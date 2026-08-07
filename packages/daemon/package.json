@@ -1,0 +1,28 @@
+{
+  "name": "@papyrus/daemon",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^4.0.34",
+    "@papyrus/agents": "workspace:*",
+    "@papyrus/core": "workspace:*",
+    "@papyrus/network": "workspace:*",
+    "ai": "^7.0.56",
+    "better-sqlite3": "^13.0.3",
+    "ws": "^8.21.2"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^22.10.2",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^3.2.4"
+  }
+}

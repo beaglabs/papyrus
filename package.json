@@ -1,0 +1,30 @@
+{
+  "name": "papyrus",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The secure product development canvas for regulated industries and public sector.",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@9.0.4",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm -r run build",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "cli": "pnpm --filter @papyrus/cli start",
+    "smoke": "pnpm --filter @papyrus/daemon test"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/saml2-js": "^3.0.4",
+    "typescript": "^5.6.3"
+  },
+  "dependencies": {
+    "@simplewebauthn/server": "^10.0.0",
+    "saml2-js": "^3.0.0"
+  }
+}

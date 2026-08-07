@@ -232,6 +232,16 @@ async function initNetwork(): Promise<void> {
   }
 }
 
+// Revalidate without network access. If a pilot expires while running, stop peer activity
+// and leave only diagnostics and offline activation available.
+setInterval(async () => {
+  if (networkReady && !licenseService.isLicensed()) {
+    console.error('  LICENSE expired or invalid; stopping peer network')
+    await network.close()
+    networkReady = false
+  }
+}, 60_000)
+
 // ── In-memory state per project ──────────────────────────────────
 
 interface ProjectState {

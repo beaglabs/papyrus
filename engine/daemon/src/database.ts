@@ -4,17 +4,19 @@
  * Stores projects, nodes, and edges in a single SQLite database at
  * ~/.papyrus/papyrus.db. Replaces the previous JSON file storage.
  */
+import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { CanvasNodeDoc, EdgeDoc } from '@papyrus/core/nodes/types'
 import Database from 'better-sqlite3'
+import { DEFAULT_ORGANIZATION_ID, runMigrations } from './migrations.js'
 
 const DB_DIR = join(process.env.HOME ?? '~', '.papyrus')
 const DB_PATH = join(DB_DIR, 'papyrus.db')
 
 let db: Database.Database | null = null
 
-function getDb(): Database.Database {
+export function getDb(): Database.Database {
   if (db) return db
 
   if (!existsSync(DB_DIR)) {
@@ -24,6 +26,7 @@ function getDb(): Database.Database {
   db = new Database(DB_PATH)
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
+  db.pragma('busy_timeout = 5000')
 
   // Create tables
   db.exec(`
@@ -87,61 +90,86 @@ function getDb(): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_webauthn_credential ON webauthn_credentials(credential_id);
   `)
 
+  runMigrations(db)
+
   return db
 }
 
 export interface ProjectData {
   id: string
+  organizationId: string
   name: string
   createdAt: string
+  revision: number
   nodes: CanvasNodeDoc[]
   edges: EdgeDoc[]
 }
 
 /** List all known projects. */
-export function listProjects(): ProjectData[] {
+export function listProjects(organizationId?: string): ProjectData[] {
   const db = getDb()
-  const rows = db
-    .prepare('SELECT id, name, created_at FROM projects ORDER BY created_at DESC')
-    .all() as Array<{
+  const rows = (
+    organizationId
+      ? db
+          .prepare(
+            'SELECT id, organization_id, name, created_at, revision FROM projects WHERE organization_id = ? AND deleted_at IS NULL ORDER BY created_at DESC',
+          )
+          .all(organizationId)
+      : db
+          .prepare(
+            'SELECT id, organization_id, name, created_at, revision FROM projects WHERE deleted_at IS NULL ORDER BY created_at DESC',
+          )
+          .all()
+  ) as Array<{
     id: string
+    organization_id: string
     name: string
     created_at: string
+    revision: number
   }>
 
   return rows.map((row) => ({
     id: row.id,
+    organizationId: row.organization_id,
     name: row.name,
     createdAt: row.created_at,
+    revision: row.revision,
     nodes: getNodes(db, row.id),
     edges: getEdges(db, row.id),
   }))
 }
 
 /** Create a new project. */
-export function createProject(name: string): ProjectData {
+export function createProject(
+  name: string,
+  organizationId = DEFAULT_ORGANIZATION_ID,
+  createdBy = 'system',
+): ProjectData {
   const db = getDb()
-  const id = `proj-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  const id = `proj-${randomUUID()}`
   const now = new Date().toISOString()
 
-  db.prepare('INSERT INTO projects (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)').run(
-    id,
-    name,
-    now,
-    now,
-  )
+  db.prepare(
+    'INSERT INTO projects (id, organization_id, name, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+  ).run(id, organizationId, name, createdBy, now, now)
 
-  return { id, name, createdAt: now, nodes: [], edges: [] }
+  return { id, organizationId, name, createdAt: now, revision: 0, nodes: [], edges: [] }
 }
 
 /** Load a project from the database. */
 export function loadProject(id: string): ProjectData | null {
   const db = getDb()
-  const row = db.prepare('SELECT id, name, created_at FROM projects WHERE id = ?').get(id) as
+  const row = db
+    .prepare(
+      'SELECT id, organization_id, name, created_at, revision FROM projects WHERE id = ? AND deleted_at IS NULL',
+    )
+    .get(id) as
     | {
         id: string
+        organization_id: string
         name: string
         created_at: string
+        revision: number
       }
     | undefined
 
@@ -149,8 +177,10 @@ export function loadProject(id: string): ProjectData | null {
 
   return {
     id: row.id,
+    organizationId: row.organization_id,
     name: row.name,
     createdAt: row.created_at,
+    revision: row.revision,
     nodes: getNodes(db, row.id),
     edges: getEdges(db, row.id),
   }
@@ -159,20 +189,25 @@ export function loadProject(id: string): ProjectData | null {
 /** Save canvas state (nodes + edges) to the database. */
 export function saveCanvas(id: string, nodes: CanvasNodeDoc[], edges: EdgeDoc[]): void {
   const db = getDb()
+  const project = db
+    .prepare('SELECT organization_id, revision FROM projects WHERE id = ? AND deleted_at IS NULL')
+    .get(id) as { organization_id: string; revision: number } | undefined
+  if (!project) throw new Error(`Project not found: ${id}`)
 
   const transaction = db.transaction(() => {
     // Delete existing nodes and edges
-    db.prepare('DELETE FROM nodes WHERE project_id = ?').run(id)
     db.prepare('DELETE FROM edges WHERE project_id = ?').run(id)
+    db.prepare('DELETE FROM nodes WHERE project_id = ?').run(id)
 
     // Insert new nodes
     const insertNode = db.prepare(
-      'INSERT INTO nodes (id, project_id, type, category, flow_role, position_x, position_y, fields, status, created_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO nodes (id, project_id, organization_id, type, category, flow_role, position_x, position_y, fields, status, created_by, updated_at, revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     )
     for (const node of nodes) {
       insertNode.run(
         node.id,
         id,
+        project.organization_id,
         node.type,
         node.category,
         node.flowRole ?? 'artifact',
@@ -182,22 +217,25 @@ export function saveCanvas(id: string, nodes: CanvasNodeDoc[], edges: EdgeDoc[])
         node.status ?? 'draft',
         node.createdBy ?? null,
         node.updatedAt,
+        project.revision,
       )
     }
 
     // Insert new edges
     const insertEdge = db.prepare(
-      'INSERT INTO edges (id, project_id, from_node, to_node, kind, created_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO edges (id, project_id, organization_id, from_node, to_node, kind, created_by, updated_at, revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     )
     for (const edge of edges) {
       insertEdge.run(
         edge.id,
-        edge.projectId,
+        id,
+        project.organization_id,
         edge.from,
         edge.to,
         edge.kind ?? 'smoothstep',
         edge.createdBy ?? null,
         edge.updatedAt,
+        project.revision,
       )
     }
 
@@ -208,10 +246,180 @@ export function saveCanvas(id: string, nodes: CanvasNodeDoc[], edges: EdgeDoc[])
   transaction()
 }
 
+export interface CanvasOperationInput {
+  id: string
+  projectId: string
+  actorKey: string
+  entityType: 'node' | 'edge' | 'document' | 'project'
+  entityId: string
+  operationType: 'create' | 'update' | 'delete'
+  payload?: unknown
+  baseRevision?: number
+}
+
+export interface CanvasOperationResult {
+  operationId: string
+  projectRevision: number
+  duplicate: boolean
+}
+
+/**
+ * Atomically persist the authoritative canvas materialization and its immutable operation.
+ * Duplicate operation IDs are acknowledged without being applied twice.
+ */
+export function commitCanvasOperation(
+  input: CanvasOperationInput,
+  nodes: CanvasNodeDoc[],
+  edges: EdgeDoc[],
+): CanvasOperationResult {
+  const database = getDb()
+  return database.transaction(() => {
+    const duplicate = database
+      .prepare('SELECT project_revision FROM operations WHERE id = ?')
+      .get(input.id) as { project_revision: number } | undefined
+    if (duplicate) {
+      return {
+        operationId: input.id,
+        projectRevision: duplicate.project_revision,
+        duplicate: true,
+      }
+    }
+
+    const project = database
+      .prepare('SELECT organization_id, revision FROM projects WHERE id = ? AND deleted_at IS NULL')
+      .get(input.projectId) as { organization_id: string; revision: number } | undefined
+    if (!project) throw new Error(`Project not found: ${input.projectId}`)
+    if (input.baseRevision !== undefined && input.baseRevision > project.revision) {
+      throw new Error(
+        `Invalid future revision ${input.baseRevision}; current is ${project.revision}`,
+      )
+    }
+
+    const revision = project.revision + 1
+    database
+      .prepare("UPDATE projects SET revision = ?, updated_at = datetime('now') WHERE id = ?")
+      .run(revision, input.projectId)
+
+    saveCanvas(input.projectId, nodes, edges)
+    database
+      .prepare(
+        `INSERT INTO operations
+          (id, organization_id, project_id, project_revision, actor_key, entity_type,
+           entity_id, operation_type, payload, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        input.id,
+        project.organization_id,
+        input.projectId,
+        revision,
+        input.actorKey,
+        input.entityType,
+        input.entityId,
+        input.operationType,
+        input.payload === undefined ? null : JSON.stringify(input.payload),
+        new Date().toISOString(),
+      )
+
+    return { operationId: input.id, projectRevision: revision, duplicate: false }
+  })()
+}
+
+export function getProjectRevision(projectId: string): number {
+  const row = getDb()
+    .prepare('SELECT revision FROM projects WHERE id = ? AND deleted_at IS NULL')
+    .get(projectId) as { revision: number } | undefined
+  if (!row) throw new Error(`Project not found: ${projectId}`)
+  return row.revision
+}
+
+export interface StoredOperation {
+  id: string
+  projectId: string
+  projectRevision: number
+  actorKey: string
+  entityType: string
+  entityId: string
+  operationType: string
+  payload: unknown
+  createdAt: string
+}
+
+export function getStoredOperations(projectId: string, sinceRevision = 0): StoredOperation[] {
+  const rows = getDb()
+    .prepare(
+      'SELECT * FROM operations WHERE project_id = ? AND project_revision > ? ORDER BY project_revision ASC',
+    )
+    .all(projectId, sinceRevision) as Array<{
+    id: string
+    project_id: string
+    project_revision: number
+    actor_key: string
+    entity_type: string
+    entity_id: string
+    operation_type: string
+    payload: string | null
+    created_at: string
+  }>
+  return rows.map((row) => ({
+    id: row.id,
+    projectId: row.project_id,
+    projectRevision: row.project_revision,
+    actorKey: row.actor_key,
+    entityType: row.entity_type,
+    entityId: row.entity_id,
+    operationType: row.operation_type,
+    payload: row.payload ? JSON.parse(row.payload) : null,
+    createdAt: row.created_at,
+  }))
+}
+
+export function loadDocumentState(projectId: string, nodeId: string): Uint8Array | null {
+  const row = getDb()
+    .prepare('SELECT yjs_state FROM documents WHERE project_id = ? AND node_id = ?')
+    .get(projectId, nodeId) as { yjs_state: Buffer } | undefined
+  return row ? new Uint8Array(row.yjs_state) : null
+}
+
+export function saveDocumentState(
+  projectId: string,
+  nodeId: string,
+  state: Uint8Array,
+  revision: number,
+): void {
+  const database = getDb()
+  const project = database
+    .prepare('SELECT organization_id FROM projects WHERE id = ? AND deleted_at IS NULL')
+    .get(projectId) as { organization_id: string } | undefined
+  if (!project) throw new Error(`Project not found: ${projectId}`)
+  database
+    .prepare(
+      `INSERT INTO documents
+        (organization_id, project_id, node_id, yjs_state, revision, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(project_id, node_id) DO UPDATE SET
+         yjs_state = excluded.yjs_state,
+         revision = excluded.revision,
+         updated_at = excluded.updated_at`,
+    )
+    .run(
+      project.organization_id,
+      projectId,
+      nodeId,
+      Buffer.from(state),
+      revision,
+      new Date().toISOString(),
+    )
+}
+
 /** Delete a project and all its data. */
 export function deleteProject(id: string): boolean {
   const db = getDb()
-  const result = db.prepare('DELETE FROM projects WHERE id = ?').run(id)
+  const result = db
+    .prepare(
+      "UPDATE projects SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND deleted_at IS NULL",
+    )
+    .run(id)
   return result.changes > 0
 }
 
@@ -367,7 +575,9 @@ export function saveWebAuthnCredential(
     'INSERT INTO webauthn_credentials (member_key, credential_id, public_key, counter, aaguid) VALUES (?, ?, ?, ?, ?)',
   ).run(memberKey, credentialId, publicKey, counter, aaguid)
 
-  const row = db.prepare('SELECT * FROM webauthn_credentials WHERE credential_id = ?').get(credentialId) as
+  const row = db
+    .prepare('SELECT * FROM webauthn_credentials WHERE credential_id = ?')
+    .get(credentialId) as
     | {
         id: number
         member_key: string
@@ -394,7 +604,9 @@ export function saveWebAuthnCredential(
 
 export function getWebAuthnCredential(credentialId: string): WebAuthnCredential | null {
   const db = getDb()
-  const row = db.prepare('SELECT * FROM webauthn_credentials WHERE credential_id = ?').get(credentialId) as
+  const row = db
+    .prepare('SELECT * FROM webauthn_credentials WHERE credential_id = ?')
+    .get(credentialId) as
     | {
         id: number
         member_key: string
@@ -446,12 +658,16 @@ export function getWebAuthnCredentialsForMember(memberKey: string): WebAuthnCred
 
 export function updateWebAuthnCredentialCounter(credentialId: string, counter: number): boolean {
   const db = getDb()
-  const result = db.prepare('UPDATE webauthn_credentials SET counter = ? WHERE credential_id = ?').run(counter, credentialId)
+  const result = db
+    .prepare('UPDATE webauthn_credentials SET counter = ? WHERE credential_id = ?')
+    .run(counter, credentialId)
   return result.changes > 0
 }
 
 export function deleteWebAuthnCredential(credentialId: string): boolean {
   const db = getDb()
-  const result = db.prepare('DELETE FROM webauthn_credentials WHERE credential_id = ?').run(credentialId)
+  const result = db
+    .prepare('DELETE FROM webauthn_credentials WHERE credential_id = ?')
+    .run(credentialId)
   return result.changes > 0
 }

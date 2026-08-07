@@ -21,19 +21,19 @@ Papyrus uses `PAPYRUS_PROFILE` to gate available authentication methods. SIPRNet
 
 ### Cryptography and keys
 
-Relevant material includes member identity keys, TLS certificates, SAML IdP certificates, OIDC verification keys, Iroh identities, license-signing keys, and customer-managed storage encryption keys. Deployments requiring FIPS validation must select and verify validated cryptographic modules; use of a generally approved algorithm is not by itself a FIPS claim.
+Relevant material includes the deployment identity, TLS certificates, SAML IdP certificates, OIDC verification keys, license-signing keys, trusted transfer deployment identities, and customer-managed storage encryption keys. Deployments requiring FIPS validation must select and verify validated cryptographic modules; use of a generally approved algorithm is not by itself a FIPS claim.
 
 ### Audit and evidence
 
-Security-relevant events include authentication, credential enrollment and removal, membership and role changes, project lifecycle, node/specification changes, agent and skill execution, MCP tool use, model endpoint changes, peer activity, cross-domain export, backup/restore, and administrative configuration. Evidence should include event samples, integrity verification, tests, SBOMs, scan results, release hashes, configuration exports, and operating procedures.
+Security-relevant events include authentication, credential enrollment and removal, membership and role changes, project lifecycle, node/specification operations, agent and skill execution, MCP tool use, model endpoint changes, WebSocket session activity, signed cross-domain transfer, backup/restore, and administrative configuration. Evidence should include event samples, integrity verification, tests, SBOMs, scan results, release hashes, configuration exports, and operating procedures.
 
 ### Agent and MCP boundaries
 
 Agent security should document tool authorization, human approval gates, skill provenance, MCP allowlists, prompt/tool separation, secret redaction, input validation, egress restrictions, endpoint allowlists, execution limits, auditability, failure handling, and acceptance of generated changes.
 
-### Peer networking
+### Centralized collaboration
 
-Papyrus uses Iroh with encrypted QUIC streams and customer-controlled peer discovery or relay topology. Deployment documentation must cover direct versus relayed paths, permitted peers, relay ownership and allowlisting, ports, metadata exposure, peer revocation, offline behavior, segmentation, and cross-domain boundaries.
+Papyrus uses an authoritative service per agency or security boundary. Authenticated HTTPS and WebSocket requests are authorized against organization membership and project roles. Deployment documentation must cover service binding, TLS termination, permitted clients, ports, session revocation, offline browser outboxes, conflict handling, segmentation, and cross-domain boundaries. Papyrus does not require public discovery, STUN, TURN, or relay infrastructure.
 
 ### Data protection
 

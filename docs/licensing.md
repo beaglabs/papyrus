@@ -45,6 +45,6 @@ The signature covers the canonical, recursively key-sorted JSON of every field e
 
 ## Fail-closed behavior
 
-Without a valid license, the daemon exposes only health, license status, activation request, and activation endpoints. It does not serve the application, initialize Iroh, accept WebSocket sessions, or process normal APIs. A running 90-day pilot is revalidated every minute and peer networking is stopped when it expires.
+Without a valid license, the service exposes only health, license status, activation request, and activation endpoints. It does not serve the application, accept WebSocket sessions, or process normal APIs. License status is checked before every protected REST or WebSocket entry point, so an expired pilot fails closed without relying on network connectivity.
 
 Back up the deployment identity through the customer's approved protected backup process. Restoring only the license without its deployment identity will correctly fail validation.

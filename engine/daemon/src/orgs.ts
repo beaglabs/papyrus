@@ -1,55 +1,6 @@
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync } from 'node:fs'
-import { join } from 'node:path'
 import { type NetworkProfile, resolveProfile } from '@papyrus/core/profiles'
-import Database from 'better-sqlite3'
-
-const DB_DIR = join(process.env.HOME ?? '~', '.papyrus')
-const DB_PATH = join(DB_DIR, 'papyrus.db')
-
-let db: Database.Database | null = null
-
-function getDb(): Database.Database {
-  if (db) return db
-
-  if (!existsSync(DB_DIR)) {
-    mkdirSync(DB_DIR, { recursive: true })
-  }
-
-  db = new Database(DB_PATH)
-  db.pragma('journal_mode = WAL')
-  db.pragma('foreign_keys = ON')
-
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS organizations (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      domain TEXT NOT NULL,
-      profile TEXT NOT NULL DEFAULT 'commercial',
-      created_by TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS org_members (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      org_id TEXT NOT NULL,
-      member_key TEXT NOT NULL,
-      email TEXT NOT NULL,
-      display_name TEXT,
-      avatar_url TEXT,
-      role TEXT NOT NULL DEFAULT 'member',
-      joined_at TEXT NOT NULL DEFAULT (datetime('now')),
-      UNIQUE(org_id, member_key),
-      FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_org_members_org ON org_members(org_id);
-    CREATE INDEX IF NOT EXISTS idx_org_members_member ON org_members(member_key);
-    CREATE INDEX IF NOT EXISTS idx_orgs_domain ON organizations(domain);
-  `)
-
-  return db
-}
+import { getDb } from './database.js'
 
 export type OrgProfile = NetworkProfile
 export type OrgRole = 'admin' | 'member'

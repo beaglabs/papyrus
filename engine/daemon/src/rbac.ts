@@ -9,42 +9,7 @@
  * Roles are stored per-project in SQLite. The project creator is automatically
  * the owner. Owners can assign roles to other members.
  */
-import { existsSync, mkdirSync } from 'node:fs'
-import { join } from 'node:path'
-import Database from 'better-sqlite3'
-
-const DB_DIR = join(process.env.HOME ?? '~', '.papyrus')
-const DB_PATH = join(DB_DIR, 'papyrus.db')
-
-let db: Database.Database | null = null
-
-function getDb(): Database.Database {
-  if (db) return db
-
-  if (!existsSync(DB_DIR)) {
-    mkdirSync(DB_DIR, { recursive: true })
-  }
-
-  db = new Database(DB_PATH)
-  db.pragma('journal_mode = WAL')
-
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS project_roles (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      project_id TEXT NOT NULL,
-      member_key TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('owner', 'editor', 'viewer')),
-      assigned_by TEXT NOT NULL,
-      assigned_at TEXT NOT NULL DEFAULT (datetime('now')),
-      UNIQUE(project_id, member_key)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_roles_project ON project_roles(project_id);
-    CREATE INDEX IF NOT EXISTS idx_roles_member ON project_roles(member_key);
-  `)
-
-  return db
-}
+import { getDb } from './database.js'
 
 export type ProjectRole = 'owner' | 'editor' | 'viewer'
 

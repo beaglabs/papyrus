@@ -63,7 +63,7 @@ function loadToken(): string | null {
 export default defineCommand({
   meta: {
     name: 'papyrus projects',
-    description: 'Project lifecycle: init | list | share | join | open | invite.',
+    description: 'Project lifecycle: init | list | open | invite.',
   },
   subCommands: {
     init: defineCommand({
@@ -113,100 +113,6 @@ export default defineCommand({
           console.log(`  ${p.name}  ${p.id}  ${p.createdAt}`)
         }
         console.log()
-      },
-    }),
-    share: defineCommand({
-      meta: {
-        name: 'papyrus projects share',
-        description: 'Get a shareable ticket for a project.',
-      },
-      args: {
-        project: {
-          type: 'positional',
-          description: 'Project ID to share.',
-        },
-      },
-      async run({ args }) {
-        banner('projects share')
-        ensureDaemon()
-
-        if (!args.project) {
-          console.error('  Usage: papyrus projects share <project-id>\n')
-          return
-        }
-
-        // Get the Iroh ticket
-        const ticketRes = await fetch(`http://localhost:${PORT}/api/network/ticket`)
-        const ticketData = (await ticketRes.json()) as { ticket?: string; error?: string }
-
-        if (ticketData.error) {
-          console.error(`  Error: ${ticketData.error}\n`)
-          return
-        }
-
-        console.log('  Share this ticket with your team:')
-        console.log(`  ${ticketData.ticket}\n`)
-        console.log('  They can join with: papyrus projects join <ticket>\n')
-      },
-    }),
-    join: defineCommand({
-      meta: {
-        name: 'papyrus projects join',
-        description: 'Join a project by ticket.',
-      },
-      args: {
-        ticket: {
-          type: 'positional',
-          description: 'Iroh connection ticket.',
-        },
-      },
-      async run({ args }) {
-        banner('projects join')
-        ensureDaemon()
-
-        if (!args.ticket) {
-          console.error('  Usage: papyrus projects join <ticket>\n')
-          return
-        }
-
-        console.log('  Connecting to peer...')
-
-        try {
-          const res = await fetch(`http://localhost:${PORT}/api/network/connect`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ticket: args.ticket }),
-          })
-          const data = (await res.json()) as { peerId?: string; error?: string }
-
-          if (data.error) {
-            console.error(`  Error: ${data.error}\n`)
-            return
-          }
-
-          console.log(`  Connected to peer: ${data.peerId}\n`)
-          console.log('  Projects on the network:')
-
-          // Fetch network projects
-          const projectsRes = await fetch(`http://localhost:${PORT}/api/network/projects`)
-          const projects = (await projectsRes.json()) as Array<{
-            id: string
-            name: string
-            ownerId: string
-            nodeCount: number
-          }>
-
-          if (projects.length === 0) {
-            console.log('  No projects found on the network.\n')
-          } else {
-            for (const p of projects) {
-              console.log(`  ${p.name}  ${p.id}  ${p.nodeCount} nodes`)
-            }
-            console.log()
-          }
-        } catch (err) {
-          console.error(`  Connection failed: ${err instanceof Error ? err.message : err}\n`)
-        }
       },
     }),
     open: defineCommand({

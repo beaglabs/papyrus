@@ -582,11 +582,11 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
         >
           {!sidebarCollapsed && (
             <>
-              <span className="logo">P</span>
+              <img className="papyrus-logo" src="/papyrus-logo.svg" alt="" />
               <span className="name">PAPYRUS</span>
             </>
           )}
-          {sidebarCollapsed && <span className="logo">P</span>}
+          {sidebarCollapsed && <img className="papyrus-logo" src="/papyrus-logo.svg" alt="Papyrus" />}
         </div>
         {!sidebarCollapsed && (
           <div className="sidebar-nav">

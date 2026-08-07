@@ -135,22 +135,17 @@ export function Login() {
           borderRadius: 16,
         }}
       >
-        <div
+        <img
+          src="/papyrus-logo.svg"
+          alt="Papyrus"
           style={{
-            width: 48,
-            height: 48,
+            display: 'block',
+            width: 88,
+            height: 88,
+            objectFit: 'contain',
             margin: '0 auto 16px',
-            background: tokens.color.accent,
-            color: tokens.color.bg,
-            borderRadius: 8,
-            display: 'grid',
-            placeItems: 'center',
-            fontWeight: 800,
-            fontSize: 24,
           }}
-        >
-          P
-        </div>
+        />
         <h1
           style={{
             textAlign: 'center',

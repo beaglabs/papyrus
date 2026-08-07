@@ -262,6 +262,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
         const [editingContent, setEditingContent] = useState(false)
         const [contentValue, setContentValue] = useState(content)
         const isEditableSpec = doc.type === 'specification'
+        const hasUnsavedContent = contentValue !== content
 
         useEffect(() => {
           if (!editingName) setNameValue(title)
@@ -298,8 +299,22 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
           setEditingName(false)
         }
 
-        function handleContentSave() {
-          if (contentValue !== content) {
+        function beginContentEdit(event?: React.SyntheticEvent) {
+          event?.stopPropagation()
+          if (!isEditableSpec || !canEdit) return
+          setContentValue(content)
+          setEditingContent(true)
+        }
+
+        function cancelContentEdit(event?: React.SyntheticEvent) {
+          event?.stopPropagation()
+          setContentValue(content)
+          setEditingContent(false)
+        }
+
+        function handleContentSave(event?: React.SyntheticEvent) {
+          event?.stopPropagation()
+          if (hasUnsavedContent) {
             upsertNode({
               ...doc,
               fields: { ...doc.fields, content: contentValue },
@@ -315,8 +330,9 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
               background: tokens.color.surface,
               border: `2px solid ${selected ? tokens.color.accent : tokens.color.black}`,
               borderRadius: tokens.radius.lg,
-              minWidth: 240,
-              maxWidth: 340,
+              width: editingContent ? 640 : 340,
+              minWidth: editingContent ? 640 : 240,
+              maxWidth: editingContent ? 640 : 340,
               boxShadow: selected ? tokens.shadow.glow : '5px 5px 0 #111',
               transition: 'border-color 0.15s, box-shadow 0.15s',
               overflow: 'hidden',
@@ -393,91 +409,167 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
             </div>
 
             {/* Editable specification / content preview */}
-            <div style={{ padding: '10px 12px' }}>
-              {editingContent ? (
-                <>
-                  <textarea
-                    className="nodrag nowheel"
-                    value={contentValue}
-                    onChange={(event) => setContentValue(event.target.value)}
-                    onKeyDown={(event) => {
-                      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter')
-                        handleContentSave()
-                      if (event.key === 'Escape') {
-                        setContentValue(content)
-                        setEditingContent(false)
-                      }
-                    }}
-                    rows={12}
-                    style={{
-                      width: '100%',
-                      minWidth: 300,
-                      resize: 'vertical',
-                      background: tokens.color.bg,
-                      color: tokens.color.text,
-                      border: `2px solid ${tokens.color.black}`,
-                      borderRadius: tokens.radius.md,
-                      padding: 10,
-                      fontFamily: tokens.font.mono,
-                      fontSize: 12,
-                      lineHeight: 1.5,
-                      outline: 'none',
-                    }}
-                  />
-                  <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                    <button type="button" onClick={handleContentSave} style={nodeActionStyle}>
-                      Save & sync
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setContentValue(content)
-                        setEditingContent(false)
-                      }}
-                      style={nodeSecondaryActionStyle}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </>
-              ) : (
+            <div className="nodrag" style={{ padding: '10px 12px' }}>
+              {isEditableSpec && (
                 <div
-                  onDoubleClick={() => isEditableSpec && canEdit && setEditingContent(true)}
                   style={{
-                    fontSize: 12,
-                    color: tokens.color.textMuted,
-                    lineHeight: 1.5,
-                    maxHeight: showPreview ? 300 : 60,
-                    overflow: showPreview ? 'auto' : 'hidden',
-                    position: 'relative',
-                    whiteSpace: 'pre-wrap',
-                    cursor: isEditableSpec && canEdit ? 'text' : 'default',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                    marginBottom: 8,
                   }}
-                  title={
-                    isEditableSpec && canEdit ? 'Double-click to edit specification' : undefined
-                  }
                 >
-                  {content.slice(0, showPreview ? 5000 : 150)}
-                  {!showPreview && content.length > 150 ? '...' : ''}
+                  <div>
+                    <div
+                      style={{
+                        color: tokens.color.text,
+                        fontSize: 11,
+                        fontWeight: 800,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.06em',
+                      }}
+                    >
+                      Source specification
+                    </div>
+                    <div style={{ color: tokens.color.textDim, fontSize: 10, marginTop: 2 }}>
+                      {canEdit ? 'Shared with collaborators and agents' : 'Read-only access'}
+                    </div>
+                  </div>
+                  {canEdit && !editingContent && (
+                    <button
+                      className="nodrag"
+                      type="button"
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={beginContentEdit}
+                      style={{ ...nodeActionStyle, marginTop: 0 }}
+                    >
+                      ✎ Edit
+                    </button>
+                  )}
                 </div>
               )}
 
-              {isEditableSpec && canEdit && !editingContent && (
+              {editingContent ? (
+                <>
+                  <textarea
+                    autoFocus
+                    aria-label="Specification content"
+                    className="nodrag nowheel"
+                    value={contentValue}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onChange={(event) => setContentValue(event.target.value)}
+                    onKeyDown={(event) => {
+                      event.stopPropagation()
+                      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter')
+                        handleContentSave(event)
+                      if (event.key === 'Escape') cancelContentEdit(event)
+                    }}
+                    rows={18}
+                    style={{
+                      width: '100%',
+                      minHeight: 320,
+                      resize: 'vertical',
+                      background: tokens.color.bg,
+                      color: tokens.color.text,
+                      border: `3px solid ${tokens.color.black}`,
+                      borderRadius: tokens.radius.md,
+                      boxShadow: '4px 4px 0 #111',
+                      padding: 14,
+                      fontFamily: tokens.font.mono,
+                      fontSize: 13,
+                      lineHeight: 1.6,
+                      outline: 'none',
+                    }}
+                  />
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 12,
+                      marginTop: 10,
+                    }}
+                  >
+                    <span
+                      aria-live="polite"
+                      style={{ color: tokens.color.textDim, fontSize: 10 }}
+                    >
+                      {contentValue.length.toLocaleString()} characters
+                      {hasUnsavedContent ? ' · Unsaved changes' : ' · No changes'}
+                    </span>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        className="nodrag"
+                        type="button"
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={cancelContentEdit}
+                        style={{ ...nodeSecondaryActionStyle, marginTop: 0 }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        className="nodrag"
+                        type="button"
+                        disabled={!hasUnsavedContent}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={handleContentSave}
+                        style={{
+                          ...nodeActionStyle,
+                          marginTop: 0,
+                          opacity: hasUnsavedContent ? 1 : 0.45,
+                          cursor: hasUnsavedContent ? 'pointer' : 'not-allowed',
+                        }}
+                      >
+                        Save & sync
+                      </button>
+                    </div>
+                  </div>
+                  <div style={{ color: tokens.color.textDim, fontSize: 9, marginTop: 6 }}>
+                    ⌘/Ctrl + Enter to save · Esc to cancel
+                  </div>
+                </>
+              ) : (
                 <button
+                  className={isEditableSpec && canEdit ? 'nodrag' : undefined}
                   type="button"
-                  onClick={() => setEditingContent(true)}
-                  style={nodeActionStyle}
+                  disabled={!isEditableSpec || !canEdit}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={beginContentEdit}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    padding: 0,
+                    border: 0,
+                    background: 'transparent',
+                    textAlign: 'left',
+                    fontSize: 12,
+                    color: content ? tokens.color.textMuted : tokens.color.textDim,
+                    lineHeight: 1.5,
+                    maxHeight: showPreview ? 300 : 84,
+                    overflow: showPreview ? 'auto' : 'hidden',
+                    whiteSpace: 'pre-wrap',
+                    cursor: isEditableSpec && canEdit ? 'text' : 'default',
+                  }}
+                  title={isEditableSpec && canEdit ? 'Click to edit specification' : undefined}
                 >
-                  Edit specification
+                  {content
+                    ? content.slice(0, showPreview ? 5000 : 220)
+                    : isEditableSpec && canEdit
+                      ? 'Click to write the source specification…'
+                      : 'No content'}
+                  {!showPreview && content.length > 220 ? '…' : ''}
                 </button>
               )}
 
               {/* Toggle preview */}
-              {content.length > 150 && (
+              {!editingContent && content.length > 220 && (
                 <button
+                  className="nodrag"
                   type="button"
-                  onClick={(e) => {
-                    e.stopPropagation()
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation()
                     setShowPreview(!showPreview)
                   }}
                   style={{
@@ -486,11 +578,11 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
                     color: tokens.color.accent,
                     fontSize: 11,
                     cursor: 'pointer',
-                    padding: '4px 0',
+                    padding: '6px 0 0',
                     fontFamily: tokens.font.mono,
                   }}
                 >
-                  {showPreview ? '\u{25B2} Show less' : '\u{25BC} Preview'}
+                  {showPreview ? '\u{25B2} Show less' : '\u{25BC} Read full specification'}
                 </button>
               )}
             </div>

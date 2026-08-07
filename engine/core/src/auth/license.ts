@@ -2,7 +2,13 @@
 import { createPrivateKey, createPublicKey, sign, verify } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { LicenseFile, LicensePayload, LicenseStatus, NetworkProfile, StoredLicense } from './types.js'
+import type {
+  LicenseFile,
+  LicensePayload,
+  LicenseStatus,
+  NetworkProfile,
+  StoredLicense,
+} from './types.js'
 
 const DEFAULT_CONFIG_DIR = join(process.env.HOME ?? '.', '.papyrus')
 const LICENSE_FILE = 'license.json'
@@ -25,7 +31,10 @@ export function signLicense(payload: LicensePayload, authorityPrivateKeyPem: str
   return { ...payload, signature }
 }
 
-export function verifyLicenseSignature(license: LicenseFile, authorityPublicKeyPem: string): boolean {
+export function verifyLicenseSignature(
+  license: LicenseFile,
+  authorityPublicKeyPem: string,
+): boolean {
   try {
     const { signature, ...payload } = license
     return verify(
@@ -53,13 +62,22 @@ export function validateLicense(
     deploymentId,
     expiresAt: license.expiresAt,
   }
-  if (!verifyLicenseSignature(license, authorityPublicKeyPem)) return { ...base, valid: false, reason: 'Invalid signature' }
-  if (license.profile !== activeProfile) return { ...base, valid: false, reason: `License is for profile "${license.profile}", not "${activeProfile}"` }
-  if (license.deploymentId !== deploymentId) return { ...base, valid: false, reason: 'License is bound to another deployment' }
+  if (!verifyLicenseSignature(license, authorityPublicKeyPem))
+    return { ...base, valid: false, reason: 'Invalid signature' }
+  if (license.profile !== activeProfile)
+    return {
+      ...base,
+      valid: false,
+      reason: `License is for profile "${license.profile}", not "${activeProfile}"`,
+    }
+  if (license.deploymentId !== deploymentId)
+    return { ...base, valid: false, reason: 'License is bound to another deployment' }
   if (license.expiresAt !== null) {
     const expiry = Date.parse(license.expiresAt)
-    if (!Number.isFinite(expiry)) return { ...base, valid: false, reason: 'License expiry is not a valid ISO-8601 timestamp' }
-    if (expiry <= now.getTime()) return { ...base, valid: false, reason: `License expired on ${license.expiresAt}` }
+    if (!Number.isFinite(expiry))
+      return { ...base, valid: false, reason: 'License expiry is not a valid ISO-8601 timestamp' }
+    if (expiry <= now.getTime())
+      return { ...base, valid: false, reason: `License expired on ${license.expiresAt}` }
   }
   return { ...base, valid: true }
 }
@@ -67,10 +85,18 @@ export function validateLicense(
 export function loadStoredLicense(dir = DEFAULT_CONFIG_DIR): StoredLicense | null {
   const file = join(dir, LICENSE_FILE)
   if (!existsSync(file)) return null
-  try { return JSON.parse(readFileSync(file, 'utf8')) as StoredLicense } catch { return null }
+  try {
+    return JSON.parse(readFileSync(file, 'utf8')) as StoredLicense
+  } catch {
+    return null
+  }
 }
 
 export function storeLicense(license: LicenseFile, dir = DEFAULT_CONFIG_DIR): void {
   mkdirSync(dir, { recursive: true, mode: 0o700 })
-  writeFileSync(join(dir, LICENSE_FILE), JSON.stringify({ license, activatedAt: new Date().toISOString() }, null, 2), { encoding: 'utf8', mode: 0o600 })
+  writeFileSync(
+    join(dir, LICENSE_FILE),
+    JSON.stringify({ license, activatedAt: new Date().toISOString() }, null, 2),
+    { encoding: 'utf8', mode: 0o600 },
+  )
 }

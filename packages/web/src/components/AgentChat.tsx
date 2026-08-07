@@ -24,6 +24,7 @@ interface AgentChatProps {
   onPersonaChange: (p: Persona) => void
   projectId: string
   peerId: string
+  canvasContext: string
 }
 
 const SEED_MESSAGES: Record<string, ChatMessage[]> = {
@@ -176,7 +177,13 @@ function renderMarkdown(text: string): string {
     .replace(/\n/g, '<br />')
 }
 
-export function AgentChat({ persona, personas, onPersonaChange, projectId }: AgentChatProps) {
+export function AgentChat({
+  persona,
+  personas,
+  onPersonaChange,
+  projectId,
+  canvasContext,
+}: AgentChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(() => SEED_MESSAGES[persona.id] ?? [])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -209,7 +216,14 @@ export function AgentChat({ persona, personas, onPersonaChange, projectId }: Age
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           persona: persona.id,
-          messages: chatHistoryRef.current,
+          messages: chatHistoryRef.current.map((message, index, history) =>
+            index === history.length - 1 && message.role === 'user' && canvasContext
+              ? {
+                  ...message,
+                  content: `${message.content}\n\n--- Current Shared Canvas ---\n${canvasContext}`,
+                }
+              : message,
+          ),
           projectId,
           attachments,
         }),

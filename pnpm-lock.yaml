@@ -22,7 +22,7 @@ importers:
         specifier: ^5.6.3
         version: 5.9.3
 
-  packages/agents:
+  engine/agents:
     dependencies:
       '@ai-sdk/openai':
         specifier: ^4.0.34
@@ -38,7 +38,7 @@ importers:
         specifier: ^5.6.3
         version: 5.9.3
 
-  packages/cli:
+  engine/cli:
     dependencies:
       '@papyrus/core':
         specifier: workspace:*
@@ -57,7 +57,7 @@ importers:
         specifier: ^5.6.3
         version: 5.9.3
 
-  packages/core:
+  engine/core:
     devDependencies:
       '@types/node':
         specifier: ^22.10.2
@@ -69,7 +69,7 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.1)
 
-  packages/daemon:
+  engine/daemon:
     dependencies:
       '@ai-sdk/openai':
         specifier: ^4.0.34
@@ -112,7 +112,7 @@ importers:
         specifier: ^3.2.4
         version: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.1)
 
-  packages/network:
+  engine/network:
     dependencies:
       '@number0/iroh':
         specifier: ^1.1.0
@@ -128,7 +128,7 @@ importers:
         specifier: ^5.6.3
         version: 5.9.3
 
-  packages/web:
+  engine/web:
     dependencies:
       '@papyrus/core':
         specifier: workspace:*
@@ -165,7 +165,7 @@ importers:
         specifier: ^5.4.11
         version: 5.4.21(@types/node@22.20.1)
 
-packages:
+engine:
 
   '@ai-sdk/gateway@4.0.44':
     resolution: {integrity: sha512-dQ/AHH1do1iEpWEXdAge37FtpXV17fsj7NkL9w+xuzVgvmI7+dQFeDerul+F2I5czmxe61Lq+TnUREjU92UXYg==}

@@ -28,12 +28,11 @@ papyrus CLI ──projects open──▶ Papyrus Daemon (per-user)
 
 | Package | Role |
 | --- | --- |
-| `packages/core` | Shared types: node registry + catalog, profile config, design tokens. |
-| `packages/p2panda-node` | Store/Sync port + in-memory CRDT mock (real `p2panda-ffi` adapter next). |
-| `packages/cli` | `papyrus` CLI (citty): license, projects, skills, artifacts, assets, orgs, org-roles. |
-| `packages/daemon` | Local per-user daemon (HTTP/WS + Mastra + p2panda). |
-| `packages/agents` | Mastra agents/workflows backing AI Skill nodes. |
-| `packages/web` | Vite + React + ReactFlow canvas (neobrutalist). |
+| `engine/core` | Shared types: node registry + catalog, profile config, design tokens. |
+| `engine/cli` | `papyrus` CLI (citty): license, projects, skills, artifacts, assets, orgs, org-roles. |
+| `engine/daemon` | Local per-user daemon (HTTP/WS + Mastra + p2panda). |
+| `engine/agents` | Mastra agents/workflows backing AI Skill nodes. |
+| `engine/web` | Vite + React + ReactFlow canvas (neobrutalist). |
 
 ## Develop
 

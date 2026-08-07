@@ -8,10 +8,17 @@ import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
  * package's dist/ directory.
  */
 import { type IncomingMessage, type ServerResponse, createServer } from 'node:http'
-import { createServer as createHttpsServer, type Server as HttpsServer } from 'node:https'
-import type { TLSSocket } from 'node:tls'
+import { createServer as createHttpsServer } from 'node:https'
 import { extname, join } from 'node:path'
+import { TLSSocket } from 'node:tls'
 import { type AgentMessage, createPersonaAgent, listSkills, runSkill } from '@papyrus/agents'
+import {
+  CACPIVAdapter,
+  OIDCAdapter,
+  SAMLAdapter,
+  WebAuthnAdapter,
+  createAdapter,
+} from '@papyrus/core'
 import { loadOrGenerateMemberIdentity } from '@papyrus/core/auth/keygen'
 import {
   type AuthContext,
@@ -19,7 +26,6 @@ import {
   extractAuth,
   requireAuth,
 } from '@papyrus/core/auth/middleware'
-import { createAdapter, WebAuthnAdapter, OIDCAdapter, CACPIVAdapter, SAMLAdapter } from '@papyrus/core'
 import type { CanvasNodeDoc, EdgeDoc } from '@papyrus/core/nodes/types'
 import type { ClientMsg, ServerMsg } from '@papyrus/core/sync/protocol'
 import type { PresenceInfo } from '@papyrus/core/sync/protocol'
@@ -42,13 +48,13 @@ import {
   createProject,
   deleteInvite,
   deleteProject,
+  deleteWebAuthnCredential,
   getInvite,
+  getWebAuthnCredential,
+  getWebAuthnCredentialsForMember,
   listProjects,
   loadProject,
   saveCanvas,
-  deleteWebAuthnCredential,
-  getWebAuthnCredential,
-  getWebAuthnCredentialsForMember,
   saveWebAuthnCredential,
   updateWebAuthnCredentialCounter,
 } from './database.js'
@@ -319,6 +325,28 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
     return true
   }
 
+  if (url.pathname === '/api/auth/config' && method === 'GET') {
+    const tlsSocket = req.socket instanceof TLSSocket ? req.socket : null
+    const profile = currentProfile()
+    json(res, 200, {
+      profile,
+      methods: {
+        local:
+          process.env.PAPYRUS_ALLOW_LOCAL_AUTH === 'true' ||
+          (profile === 'commercial' && process.env.PAPYRUS_ALLOW_LOCAL_AUTH !== 'false'),
+        webauthn: profile !== 'siprnet-il6',
+        oidc:
+          profile === 'commercial' &&
+          Boolean(process.env.OIDC_ISSUER && process.env.OIDC_CLIENT_ID),
+        saml:
+          profile === 'commercial' &&
+          Boolean(process.env.SAML_ENTRY_POINT && process.env.SAML_CERT),
+        cac: Boolean(process.env.PAPYRUS_CAC_CA_BUNDLE && tlsSocket),
+      },
+    })
+    return true
+  }
+
   if (url.pathname === '/api/auth/login' && method === 'POST') {
     // Rate limit auth endpoints
     const rateKey = getRateLimitKey(req, 'auth')
@@ -386,7 +414,7 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
     return true
   }
 
-if (url.pathname === '/api/auth/me' && method === 'GET') {
+  if (url.pathname === '/api/auth/me' && method === 'GET') {
     const ctx = extractAuth(req)
     if (!ctx) {
       json(res, 401, { error: 'Not authenticated' })
@@ -410,8 +438,10 @@ if (url.pathname === '/api/auth/me' && method === 'GET') {
   // ── WebAuthn Endpoints ──────────────────────────────────────────
 
   if (url.pathname === '/api/auth/webauthn/register/start' && method === 'POST') {
+    const authCtx = requireAuth(req, res)
+    if (!authCtx) return true
     const body = await parseBody(req)
-    const memberKey = body.memberKey as string
+    const memberKey = authCtx.memberKey
     const displayName = (body.displayName as string) ?? 'User'
     if (!memberKey) {
       json(res, 400, { error: 'memberKey required' })
@@ -431,9 +461,11 @@ if (url.pathname === '/api/auth/me' && method === 'GET') {
   }
 
   if (url.pathname === '/api/auth/webauthn/register/finish' && method === 'POST') {
+    const authCtx = requireAuth(req, res)
+    if (!authCtx) return true
     const body = await parseBody(req)
-    const memberKey = body.memberKey as string
-    const credential = body.credential as any
+    const memberKey = authCtx.memberKey
+    const credential = body.credential as Record<string, unknown>
     if (!memberKey || !credential) {
       json(res, 400, { error: 'memberKey and credential required' })
       return true
@@ -445,7 +477,9 @@ if (url.pathname === '/api/auth/me' && method === 'GET') {
       return true
     }
     const adapter = webauthnAdapter
-    const origin = process.env.WEBAUTHN_ORIGIN ?? new URL(body.origin as string ?? 'http://localhost:3777').origin
+    const origin =
+      process.env.WEBAUTHN_ORIGIN ??
+      new URL((body.origin as string) ?? 'http://localhost:3777').origin
     const rpId = process.env.WEBAUTHN_RP_ID ?? new URL(origin).hostname
     try {
       const result = await adapter.registerComplete(
@@ -455,7 +489,13 @@ if (url.pathname === '/api/auth/me' && method === 'GET') {
         rpId,
       )
       // Save credential to database
-      saveWebAuthnCredential(memberKey, result.credentialId, result.publicKey, result.counter, result.aaguid)
+      saveWebAuthnCredential(
+        memberKey,
+        result.credentialId,
+        result.publicKey,
+        result.counter,
+        result.aaguid,
+      )
       webauthnChallenges.delete(challengeKey)
       json(res, 200, { ok: true, credentialId: result.credentialId })
     } catch (e) {
@@ -493,7 +533,7 @@ if (url.pathname === '/api/auth/me' && method === 'GET') {
   if (url.pathname === '/api/auth/webauthn/authenticate/finish' && method === 'POST') {
     const body = await parseBody(req)
     const memberKey = body.memberKey as string
-    const credential = body.credential as any
+    const credential = body.credential as Record<string, unknown>
     if (!memberKey || !credential) {
       json(res, 400, { error: 'memberKey and credential required' })
       return true
@@ -512,7 +552,9 @@ if (url.pathname === '/api/auth/me' && method === 'GET') {
       return true
     }
     const adapter = webauthnAdapter
-    const origin = process.env.WEBAUTHN_ORIGIN ?? new URL(body.origin as string ?? 'http://localhost:3777').origin
+    const origin =
+      process.env.WEBAUTHN_ORIGIN ??
+      new URL((body.origin as string) ?? 'http://localhost:3777').origin
     const rpId = process.env.WEBAUTHN_RP_ID ?? new URL(origin).hostname
     try {
       const result = await adapter.authenticateComplete(
@@ -544,12 +586,16 @@ if (url.pathname === '/api/auth/me' && method === 'GET') {
     const authCtx = requireAuth(req, res)
     if (!authCtx) return true
     const credentials = getWebAuthnCredentialsForMember(authCtx.memberKey)
-    json(res, 200, credentials.map((c) => ({
-      credentialId: c.credentialId,
-      aaguid: c.aaguid,
-      counter: c.counter,
-      createdAt: c.createdAt,
-    })))
+    json(
+      res,
+      200,
+      credentials.map((c) => ({
+        credentialId: c.credentialId,
+        aaguid: c.aaguid,
+        counter: c.counter,
+        createdAt: c.createdAt,
+      })),
+    )
     return true
   }
 
@@ -578,7 +624,8 @@ if (url.pathname === '/api/auth/me' && method === 'GET') {
     // Build the authorization URL and redirect
     const issuer = process.env.OIDC_ISSUER ?? 'https://login.example.com'
     const clientId = process.env.OIDC_CLIENT_ID ?? 'papyrus'
-    const redirectUri = process.env.OIDC_REDIRECT_URI ?? 'http://localhost:3777/api/auth/oidc/callback'
+    const redirectUri =
+      process.env.OIDC_REDIRECT_URI ?? 'http://localhost:3777/api/auth/oidc/callback'
     const scopes = (process.env.OIDC_SCOPES ?? 'openid,profile,email').split(',')
 
     const oidcAdapter = new OIDCAdapter({
@@ -676,15 +723,16 @@ if (url.pathname === '/api/auth/me' && method === 'GET') {
   // ── CAC/PIV Endpoints ───────────────────────────────────────────
 
   if (url.pathname === '/api/auth/cac/status' && method === 'GET') {
-    // Check if the connection has a client certificate (mTLS)
-    const tlsSocket = req.socket as TLSSocket
-    const peerCert = tlsSocket.peerCertificate
-    const hasCert = !!peerCert && peerCert !== undefined
+    const tlsSocket = req.socket instanceof TLSSocket ? req.socket : null
+    const peerCert = tlsSocket?.getPeerCertificate()
+    const hasCert = Boolean(peerCert && Object.keys(peerCert).length > 0)
     json(res, 200, {
-      mtlsEnabled: req.socket.constructor.name === 'TLSSocket',
+      mtlsEnabled: Boolean(tlsSocket),
       hasClientCert: hasCert,
-      subject: hasCert ? (peerCert as { subject: string }).subject : null,
-      issuer: hasCert ? (peerCert as { issuer: string }).issuer : null,
+      authorized: tlsSocket?.authorized ?? false,
+      authorizationError: tlsSocket?.authorizationError ?? null,
+      subject: hasCert ? peerCert?.subject : null,
+      issuer: hasCert ? peerCert?.issuer : null,
     })
     return true
   }
@@ -706,36 +754,35 @@ if (url.pathname === '/api/auth/me' && method === 'GET') {
   }
 
   if (url.pathname === '/api/auth/cac/verify' && method === 'POST') {
-    // Try to get cert from mTLS socket first, fall back to body
-    const tlsSocket = req.socket as TLSSocket
-    let certPem: string | undefined
-
-    const peerCert = tlsSocket.peerCertificate as unknown
-    if (peerCert && typeof peerCert === 'object' && 'raw' in peerCert) {
-      certPem = `-----BEGIN CERTIFICATE-----\n${Buffer.from((peerCert as { raw: Uint8Array }).raw).toString('base64')}\n-----END CERTIFICATE-----`
-    }
-
-    if (!certPem) {
-      const body = await parseBody(req)
-      certPem = body.certPem as string
-    }
-
-    if (!certPem) {
-      json(res, 400, { error: 'No client certificate presented. Connect via HTTPS with a CAC/PIV card, or provide certPem in the request body.' })
+    const tlsSocket = req.socket instanceof TLSSocket ? req.socket : null
+    const peerCert = tlsSocket?.getPeerCertificate()
+    if (!tlsSocket || !peerCert?.raw) {
+      json(res, 400, { error: 'No CAC/PIV client certificate was presented over HTTPS.' })
       return true
     }
 
     const caBundlePath = process.env.PAPYRUS_CAC_CA_BUNDLE
     let caBundle: string | undefined
-    if (caBundlePath) {
-      try {
-        caBundle = readFileSync(caBundlePath, 'utf-8')
-      } catch {
-        // CA bundle not readable
-      }
+    if (!caBundlePath || !tlsSocket.authorized) {
+      json(res, 401, {
+        error: `CAC/PIV certificate is not trusted${tlsSocket.authorizationError ? `: ${tlsSocket.authorizationError}` : ''}`,
+      })
+      return true
+    }
+    try {
+      caBundle = readFileSync(caBundlePath, 'utf-8')
+    } catch {
+      json(res, 500, { error: 'CAC/PIV CA bundle is not readable.' })
+      return true
     }
 
-    const adapter = new CACPIVAdapter(caBundle ? { caBundle } : undefined)
+    const certPem = `-----BEGIN CERTIFICATE-----\n${
+      peerCert.raw
+        .toString('base64')
+        .match(/.{1,64}/g)
+        ?.join('\n') ?? ''
+    }\n-----END CERTIFICATE-----`
+    const adapter = new CACPIVAdapter({ caBundle })
     try {
       const result = await adapter.complete({
         method: 'cac-piv',
@@ -752,7 +799,11 @@ if (url.pathname === '/api/auth/me' && method === 'GET') {
         entityType: 'session',
         entityId: 'cac-login',
         projectId: 'system',
-        details: { method: 'cac-piv', externalId: result.externalId, displayName: result.displayName },
+        details: {
+          method: 'cac-piv',
+          externalId: result.externalId,
+          displayName: result.displayName,
+        },
       })
 
       json(res, 200, { token, memberKey: identity.publicKey, displayName: result.displayName })
@@ -2159,17 +2210,22 @@ const tlsCertPath = process.env.PAPYRUS_TLS_CERT
 const tlsKeyPath = process.env.PAPYRUS_TLS_KEY
 const useHttps = !!(tlsCertPath && tlsKeyPath && existsSync(tlsCertPath) && existsSync(tlsKeyPath))
 
-const httpServer = useHttps
-  ? createHttpsServer({
-      cert: readFileSync(tlsCertPath!, 'utf-8'),
-      key: readFileSync(tlsKeyPath!, 'utf-8'),
-      ca: process.env.PAPYRUS_CAC_CA_BUNDLE && existsSync(process.env.PAPYRUS_CAC_CA_BUNDLE)
-        ? readFileSync(process.env.PAPYRUS_CAC_CA_BUNDLE, 'utf-8')
-        : undefined,
+const httpServer = (() => {
+  if (!useHttps || !tlsCertPath || !tlsKeyPath) return createServer(requestHandler)
+  return createHttpsServer(
+    {
+      cert: readFileSync(tlsCertPath, 'utf-8'),
+      key: readFileSync(tlsKeyPath, 'utf-8'),
+      ca:
+        process.env.PAPYRUS_CAC_CA_BUNDLE && existsSync(process.env.PAPYRUS_CAC_CA_BUNDLE)
+          ? readFileSync(process.env.PAPYRUS_CAC_CA_BUNDLE, 'utf-8')
+          : undefined,
       requestCert: true,
       rejectUnauthorized: false,
-    }, requestHandler)
-  : createServer(requestHandler)
+    },
+    requestHandler,
+  )
+})()
 
 const wss = new WebSocketServer({ server: httpServer, path: '/ws' })
 
@@ -2186,12 +2242,16 @@ wss.on('connection', (ws, req) => {
 httpServer.listen(PORT, async () => {
   console.log('\n  PAPYRUS daemon')
   console.log('  ─────────────')
-  console.log(`  ${useHttps ? 'HTTPS' : 'HTTP'}  ${useHttps ? 'https' : 'http'}://localhost:${PORT}`)
+  console.log(
+    `  ${useHttps ? 'HTTPS' : 'HTTP'}  ${useHttps ? 'https' : 'http'}://localhost:${PORT}`,
+  )
   if (useHttps) {
-    console.log(`  mTLS  ${process.env.PAPYRUS_CAC_CA_BUNDLE ? 'CAC/PIV client cert verification active' : 'client certs requested (no CA bundle)'}`)
+    console.log(
+      `  mTLS  ${process.env.PAPYRUS_CAC_CA_BUNDLE ? 'CAC/PIV client cert verification active' : 'client certs requested (no CA bundle)'}`,
+    )
   }
-  console.log(`  WS    ws://localhost:${PORT}/ws`)
-  console.log(`  API   http://localhost:${PORT}/api/health`)
+  console.log(`  WS    ${useHttps ? 'wss' : 'ws'}://localhost:${PORT}/ws`)
+  console.log(`  API   ${useHttps ? 'https' : 'http'}://localhost:${PORT}/api/health`)
 
   // Auto-generate member identity on first run
   const identity = loadOrGenerateMemberIdentity()

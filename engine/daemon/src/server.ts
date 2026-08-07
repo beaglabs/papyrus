@@ -13,6 +13,7 @@ import { extname, join } from 'node:path'
 import { TLSSocket } from 'node:tls'
 import { type AgentMessage, createPersonaAgent, listSkills, runSkill } from '@papyrus/agents'
 import {
+  type LicenseFile,
   CACPIVAdapter,
   OIDCAdapter,
   SAMLAdapter,
@@ -73,9 +74,11 @@ import {
   validateEmailForProfile,
 } from './orgs.js'
 import { assignRole, getProjectRoles, getRole, removeRole, requirePermission } from './rbac.js'
+import { LicenseService } from './license-service.js'
 
 const PORT = Number(process.env.PAPYRUS_PORT ?? 3777)
 const WEB_DIST = join(import.meta.dirname ?? '.', '../../web/dist')
+const licenseService = new LicenseService(currentProfile())
 
 // ── Generation Tasks (in-memory) ─────────────────────────────
 
@@ -229,6 +232,16 @@ async function initNetwork(): Promise<void> {
   }
 }
 
+// Revalidate without network access. If a pilot expires while running, stop peer activity
+// and leave only diagnostics and offline activation available.
+setInterval(async () => {
+  if (networkReady && !licenseService.isLicensed()) {
+    console.error('  LICENSE expired or invalid; stopping peer network')
+    await network.close()
+    networkReady = false
+  }
+}, 60_000)
+
 // ── In-memory state per project ──────────────────────────────────
 
 interface ProjectState {
@@ -307,7 +320,32 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
   }
 
   if (url.pathname === '/api/health') {
-    json(res, 200, { ok: true, projects: listProjects().length })
+    const license = licenseService.getStatus()
+    json(res, 200, { ok: true, licensed: license.valid, projects: license.valid ? listProjects().length : 0 })
+    return true
+  }
+
+  // License diagnostics and activation remain available while the daemon is locked.
+  if (url.pathname === '/api/license/status' && method === 'GET') {
+    json(res, 200, licenseService.getStatus())
+    return true
+  }
+
+  if (url.pathname === '/api/license/request' && method === 'GET') {
+    json(res, 200, licenseService.activationRequest())
+    return true
+  }
+
+  if (url.pathname === '/api/license/activate' && method === 'POST') {
+    const body = await parseBody(req)
+    const status = licenseService.activate(body as unknown as LicenseFile)
+    if (status.valid && !networkReady) await initNetwork()
+    json(res, status.valid ? 200 : 400, status)
+    return true
+  }
+
+  if (!licenseService.isLicensed()) {
+    json(res, 402, { error: 'Papyrus license required', license: licenseService.getStatus() })
     return true
   }
 
@@ -2200,6 +2238,11 @@ const requestHandler = async (req: IncomingMessage, res: ServerResponse) => {
     if (handled) return
   }
 
+  if (!licenseService.isLicensed()) {
+    json(res, 402, { error: 'Papyrus license required', license: licenseService.getStatus() })
+    return
+  }
+
   // Static files from web dist
   const filePath = join(WEB_DIST, req.url === '/' ? 'index.html' : (req.url ?? ''))
   serveSPA(res, filePath)
@@ -2230,6 +2273,10 @@ const httpServer = (() => {
 const wss = new WebSocketServer({ server: httpServer, path: '/ws' })
 
 wss.on('connection', (ws, req) => {
+  if (!licenseService.isLicensed()) {
+    ws.close(1008, 'Papyrus license required')
+    return
+  }
   const url = new URL(req.url ?? '/', `http://localhost:${PORT}`)
   const projectId = url.searchParams.get('project')
   if (!projectId) {
@@ -2257,8 +2304,12 @@ httpServer.listen(PORT, async () => {
   const identity = loadOrGenerateMemberIdentity()
   console.log(`  ID     ${identity.publicKey.slice(0, 16)}...`)
 
-  // Initialize Iroh P2P network
-  await initNetwork()
+  const license = licenseService.getStatus()
+  console.log(`  LICENSE ${license.valid ? `valid — ${license.licensee}` : `locked — ${license.reason}`}`)
+  console.log(`  DEPLOY  ${license.deploymentId}`)
+
+  // Network activity is disabled until a valid deployment-bound license is installed.
+  if (license.valid) await initNetwork()
 
   console.log()
 })

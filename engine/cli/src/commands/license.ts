@@ -1,55 +1,88 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname } from 'node:path'
-import {
-  type LicenseFile,
-  generateAuthorityKeyPair,
-  loadStoredLicense,
-  resolveConfig,
-  signLicense,
-  storeLicense,
-  validateLicense,
-} from '@papyrus/core'
+import { spawn } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import type { LicenseFile, LicenseStatus } from '@papyrus/core'
 import { defineCommand } from 'citty'
-import { activeProfile, banner } from './_shared.js'
+import { banner } from './_shared.js'
+
+const PORT = Number(process.env.PAPYRUS_PORT ?? 3777)
+const BASE_URL = `http://localhost:${PORT}`
+
+async function ensureDaemon(): Promise<void> {
+  try {
+    const response = await fetch(`${BASE_URL}/api/health`)
+    if (response.ok) return
+  } catch {
+    const daemon = spawn(
+      'node',
+      ['--import', 'tsx', join(import.meta.dirname, '../../../daemon/src/server.ts')],
+      { detached: true, stdio: 'ignore' },
+    )
+    daemon.unref()
+  }
+  for (let attempt = 0; attempt < 30; attempt++) {
+    try {
+      if ((await fetch(`${BASE_URL}/api/health`)).ok) return
+    } catch {
+      /* daemon is starting */
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+  throw new Error('Papyrus daemon did not start')
+}
+
+async function getJson<T>(path: string): Promise<T> {
+  await ensureDaemon()
+  const response = await fetch(`${BASE_URL}${path}`)
+  if (!response.ok) throw new Error(`Daemon returned ${response.status}`)
+  return response.json() as Promise<T>
+}
 
 export default defineCommand({
   meta: {
     name: 'papyrus license',
-    description: 'Offline license management: status | activate | validate | generate.',
+    description: 'Offline license management: status | request | activate | validate.',
   },
   subCommands: {
     status: defineCommand({
-      meta: { name: 'papyrus license status', description: 'Show the current license status.' },
-      run() {
+      meta: { name: 'papyrus license status', description: 'Show license and deployment status.' },
+      async run() {
         banner('license status')
-        const profile = activeProfile()
-        const stored = loadStoredLicense()
-        if (!stored) {
-          console.log('  No license activated.\n')
-          console.log('  Activate one with:  papyrus license activate <license-file.json>\n')
-          return
+        try {
+          const status = await getJson<LicenseStatus>('/api/license/status')
+          console.log(`  Deployment : ${status.deploymentId}`)
+          console.log(`  License ID : ${status.licenseId ?? 'none'}`)
+          console.log(`  Licensee   : ${status.licensee ?? 'none'}`)
+          console.log(`  Profile    : ${status.profile ?? 'unlicensed'}`)
+          console.log(`  Expires    : ${status.expiresAt ?? 'never / not installed'}`)
+          console.log(
+            `  Status     : ${status.valid ? 'VALID' : `INVALID — ${status.reason ?? 'unknown'}`}\n`,
+          )
+        } catch (error) {
+          console.error(`  ${(error as Error).message}\n`)
+          process.exitCode = 1
         }
-        const status = validateLicense(stored.license, profile)
-        console.log(`  License ID : ${stored.license.licenseId}`)
-        console.log(`  Licensee   : ${stored.license.licensee}`)
-        console.log(`  Profile    : ${stored.license.profile}`)
-        console.log(`  Node limit : ${stored.license.nodeLimit}`)
-        console.log(`  Expires    : ${stored.license.expiresAt ?? 'never (perpetual)'}`)
-        console.log(`  Activated  : ${stored.activatedAt}`)
-        console.log(`  Agents     : ${stored.license.features.agents ? 'enabled' : 'disabled'}`)
-        console.log(
-          `  Cross-Dom  : ${stored.license.features.crossDomainExport ? 'enabled' : 'disabled'}`,
-        )
-        console.log(
-          `  Status     : ${status.valid ? 'VALID' : `INVALID — ${status.reason ?? ''}`}\n`,
-        )
       },
     }),
-
+    request: defineCommand({
+      meta: {
+        name: 'papyrus license request',
+        description: 'Print the offline deployment activation request.',
+      },
+      async run() {
+        banner('license request')
+        try {
+          console.log(`${JSON.stringify(await getJson('/api/license/request'), null, 2)}\n`)
+        } catch (error) {
+          console.error(`  ${(error as Error).message}\n`)
+          process.exitCode = 1
+        }
+      },
+    }),
     activate: defineCommand({
       meta: {
         name: 'papyrus license activate',
-        description: 'Activate an offline, signed license file.',
+        description: 'Install an offline Beag Labs-signed license.',
       },
       args: {
         file: {
@@ -58,87 +91,39 @@ export default defineCommand({
           required: true,
         },
       },
-      run(ctx) {
+      async run(ctx) {
         banner('license activate')
-        const profile = activeProfile()
-        const filePath = ctx.args.file as string
         try {
-          const raw = readFileSync(filePath, 'utf-8')
-          const license = JSON.parse(raw) as LicenseFile
-          const status = validateLicense(license, profile)
-          if (!status.valid) {
-            console.error(`  License validation failed: ${status.reason}\n`)
-            process.exitCode = 1
-            return
-          }
-          storeLicense(license)
-          console.log(`  License activated: ${license.licenseId}`)
-          console.log(`  Licensee  : ${license.licensee}`)
-          console.log(`  Profile   : ${license.profile}`)
-          console.log(
-            `  Features  : agents=${license.features.agents}, crossDomain=${license.features.crossDomainExport}\n`,
-          )
-        } catch (err) {
-          console.error(`  Failed to activate license: ${(err as Error).message}\n`)
+          await ensureDaemon()
+          const license = JSON.parse(readFileSync(ctx.args.file as string, 'utf8')) as LicenseFile
+          const response = await fetch(`${BASE_URL}/api/license/activate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(license),
+          })
+          const status = (await response.json()) as LicenseStatus
+          if (!response.ok || !status.valid)
+            throw new Error(status.reason ?? 'License activation failed')
+          console.log(`  Activated ${status.licenseId} for ${status.licensee}.\n`)
+        } catch (error) {
+          console.error(`  ${(error as Error).message}\n`)
           process.exitCode = 1
         }
       },
     }),
-
     validate: defineCommand({
-      meta: { name: 'papyrus license validate', description: 'Re-validate the active license.' },
-      run() {
-        banner('license validate')
-        const profile = activeProfile()
-        const stored = loadStoredLicense()
-        if (!stored) {
-          console.error('  No license to validate. Activate one first.\n')
-          process.exitCode = 1
-          return
-        }
-        const status = validateLicense(stored.license, profile)
-        if (status.valid) {
-          console.log(`  License ${stored.license.licenseId} is VALID for profile "${profile}".\n`)
-        } else {
-          console.error(`  License INVALID: ${status.reason}\n`)
+      meta: { name: 'papyrus license validate', description: 'Revalidate the installed license.' },
+      async run() {
+        try {
+          const status = await getJson<LicenseStatus>('/api/license/status')
+          if (!status.valid) throw new Error(status.reason ?? 'License is invalid')
+          console.log(
+            `  License ${status.licenseId} is VALID for deployment ${status.deploymentId}.\n`,
+          )
+        } catch (error) {
+          console.error(`  ${(error as Error).message}\n`)
           process.exitCode = 1
         }
-      },
-    }),
-
-    generate: defineCommand({
-      meta: {
-        name: 'papyrus license generate',
-        description: 'Generate a test license signed with a fresh authority keypair (dev only).',
-      },
-      args: {
-        licensee: { type: 'string', description: 'Licensee name.', default: 'Test Organization' },
-        profile: { type: 'string', description: 'Profile to bind to.', default: 'commercial' },
-        output: { type: 'string', description: 'Output file path.', default: 'license.json' },
-      },
-      run(ctx) {
-        banner('license generate (dev)')
-        const authority = generateAuthorityKeyPair()
-        const license = signLicense(
-          {
-            licenseId: `papyrus-dev-${Date.now()}`,
-            licensee: ctx.args.licensee as string,
-            profile: ctx.args.profile as string as 'commercial',
-            features: { agents: true, crossDomainExport: true },
-            nodeLimit: 100,
-            expiresAt: null,
-            issuedAt: new Date().toISOString(),
-          },
-          authority.privateKeyPem,
-        )
-        const out = ctx.args.output as string
-        mkdirSync(dirname(out), { recursive: true })
-        writeFileSync(out, JSON.stringify(license, null, 2), 'utf-8')
-        console.log(`  License written to: ${out}`)
-        console.log(`  License ID : ${license.licenseId}`)
-        console.log(`  Licensee   : ${license.licensee}`)
-        console.log(`  Profile    : ${license.profile}`)
-        console.log(`  Authority  : ${authority.publicKeyPem.slice(0, 40)}...\n`)
       },
     }),
   },

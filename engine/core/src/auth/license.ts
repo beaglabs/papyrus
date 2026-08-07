@@ -1,21 +1,5 @@
-/**
- * Offline license management.
- *
- * Papyrus licenses are Ed25519-signed, profile-bound JSON files. The signing
- * authority's public key is embedded in the license. The daemon verifies the
- * signature at activation and periodically re-validates. For SIPRNet this must
- * work entirely offline — no revocation check, no OCSP.
- *
- * License file layout:
- *   { LicensePayload, publicKey: base64, signature: base64 }
- *
- * Signature covers the canonical JSON of LicensePayload only (deterministic
- * stringify: sorted keys, no whitespace).
- *
- * Uses `crypto.sign()` / `crypto.verify()` (not `createSign`) because Ed25519
- * uses its own internal hash — not pluggable like RSA/ECDSA.
- */
-import { createPrivateKey, createPublicKey, generateKeyPairSync, sign, verify } from 'node:crypto'
+/** Offline Papyrus license primitives. Runtime policy belongs to the daemon LicenseService. */
+import { createPrivateKey, createPublicKey, sign, verify } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type {
@@ -26,122 +10,93 @@ import type {
   StoredLicense,
 } from './types.js'
 
-const DEFAULT_CONFIG_DIR = join(process.env.HOME ?? '~', '.papyrus')
+const DEFAULT_CONFIG_DIR = join(process.env.HOME ?? '.', '.papyrus')
 const LICENSE_FILE = 'license.json'
 
-/** Deterministic JSON stringify (sorted keys, no whitespace) for signing. */
-function canonicalJson(value: unknown): string {
+export function canonicalLicenseJson(value: unknown): string {
   if (value === null || value === undefined) return 'null'
   if (typeof value === 'string') return JSON.stringify(value)
   if (typeof value === 'number' || typeof value === 'boolean') return String(value)
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  if (Array.isArray(value)) return `[${value.map(canonicalLicenseJson).join(',')}]`
   const keys = Object.keys(value as Record<string, unknown>).sort()
-  const pairs = keys.map(
-    (k) => `${JSON.stringify(k)}:${canonicalJson((value as Record<string, unknown>)[k])}`,
-  )
-  return `{${pairs.join(',')}}`
+  return `{${keys.map((key) => `${JSON.stringify(key)}:${canonicalLicenseJson((value as Record<string, unknown>)[key])}`).join(',')}}`
 }
 
-/** Build the Ed25519 SPKI DER from a raw 32-byte public key (base64). */
-function ed25519SpkiDer(pubBase64: string): Buffer {
-  const raw = Buffer.from(pubBase64, 'base64')
-  const header = Buffer.from('302a300506032b6570032100', 'hex')
-  return Buffer.concat([header, raw])
-}
-
-/** Sign a license payload. Returns the signed LicenseFile. */
 export function signLicense(payload: LicensePayload, authorityPrivateKeyPem: string): LicenseFile {
-  const canonical = Buffer.from(canonicalJson(payload), 'utf-8')
-  const keyObj = createPrivateKey(authorityPrivateKeyPem)
-  const signature = sign(null, canonical, keyObj).toString('base64')
-
-  // Derive the public key from the private key for embedding.
-  const pubKeyObj = createPublicKey(keyObj)
-  const pubSpki = pubKeyObj.export({ type: 'spki', format: 'der' })
-  // Ed25519 SPKI: raw 32-byte public key starts at offset 12
-  const pubRaw = Buffer.isBuffer(pubSpki) ? pubSpki.subarray(12, 44).toString('base64') : ''
-
-  return { ...payload, publicKey: pubRaw, signature }
+  const signature = sign(
+    null,
+    Buffer.from(canonicalLicenseJson(payload), 'utf8'),
+    createPrivateKey(authorityPrivateKeyPem),
+  ).toString('base64')
+  return { ...payload, signature }
 }
 
-/** Verify a license file's signature against its embedded public key. */
-export function verifyLicenseSignature(license: LicenseFile): boolean {
-  const { publicKey, signature, ...payload } = license
-  const canonical = Buffer.from(canonicalJson(payload as LicensePayload), 'utf-8')
-  const spki = ed25519SpkiDer(publicKey)
-  const pubKeyObj = createPublicKey({ key: spki, format: 'der', type: 'spki' })
-  const sigBuf = Buffer.from(signature, 'base64')
-  return verify(null, canonical, pubKeyObj, sigBuf)
+export function verifyLicenseSignature(
+  license: LicenseFile,
+  authorityPublicKeyPem: string,
+): boolean {
+  try {
+    const { signature, ...payload } = license
+    return verify(
+      null,
+      Buffer.from(canonicalLicenseJson(payload), 'utf8'),
+      createPublicKey(authorityPublicKeyPem),
+      Buffer.from(signature, 'base64'),
+    )
+  } catch {
+    return false
+  }
 }
 
-/** Validate a license: signature + profile + expiry. */
 export function validateLicense(
   license: LicenseFile,
   activeProfile: NetworkProfile,
+  deploymentId: string,
+  authorityPublicKeyPem: string,
+  now = new Date(),
 ): LicenseStatus {
-  if (!verifyLicenseSignature(license)) {
-    return {
-      valid: false,
-      profile: license.profile,
-      licensee: license.licensee,
-      features: license.features,
-      nodeLimit: license.nodeLimit,
-      expiresAt: license.expiresAt,
-      reason: 'Invalid signature',
-    }
-  }
-  if (license.profile !== activeProfile) {
-    return {
-      valid: false,
-      profile: license.profile,
-      licensee: license.licensee,
-      features: license.features,
-      nodeLimit: license.nodeLimit,
-      expiresAt: license.expiresAt,
-      reason: `License bound to profile "${license.profile}" but active profile is "${activeProfile}"`,
-    }
-  }
-  if (license.expiresAt !== null && new Date(license.expiresAt) < new Date()) {
-    return {
-      valid: false,
-      profile: license.profile,
-      licensee: license.licensee,
-      features: license.features,
-      nodeLimit: license.nodeLimit,
-      expiresAt: license.expiresAt,
-      reason: `License expired on ${license.expiresAt}`,
-    }
-  }
-  return {
-    valid: true,
+  const base = {
+    licenseId: license.licenseId,
     profile: license.profile,
     licensee: license.licensee,
-    features: license.features,
-    nodeLimit: license.nodeLimit,
+    deploymentId,
     expiresAt: license.expiresAt,
   }
+  if (!verifyLicenseSignature(license, authorityPublicKeyPem))
+    return { ...base, valid: false, reason: 'Invalid signature' }
+  if (license.profile !== activeProfile)
+    return {
+      ...base,
+      valid: false,
+      reason: `License is for profile "${license.profile}", not "${activeProfile}"`,
+    }
+  if (license.deploymentId !== deploymentId)
+    return { ...base, valid: false, reason: 'License is bound to another deployment' }
+  if (license.expiresAt !== null) {
+    const expiry = Date.parse(license.expiresAt)
+    if (!Number.isFinite(expiry))
+      return { ...base, valid: false, reason: 'License expiry is not a valid ISO-8601 timestamp' }
+    if (expiry <= now.getTime())
+      return { ...base, valid: false, reason: `License expired on ${license.expiresAt}` }
+  }
+  return { ...base, valid: true }
 }
 
-/** Load the stored license from disk. Returns null if not activated. */
 export function loadStoredLicense(dir = DEFAULT_CONFIG_DIR): StoredLicense | null {
   const file = join(dir, LICENSE_FILE)
   if (!existsSync(file)) return null
-  return JSON.parse(readFileSync(file, 'utf-8')) as StoredLicense
+  try {
+    return JSON.parse(readFileSync(file, 'utf8')) as StoredLicense
+  } catch {
+    return null
+  }
 }
 
-/** Store a license to disk (after activation). */
 export function storeLicense(license: LicenseFile, dir = DEFAULT_CONFIG_DIR): void {
-  mkdirSync(dir, { recursive: true })
-  const file = join(dir, LICENSE_FILE)
-  const stored: StoredLicense = { license, activatedAt: new Date().toISOString() }
-  writeFileSync(file, JSON.stringify(stored, null, 2), 'utf-8')
-}
-
-/** Generate an Ed25519 keypair for a license authority (dev/testing). */
-export function generateAuthorityKeyPair(): { publicKeyPem: string; privateKeyPem: string } {
-  const { publicKey, privateKey } = generateKeyPairSync('ed25519', {
-    publicKeyEncoding: { type: 'spki', format: 'pem' },
-    privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-  })
-  return { publicKeyPem: publicKey, privateKeyPem: privateKey }
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  writeFileSync(
+    join(dir, LICENSE_FILE),
+    JSON.stringify({ license, activatedAt: new Date().toISOString() }, null, 2),
+    { encoding: 'utf8', mode: 0o600 },
+  )
 }

@@ -32,7 +32,7 @@ const main = defineCommand({
     console.log('  Usage: papyrus <command> [subcommand] [options]')
     console.log('  Commands:')
     console.log('    auth        login | logout | status | refresh')
-    console.log('    license     status | activate | validate')
+    console.log('    license     status | request | activate | validate')
     console.log('    projects    init | list | share | join | open | invite')
     console.log('    skills      list')
     console.log('    orgs        create | archive | list')

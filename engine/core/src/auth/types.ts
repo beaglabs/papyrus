@@ -58,43 +58,45 @@ export interface AttestationRecord {
   provenance: Record<string, unknown>
 }
 
-/** Offline license data (unsigned payload). */
+/** Offline license payload signed by the Beag Labs licensing authority. */
 export interface LicensePayload {
   licenseId: string
   licensee: string
   profile: NetworkProfile
-  features: { agents: boolean; crossDomainExport: boolean }
-  nodeLimit: number
-  /** null = perpetual; ISO date = expiry. */
+  /** SHA-256 fingerprint of the deployment's locally generated Ed25519 public key. */
+  deploymentId: string
+  /** null denotes a perpetual license; otherwise an ISO-8601 expiry timestamp. */
   expiresAt: string | null
   issuedAt: string
 }
 
-/** A signed license file. */
+/** A license carries only its signed payload and signature. The trusted key is pinned by Papyrus. */
 export interface LicenseFile extends LicensePayload {
-  /** Ed25519 public key of the signing authority (base64). */
-  publicKey: string
-  /** Ed25519 signature over canonical JSON of LicensePayload (base64). */
   signature: string
 }
 
-/** The result of license validation. */
 export interface LicenseStatus {
   valid: boolean
-  profile: NetworkProfile
-  licensee: string
-  features: LicensePayload['features']
-  nodeLimit: number
-  expiresAt: string | null
-  /** Human-readable reason if invalid. */
+  licenseId?: string
+  profile?: NetworkProfile
+  licensee?: string
+  deploymentId: string
+  expiresAt?: string | null
   reason?: string
 }
 
-/** Stored license state on disk (`~/.papyrus/license.json`). */
 export interface StoredLicense {
   license: LicenseFile
   activatedAt: string
 }
+
+export interface DeploymentIdentity {
+  publicKeyPem: string
+  privateKeyPem: string
+  deploymentId: string
+  createdAt: string
+}
+
 
 /**
  * The auth adapter interface. Each auth method implements this.

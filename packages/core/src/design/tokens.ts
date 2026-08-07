@@ -1,20 +1,20 @@
 /**
- * Papyrus design tokens — Dark/Light theme, agent-driven, Inter-first.
+ * Papyrus design tokens — Beag Labs neobrutalist system.
  *
  * Inspired by OiiOii's clean dark UI but adapted for secure product development.
  * Orange accent retained as the Papyrus brand signal.
  */
 export const tokens = {
   color: {
-    bg: '#0a0a0a',
-    surface: '#141414',
-    surfaceHover: '#1c1c1c',
-    surfaceActive: '#222222',
-    border: '#2a2a2a',
-    borderLight: '#333333',
-    text: '#e5e5e5',
-    textMuted: '#888888',
-    textDim: '#555555',
+    bg: '#f7f7f5',
+    surface: '#ffffff',
+    surfaceHover: '#fff1e9',
+    surfaceActive: '#ffe1d2',
+    border: '#111111',
+    borderLight: '#292929',
+    text: '#0a0a0a',
+    textMuted: '#3f3f3f',
+    textDim: '#6b6b6b',
     accent: '#ff5f1f',
     accentHover: '#ff7a1a',
     accentMuted: 'rgba(255, 95, 31, 0.15)',
@@ -46,18 +46,18 @@ export const tokens = {
     width: 1,
     widthLg: 2,
     style: 'solid',
-    color: '#2a2a2a',
+    color: '#111111',
   },
   shadow: {
-    sm: '0 1px 3px rgba(0,0,0,0.4)',
-    md: '0 4px 12px rgba(0,0,0,0.5)',
-    lg: '0 8px 24px rgba(0,0,0,0.6)',
-    glow: '0 0 20px rgba(255, 95, 31, 0.15)',
+    sm: '4px 4px 0 #111111',
+    md: '6px 6px 0 #111111',
+    lg: '8px 8px 0 #111111',
+    glow: '6px 6px 0 #ff5f1f',
   },
   radius: {
-    sm: '6px',
-    md: '10px',
-    lg: '16px',
+    sm: '8px',
+    md: '14px',
+    lg: '22px',
     full: '9999px',
   },
   spacing: {

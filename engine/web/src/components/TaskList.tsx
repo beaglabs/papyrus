@@ -1,4 +1,15 @@
 import { tokens } from '@papyrus/core/design'
+import {
+  BriefcaseBusiness,
+  Check,
+  ChevronDown,
+  Code2,
+  ListTodo,
+  LoaderCircle,
+  Palette,
+  ShieldCheck,
+  X,
+} from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -15,11 +26,11 @@ interface Task {
   error?: string
 }
 
-const PERSONA_ICONS: Record<string, string> = {
-  pm: '\u{1F4CB}',
-  designer: '\u{1F3A8}',
-  engineer: '\u{2699}\u{FE0F}',
-  security: '\u{1F512}',
+const PERSONA_ICONS = {
+  pm: BriefcaseBusiness,
+  designer: Palette,
+  engineer: Code2,
+  security: ShieldCheck,
 }
 
 export function TaskList({ projectId }: { projectId: string }) {
@@ -52,7 +63,7 @@ export function TaskList({ projectId }: { projectId: string }) {
         onClick={() => setCollapsed(false)}
         style={{
           position: 'absolute',
-          top: 16,
+          top: 68,
           right: 16,
           zIndex: 200,
           display: 'flex',
@@ -60,8 +71,9 @@ export function TaskList({ projectId }: { projectId: string }) {
           gap: 6,
           padding: '6px 12px',
           background: tokens.color.surface,
-          border: `1px solid ${tokens.color.border}`,
-          borderRadius: tokens.radius.full,
+          border: `2px solid ${tokens.color.black}`,
+          borderRadius: tokens.radius.md,
+          boxShadow: '3px 3px 0 #111',
           color: tokens.color.textMuted,
           fontSize: 12,
           cursor: 'pointer',
@@ -78,7 +90,9 @@ export function TaskList({ projectId }: { projectId: string }) {
             }}
           />
         )}
+        <ListTodo size={14} aria-hidden="true" />
         Tasks ({tasks.length})
+        <ChevronDown size={14} aria-hidden="true" />
       </button>
     )
   }
@@ -87,15 +101,15 @@ export function TaskList({ projectId }: { projectId: string }) {
     <div
       style={{
         position: 'absolute',
-        top: 16,
+        top: 68,
         right: 16,
         zIndex: 200,
         width: 300,
         maxHeight: '60vh',
         background: tokens.color.surface,
-        border: `1px solid ${tokens.color.border}`,
+        border: `2px solid ${tokens.color.black}`,
         borderRadius: tokens.radius.md,
-        boxShadow: tokens.shadow.lg,
+        boxShadow: '5px 5px 0 #111',
         display: 'flex',
         flexDirection: 'column',
       }}
@@ -110,7 +124,8 @@ export function TaskList({ projectId }: { projectId: string }) {
           gap: 8,
         }}
       >
-        <span style={{ fontWeight: 600, fontSize: 13, color: tokens.color.text, flex: 1 }}>
+        <ListTodo size={16} aria-hidden="true" />
+        <span style={{ fontWeight: 700, fontSize: 13, color: tokens.color.text, flex: 1 }}>
           Tasks
         </span>
         {activeTasks.length > 0 && (
@@ -121,6 +136,7 @@ export function TaskList({ projectId }: { projectId: string }) {
         <button
           type="button"
           onClick={() => setCollapsed(true)}
+          aria-label="Collapse tasks"
           style={{
             background: 'none',
             border: 'none',
@@ -129,7 +145,7 @@ export function TaskList({ projectId }: { projectId: string }) {
             fontSize: 14,
           }}
         >
-          {'\u{2715}'}
+          <ChevronDown size={16} aria-hidden="true" />
         </button>
       </div>
 
@@ -160,13 +176,11 @@ export function TaskList({ projectId }: { projectId: string }) {
               alignItems: 'flex-start',
             }}
           >
-            <div
+            <LoaderCircle
+              aria-label="Running"
+              size={20}
               style={{
-                width: 20,
-                height: 20,
-                borderRadius: '50%',
-                border: `2px solid ${tokens.color.accent}`,
-                borderTopColor: 'transparent',
+                color: tokens.color.accent,
                 animation: 'spin 0.8s linear infinite',
                 flexShrink: 0,
                 marginTop: 2,
@@ -175,6 +189,9 @@ export function TaskList({ projectId }: { projectId: string }) {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div
                 style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 5,
                   fontSize: 12,
                   fontWeight: 600,
                   color: tokens.color.text,
@@ -183,11 +200,21 @@ export function TaskList({ projectId }: { projectId: string }) {
                   whiteSpace: 'nowrap',
                 }}
               >
-                {PERSONA_ICONS[task.persona] ?? '\u{1F9E0}'} {task.prompt.slice(0, 50)}
-                {task.prompt.length > 50 ? '...' : ''}
+                {(() => {
+                  const PersonaIcon =
+                    PERSONA_ICONS[task.persona as keyof typeof PERSONA_ICONS] ?? BriefcaseBusiness
+                  return <PersonaIcon size={13} aria-hidden="true" />
+                })()}
+                <span>
+                  {task.prompt.slice(0, 50)}
+                  {task.prompt.length > 50 ? '…' : ''}
+                </span>
               </div>
               <div
                 style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 5,
                   fontSize: 10,
                   color: tokens.color.accent,
                   fontFamily: tokens.font.mono,
@@ -223,17 +250,18 @@ export function TaskList({ projectId }: { projectId: string }) {
                 flexShrink: 0,
                 marginTop: 1,
                 background:
-                  task.status === 'done'
-                    ? 'rgba(34,197,94,0.15)'
-                    : 'rgba(239,68,68,0.15)',
+                  task.status === 'done' ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
                 color: task.status === 'done' ? tokens.color.success : tokens.color.error,
               }}
             >
-              {task.status === 'done' ? '\u{2713}' : '\u{2715}'}
+              {task.status === 'done' ? <Check size={13} /> : <X size={13} />}
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div
                 style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 5,
                   fontSize: 12,
                   fontWeight: 500,
                   color: tokens.color.textMuted,
@@ -242,7 +270,12 @@ export function TaskList({ projectId }: { projectId: string }) {
                   whiteSpace: 'nowrap',
                 }}
               >
-                {PERSONA_ICONS[task.persona] ?? '\u{1F9E0}'} {task.nodeTitle ?? task.prompt.slice(0, 40)}
+                {(() => {
+                  const PersonaIcon =
+                    PERSONA_ICONS[task.persona as keyof typeof PERSONA_ICONS] ?? BriefcaseBusiness
+                  return <PersonaIcon size={13} aria-hidden="true" />
+                })()}
+                <span>{task.nodeTitle ?? task.prompt.slice(0, 40)}</span>
               </div>
               <div
                 style={{
@@ -256,7 +289,7 @@ export function TaskList({ projectId }: { projectId: string }) {
                   ? task.completedAt
                     ? new Date(task.completedAt).toLocaleTimeString()
                     : 'Done'
-                  : task.error ?? 'Failed'}
+                  : (task.error ?? 'Failed')}
               </div>
             </div>
           </div>

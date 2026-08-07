@@ -12,6 +12,21 @@ import '@xyflow/react/dist/style.css'
 import { tokens } from '@papyrus/core/design'
 import type { CanvasNodeDoc, EdgeDoc } from '@papyrus/core/nodes/types'
 import gsap from 'gsap'
+import {
+  ArrowLeft,
+  BriefcaseBusiness,
+  ChevronDown,
+  ChevronUp,
+  Code2,
+  LayoutPanelLeft,
+  Palette,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Pencil,
+  Save,
+  ShieldCheck,
+  X,
+} from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useCanvasSync } from '../hooks/useCanvasSync'
@@ -27,7 +42,7 @@ const PERSONA_LIST = [
     name: 'Product Manager',
     role: 'PM',
     color: tokens.color.persona.pm ?? '#ff5f1f',
-    icon: '\u{1F4CB}',
+    icon: BriefcaseBusiness,
     description: 'Defines requirements and product vision.',
   },
   {
@@ -35,7 +50,7 @@ const PERSONA_LIST = [
     name: 'Designer',
     role: 'DESIGN',
     color: tokens.color.persona.designer ?? '#a78bfa',
-    icon: '\u{1F3A8}',
+    icon: Palette,
     description: 'Creates wireframes and design systems.',
   },
   {
@@ -43,7 +58,7 @@ const PERSONA_LIST = [
     name: 'Engineer',
     role: 'ENG',
     color: tokens.color.persona.engineer ?? '#60a5fa',
-    icon: '\u{2699}\u{FE0F}',
+    icon: Code2,
     description: 'Designs architecture and APIs.',
   },
   {
@@ -51,7 +66,7 @@ const PERSONA_LIST = [
     name: 'Security Reviewer',
     role: 'SEC',
     color: tokens.color.persona.security ?? '#facc15',
-    icon: '\u{1F512}',
+    icon: ShieldCheck,
     description: 'Reviews threats and compliance.',
   },
 ]
@@ -75,6 +90,10 @@ interface CanvasProps {
 }
 
 const nodeActionStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 5,
   marginTop: 8,
   padding: '6px 10px',
   background: tokens.color.accent,
@@ -266,16 +285,20 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
         const [nameValue, setNameValue] = useState(title)
         const [editingContent, setEditingContent] = useState(false)
         const [contentValue, setContentValue] = useState(content)
-        const isEditableSpec = doc.type === 'specification'
-        const hasUnsavedContent = contentValue !== content
+        const [editBaseline, setEditBaseline] = useState(content)
+        const isEditableSpec = doc.type === 'specification' || doc.flowRole === 'source'
+        const hasUnsavedContent = contentValue !== editBaseline
 
         useEffect(() => {
           if (!editingName) setNameValue(title)
         }, [title, editingName])
 
         useEffect(() => {
-          setContentValue(content)
-        }, [content])
+          if (!editingContent) {
+            setContentValue(content)
+            setEditBaseline(content)
+          }
+        }, [content, editingContent])
 
         async function handleRetry() {
           try {
@@ -308,15 +331,16 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
           event?.stopPropagation()
           if (!isEditableSpec || !canEdit) return
           setContentValue(content)
+          setEditBaseline(content)
           setEditingContent(true)
         }
 
         function cancelContentEdit(event?: React.SyntheticEvent) {
           event?.stopPropagation()
           if (isEditableSpec && hasUnsavedContent) {
-            updateDocumentText(doc.id, contentValue, content)
+            updateDocumentText(doc.id, contentValue, editBaseline)
           }
-          setContentValue(content)
+          setContentValue(editBaseline)
           setEditingContent(false)
         }
 
@@ -452,7 +476,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
                       onClick={beginContentEdit}
                       style={{ ...nodeActionStyle, marginTop: 0 }}
                     >
-                      ✎ Edit
+                      <Pencil size={12} aria-hidden="true" /> Edit
                     </button>
                   )}
                 </div>
@@ -514,7 +538,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
                         onClick={cancelContentEdit}
                         style={{ ...nodeSecondaryActionStyle, marginTop: 0 }}
                       >
-                        Cancel
+                        <X size={12} aria-hidden="true" /> Cancel
                       </button>
                       <button
                         className="nodrag"
@@ -529,7 +553,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
                           cursor: hasUnsavedContent ? 'pointer' : 'not-allowed',
                         }}
                       >
-                        Save & sync
+                        <Save size={12} aria-hidden="true" /> Save & sync
                       </button>
                     </div>
                   </div>
@@ -590,7 +614,15 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
                     fontFamily: tokens.font.mono,
                   }}
                 >
-                  {showPreview ? '\u{25B2} Show less' : '\u{25BC} Read full specification'}
+                  {showPreview ? (
+                    <>
+                      <ChevronUp size={12} aria-hidden="true" /> Show less
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown size={12} aria-hidden="true" /> Read full specification
+                    </>
+                  )}
                 </button>
               )}
             </div>
@@ -693,11 +725,15 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
         {!sidebarCollapsed && (
           <div className="sidebar-nav">
             <button type="button" onClick={onBack}>
-              <span className="icon">{'\u{2190}'}</span>
+              <span className="icon">
+                <ArrowLeft size={16} aria-hidden="true" />
+              </span>
               Back
             </button>
             <button type="button" className="active">
-              <span className="icon">{'\u{1F4A1}'}</span>
+              <span className="icon">
+                <LayoutPanelLeft size={16} aria-hidden="true" />
+              </span>
               Canvas
             </button>
           </div>
@@ -754,17 +790,28 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
             style={{
               marginTop: 8,
-              background: 'none',
-              border: `1px solid ${tokens.color.border}`,
-              borderRadius: tokens.radius.sm,
-              color: tokens.color.textDim,
-              padding: sidebarCollapsed ? '6px' : '4px 8px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 7,
+              background: tokens.color.surface,
+              border: `2px solid ${tokens.color.black}`,
+              borderRadius: tokens.radius.md,
+              boxShadow: '3px 3px 0 #111',
+              color: tokens.color.text,
+              padding: sidebarCollapsed ? '8px' : '7px 10px',
               fontSize: 11,
               cursor: 'pointer',
               width: '100%',
             }}
           >
-            {sidebarCollapsed ? '\u{25B6}' : '\u{25C0} Collapse'}
+            {sidebarCollapsed ? (
+              <PanelLeftOpen size={16} aria-label="Expand sidebar" />
+            ) : (
+              <>
+                <PanelLeftClose size={16} aria-hidden="true" /> Collapse sidebar
+              </>
+            )}
           </button>
         </div>
       </nav>

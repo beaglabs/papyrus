@@ -22,10 +22,7 @@ import {
   Palette,
   PanelLeftClose,
   PanelLeftOpen,
-  Pencil,
-  Save,
   ShieldCheck,
-  X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
@@ -106,12 +103,6 @@ const nodeActionStyle: React.CSSProperties = {
   cursor: 'pointer',
   fontFamily: tokens.font.mono,
   textTransform: 'uppercase',
-}
-
-const nodeSecondaryActionStyle: React.CSSProperties = {
-  ...nodeActionStyle,
-  background: tokens.color.surface,
-  color: tokens.color.text,
 }
 
 /** Animate a new node appearing. */
@@ -283,22 +274,11 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
         const [showPreview, setShowPreview] = useState(false)
         const [editingName, setEditingName] = useState(false)
         const [nameValue, setNameValue] = useState(title)
-        const [editingContent, setEditingContent] = useState(false)
-        const [contentValue, setContentValue] = useState(content)
-        const [editBaseline, setEditBaseline] = useState(content)
         const isEditableSpec = doc.type === 'specification' || doc.flowRole === 'source'
-        const hasUnsavedContent = contentValue !== editBaseline
 
         useEffect(() => {
           if (!editingName) setNameValue(title)
         }, [title, editingName])
-
-        useEffect(() => {
-          if (!editingContent) {
-            setContentValue(content)
-            setEditBaseline(content)
-          }
-        }, [content, editingContent])
 
         async function handleRetry() {
           try {
@@ -327,44 +307,15 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
           setEditingName(false)
         }
 
-        function beginContentEdit(event?: React.SyntheticEvent) {
-          event?.stopPropagation()
-          if (!isEditableSpec || !canEdit) return
-          setContentValue(content)
-          setEditBaseline(content)
-          setEditingContent(true)
-        }
-
-        function cancelContentEdit(event?: React.SyntheticEvent) {
-          event?.stopPropagation()
-          if (isEditableSpec && hasUnsavedContent) {
-            updateDocumentText(doc.id, contentValue, editBaseline)
-          }
-          setContentValue(editBaseline)
-          setEditingContent(false)
-        }
-
-        function handleContentSave(event?: React.SyntheticEvent) {
-          event?.stopPropagation()
-          if (hasUnsavedContent && !isEditableSpec) {
-            upsertNode({
-              ...doc,
-              fields: { ...doc.fields, content: contentValue },
-              updatedAt: Date.now(),
-            })
-          }
-          setEditingContent(false)
-        }
-
         return (
           <div
             style={{
               background: tokens.color.surface,
               border: `2px solid ${selected ? tokens.color.accent : tokens.color.black}`,
               borderRadius: tokens.radius.lg,
-              width: editingContent ? 640 : 340,
-              minWidth: editingContent ? 640 : 240,
-              maxWidth: editingContent ? 640 : 340,
+              width: isEditableSpec ? 520 : 340,
+              minWidth: isEditableSpec ? 520 : 240,
+              maxWidth: isEditableSpec ? 520 : 340,
               boxShadow: selected ? tokens.shadow.glow : '5px 5px 0 #111',
               transition: 'border-color 0.15s, box-shadow 0.15s',
               overflow: 'hidden',
@@ -468,134 +419,70 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
                       {canEdit ? 'Shared with collaborators and agents' : 'Read-only access'}
                     </div>
                   </div>
-                  {canEdit && !editingContent && (
-                    <button
-                      className="nodrag"
-                      type="button"
-                      onPointerDown={(event) => event.stopPropagation()}
-                      onClick={beginContentEdit}
-                      style={{ ...nodeActionStyle, marginTop: 0 }}
+                  {canEdit && (
+                    <span
+                      style={{
+                        padding: '4px 8px',
+                        border: `1px solid ${tokens.color.border}`,
+                        borderRadius: tokens.radius.full,
+                        color: tokens.color.accent,
+                        fontFamily: tokens.font.mono,
+                        fontSize: 9,
+                        fontWeight: 700,
+                        textTransform: 'uppercase',
+                      }}
                     >
-                      <Pencil size={12} aria-hidden="true" /> Edit
-                    </button>
+                      Live document
+                    </span>
                   )}
                 </div>
               )}
 
-              {editingContent ? (
-                <>
-                  <textarea
-                    aria-label="Specification content"
-                    className="nodrag nowheel"
-                    value={contentValue}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onChange={(event) => {
-                      const next = event.target.value
-                      if (isEditableSpec) updateDocumentText(doc.id, contentValue, next)
-                      setContentValue(next)
-                    }}
-                    onKeyDown={(event) => {
-                      event.stopPropagation()
-                      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter')
-                        handleContentSave(event)
-                      if (event.key === 'Escape') cancelContentEdit(event)
-                    }}
-                    rows={18}
-                    style={{
-                      width: '100%',
-                      minHeight: 320,
-                      resize: 'vertical',
-                      background: tokens.color.bg,
-                      color: tokens.color.text,
-                      border: `3px solid ${tokens.color.black}`,
-                      borderRadius: tokens.radius.md,
-                      boxShadow: '4px 4px 0 #111',
-                      padding: 14,
-                      fontFamily: tokens.font.mono,
-                      fontSize: 13,
-                      lineHeight: 1.6,
-                      outline: 'none',
-                    }}
-                  />
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: 12,
-                      marginTop: 10,
-                    }}
-                  >
-                    <span aria-live="polite" style={{ color: tokens.color.textDim, fontSize: 10 }}>
-                      {contentValue.length.toLocaleString()} characters
-                      {hasUnsavedContent ? ' · Unsaved changes' : ' · No changes'}
-                    </span>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <button
-                        className="nodrag"
-                        type="button"
-                        onPointerDown={(event) => event.stopPropagation()}
-                        onClick={cancelContentEdit}
-                        style={{ ...nodeSecondaryActionStyle, marginTop: 0 }}
-                      >
-                        <X size={12} aria-hidden="true" /> Cancel
-                      </button>
-                      <button
-                        className="nodrag"
-                        type="button"
-                        disabled={!hasUnsavedContent}
-                        onPointerDown={(event) => event.stopPropagation()}
-                        onClick={handleContentSave}
-                        style={{
-                          ...nodeActionStyle,
-                          marginTop: 0,
-                          opacity: hasUnsavedContent ? 1 : 0.45,
-                          cursor: hasUnsavedContent ? 'pointer' : 'not-allowed',
-                        }}
-                      >
-                        <Save size={12} aria-hidden="true" /> Save & sync
-                      </button>
-                    </div>
-                  </div>
-                  <div style={{ color: tokens.color.textDim, fontSize: 9, marginTop: 6 }}>
-                    ⌘/Ctrl + Enter to save · Esc to cancel
-                  </div>
-                </>
-              ) : (
-                <button
-                  className={isEditableSpec && canEdit ? 'nodrag' : undefined}
-                  type="button"
-                  disabled={!isEditableSpec || !canEdit}
+              {isEditableSpec && canEdit ? (
+                <textarea
+                  aria-label="Source specification content"
+                  className="nodrag nowheel"
+                  value={content}
+                  placeholder="Describe what you are building, who it serves, and the problem it solves…"
                   onPointerDown={(event) => event.stopPropagation()}
-                  onClick={beginContentEdit}
+                  onClick={(event) => event.stopPropagation()}
+                  onKeyDown={(event) => event.stopPropagation()}
+                  onChange={(event) => updateDocumentText(doc.id, content, event.target.value)}
+                  rows={12}
                   style={{
-                    display: 'block',
                     width: '100%',
-                    padding: 0,
-                    border: 0,
-                    background: 'transparent',
-                    textAlign: 'left',
+                    minHeight: 220,
+                    resize: 'vertical',
+                    background: tokens.color.bg,
+                    color: tokens.color.text,
+                    border: `2px solid ${tokens.color.black}`,
+                    borderRadius: tokens.radius.md,
+                    boxShadow: '3px 3px 0 #111',
+                    padding: 12,
+                    fontFamily: tokens.font.mono,
                     fontSize: 12,
+                    lineHeight: 1.6,
+                    outline: 'none',
+                  }}
+                />
+              ) : (
+                <div
+                  style={{
                     color: content ? tokens.color.textMuted : tokens.color.textDim,
+                    fontSize: 12,
                     lineHeight: 1.5,
                     maxHeight: showPreview ? 300 : 84,
                     overflow: showPreview ? 'auto' : 'hidden',
                     whiteSpace: 'pre-wrap',
-                    cursor: isEditableSpec && canEdit ? 'text' : 'default',
                   }}
-                  title={isEditableSpec && canEdit ? 'Click to edit specification' : undefined}
                 >
-                  {content
-                    ? content.slice(0, showPreview ? 5000 : 220)
-                    : isEditableSpec && canEdit
-                      ? 'Click to write the source specification…'
-                      : 'No content'}
+                  {content ? content.slice(0, showPreview ? 5000 : 220) : 'No content'}
                   {!showPreview && content.length > 220 ? '…' : ''}
-                </button>
+                </div>
               )}
 
               {/* Toggle preview */}
-              {!editingContent && content.length > 220 && (
+              {(!isEditableSpec || !canEdit) && content.length > 220 && (
                 <button
                   className="nodrag"
                   type="button"

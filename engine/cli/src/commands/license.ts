@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import type { LicenseFile, LicenseStatus } from '@papyrus/core'
 import { defineCommand } from 'citty'
 import { banner } from './_shared.js'
@@ -95,7 +95,8 @@ export default defineCommand({
         banner('license activate')
         try {
           await ensureDaemon()
-          const license = JSON.parse(readFileSync(ctx.args.file as string, 'utf8')) as LicenseFile
+          const licensePath = resolve(process.env.INIT_CWD ?? process.cwd(), ctx.args.file as string)
+          const license = JSON.parse(readFileSync(licensePath, 'utf8')) as LicenseFile
           const response = await fetch(`${BASE_URL}/api/license/activate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

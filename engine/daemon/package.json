@@ -12,10 +12,10 @@
     "@ai-sdk/openai": "^4.0.34",
     "@papyrus/agents": "workspace:*",
     "@papyrus/core": "workspace:*",
-    "@papyrus/network": "workspace:*",
     "ai": "^7.0.56",
     "better-sqlite3": "^13.0.3",
-    "ws": "^8.21.2"
+    "ws": "^8.21.2",
+    "yjs": "^13.6.27"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",

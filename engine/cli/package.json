@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@papyrus/core": "workspace:*",
+    "@papyrus/daemon": "workspace:*",
     "citty": "^0.1.6"
   },
   "devDependencies": {

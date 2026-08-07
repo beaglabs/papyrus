@@ -1,10 +1,10 @@
 {
   "component-definition": {
-    "uuid": "4f5a392c-cd42-4da7-9a55-875875499b19",
+    "uuid": "be57447b-fc2d-4e38-a78d-6e29502bb151",
     "metadata": {
       "title": "Papyrus Security Control Component Definition",
-      "last-modified": "2026-08-07T19:45:00-04:00",
-      "version": "0.1.0",
+      "last-modified": "2026-08-07T18:45:00-04:00",
+      "version": "0.2.0",
       "oscal-version": "1.2.1",
       "remarks": "This machine-readable component definition documents potential control contributions of Papyrus when deployed in a customer-managed environment. It is not a certification, authorization, assessment result, System Security Plan, or claim that any deployment satisfies NIST SP 800-53. Control effectiveness and applicability must be assessed within the customer's system boundary.",
       "roles": [
@@ -38,7 +38,7 @@
         "uuid": "65d5f633-63f1-48cf-a13e-7e75e991d882",
         "type": "software",
         "title": "Papyrus",
-        "description": "A local-first, multiplayer product-development canvas for regulated and disconnected environments, with profile-gated identity, Iroh-based peer synchronization, locally persisted project data, auditable agent and skill execution, and human-reviewed AI assistance.",
+        "description": "A self-hosted, multiplayer product-development canvas for regulated and disconnected environments, with profile-gated identity, authoritative server-sequenced collaboration, locally persisted SQLite project data and operations, auditable agent and skill execution, and human-reviewed AI assistance.",
         "purpose": "Provide a self-hosted collaboration and product-development component that can contribute security mechanisms and evidence to a customer-owned authorization boundary.",
         "props": [
           {
@@ -412,7 +412,7 @@
                     "value": "partial"
                   }
                 ],
-                "description": "Papyrus provides profile-driven defaults for commercial, NIPRNet/IL4, and SIPRNet/IL6 modes. Customers document the approved deployment manifest, operating system, container, network, IdP, model endpoint, relay, and storage configuration."
+                "description": "Papyrus provides profile-driven defaults for commercial, NIPRNet/IL4, and SIPRNet/IL6 modes. Customers document the approved deployment manifest, operating system, container, network, IdP, model endpoint, service binding, and storage configuration."
               },
               {
                 "uuid": "7b3c8f21-0026-4a61-9b7d-100000000026",
@@ -517,7 +517,7 @@
                     "value": "partial"
                   }
                 ],
-                "description": "Papyrus publishes a lockfile and can produce SPDX or CycloneDX SBOMs for application dependencies. Customers add operating system, container, hardware, IdP, database, model server, relay, and infrastructure components."
+                "description": "Papyrus publishes a lockfile and can produce SPDX or CycloneDX SBOMs for application dependencies. Customers add operating system, container, hardware, IdP, database, model server, and infrastructure components."
               },
               {
                 "uuid": "7b3c8f21-0031-4a61-9b7d-100000000031",
@@ -538,7 +538,7 @@
                     "value": "partial"
                   }
                 ],
-                "description": "Papyrus supports explicit peers, local service binding, profile-based internet restrictions, and customer-controlled Iroh discovery or relay topology. Firewalls, proxies, segmentation, CDS boundaries, and enclave routing remain customer controls."
+                "description": "Papyrus supports explicit service binding, profile-based internet restrictions, authenticated project-scoped WebSocket sessions, and no required public discovery or relay infrastructure. Firewalls, proxies, segmentation, CDS boundaries, and enclave routing remain customer controls."
               },
               {
                 "uuid": "7b3c8f21-0032-4a61-9b7d-100000000032",
@@ -559,7 +559,7 @@
                     "value": "partial"
                   }
                 ],
-                "description": "Browser/API traffic can use TLS and peer synchronization uses encrypted QUIC transport through Iroh. Customers provision certificates, approved cipher policy, termination architecture, and any required FIPS-validated modules."
+                "description": "Browser, API, and realtime WebSocket traffic can use TLS through the authoritative Papyrus service. Customers provision certificates, approved cipher policy, termination architecture, and any required FIPS-validated modules."
               },
               {
                 "uuid": "7b3c8f21-0033-4a61-9b7d-100000000033",
@@ -580,7 +580,7 @@
                     "value": "partial"
                   }
                 ],
-                "description": "Papyrus uses member identity keys, TLS certificates, SAML certificates, OIDC verification keys, Iroh identities, and license-signing keys. Customers define key custody, approved generation, backup, rotation, revocation, escrow, and destruction."
+                "description": "Papyrus uses a deployment identity for session and transfer signing, TLS certificates, SAML certificates, OIDC verification keys, trusted deployment identities, and a pinned license authority key. Customers define key custody, approved generation, backup, rotation, revocation, escrow, and destruction."
               },
               {
                 "uuid": "7b3c8f21-0034-4a61-9b7d-100000000034",
@@ -685,7 +685,7 @@
                     "value": "partial"
                   }
                 ],
-                "description": "Papyrus exposes audit, authentication, peer, agent, and integrity events suitable for operational monitoring. Customers collect, retain, correlate, alert on, and respond to those events in their monitoring platform."
+                "description": "Papyrus exposes audit, authentication, collaboration-session, agent, transfer, and integrity events suitable for operational monitoring. Customers collect, retain, correlate, alert on, and respond to those events in their monitoring platform."
               },
               {
                 "uuid": "7b3c8f21-0039-4a61-9b7d-100000000039",

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
 /**
  * Papyrus daemon — HTTP server (serves SPA + REST API) + WebSocket (canvas sync + presence).
@@ -13,8 +14,8 @@ import { extname, join } from 'node:path'
 import { TLSSocket } from 'node:tls'
 import { type AgentMessage, createPersonaAgent, listSkills, runSkill } from '@papyrus/agents'
 import {
-  type LicenseFile,
   CACPIVAdapter,
+  type LicenseFile,
   OIDCAdapter,
   SAMLAdapter,
   WebAuthnAdapter,
@@ -26,39 +27,40 @@ import {
   createSessionToken,
   extractAuth,
   requireAuth,
+  validateSessionToken,
 } from '@papyrus/core/auth/middleware'
 import type { CanvasNodeDoc, EdgeDoc } from '@papyrus/core/nodes/types'
 import type { ClientMsg, ServerMsg } from '@papyrus/core/sync/protocol'
 import type { PresenceInfo } from '@papyrus/core/sync/protocol'
-import {
-  type Operation,
-  appendOperation,
-  applyBundle,
-  applyOperationsToState,
-  exportBundle,
-  getOperations,
-  getOperationsSince,
-  verifyBundle,
-} from '@papyrus/core/transfer/cross-domain'
-import { type NetworkProject, PapyrusNetwork } from '@papyrus/network'
 import { WebSocket, WebSocketServer } from 'ws'
+import * as Y from 'yjs'
 import { type AuditAction, auditLog, getAuditLog, verifyAuditChain } from './audit.js'
 import {
   closeDb,
+  commitCanvasOperation,
   createInvite,
   createProject,
   deleteInvite,
   deleteProject,
   deleteWebAuthnCredential,
   getInvite,
+  getStoredOperations,
   getWebAuthnCredential,
   getWebAuthnCredentialsForMember,
   listProjects,
+  loadDocumentState,
   loadProject,
   saveCanvas,
+  saveDocumentState,
   saveWebAuthnCredential,
   updateWebAuthnCredentialCounter,
 } from './database.js'
+import {
+  type DeploymentTransferBundle,
+  createDeploymentBundle,
+  verifyDeploymentBundle,
+} from './deployment-transfer.js'
+import { LicenseService } from './license-service.js'
 import {
   type OrgMembership,
   createOrg,
@@ -73,10 +75,18 @@ import {
   updateProfile,
   validateEmailForProfile,
 } from './orgs.js'
-import { assignRole, getProjectRoles, getRole, removeRole, requirePermission } from './rbac.js'
-import { LicenseService } from './license-service.js'
+import {
+  assignRole,
+  getMemberProjects,
+  getProjectRoles,
+  getRole,
+  hasPermission,
+  removeRole,
+  requirePermission,
+} from './rbac.js'
 
 const PORT = Number(process.env.PAPYRUS_PORT ?? 3777)
+const HOST = process.env.PAPYRUS_HOST ?? '127.0.0.1'
 const WEB_DIST = join(import.meta.dirname ?? '.', '../../web/dist')
 const licenseService = new LicenseService(currentProfile())
 
@@ -128,6 +138,16 @@ function checkRateLimit(key: string): boolean {
 function getRateLimitKey(req: IncomingMessage, prefix: string): string {
   const ip = req.socket.remoteAddress ?? 'unknown'
   return `${prefix}:${ip}`
+}
+
+function isLoopback(req: IncomingMessage): boolean {
+  const address = req.socket.remoteAddress
+  return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1'
+}
+
+function localAuthEnabled(req: IncomingMessage): boolean {
+  if (process.env.PAPYRUS_ALLOW_LOCAL_AUTH === 'true') return true
+  return process.env.NODE_ENV !== 'production' && isLoopback(req)
 }
 
 // ── CSRF Protection ──────────────────────────────────────────
@@ -187,66 +207,13 @@ setInterval(() => {
   }
 }, 60_000)
 
-// ── Network (Iroh P2P) ────────────────────────────────────────
-
-const network = new PapyrusNetwork()
-let networkReady = false
-
-async function initNetwork(): Promise<void> {
-  try {
-    const nodeId = await network.init()
-    console.log(`  IROH    ${nodeId}`)
-    networkReady = true
-
-    // Announce existing projects
-    for (const p of listProjects()) {
-      network.announceProject({
-        id: p.id,
-        name: p.name,
-        ownerId: nodeId,
-        nodeCount: p.nodes.length,
-        updatedAt: Date.now(),
-      })
-    }
-
-    // Listen for canvas sync from Iroh peers
-    network.on('canvas:sync', (data) => {
-      const { projectId, nodes, edges } = data as {
-        projectId: string
-        nodes: CanvasNodeDoc[]
-        edges: EdgeDoc[]
-      }
-      const state = getOrCreateState(projectId)
-      state.nodes = nodes
-      state.edges = edges
-      saveCanvas(projectId, nodes, edges)
-
-      // Push to all connected WS clients
-      broadcast(state, {
-        type: 'canvas:state',
-        data: { nodes, edges, presence: [...state.presence.values()] },
-      })
-    })
-  } catch (err) {
-    console.error('  IROH    Failed to initialize:', err instanceof Error ? err.message : err)
-  }
-}
-
-// Revalidate without network access. If a pilot expires while running, stop peer activity
-// and leave only diagnostics and offline activation available.
-setInterval(async () => {
-  if (networkReady && !licenseService.isLicensed()) {
-    console.error('  LICENSE expired or invalid; stopping peer network')
-    await network.close()
-    networkReady = false
-  }
-}, 60_000)
-
 // ── In-memory state per project ──────────────────────────────────
 
 interface ProjectState {
   nodes: CanvasNodeDoc[]
   edges: EdgeDoc[]
+  revision: number
+  documents: Map<string, Y.Doc>
   presence: Map<string, PresenceInfo>
   clients: Set<WebSocket>
   wsPeerMap: Map<WebSocket, string>
@@ -261,6 +228,8 @@ function getOrCreateState(id: string): ProjectState {
   const state: ProjectState = {
     nodes: data?.nodes ?? [],
     edges: data?.edges ?? [],
+    revision: data?.revision ?? 0,
+    documents: new Map(),
     presence: new Map(),
     clients: new Set(),
     wsPeerMap: new Map(),
@@ -281,6 +250,30 @@ function broadcast(state: ProjectState, msg: ServerMsg, exclude?: WebSocket): vo
 function persistIfState(id: string): void {
   const state = projects.get(id)
   if (state) saveCanvas(id, state.nodes, state.edges)
+}
+
+function commitStateMutation(
+  projectId: string,
+  state: ProjectState,
+  mutation: {
+    actorKey: string
+    entityType: 'node' | 'edge' | 'document' | 'project'
+    entityId: string
+    operationType: 'create' | 'update' | 'delete'
+    payload?: unknown
+  },
+): void {
+  const result = commitCanvasOperation(
+    {
+      id: `op-${randomUUID()}`,
+      projectId,
+      ...mutation,
+      baseRevision: state.revision,
+    },
+    state.nodes,
+    state.edges,
+  )
+  state.revision = result.projectRevision
 }
 
 // ── REST API ─────────────────────────────────────────────────────
@@ -321,7 +314,11 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
 
   if (url.pathname === '/api/health') {
     const license = licenseService.getStatus()
-    json(res, 200, { ok: true, licensed: license.valid, projects: license.valid ? listProjects().length : 0 })
+    json(res, 200, {
+      ok: true,
+      licensed: license.valid,
+      projects: license.valid ? listProjects().length : 0,
+    })
     return true
   }
 
@@ -339,7 +336,6 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
   if (url.pathname === '/api/license/activate' && method === 'POST') {
     const body = await parseBody(req)
     const status = licenseService.activate(body as unknown as LicenseFile)
-    if (status.valid && !networkReady) await initNetwork()
     json(res, status.valid ? 200 : 400, status)
     return true
   }
@@ -369,9 +365,7 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
     json(res, 200, {
       profile,
       methods: {
-        local:
-          process.env.PAPYRUS_ALLOW_LOCAL_AUTH === 'true' ||
-          (profile === 'commercial' && process.env.PAPYRUS_ALLOW_LOCAL_AUTH !== 'false'),
+        local: localAuthEnabled(req),
         webauthn: profile !== 'siprnet-il6',
         oidc:
           profile === 'commercial' &&
@@ -386,6 +380,10 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
   }
 
   if (url.pathname === '/api/auth/login' && method === 'POST') {
+    if (!localAuthEnabled(req)) {
+      json(res, 403, { error: 'Local development authentication is disabled' })
+      return true
+    }
     // Rate limit auth endpoints
     const rateKey = getRateLimitKey(req, 'auth')
     if (!checkRateLimit(rateKey)) {
@@ -406,6 +404,11 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
 
     if (!memberKey) {
       json(res, 400, { error: 'memberKey required' })
+      return true
+    }
+    const localIdentity = loadOrGenerateMemberIdentity()
+    if (memberKey !== localIdentity.publicKey) {
+      json(res, 403, { error: 'Local login must use this deployment host identity' })
       return true
     }
 
@@ -447,7 +450,10 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
 
   if (url.pathname === '/api/auth/logout' && method === 'POST') {
     const { revokeSessionToken } = await import('@papyrus/core/auth/middleware')
-    revokeSessionToken()
+    const token = req.headers.authorization?.startsWith('Bearer ')
+      ? req.headers.authorization.slice(7)
+      : undefined
+    revokeSessionToken(token)
     json(res, 200, { ok: true })
     return true
   }
@@ -463,11 +469,6 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
     let role = null
     if (projectId) {
       role = getRole(projectId, ctx.memberKey)
-      // If no role assigned but project has no roles at all, auto-assign owner
-      if (!role && getProjectRoles(projectId).length === 0) {
-        role = 'owner'
-        assignRole(projectId, ctx.memberKey, 'owner', ctx.memberKey)
-      }
     }
     json(res, 200, { memberKey: ctx.memberKey, displayName: ctx.displayName, role })
     return true
@@ -932,7 +933,14 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
   }
 
   if (url.pathname === '/api/projects' && method === 'GET') {
-    json(res, 200, listProjects())
+    const authCtx = requireAuth(req, res)
+    if (!authCtx) return true
+    const allowed = new Set(getMemberProjects(authCtx.memberKey).map((item) => item.projectId))
+    json(
+      res,
+      200,
+      listProjects().filter((project) => allowed.has(project.id)),
+    )
     return true
   }
 
@@ -942,7 +950,8 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
 
     const body = await parseBody(req)
     const name = (body.name as string) ?? 'Untitled Project'
-    const project = createProject(name)
+    const membership = getOrgForMember(authCtx.memberKey)
+    const project = createProject(name, membership?.org.id, authCtx.memberKey)
 
     // Assign owner role to creator
     assignRole(project.id, authCtx.memberKey, 'owner', authCtx.memberKey)
@@ -967,26 +976,21 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
 
     const state = getOrCreateState(project.id)
     state.nodes = [specNode]
-    saveCanvas(project.id, [specNode], [])
-
-    appendOperation({
-      type: 'node:create',
-      projectId: project.id,
-      targetId: specNode.id,
-      data: specNode,
-      authorKey: authCtx.memberKey,
-    })
-
-    // Announce on the network
-    if (networkReady) {
-      network.announceProject({
-        id: project.id,
-        name: project.name,
-        ownerId: network.nodeId(),
-        nodeCount: 1,
-        updatedAt: Date.now(),
-      })
-    }
+    const initialOperation = commitCanvasOperation(
+      {
+        id: `op-${randomUUID()}`,
+        projectId: project.id,
+        actorKey: authCtx.memberKey,
+        entityType: 'node',
+        entityId: specNode.id,
+        operationType: 'create',
+        payload: specNode,
+        baseRevision: 0,
+      },
+      [specNode],
+      [],
+    )
+    state.revision = initialOperation.projectRevision
 
     json(res, 201, { ...project, nodes: [specNode] })
     return true
@@ -994,9 +998,15 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
 
   const projectMatch = url.pathname.match(/^\/api\/projects\/([^/]+)$/)
   if (projectMatch && method === 'GET') {
+    const authCtx = requireAuth(req, res)
+    if (!authCtx) return true
     const id = projectMatch[1]
     if (!id) {
       json(res, 400, { error: 'missing project id' })
+      return true
+    }
+    if (!hasPermission(id, authCtx.memberKey, 'project:read')) {
+      json(res, 403, { error: 'Project access denied' })
       return true
     }
     const data = loadProject(id)
@@ -1009,9 +1019,15 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
   }
 
   if (projectMatch && method === 'DELETE') {
+    const authCtx = requireAuth(req, res)
+    if (!authCtx) return true
     const id = projectMatch[1]
     if (!id) {
       json(res, 400, { error: 'missing project id' })
+      return true
+    }
+    if (!hasPermission(id, authCtx.memberKey, 'project:delete')) {
+      json(res, 403, { error: 'Project deletion denied' })
       return true
     }
     const deleted = deleteProject(id)
@@ -1019,98 +1035,8 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       json(res, 404, { error: 'not found' })
       return true
     }
-    // Remove from network
-    if (networkReady) {
-      network.removeProject(id)
-    }
     // Remove from in-memory state
     projects.delete(id)
-    json(res, 200, { ok: true })
-    return true
-  }
-
-  // ── Network endpoints (Iroh P2P) ──────────────────────────────
-
-  if (url.pathname === '/api/network/status') {
-    json(res, 200, {
-      ready: networkReady,
-      nodeId: networkReady ? network.nodeId() : null,
-      stats: networkReady ? network.getStats() : null,
-    })
-    return true
-  }
-
-  if (url.pathname === '/api/network/ticket' && method === 'GET') {
-    if (!networkReady) {
-      json(res, 503, { error: 'network not ready' })
-      return true
-    }
-    const ticket = await network.getTicket()
-    json(res, 200, { ticket })
-    return true
-  }
-
-  if (url.pathname === '/api/network/connect' && method === 'POST') {
-    if (!networkReady) {
-      json(res, 503, { error: 'network not ready' })
-      return true
-    }
-    const body = await parseBody(req)
-    const ticket = body.ticket as string
-    if (!ticket) {
-      json(res, 400, { error: 'ticket required' })
-      return true
-    }
-    try {
-      const peerId = await network.connect(ticket)
-      json(res, 200, { peerId })
-    } catch (err) {
-      json(res, 500, { error: err instanceof Error ? err.message : 'connect failed' })
-    }
-    return true
-  }
-
-  if (url.pathname === '/api/network/projects') {
-    json(res, 200, networkReady ? network.getNetworkProjects() : [])
-    return true
-  }
-
-  if (url.pathname === '/api/network/peers') {
-    json(res, 200, networkReady ? network.getPeers() : [])
-    return true
-  }
-
-  if (url.pathname === '/api/network/disconnect' && method === 'POST') {
-    if (!networkReady) {
-      json(res, 503, { error: 'network not ready' })
-      return true
-    }
-    const body = await parseBody(req)
-    const peerId = body.peerId as string
-    if (!peerId) {
-      json(res, 400, { error: 'peerId required' })
-      return true
-    }
-    await network.disconnect(peerId)
-    json(res, 200, { ok: true })
-    return true
-  }
-
-  if (url.pathname === '/api/network/broadcast' && method === 'POST') {
-    if (!networkReady) {
-      json(res, 503, { error: 'network not ready' })
-      return true
-    }
-    const body = await parseBody(req)
-    const projectId = body.projectId as string
-    if (!projectId) {
-      json(res, 400, { error: 'projectId required' })
-      return true
-    }
-    const state = projects.get(projectId)
-    if (state) {
-      network.broadcastCanvas(projectId, state.nodes, state.edges)
-    }
     json(res, 200, { ok: true })
     return true
   }
@@ -1127,6 +1053,10 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
 
     if (!projectId) {
       json(res, 400, { error: 'projectId required' })
+      return true
+    }
+    if (!hasPermission(projectId, authCtx.memberKey, 'project:export')) {
+      json(res, 403, { error: 'Project export denied' })
       return true
     }
 
@@ -1180,21 +1110,21 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
     const body = await parseBody(req)
     const projectId = body.projectId as string
     const sourceDomain = (body.domain as string) ?? 'unknown'
-    const sinceSeq = (body.sinceSeq as number) ?? 0
+    const sinceRevision = (body.sinceRevision as number) ?? 0
 
     if (!projectId) {
       json(res, 400, { error: 'projectId required' })
       return true
     }
+    if (!hasPermission(projectId, authCtx.memberKey, 'project:export')) {
+      json(res, 403, { error: 'Project transfer export denied' })
+      return true
+    }
 
-    // Load member identity for signing
-    const identity = loadOrGenerateMemberIdentity()
-    const bundle = await exportBundle(
+    const bundle = createDeploymentBundle(
       projectId,
       sourceDomain,
-      identity.publicKey,
-      identity.privateKey,
-      sinceSeq,
+      getStoredOperations(projectId, sinceRevision),
     )
     json(res, 200, bundle)
     return true
@@ -1206,39 +1136,101 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
 
     const body = await parseBody(req)
     const projectId = body.projectId as string
-    const bundle = body.bundle as Awaited<ReturnType<typeof exportBundle>> | undefined
+    const bundle = body.bundle as DeploymentTransferBundle | undefined
 
     if (!projectId || !bundle) {
       json(res, 400, { error: 'projectId and bundle required' })
       return true
     }
-
-    // Verify bundle integrity
-    const valid = await verifyBundle(bundle)
-    if (!valid) {
-      json(res, 400, { error: 'Bundle integrity check failed' })
+    if (!hasPermission(projectId, authCtx.memberKey, 'node:update')) {
+      json(res, 403, { error: 'Project transfer import denied' })
       return true
     }
 
-    // Get existing operations
-    const existingOps = getOperations(projectId)
+    if (bundle.projectId !== projectId) {
+      json(res, 400, { error: 'Bundle project does not match import target' })
+      return true
+    }
+    const trustedDeployments = new Set(
+      (process.env.PAPYRUS_TRUSTED_DEPLOYMENT_IDS ?? '')
+        .split(',')
+        .map((id) => id.trim())
+        .filter(Boolean),
+    )
+    const verification = verifyDeploymentBundle(bundle, trustedDeployments)
+    if (!verification.valid) {
+      json(res, 400, { error: verification.reason ?? 'Bundle verification failed' })
+      return true
+    }
 
-    // Apply bundle
-    const applied = applyBundle(bundle, projectId, existingOps)
-
-    // Apply operations to canvas state
     const state = getOrCreateState(projectId)
-    const merged = applyOperationsToState(applied, state.nodes, state.edges)
-    state.nodes = merged.nodes
-    state.edges = merged.edges
-
-    // Persist
-    saveCanvas(projectId, state.nodes, state.edges)
+    let applied = 0
+    for (const operation of bundle.operations) {
+      if (operation.projectId !== projectId) continue
+      if (operation.entityType === 'node') {
+        if (operation.operationType === 'delete') {
+          state.nodes = state.nodes.filter((node) => node.id !== operation.entityId)
+          state.edges = state.edges.filter(
+            (edge) => edge.from !== operation.entityId && edge.to !== operation.entityId,
+          )
+        } else if (operation.payload) {
+          const node = { ...(operation.payload as CanvasNodeDoc), projectId }
+          const index = state.nodes.findIndex((item) => item.id === node.id)
+          state.nodes =
+            index >= 0
+              ? state.nodes.map((item, itemIndex) => (itemIndex === index ? node : item))
+              : [...state.nodes, node]
+        }
+      } else if (operation.entityType === 'edge') {
+        if (operation.operationType === 'delete') {
+          state.edges = state.edges.filter((edge) => edge.id !== operation.entityId)
+        } else if (operation.payload) {
+          const edge = { ...(operation.payload as EdgeDoc), projectId }
+          const index = state.edges.findIndex((item) => item.id === edge.id)
+          state.edges =
+            index >= 0
+              ? state.edges.map((item, itemIndex) => (itemIndex === index ? edge : item))
+              : [...state.edges, edge]
+        }
+      } else if (operation.entityType === 'document') {
+        const update = (operation.payload as { update?: string } | null)?.update
+        if (update) {
+          const doc = getDocument(state, projectId, operation.entityId)
+          Y.applyUpdate(doc, Buffer.from(update, 'base64'))
+          const content = doc.getText('content').toString()
+          state.nodes = state.nodes.map((node) =>
+            node.id === operation.entityId
+              ? { ...node, fields: { ...node.fields, content }, updatedAt: Date.now() }
+              : node,
+          )
+        }
+      }
+      const result = commitCanvasOperation(
+        {
+          id: operation.id,
+          projectId,
+          actorKey: `deployment:${bundle.sourceDeploymentId}`,
+          entityType: operation.entityType as 'node' | 'edge' | 'document' | 'project',
+          entityId: operation.entityId,
+          operationType: operation.operationType as 'create' | 'update' | 'delete',
+          payload: operation.payload,
+        },
+        state.nodes,
+        state.edges,
+      )
+      state.revision = result.projectRevision
+      if (!result.duplicate) applied++
+    }
 
     // Broadcast to WS clients
     broadcast(state, {
       type: 'canvas:state',
-      data: { nodes: state.nodes, edges: state.edges, presence: [...state.presence.values()] },
+      data: {
+        nodes: state.nodes,
+        edges: state.edges,
+        presence: [...state.presence.values()],
+        revision: state.revision,
+      },
     })
 
     // Audit
@@ -1248,21 +1240,31 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       entityType: 'transfer',
       entityId: `bundle-${bundle.exportedAt}`,
       projectId,
-      details: { operationsApplied: applied.length, sourceDomain: bundle.sourceDomain },
+      details: {
+        operationsApplied: applied,
+        sourceDomain: bundle.sourceDomain,
+        sourceDeploymentId: bundle.sourceDeploymentId,
+      },
     })
 
-    json(res, 200, { ok: true, operationsApplied: applied.length })
+    json(res, 200, { ok: true, operationsApplied: applied })
     return true
   }
 
   if (url.pathname === '/api/transfer/operations' && method === 'GET') {
+    const authCtx = requireAuth(req, res)
+    if (!authCtx) return true
     const projectId = url.searchParams.get('projectId')
     if (!projectId) {
       json(res, 400, { error: 'projectId required' })
       return true
     }
-    const sinceSeq = Number(url.searchParams.get('sinceSeq') ?? '0')
-    const ops = sinceSeq > 0 ? getOperationsSince(projectId, sinceSeq) : getOperations(projectId)
+    if (!hasPermission(projectId, authCtx.memberKey, 'project:read')) {
+      json(res, 403, { error: 'Project access denied' })
+      return true
+    }
+    const sinceRevision = Number(url.searchParams.get('sinceRevision') ?? '0')
+    const ops = getStoredOperations(projectId, sinceRevision)
     json(res, 200, ops)
     return true
   }
@@ -1270,9 +1272,15 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
   // ── Audit endpoints ───────────────────────────────────────────
 
   if (url.pathname === '/api/audit' && method === 'GET') {
+    const authCtx = requireAuth(req, res)
+    if (!authCtx) return true
     const projectId = url.searchParams.get('projectId')
     if (!projectId) {
       json(res, 400, { error: 'projectId required' })
+      return true
+    }
+    if (!hasPermission(projectId, authCtx.memberKey, 'audit:read')) {
+      json(res, 403, { error: 'Audit access denied' })
       return true
     }
 
@@ -1287,9 +1295,15 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
   }
 
   if (url.pathname === '/api/audit/verify' && method === 'GET') {
+    const authCtx = requireAuth(req, res)
+    if (!authCtx) return true
     const projectId = url.searchParams.get('projectId')
     if (!projectId) {
       json(res, 400, { error: 'projectId required' })
+      return true
+    }
+    if (!hasPermission(projectId, authCtx.memberKey, 'audit:read')) {
+      json(res, 403, { error: 'Audit access denied' })
       return true
     }
 
@@ -1301,9 +1315,15 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
   // ── RBAC endpoints ────────────────────────────────────────────
 
   if (url.pathname === '/api/rbac/roles' && method === 'GET') {
+    const authCtx = requireAuth(req, res)
+    if (!authCtx) return true
     const projectId = url.searchParams.get('projectId')
     if (!projectId) {
       json(res, 400, { error: 'projectId required' })
+      return true
+    }
+    if (!hasPermission(projectId, authCtx.memberKey, 'project:read')) {
+      json(res, 403, { error: 'Project access denied' })
       return true
     }
     const roles = getProjectRoles(projectId)
@@ -1504,6 +1524,11 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       return true
     }
 
+    if (!hasPermission(projectId, authCtx.memberKey, 'node:update')) {
+      json(res, 403, { error: 'Project mutation access denied' })
+      return true
+    }
+
     if (!apiKey) {
       json(res, 500, { error: 'OPENROUTER_API_KEY not configured' })
       return true
@@ -1541,6 +1566,14 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       const skillNode = state.nodes.find((n) => n.id === skillNodeId)
       if (skillNode) {
         skillNode.fields.status = 'running'
+        skillNode.updatedAt = Date.now()
+        commitStateMutation(projectId, state, {
+          actorKey: authCtx.memberKey,
+          entityType: 'node',
+          entityId: skillNode.id,
+          operationType: 'update',
+          payload: skillNode,
+        })
         broadcast(state, { type: 'node:upsert', data: skillNode })
       }
     }
@@ -1565,14 +1598,14 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       }
       state.nodes.push(nodeDoc)
       createdNodes.push(nodeDoc)
-      broadcast(state, { type: 'node:upsert', data: nodeDoc })
-      appendOperation({
-        type: 'node:create',
-        projectId,
-        targetId: nodeDoc.id,
-        data: nodeDoc,
-        authorKey: `skill:${skillId}`,
+      commitStateMutation(projectId, state, {
+        actorKey: authCtx.memberKey,
+        entityType: 'node',
+        entityId: nodeDoc.id,
+        operationType: 'create',
+        payload: nodeDoc,
       })
+      broadcast(state, { type: 'node:upsert', data: nodeDoc })
     }
 
     // Update skill node status
@@ -1581,22 +1614,17 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       if (skillNode) {
         skillNode.fields.status = result.status
         skillNode.fields.runId = result.runId
-        broadcast(state, { type: 'node:upsert', data: skillNode })
-        appendOperation({
-          type: 'node:update',
-          projectId,
-          targetId: skillNodeId,
-          data: skillNode,
-          authorKey: `skill:${skillId}`,
+        skillNode.updatedAt = Date.now()
+        commitStateMutation(projectId, state, {
+          actorKey: authCtx.memberKey,
+          entityType: 'node',
+          entityId: skillNode.id,
+          operationType: 'update',
+          payload: skillNode,
         })
+        broadcast(state, { type: 'node:upsert', data: skillNode })
       }
     }
-
-    // Persist
-    saveCanvas(projectId, state.nodes, state.edges)
-
-    // Broadcast to Iroh peers
-    if (networkReady) network.broadcastCanvas(projectId, state.nodes, state.edges)
 
     json(res, 200, {
       status: result.status,
@@ -1622,6 +1650,11 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
 
     if (!persona || !messages) {
       json(res, 400, { error: 'persona and messages required' })
+      return true
+    }
+
+    if (projectId && !hasPermission(projectId, authCtx.memberKey, 'node:update')) {
+      json(res, 403, { error: 'Project mutation access denied' })
       return true
     }
 
@@ -1680,15 +1713,12 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
         // Add to project state
         const state = getOrCreateState(projectId)
         state.nodes.push(nodeDoc)
-        saveCanvas(projectId, state.nodes, state.edges)
-
-        // Log to transfer operation log
-        appendOperation({
-          type: 'node:create',
-          projectId,
-          targetId: nodeDoc.id,
-          data: nodeDoc,
-          authorKey: `agent:${persona}`,
+        commitStateMutation(projectId, state, {
+          actorKey: authCtx.memberKey,
+          entityType: 'node',
+          entityId: nodeDoc.id,
+          operationType: 'create',
+          payload: nodeDoc,
         })
 
         // Broadcast to all connected clients
@@ -1718,9 +1748,23 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
 
   // ── Task list ───────────────────────────────────────────────
   if (url.pathname === '/api/tasks' && method === 'GET') {
+    const authCtx = requireAuth(req, res)
+    if (!authCtx) return true
     const projectId = url.searchParams.get('projectId')
+    if (projectId && !hasPermission(projectId, authCtx.memberKey, 'project:read')) {
+      json(res, 403, { error: 'Project access denied' })
+      return true
+    }
     let all = [...tasks.values()]
-    if (projectId) all = all.filter((t) => t.projectId === projectId)
+    if (projectId) {
+      all = all.filter((t) => t.projectId === projectId)
+    } else {
+      all = all.filter(
+        (task) =>
+          task.projectId !== 'unknown' &&
+          hasPermission(task.projectId, authCtx.memberKey, 'project:read'),
+      )
+    }
     all.sort((a, b) => b.startedAt.localeCompare(a.startedAt))
     json(res, 200, all.slice(0, 50))
     return true
@@ -1739,6 +1783,11 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
 
     if (!nodeId || !projectId) {
       json(res, 400, { error: 'nodeId and projectId required' })
+      return true
+    }
+
+    if (!hasPermission(projectId, authCtx.memberKey, 'node:update')) {
+      json(res, 403, { error: 'Project mutation access denied' })
       return true
     }
 
@@ -1780,13 +1829,12 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
         existingNode.updatedAt = Date.now()
         existingNode.status = 'regenerated'
 
-        saveCanvas(projectId, state.nodes, state.edges)
-        appendOperation({
-          type: 'node:update',
-          projectId,
-          targetId: nodeId,
-          data: existingNode,
-          authorKey: `agent:${persona}`,
+        commitStateMutation(projectId, state, {
+          actorKey: authCtx.memberKey,
+          entityType: 'node',
+          entityId: nodeId,
+          operationType: 'update',
+          payload: existingNode,
         })
         broadcast(state, { type: 'node:upsert', data: existingNode })
 
@@ -2044,9 +2092,20 @@ function serveSPA(res: ServerResponse, filePath: string): void {
 
 // ── WebSocket handler ────────────────────────────────────────────
 
-function handleWS(ws: WebSocket, projectId: string): void {
+function getDocument(state: ProjectState, projectId: string, nodeId: string): Y.Doc {
+  const existing = state.documents.get(nodeId)
+  if (existing) return existing
+  const doc = new Y.Doc()
+  const persisted = loadDocumentState(projectId, nodeId)
+  if (persisted) Y.applyUpdate(doc, persisted)
+  state.documents.set(nodeId, doc)
+  return doc
+}
+
+function handleWS(ws: WebSocket, projectId: string, auth: AuthContext): void {
   const state = getOrCreateState(projectId)
   state.clients.add(ws)
+  state.wsPeerMap.set(ws, auth.memberKey)
 
   // Send current canvas state
   const initMsg: ServerMsg = {
@@ -2055,16 +2114,41 @@ function handleWS(ws: WebSocket, projectId: string): void {
       nodes: state.nodes,
       edges: state.edges,
       presence: [...state.presence.values()],
+      revision: state.revision,
     },
   }
   ws.send(JSON.stringify(initMsg))
+  for (const node of state.nodes) {
+    const persisted = loadDocumentState(projectId, node.id)
+    if (!persisted) continue
+    ws.send(
+      JSON.stringify({
+        type: 'document:sync',
+        data: {
+          nodeId: node.id,
+          update: Buffer.from(persisted).toString('base64'),
+          revision: state.revision,
+        },
+      } satisfies ServerMsg),
+    )
+  }
 
   ws.on('message', (raw) => {
     try {
       const msg = JSON.parse(raw.toString()) as ClientMsg
-      handleClientMsg(ws, state, projectId, msg)
-    } catch {
-      // ignore malformed messages
+      handleClientMsg(ws, state, projectId, auth, msg)
+    } catch (error) {
+      ws.send(
+        JSON.stringify({
+          type: 'operation:reject',
+          data: {
+            operationId: 'malformed',
+            code: 'invalid-message',
+            message: error instanceof Error ? error.message : 'Invalid message',
+            projectRevision: state.revision,
+          },
+        } satisfies ServerMsg),
+      )
     }
   })
 
@@ -2085,147 +2169,199 @@ function handleClientMsg(
   ws: WebSocket,
   state: ProjectState,
   projectId: string,
+  auth: AuthContext,
   msg: ClientMsg,
 ): void {
-  const actor = state.wsPeerMap.get(ws) ?? 'unknown'
+  const actor = auth.memberKey
+
+  if (msg.type === 'presence:heartbeat') {
+    const info: PresenceInfo = {
+      peerId: actor,
+      displayName: auth.displayName,
+      color: msg.data.color,
+      lastSeen: new Date().toISOString(),
+    }
+    state.presence.set(actor, info)
+    broadcast(state, { type: 'presence:update', data: info }, ws)
+    return
+  }
+
+  if (msg.type === 'cursor:move') {
+    const cursorPresence = state.presence.get(actor)
+    broadcast(
+      state,
+      {
+        type: 'cursor:update',
+        data: {
+          peerId: actor,
+          x: msg.data.x,
+          y: msg.data.y,
+          displayName: auth.displayName,
+          color: cursorPresence?.color ?? '',
+        },
+      },
+      ws,
+    )
+    return
+  }
+
+  const operationId = msg.operationId ?? `op-${randomUUID()}`
+  const permission =
+    msg.type === 'node:upsert'
+      ? state.nodes.some((node) => node.id === msg.data.id)
+        ? 'node:update'
+        : 'node:create'
+      : msg.type === 'node:delete'
+        ? 'node:delete'
+        : msg.type === 'edge:add'
+          ? 'edge:create'
+          : msg.type === 'edge:delete'
+            ? 'edge:delete'
+            : 'node:update'
+
+  if (!hasPermission(projectId, actor, permission)) {
+    ws.send(
+      JSON.stringify({
+        type: 'operation:reject',
+        data: {
+          operationId,
+          code: 'permission-denied',
+          message: `Permission required: ${permission}`,
+          projectRevision: state.revision,
+        },
+      } satisfies ServerMsg),
+    )
+    return
+  }
+
+  const previousNodes = state.nodes
+  const previousEdges = state.edges
+  let broadcastMessage: ServerMsg | null = null
+  let entityType: 'node' | 'edge' | 'document' = 'node'
+  let entityId = ''
+  let operationType: 'create' | 'update' | 'delete' = 'update'
+  let payload: unknown
 
   switch (msg.type) {
     case 'node:upsert': {
       const idx = state.nodes.findIndex((n) => n.id === msg.data.id)
-      if (idx >= 0) {
-        // Fine-grained LWW: merge fields individually
-        const existing = state.nodes[idx]
-        if (existing) {
-          const incoming = msg.data
-          // If incoming is clearly newer, replace entirely
-          if (incoming.updatedAt > existing.updatedAt + 1000) {
-            state.nodes[idx] = incoming
-            broadcast(state, { type: 'node:upsert', data: incoming }, ws)
-            appendOperation({
-              type: 'node:update',
-              projectId,
-              targetId: incoming.id,
-              data: incoming,
-              authorKey: actor,
-            })
-          } else if (incoming.updatedAt > existing.updatedAt) {
-            // Merge: keep fields from both, prefer newer values
-            const merged = { ...existing }
-            merged.fields = { ...existing.fields }
-            // Merge incoming fields that are different
-            for (const [key, value] of Object.entries(incoming.fields)) {
-              if (key in existing.fields) {
-                // Field exists in both — keep incoming (it's newer)
-                ;(merged.fields as Record<string, unknown>)[key] = value
-              } else {
-                // New field from incoming
-                ;(merged.fields as Record<string, unknown>)[key] = value
-              }
-            }
-            // Keep existing fields not in incoming
-            merged.updatedAt = incoming.updatedAt
-            merged.status = incoming.status
-            state.nodes[idx] = merged
-            broadcast(state, { type: 'node:upsert', data: merged }, ws)
-            appendOperation({
-              type: 'node:update',
-              projectId,
-              targetId: merged.id,
-              data: merged,
-              authorKey: actor,
-            })
-          }
-          // If existing is newer, ignore incoming (last-write-wins)
-        }
-      } else {
-        state.nodes.push(msg.data)
-        broadcast(state, { type: 'node:upsert', data: msg.data }, ws)
-        appendOperation({
-          type: 'node:create',
-          projectId,
-          targetId: msg.data.id,
-          data: msg.data,
-          authorKey: actor,
-        })
+      const incoming: CanvasNodeDoc = {
+        ...msg.data,
+        projectId,
+        createdBy: idx >= 0 ? (state.nodes[idx]?.createdBy ?? actor) : actor,
+        updatedAt: Date.now(),
       }
-      persistIfState(projectId)
-      if (networkReady) network.broadcastCanvas(projectId, state.nodes, state.edges)
+      if (idx >= 0) {
+        state.nodes = state.nodes.map((node, index) => (index === idx ? incoming : node))
+        operationType = 'update'
+      } else {
+        state.nodes = [...state.nodes, incoming]
+        operationType = 'create'
+      }
+      entityId = incoming.id
+      payload = incoming
+      broadcastMessage = { type: 'node:upsert', data: incoming }
       break
     }
     case 'node:delete': {
       state.nodes = state.nodes.filter((n) => n.id !== msg.data.id)
-      broadcast(state, { type: 'node:delete', data: msg.data }, ws)
-      appendOperation({
-        type: 'node:delete',
-        projectId,
-        targetId: msg.data.id,
-        authorKey: actor,
-      })
-      persistIfState(projectId)
-      if (networkReady) network.broadcastCanvas(projectId, state.nodes, state.edges)
+      state.edges = state.edges.filter(
+        (edge) => edge.from !== msg.data.id && edge.to !== msg.data.id,
+      )
+      entityId = msg.data.id
+      operationType = 'delete'
+      broadcastMessage = { type: 'node:delete', data: msg.data }
       break
     }
     case 'edge:add': {
+      entityType = 'edge'
+      entityId = msg.data.id
+      operationType = 'create'
       if (!state.edges.find((e) => e.id === msg.data.id)) {
-        state.edges.push(msg.data)
-        broadcast(state, { type: 'edge:add', data: msg.data }, ws)
-        appendOperation({
-          type: 'edge:create',
-          projectId,
-          targetId: msg.data.id,
-          data: msg.data,
-          authorKey: actor,
-        })
-        persistIfState(projectId)
-        if (networkReady) network.broadcastCanvas(projectId, state.nodes, state.edges)
+        const edge = { ...msg.data, projectId, createdBy: actor, updatedAt: Date.now() }
+        state.edges = [...state.edges, edge]
+        payload = edge
+        broadcastMessage = { type: 'edge:add', data: edge }
       }
       break
     }
     case 'edge:delete': {
+      entityType = 'edge'
+      entityId = msg.data.id
+      operationType = 'delete'
       state.edges = state.edges.filter((e) => e.id !== msg.data.id)
-      broadcast(state, { type: 'edge:delete', data: msg.data }, ws)
-      appendOperation({
-        type: 'edge:delete',
-        projectId,
-        targetId: msg.data.id,
-        authorKey: actor,
-      })
-      persistIfState(projectId)
-      if (networkReady) network.broadcastCanvas(projectId, state.nodes, state.edges)
+      broadcastMessage = { type: 'edge:delete', data: msg.data }
       break
     }
-    case 'presence:heartbeat': {
-      const info: PresenceInfo = {
-        peerId: msg.data.peerId,
-        displayName: msg.data.displayName,
-        color: msg.data.color,
-        lastSeen: new Date().toISOString(),
-      }
-      state.presence.set(info.peerId, info)
-      state.wsPeerMap.set(ws, info.peerId)
-      broadcast(state, { type: 'presence:update', data: info }, ws)
-      break
-    }
-    case 'cursor:move': {
-      // Broadcast cursor position to all other clients
-      const cursorPeerId = state.wsPeerMap.get(ws) ?? 'unknown'
-      const cursorPresence = state.presence.get(cursorPeerId)
-      broadcast(
-        state,
-        {
-          type: 'cursor:update',
-          data: {
-            peerId: cursorPeerId,
-            x: msg.data.x,
-            y: msg.data.y,
-            displayName: cursorPresence?.displayName ?? '',
-            color: cursorPresence?.color ?? '',
-          },
-        },
-        ws,
+    case 'document:sync': {
+      entityType = 'document'
+      entityId = msg.data.nodeId
+      operationType = 'update'
+      const update = Buffer.from(msg.data.update, 'base64')
+      const doc = getDocument(state, projectId, msg.data.nodeId)
+      Y.applyUpdate(doc, update)
+      const content = doc.getText('content').toString()
+      state.nodes = state.nodes.map((node) =>
+        node.id === msg.data.nodeId
+          ? { ...node, fields: { ...node.fields, content }, updatedAt: Date.now() }
+          : node,
       )
+      payload = { update: msg.data.update }
+      broadcastMessage = {
+        type: 'document:sync',
+        data: { nodeId: msg.data.nodeId, update: msg.data.update, revision: state.revision + 1 },
+      }
       break
     }
+    default:
+      return
+  }
+
+  try {
+    const result = commitCanvasOperation(
+      {
+        id: operationId,
+        projectId,
+        actorKey: actor,
+        entityType,
+        entityId,
+        operationType,
+        payload,
+        baseRevision: msg.baseRevision,
+      },
+      state.nodes,
+      state.edges,
+    )
+    state.revision = result.projectRevision
+    if (entityType === 'document') {
+      const doc = getDocument(state, projectId, entityId)
+      saveDocumentState(projectId, entityId, Y.encodeStateAsUpdate(doc), state.revision)
+    }
+    if (broadcastMessage && !result.duplicate) broadcast(state, broadcastMessage)
+    ws.send(
+      JSON.stringify({
+        type: 'operation:ack',
+        data: {
+          operationId,
+          projectRevision: result.projectRevision,
+          duplicate: result.duplicate || undefined,
+        },
+      } satisfies ServerMsg),
+    )
+  } catch (error) {
+    state.nodes = previousNodes
+    state.edges = previousEdges
+    ws.send(
+      JSON.stringify({
+        type: 'operation:reject',
+        data: {
+          operationId,
+          code: 'operation-rejected',
+          message: error instanceof Error ? error.message : 'Operation rejected',
+          projectRevision: state.revision,
+        },
+      } satisfies ServerMsg),
+    )
   }
 }
 
@@ -2279,37 +2415,48 @@ wss.on('connection', (ws, req) => {
   }
   const url = new URL(req.url ?? '/', `http://localhost:${PORT}`)
   const projectId = url.searchParams.get('project')
-  if (!projectId) {
-    ws.close(1008, 'missing project id')
+  const tokenProtocol = req.headers['sec-websocket-protocol']
+    ?.split(',')
+    .map((value) => value.trim())
+    .find((value) => value.startsWith('papyrus-token.'))
+  const token = tokenProtocol?.slice('papyrus-token.'.length)
+  const session = token ? validateSessionToken(token) : null
+  if (!projectId || !session) {
+    ws.close(1008, 'authenticated project session required')
     return
   }
-  handleWS(ws, projectId)
+  if (!hasPermission(projectId, session.memberKey, 'project:read')) {
+    ws.close(1008, 'project access denied')
+    return
+  }
+  handleWS(ws, projectId, {
+    memberKey: session.memberKey,
+    displayName: session.displayName,
+    expired: false,
+  })
 })
 
-httpServer.listen(PORT, async () => {
+httpServer.listen(PORT, HOST, async () => {
   console.log('\n  PAPYRUS daemon')
   console.log('  ─────────────')
-  console.log(
-    `  ${useHttps ? 'HTTPS' : 'HTTP'}  ${useHttps ? 'https' : 'http'}://localhost:${PORT}`,
-  )
+  console.log(`  ${useHttps ? 'HTTPS' : 'HTTP'}  ${useHttps ? 'https' : 'http'}://${HOST}:${PORT}`)
   if (useHttps) {
     console.log(
       `  mTLS  ${process.env.PAPYRUS_CAC_CA_BUNDLE ? 'CAC/PIV client cert verification active' : 'client certs requested (no CA bundle)'}`,
     )
   }
-  console.log(`  WS    ${useHttps ? 'wss' : 'ws'}://localhost:${PORT}/ws`)
-  console.log(`  API   ${useHttps ? 'https' : 'http'}://localhost:${PORT}/api/health`)
+  console.log(`  WS    ${useHttps ? 'wss' : 'ws'}://${HOST}:${PORT}/ws`)
+  console.log(`  API   ${useHttps ? 'https' : 'http'}://${HOST}:${PORT}/api/health`)
 
   // Auto-generate member identity on first run
   const identity = loadOrGenerateMemberIdentity()
   console.log(`  ID     ${identity.publicKey.slice(0, 16)}...`)
 
   const license = licenseService.getStatus()
-  console.log(`  LICENSE ${license.valid ? `valid — ${license.licensee}` : `locked — ${license.reason}`}`)
+  console.log(
+    `  LICENSE ${license.valid ? `valid — ${license.licensee}` : `locked — ${license.reason}`}`,
+  )
   console.log(`  DEPLOY  ${license.deploymentId}`)
-
-  // Network activity is disabled until a valid deployment-bound license is installed.
-  if (license.valid) await initNetwork()
 
   console.log()
 })
@@ -2323,15 +2470,13 @@ process.on('unhandledRejection', (err) => {
 })
 
 // Graceful shutdown
-process.on('SIGINT', async () => {
+process.on('SIGINT', () => {
   console.log('\n  Shutting down...')
-  await network.close()
   closeDb()
   process.exit(0)
 })
 
-process.on('SIGTERM', async () => {
-  await network.close()
+process.on('SIGTERM', () => {
   closeDb()
   process.exit(0)
 })

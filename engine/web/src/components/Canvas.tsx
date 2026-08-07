@@ -17,13 +17,9 @@ import { useAuth } from '../contexts/AuthContext'
 import { useCanvasSync } from '../hooks/useCanvasSync'
 import { usePresence } from '../hooks/usePresence'
 import { AgentChat } from './AgentChat'
-import { NetworkHealth } from './NetworkHealth'
 import { TaskList } from './TaskList'
 
-const PEER_ID = `peer-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
 const PEER_COLORS = ['#ff5f1f', '#a78bfa', '#60a5fa', '#34d399', '#facc15']
-const MY_COLOR = PEER_COLORS[Math.floor(Math.random() * PEER_COLORS.length)] ?? '#ff5f1f'
-const MY_NAME = `User ${Math.floor(Math.random() * 900 + 100)}`
 
 const PERSONA_LIST = [
   {
@@ -111,11 +107,19 @@ function animateNodeIn(nodeId: string) {
 }
 
 export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
-  const { apiFetch, loadProjectRole, clearProjectRole, projectRole } = useAuth()
+  const { apiFetch, loadProjectRole, clearProjectRole, projectRole, user, token } = useAuth()
+  const peerId = user?.memberKey ?? 'anonymous'
+  const peerName = user?.displayName ?? 'Anonymous'
+  const peerColor =
+    PEER_COLORS[
+      [...peerId].reduce((sum, character) => sum + character.charCodeAt(0), 0) % PEER_COLORS.length
+    ] ?? '#ff5f1f'
   const {
     nodes,
     edges,
     connected,
+    pendingOperations,
+    syncStatus,
     upsertNode,
     deleteNode,
     addEdge,
@@ -123,8 +127,9 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
     onNodesChange,
     onEdgesChange,
     sendCursor,
+    updateDocumentText,
     setNodes,
-  } = useCanvasSync(projectId, PEER_ID, MY_NAME, MY_COLOR)
+  } = useCanvasSync(projectId, peerId, peerName, peerColor, token)
   const presence = usePresence()
   const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -269,8 +274,8 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
         }, [title, editingName])
 
         useEffect(() => {
-          if (!editingContent) setContentValue(content)
-        }, [content, editingContent])
+          setContentValue(content)
+        }, [content])
 
         async function handleRetry() {
           try {
@@ -308,13 +313,16 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
 
         function cancelContentEdit(event?: React.SyntheticEvent) {
           event?.stopPropagation()
+          if (isEditableSpec && hasUnsavedContent) {
+            updateDocumentText(doc.id, contentValue, content)
+          }
           setContentValue(content)
           setEditingContent(false)
         }
 
         function handleContentSave(event?: React.SyntheticEvent) {
           event?.stopPropagation()
-          if (hasUnsavedContent) {
+          if (hasUnsavedContent && !isEditableSpec) {
             upsertNode({
               ...doc,
               fields: { ...doc.fields, content: contentValue },
@@ -453,12 +461,15 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
               {editingContent ? (
                 <>
                   <textarea
-                    autoFocus
                     aria-label="Specification content"
                     className="nodrag nowheel"
                     value={contentValue}
                     onPointerDown={(event) => event.stopPropagation()}
-                    onChange={(event) => setContentValue(event.target.value)}
+                    onChange={(event) => {
+                      const next = event.target.value
+                      if (isEditableSpec) updateDocumentText(doc.id, contentValue, next)
+                      setContentValue(next)
+                    }}
                     onKeyDown={(event) => {
                       event.stopPropagation()
                       if ((event.metaKey || event.ctrlKey) && event.key === 'Enter')
@@ -491,10 +502,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
                       marginTop: 10,
                     }}
                   >
-                    <span
-                      aria-live="polite"
-                      style={{ color: tokens.color.textDim, fontSize: 10 }}
-                    >
+                    <span aria-live="polite" style={{ color: tokens.color.textDim, fontSize: 10 }}>
                       {contentValue.length.toLocaleString()} characters
                       {hasUnsavedContent ? ' · Unsaved changes' : ' · No changes'}
                     </span>
@@ -644,7 +652,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
         )
       },
     }),
-    [apiFetch, canEdit, activePersona.id, upsertNode],
+    [apiFetch, canEdit, activePersona.id, upsertNode, updateDocumentText],
   )
 
   const onConnect = useCallback(
@@ -656,12 +664,12 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
         from: connection.source,
         to: connection.target,
         kind: 'flow',
-        createdBy: PEER_ID,
+        createdBy: peerId,
         updatedAt: Date.now(),
       }
       addEdge(edge)
     },
-    [addEdge, projectId],
+    [addEdge, peerId, projectId],
   )
 
   return (
@@ -678,7 +686,9 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
               <span className="name">PAPYRUS</span>
             </>
           )}
-          {sidebarCollapsed && <img className="papyrus-logo" src="/papyrus-logo.svg" alt="Papyrus" />}
+          {sidebarCollapsed && (
+            <img className="papyrus-logo" src="/papyrus-logo.svg" alt="Papyrus" />
+          )}
         </div>
         {!sidebarCollapsed && (
           <div className="sidebar-nav">
@@ -726,7 +736,15 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
               )}
               <div className="conn-status">
                 <span className={`conn-dot ${connected ? 'live' : 'offline'}`} />
-                {connected ? 'Connected' : 'Offline'}
+                {syncStatus === 'synced'
+                  ? 'Synced'
+                  : syncStatus === 'conflict'
+                    ? 'Conflict'
+                    : pendingOperations > 0
+                      ? `${pendingOperations} pending`
+                      : connected
+                        ? 'Syncing'
+                        : 'Offline'}
               </div>
             </>
           )}
@@ -763,7 +781,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
               personas={PERSONA_LIST}
               onPersonaChange={setActivePersona}
               projectId={projectId}
-              peerId={PEER_ID}
+              peerId={peerId}
               canvasContext={agentCanvasContext}
             />
           </div>
@@ -898,7 +916,6 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
       </div>
 
       {/* Network health popout */}
-      <NetworkHealth />
     </div>
   )
 }

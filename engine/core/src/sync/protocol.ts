@@ -22,7 +22,12 @@ export interface PresenceInfo {
 
 export interface CanvasStateMsg {
   type: 'canvas:state'
-  data: { nodes: CanvasNodeDoc[]; edges: EdgeDoc[]; presence: PresenceInfo[] }
+  data: {
+    nodes: CanvasNodeDoc[]
+    edges: EdgeDoc[]
+    presence: PresenceInfo[]
+    revision: number
+  }
 }
 
 export interface NodeUpsertMsg {
@@ -65,6 +70,21 @@ export interface CursorLeaveMsg {
   data: { peerId: string }
 }
 
+export interface OperationAckMsg {
+  type: 'operation:ack'
+  data: { operationId: string; projectRevision: number; duplicate?: boolean }
+}
+
+export interface OperationRejectMsg {
+  type: 'operation:reject'
+  data: { operationId: string; code: string; message: string; projectRevision: number }
+}
+
+export interface DocumentSyncMsg {
+  type: 'document:sync'
+  data: { nodeId: string; update: string; revision: number }
+}
+
 export type ServerMsg =
   | CanvasStateMsg
   | NodeUpsertMsg
@@ -75,27 +95,38 @@ export type ServerMsg =
   | PresenceLeaveMsg
   | CursorUpdateMsg
   | CursorLeaveMsg
+  | OperationAckMsg
+  | OperationRejectMsg
+  | DocumentSyncMsg
 
 // ── Client → Server ──────────────────────────────────────────────
 
 export interface ClientNodeUpsertMsg {
   type: 'node:upsert'
   data: CanvasNodeDoc
+  operationId?: string
+  baseRevision?: number
 }
 
 export interface ClientNodeDeleteMsg {
   type: 'node:delete'
   data: { id: string }
+  operationId?: string
+  baseRevision?: number
 }
 
 export interface ClientEdgeAddMsg {
   type: 'edge:add'
   data: EdgeDoc
+  operationId?: string
+  baseRevision?: number
 }
 
 export interface ClientEdgeDeleteMsg {
   type: 'edge:delete'
   data: { id: string }
+  operationId?: string
+  baseRevision?: number
 }
 
 export interface ClientPresenceHeartbeatMsg {
@@ -108,6 +139,13 @@ export interface ClientCursorMoveMsg {
   data: { x: number; y: number }
 }
 
+export interface ClientDocumentSyncMsg {
+  type: 'document:sync'
+  data: { nodeId: string; update: string }
+  operationId?: string
+  baseRevision?: number
+}
+
 export type ClientMsg =
   | ClientNodeUpsertMsg
   | ClientNodeDeleteMsg
@@ -115,6 +153,7 @@ export type ClientMsg =
   | ClientEdgeDeleteMsg
   | ClientPresenceHeartbeatMsg
   | ClientCursorMoveMsg
+  | ClientDocumentSyncMsg
 
 /** Assigned avatar colors for presence (neobrutalist palette). */
 export const PRESENCE_COLORS = [

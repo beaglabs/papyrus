@@ -16,25 +16,14 @@
  * 3. Verify Ed25519 signature using the member's public key
  * 4. Check jti against revocation list
  */
-import {
-  createCipheriv,
-  createDecipheriv,
-  createHash,
-  createPrivateKey,
-  createPublicKey,
-  generateKeyPairSync,
-  randomBytes,
-  sign,
-  verify,
-} from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { randomBytes, sign, verify } from 'node:crypto'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { join } from 'node:path'
-import { loadOrGenerateMemberIdentity } from './keygen.js'
+import { loadOrGenerateDeploymentIdentity } from './deployment-identity.js'
 
 const TOKEN_DIR = join(process.env.HOME ?? '~', '.papyrus', 'auth')
-const TOKEN_FILE = join(TOKEN_DIR, 'session-token.json')
-const IDENTITY_DIR = join(process.env.HOME ?? '~', '.papyrus', 'identity')
+const REVOKED_TOKEN_FILE = join(TOKEN_DIR, 'revoked-session-tokens.json')
 
 export interface TokenPayload {
   /** Member's public key (hex) */
@@ -60,71 +49,27 @@ export interface AuthContext {
 
 // ── Helpers ──────────────────────────────────────────────────
 
-function pemPublicKeyFromHex(pubHex: string): string {
-  const raw = Buffer.from(pubHex, 'hex')
-  // Ed25519 SPKI: 12-byte header + 32-byte key
-  const spki = Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), raw])
-  return `-----BEGIN PUBLIC KEY-----\n${spki.toString('base64')}\n-----END PUBLIC KEY-----`
-}
-
-function pemPrivateKeyFromHex(privHex: string): string {
-  const raw = Buffer.from(privHex, 'hex')
-  // Ed25519 PKCS8: 16-byte header + 32-byte key
-  const pkcs8 = Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), raw])
-  return `-----BEGIN PRIVATE KEY-----\n${pkcs8.toString('base64')}\n-----END PRIVATE KEY-----`
-}
-
-function signPayload(payloadBytes: Buffer, privHex: string): string {
-  const pem = pemPrivateKeyFromHex(privHex)
-  const keyObject = createPrivateKey(pem)
-  const sig = sign(null, payloadBytes, keyObject)
-  return sig.toString('hex')
-}
-
-function verifySignature(payloadBytes: Buffer, sigHex: string, pubHex: string): boolean {
+function verifySignature(payloadBytes: Buffer, sigHex: string, publicKeyPem: string): boolean {
   try {
-    const pem = pemPublicKeyFromHex(pubHex)
-    const keyObject = createPublicKey(pem)
     const sig = Buffer.from(sigHex, 'hex')
-    return verify(null, payloadBytes, keyObject, sig)
+    return verify(null, payloadBytes, publicKeyPem, sig)
   } catch {
     return false
   }
 }
 
-// ── AES-256-GCM Encryption for Token Storage ─────────────────
-
-/**
- * Derive a 256-bit encryption key from the member's public key.
- * This ensures only the member can decrypt their stored tokens.
- */
-function deriveEncryptionKey(memberPubKey: string): Buffer {
-  return createHash('sha256').update(`papyrus-token-key:${memberPubKey}`).digest()
+function revokedTokenIds(): Set<string> {
+  if (!existsSync(REVOKED_TOKEN_FILE)) return new Set()
+  try {
+    return new Set(JSON.parse(readFileSync(REVOKED_TOKEN_FILE, 'utf8')) as string[])
+  } catch {
+    return new Set()
+  }
 }
 
-/**
- * Encrypt data using AES-256-GCM.
- * Returns base64 encoded: iv(12) + authTag(16) + ciphertext
- */
-function encrypt(plaintext: string, key: Buffer): string {
-  const iv = randomBytes(12)
-  const cipher = createCipheriv('aes-256-gcm', key, iv)
-  const encrypted = Buffer.concat([cipher.update(plaintext, 'utf-8'), cipher.final()])
-  const authTag = cipher.getAuthTag()
-  return Buffer.concat([iv, authTag, encrypted]).toString('base64')
-}
-
-/**
- * Decrypt AES-256-GCM encrypted data.
- */
-function decrypt(encryptedB64: string, key: Buffer): string {
-  const data = Buffer.from(encryptedB64, 'base64')
-  const iv = data.subarray(0, 12)
-  const authTag = data.subarray(12, 28)
-  const ciphertext = data.subarray(28)
-  const decipher = createDecipheriv('aes-256-gcm', key, iv)
-  decipher.setAuthTag(authTag)
-  return decipher.update(ciphertext, undefined, 'utf-8') + decipher.final('utf-8')
+function storeRevokedTokenIds(ids: Set<string>): void {
+  mkdirSync(TOKEN_DIR, { recursive: true, mode: 0o700 })
+  writeFileSync(REVOKED_TOKEN_FILE, JSON.stringify([...ids]), { encoding: 'utf8', mode: 0o600 })
 }
 
 // ── Token Management ─────────────────────────────────────────
@@ -134,10 +79,6 @@ function decrypt(encryptedB64: string, key: Buffer): string {
  * The member's private key is used to sign the token payload.
  */
 export function createSessionToken(memberKey: string, displayName: string): string {
-  if (!existsSync(TOKEN_DIR)) {
-    mkdirSync(TOKEN_DIR, { recursive: true })
-  }
-
   const now = new Date()
   const expires = new Date(now.getTime() + 24 * 60 * 60 * 1000) // 24 hours
 
@@ -153,29 +94,13 @@ export function createSessionToken(memberKey: string, displayName: string): stri
   const payloadJson = JSON.stringify(payload)
   const payloadB64 = Buffer.from(payloadJson).toString('base64url')
 
-  // Load the member's private key and sign
-  const identityFile = join(IDENTITY_DIR, 'member.json')
-  if (!existsSync(identityFile)) {
-    throw new Error('No member identity found. Run auth flow first.')
-  }
-  const identity = JSON.parse(readFileSync(identityFile, 'utf-8')) as {
-    publicKey: string
-    privateKey: string
-  }
-
+  // The authoritative deployment signs sessions for every authenticated member.
+  const identity = loadOrGenerateDeploymentIdentity()
   const payloadBytes = Buffer.from(payloadJson, 'utf-8')
-  const signature = signPayload(payloadBytes, identity.privateKey)
+  const signature = sign(null, payloadBytes, identity.privateKeyPem).toString('hex')
 
   // Token = payload_b64url.signature_hex
-  const token = `${payloadB64}.${signature}`
-
-  // Encrypt and store for revocation check
-  const encKey = deriveEncryptionKey(identity.publicKey)
-  const storeData = JSON.stringify({ token, payload, createdAt: now.toISOString() })
-  const encrypted = encrypt(storeData, encKey)
-  writeFileSync(TOKEN_FILE, encrypted, 'utf-8')
-
-  return token
+  return `${payloadB64}.${signature}`
 }
 
 /**
@@ -199,27 +124,14 @@ export function validateSessionToken(token: string): TokenPayload | null {
       return null
     }
 
-    // Verify Ed25519 signature using the member's public key
+    // Verify Ed25519 signature using the authoritative deployment identity.
     const payloadBytes = Buffer.from(payloadJson, 'utf-8')
-    if (!verifySignature(payloadBytes, sigHex, payload.memberKey)) {
+    const identity = loadOrGenerateDeploymentIdentity()
+    if (!verifySignature(payloadBytes, sigHex, identity.publicKeyPem)) {
       return null
     }
 
-    // Revocation check: decrypt and verify token matches the stored one
-    if (existsSync(TOKEN_FILE)) {
-      try {
-        const encKey = deriveEncryptionKey(payload.memberKey)
-        const encrypted = readFileSync(TOKEN_FILE, 'utf-8')
-        const decrypted = decrypt(encrypted, encKey)
-        const stored = JSON.parse(decrypted) as { payload: TokenPayload }
-        if (stored.payload.jti !== payload.jti) {
-          return null
-        }
-      } catch {
-        // Decryption failed — token file may be corrupted or from wrong identity
-        return null
-      }
-    }
+    if (revokedTokenIds().has(payload.jti)) return null
 
     return payload
   } catch {
@@ -236,18 +148,29 @@ export function refreshSessionToken(oldToken: string): string | null {
   if (!payload) return null
 
   // Create a new token with fresh timestamps
-  return createSessionToken(payload.memberKey, payload.displayName)
+  const token = createSessionToken(payload.memberKey, payload.displayName)
+  revokeSessionToken(oldToken)
+  return token
 }
 
 /**
  * Revoke the current session token.
  */
-export function revokeSessionToken(): boolean {
-  if (existsSync(TOKEN_FILE)) {
-    unlinkSync(TOKEN_FILE)
+export function revokeSessionToken(token?: string): boolean {
+  if (!token) return false
+  const payloadB64 = token.slice(0, token.lastIndexOf('.'))
+  if (!payloadB64) return false
+  try {
+    const payload = JSON.parse(
+      Buffer.from(payloadB64, 'base64url').toString('utf8'),
+    ) as TokenPayload
+    const revoked = revokedTokenIds()
+    revoked.add(payload.jti)
+    storeRevokedTokenIds(revoked)
     return true
+  } catch {
+    return false
   }
-  return false
 }
 
 // ── Express-style Middleware ──────────────────────────────────

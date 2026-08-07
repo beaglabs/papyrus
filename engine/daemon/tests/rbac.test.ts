@@ -1,17 +1,20 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it } from 'vitest'
+import { closeDb, createProject } from '../src/database.js'
 import {
-  assignRole,
-  removeRole,
-  getRole,
-  getProjectRoles,
-  hasPermission,
-  requirePermission,
   type ProjectRole,
+  assignRole,
+  getProjectRoles,
+  getRole,
+  hasPermission,
+  removeRole,
+  requirePermission,
 } from '../src/rbac.js'
+
+afterAll(() => closeDb())
 
 let testCounter = 0
 function nextProject(): string {
-  return `rbac-test-${++testCounter}-${Date.now()}`
+  return createProject(`RBAC test ${++testCounter}-${Date.now()}`).id
 }
 
 describe('RBAC', () => {

@@ -21,7 +21,7 @@
 
 Papyrus is a self-hosted, multiplayer workspace where product artifacts live on a typed directed canvas. Discovery, strategy, specification, design, engineering, validation, and transition artifacts remain connected; human and AI collaborators work against the same project state; and every generated change remains subject to human review.
 
-Papyrus is designed for environments where cloud-only collaboration and public model APIs are not acceptable. Projects persist locally, peers synchronize over an Iroh/QUIC mesh, model access uses configurable OpenAI-compatible endpoints, and the selected network profile constrains authentication, connectivity, agents, and export behavior.
+Papyrus is designed for environments where cloud-only collaboration and public model APIs are not acceptable. Each agency or security boundary runs an authoritative Papyrus service and SQLite database. Authenticated browsers collaborate through server-sequenced WebSocket operations, while model access uses configurable OpenAI-compatible endpoints and the selected network profile constrains authentication, agents, and export behavior.
 
 > **Development status:** active prototype. The repository demonstrates the architecture and security seams, but it is not currently represented as production-authorized, FedRAMP-authorized, or certified for a particular impact level.
 
@@ -29,16 +29,15 @@ Papyrus is designed for environments where cloud-only collaboration and public m
 
 ```mermaid
 flowchart LR
-  CLI[Papyrus CLI] --> D[Per-user daemon]
+  CLI[Papyrus CLI] --> D[Authoritative Papyrus service]
   WEB[React canvas] -->|REST + WebSocket| D
-  D --> DB[(Local SQLite)]
-  D --> NET[Iroh / QUIC mesh]
+  D --> DB[(SQLite + operation log)]
   D --> AG[Persona agents + skills]
   AG --> LLM[OpenAI-compatible model endpoint]
   D --> IDP[CAC/PIV · WebAuthn · OIDC · SAML]
 ```
 
-The daemon is the local policy and coordination boundary. It serves the browser application, enforces authentication and project RBAC, persists projects and credentials, records audit events, runs human-reviewed agent workflows, and connects approved project peers.
+The service is the deployment policy and coordination boundary. The `papyrus serve` command starts the API, authenticated collaboration hub, agent runtime, database migrations, and built browser application together. It enforces organization and project RBAC, persists authoritative project state and operations, records audit events, and runs human-reviewed agent workflows.
 
 ## Security model
 
@@ -48,9 +47,9 @@ The daemon is the local policy and coordination boundary. It serves the browser 
 
 | Profile | Authentication | Model access | Connectivity |
 | --- | --- | --- | --- |
-| `commercial` | WebAuthn, OIDC, SAML | Customer-configured local or remote OpenAI-compatible endpoint | Customer-configured peers and relays |
-| `niprnet-il4` | CAC/PIV, WebAuthn | Approved enclave endpoint | Restricted customer-controlled topology |
-| `siprnet-il6` | CAC/PIV | Self-hosted endpoint inside the enclave | Explicit disconnected or enclave-local topology |
+| `commercial` | WebAuthn, OIDC, SAML | Customer-configured local or remote OpenAI-compatible endpoint | Customer-hosted HTTPS/WebSocket service |
+| `niprnet-il4` | CAC/PIV, WebAuthn | Approved enclave endpoint | Enclave-local service only |
+| `siprnet-il6` | CAC/PIV | Self-hosted endpoint inside the enclave | Disconnected enclave-local service |
 
 The profile is an enforcement input, not a claim that Papyrus creates an IL4 or IL6 environment. The customer-owned deployment boundary, infrastructure, authorization, and operating procedures remain decisive.
 
@@ -64,9 +63,9 @@ The profile is an enforcement input, not a claim that Papyrus creates an IL4 or 
 - organization membership and project-scoped role-based access control
 - CSRF challenges, bounded authentication state, rate limiting, and session enforcement
 
-### Local data and synchronization
+### Authoritative data and synchronization
 
-Project state, credential records, audit information, and configuration are stored locally. The `@papyrus/network` package uses Iroh endpoints and encrypted QUIC bidirectional streams for peer communication, with LAN discovery or customer-controlled relay topology. Papyrus does not treat a public relay as an authorization boundary.
+Project state, credential records, audit information, immutable canvas operations, and configuration are stored in the deployment's SQLite database. WAL mode supports concurrent readers while the service sequences writes. Browsers durably queue unacknowledged changes in IndexedDB, reconnect to the same authoritative service, and remove operations only after acknowledgement. Yjs updates provide collaborative specification editing; cursors and presence remain ephemeral.
 
 ### Agents, skills, and tools
 
@@ -74,15 +73,14 @@ Persona agents consume canvas context and produce proposed artifacts through exp
 
 ### Audit and transfer
 
-The daemon records security-relevant activity and supports audit-chain verification. Cross-domain bundles use an append-oriented operation model with verification before application. A transfer package still requires the customer's approved cross-domain process and does not replace a CDS or release authority.
+The service records security-relevant activity and supports audit-chain verification. Cross-domain bundles contain versioned operations signed by the source deployment identity and are accepted only from explicitly trusted deployment IDs. A transfer package still requires the customer's approved cross-domain process and does not replace a CDS or release authority.
 
 ## Monorepo
 
 | Package | Responsibility |
 | --- | --- |
 | `engine/core` | Profiles, auth adapters, identity, RBAC-facing types, node catalog, sync protocol, transfer verification, and shared design tokens |
-| `engine/daemon` | Local HTTP/HTTPS and WebSocket service, SQLite persistence, project APIs, audit, organizations, roles, auth endpoints, network coordination, and SPA hosting |
-| `engine/network` | Iroh endpoint lifecycle, discovery/relay integration, encrypted QUIC peer sessions, presence, and canvas synchronization |
+| `engine/daemon` | Authoritative HTTP/HTTPS and WebSocket service, migrations, SQLite operation/state persistence, Yjs documents, project APIs, audit, organizations, roles, auth, signed transfer, and SPA hosting |
 | `engine/agents` | Persona agents, skill discovery/execution, model routing, and generated artifact workflows |
 | `engine/web` | Vite, React, and XYFlow canvas; onboarding, auth, presence, persona history, editable product nodes, and collaboration UI |
 | `engine/cli` | Local administration for licensing, projects, skills, artifacts, assets, organizations, and roles |
@@ -107,6 +105,7 @@ Requirements: Node.js 22+ and pnpm 9.
 
 ```bash
 pnpm install
+pnpm cli serve --no-open
 pnpm cli --help
 pnpm smoke
 pnpm test
@@ -114,11 +113,11 @@ pnpm typecheck
 pnpm lint
 ```
 
-Package scripts currently run directly from each workspace. Deployment-specific configuration, certificates, model endpoints, peers, and secrets should be supplied through the approved environment rather than committed to source.
+Package scripts currently run directly from each workspace. Deployment-specific configuration, certificates, model endpoints, trusted transfer deployment IDs, and secrets should be supplied through the approved environment rather than committed to source.
 
 ## Trust boundaries and customer responsibilities
 
-Papyrus supplies application mechanisms; the deployment owner supplies and authorizes the system around them. Customer responsibilities include host hardening, storage encryption, certificate and key custody, enterprise identity lifecycle, network segmentation, relay operation, approved cryptographic modules, monitoring and retention, backup and recovery, vulnerability scanning of the deployed stack, model-server authorization, and any cross-domain transfer process.
+Papyrus supplies application mechanisms; the deployment owner supplies and authorizes the system around them. Customer responsibilities include host hardening, storage encryption, certificate and key custody, enterprise identity lifecycle, network segmentation, approved cryptographic modules, monitoring and retention, backup and recovery, vulnerability scanning of the deployed stack, model-server authorization, trusted deployment allowlisting, and any cross-domain transfer process.
 
 ## License
 

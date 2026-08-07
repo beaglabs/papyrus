@@ -16,6 +16,7 @@ const main = defineCommand({
     },
   },
   subCommands: {
+    serve: () => import('./commands/serve.js').then((m) => m.default),
     auth: () => import('./commands/auth.js').then((m) => m.auth),
     license: () => import('./commands/license.js').then((m) => m.default),
     projects: () => import('./commands/projects.js').then((m) => m.default),
@@ -24,6 +25,8 @@ const main = defineCommand({
     'org-roles': () => import('./commands/org-roles.js').then((m) => m.default),
   },
   run(ctx) {
+    const command = process.argv.slice(2).find((value) => !value.startsWith('-'))
+    if (command && command in (main.subCommands ?? {})) return
     const profile = ctx.args.profile
       ? String(ctx.args.profile).toLowerCase()
       : resolveProfile(process.env)
@@ -31,9 +34,10 @@ const main = defineCommand({
     console.log(`  active profile: ${profile}\n`)
     console.log('  Usage: papyrus <command> [subcommand] [options]')
     console.log('  Commands:')
+    console.log('    serve       run the centralized Papyrus server and web application')
     console.log('    auth        login | logout | status | refresh')
     console.log('    license     status | request | activate | validate')
-    console.log('    projects    init | list | share | join | open | invite')
+    console.log('    projects    init | list | open | invite')
     console.log('    skills      list')
     console.log('    orgs        create | archive | list')
     console.log('    org-roles   add | assign | list | remove | delete\n')

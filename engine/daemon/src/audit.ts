@@ -6,26 +6,10 @@
  * entry includes a hash of the previous entry).
  */
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync } from 'node:fs'
-import { join } from 'node:path'
-import Database from 'better-sqlite3'
+import { getDb } from './database.js'
 
-const DB_DIR = join(process.env.HOME ?? '~', '.papyrus')
-const DB_PATH = join(DB_DIR, 'papyrus.db')
-
-let db: Database.Database | null = null
-
-function getDb(): Database.Database {
-  if (db) return db
-
-  if (!existsSync(DB_DIR)) {
-    mkdirSync(DB_DIR, { recursive: true })
-  }
-
-  db = new Database(DB_PATH)
-  db.pragma('journal_mode = WAL')
-
-  db.exec(`
+function ensureAuditSchema(): void {
+  getDb().exec(`
     CREATE TABLE IF NOT EXISTS audit_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       timestamp TEXT NOT NULL DEFAULT (datetime('now')),
@@ -44,8 +28,6 @@ function getDb(): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log(actor);
     CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity_type, entity_id);
   `)
-
-  return db
 }
 
 export type AuditAction =
@@ -87,12 +69,13 @@ export function auditLog(params: {
   projectId: string
   details?: Record<string, unknown>
 }): AuditEntry {
+  ensureAuditSchema()
   const db = getDb()
 
   // Get the last hash for this project's chain
-  const lastEntry = db.prepare('SELECT entry_hash FROM audit_log WHERE project_id = ? ORDER BY id DESC LIMIT 1').get(params.projectId) as
-    | { entry_hash: string }
-    | undefined
+  const lastEntry = db
+    .prepare('SELECT entry_hash FROM audit_log WHERE project_id = ? ORDER BY id DESC LIMIT 1')
+    .get(params.projectId) as { entry_hash: string } | undefined
 
   const prevHash = lastEntry?.entry_hash ?? null
   const timestamp = new Date().toISOString()
@@ -140,6 +123,7 @@ export function getAuditLog(params: {
   action?: AuditAction
   entityType?: string
 }): AuditEntry[] {
+  ensureAuditSchema()
   const db = getDb()
   let query = 'SELECT * FROM audit_log WHERE project_id = ?'
   const args: unknown[] = [params.projectId]
@@ -199,6 +183,7 @@ export function getAuditLog(params: {
  * Verify audit log integrity (chain of hashes).
  */
 export function verifyAuditChain(projectId: string): { valid: boolean; brokenAt?: number } {
+  ensureAuditSchema()
   const db = getDb()
   const rows = db
     .prepare('SELECT * FROM audit_log WHERE project_id = ? ORDER BY id ASC')

@@ -1,9 +1,9 @@
+import { generateKeyPairSync } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
-  generateAuthorityKeyPair,
   loadStoredLicense,
   signLicense,
   storeLicense,
@@ -17,32 +17,38 @@ function makePayload(profile: NetworkProfile = 'commercial'): LicensePayload {
     licenseId: 'papyrus-test-001',
     licensee: 'AFCyberWorx',
     profile,
-    features: { agents: true, crossDomainExport: false },
-    nodeLimit: 50,
+    deploymentId: 'deployment-test-001',
     expiresAt: null,
     issuedAt: '2026-08-07T00:00:00Z',
   }
 }
 
 describe('offline license (Ed25519, profile-bound)', () => {
-  const authority = generateAuthorityKeyPair()
+  const authority = generateKeyPairSync('ed25519', {
+    publicKeyEncoding: { type: 'spki', format: 'pem' },
+    privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+  })
 
   it('signs and verifies a license', () => {
-    const license = signLicense(makePayload(), authority.privateKeyPem)
+    const license = signLicense(makePayload(), authority.privateKey)
     expect(license.signature).toBeTruthy()
-    expect(license.publicKey).toBeTruthy()
-    expect(verifyLicenseSignature(license)).toBe(true)
+    expect(verifyLicenseSignature(license, authority.publicKey)).toBe(true)
   })
 
   it('rejects a tampered license', () => {
-    const license = signLicense(makePayload(), authority.privateKeyPem)
+    const license = signLicense(makePayload(), authority.privateKey)
     license.licensee = 'TAMPERED'
-    expect(verifyLicenseSignature(license)).toBe(false)
+    expect(verifyLicenseSignature(license, authority.publicKey)).toBe(false)
   })
 
   it('validates a correct license (same profile)', () => {
-    const license = signLicense(makePayload('siprnet-il6'), authority.privateKeyPem)
-    const status = validateLicense(license, 'siprnet-il6')
+    const license = signLicense(makePayload('siprnet-il6'), authority.privateKey)
+    const status = validateLicense(
+      license,
+      'siprnet-il6',
+      'deployment-test-001',
+      authority.publicKey,
+    )
     expect(status.valid).toBe(true)
     expect(status.profile).toBe('siprnet-il6')
     expect(status.licensee).toBe('AFCyberWorx')
@@ -50,17 +56,27 @@ describe('offline license (Ed25519, profile-bound)', () => {
   })
 
   it('rejects license for wrong profile', () => {
-    const license = signLicense(makePayload('siprnet-il6'), authority.privateKeyPem)
-    const status = validateLicense(license, 'commercial')
+    const license = signLicense(makePayload('siprnet-il6'), authority.privateKey)
+    const status = validateLicense(
+      license,
+      'commercial',
+      'deployment-test-001',
+      authority.publicKey,
+    )
     expect(status.valid).toBe(false)
-    expect(status.reason).toContain('bound to profile')
+    expect(status.reason).toContain('not "commercial"')
   })
 
   it('rejects expired license', () => {
     const payload = makePayload()
     payload.expiresAt = '2020-01-01T00:00:00Z'
-    const license = signLicense(payload, authority.privateKeyPem)
-    const status = validateLicense(license, 'commercial')
+    const license = signLicense(payload, authority.privateKey)
+    const status = validateLicense(
+      license,
+      'commercial',
+      'deployment-test-001',
+      authority.publicKey,
+    )
     expect(status.valid).toBe(false)
     expect(status.reason).toContain('expired')
   })
@@ -68,15 +84,20 @@ describe('offline license (Ed25519, profile-bound)', () => {
   it('accepts license with future expiry', () => {
     const payload = makePayload()
     payload.expiresAt = '2099-12-31T23:59:59Z'
-    const license = signLicense(payload, authority.privateKeyPem)
-    const status = validateLicense(license, 'commercial')
+    const license = signLicense(payload, authority.privateKey)
+    const status = validateLicense(
+      license,
+      'commercial',
+      'deployment-test-001',
+      authority.publicKey,
+    )
     expect(status.valid).toBe(true)
   })
 
   it('stores and loads license from disk', () => {
     const dir = mkdtempSync(join(tmpdir(), 'papyrus-license-'))
     try {
-      const license = signLicense(makePayload(), authority.privateKeyPem)
+      const license = signLicense(makePayload(), authority.privateKey)
       storeLicense(license, dir)
       const loaded = loadStoredLicense(dir)
       expect(loaded).not.toBeNull()

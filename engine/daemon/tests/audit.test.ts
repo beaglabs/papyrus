@@ -1,4 +1,7 @@
-import { describe, it, expect } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
+import { closeDb } from '../src/database.js'
+
+afterAll(() => closeDb())
 import { auditLog, getAuditLog, verifyAuditChain } from '../src/audit.js'
 
 let testCounter = 0
@@ -69,7 +72,7 @@ describe('Audit logging', () => {
 
       const log = getAuditLog({ projectId, actor: 'u1' })
       expect(log.length).toBe(1)
-      expect(log[0]!.actor).toBe('u1')
+      expect(log[0]?.actor).toBe('u1')
     })
 
     it('should filter by action', () => {
@@ -79,7 +82,7 @@ describe('Audit logging', () => {
 
       const log = getAuditLog({ projectId, action: 'create' })
       expect(log.length).toBe(1)
-      expect(log[0]!.action).toBe('create')
+      expect(log[0]?.action).toBe('create')
     })
 
     it('should respect limit', () => {

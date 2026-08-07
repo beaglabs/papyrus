@@ -232,6 +232,18 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
     [edges],
   )
 
+  const agentCanvasContext = useMemo(
+    () =>
+      nodes
+        .map((node) => {
+          const title = String(node.fields.title ?? node.type)
+          const content = String(node.fields.content ?? '')
+          return `### ${title} [${node.type}]\n${content}`
+        })
+        .join('\n\n'),
+    [nodes],
+  )
+
   // ── Node renderer with preview, name, retry ──────────────────
   const nodeTypes: NodeTypes = useMemo(
     () => ({
@@ -660,6 +672,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
               onPersonaChange={setActivePersona}
               projectId={projectId}
               peerId={PEER_ID}
+              canvasContext={agentCanvasContext}
             />
           </div>
         ))}

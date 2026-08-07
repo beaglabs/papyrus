@@ -5,6 +5,10 @@ interface AuthUser {
   displayName: string
 }
 
+export interface AuthSession extends AuthUser {
+  token: string
+}
+
 interface AuthContextType {
   user: AuthUser | null
   token: string | null
@@ -12,6 +16,7 @@ interface AuthContextType {
   /** Role in the currently active project (null if no project selected) */
   projectRole: 'owner' | 'editor' | 'viewer' | null
   login: (memberKey: string, displayName: string, csrfToken?: string) => Promise<void>
+  acceptSession: (session: AuthSession) => void
   logout: () => Promise<void>
   refresh: () => Promise<void>
   /** Fetch and set the user's role for a specific project */
@@ -30,6 +35,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [projectRole, setProjectRole] = useState<'owner' | 'editor' | 'viewer' | null>(null)
 
   const API = `${window.location.protocol}//${window.location.hostname}:${window.location.port}`
+
+  const acceptSession = useCallback((session: AuthSession) => {
+    localStorage.setItem('papyrus_token', session.token)
+    setToken(session.token)
+    setUser({ memberKey: session.memberKey, displayName: session.displayName })
+  }, [])
+
+  // OIDC and SAML callbacks return the session through the same-origin redirect.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const callbackToken = params.get('token')
+    if (!callbackToken) return
+
+    localStorage.setItem('papyrus_token', callbackToken)
+    setToken(callbackToken)
+    params.delete('token')
+    params.delete('displayName')
+    const query = params.toString()
+    window.history.replaceState(
+      {},
+      '',
+      `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`,
+    )
+  }, [])
 
   // Validate token on mount
   useEffect(() => {
@@ -74,14 +103,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       const data = (await res.json()) as { token: string; memberKey: string; displayName: string }
-      localStorage.setItem('papyrus_token', data.token)
-      setToken(data.token)
-      setUser({
-        memberKey: data.memberKey,
-        displayName: data.displayName,
-      })
+      acceptSession(data)
     },
-    [API],
+    [API, acceptSession],
   )
 
   const logout = useCallback(async () => {
@@ -158,9 +182,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(null)
         setProjectRole(null)
         // Dispatch event for toast notification
-        window.dispatchEvent(new CustomEvent('papyrus:auth-expired', {
-          detail: { message: 'Your session has expired. Please sign in again.' },
-        }))
+        window.dispatchEvent(
+          new CustomEvent('papyrus:auth-expired', {
+            detail: { message: 'Your session has expired. Please sign in again.' },
+          }),
+        )
       }
 
       return res
@@ -176,6 +202,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loading,
         projectRole,
         login,
+        acceptSession,
         logout,
         refresh,
         loadProjectRole,

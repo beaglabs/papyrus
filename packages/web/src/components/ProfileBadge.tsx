@@ -1,6 +1,7 @@
 import { tokens } from '@papyrus/core/design'
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
+import { CredentialManager } from './CredentialManager'
 
 interface OrgInfo {
   org: {
@@ -24,7 +25,10 @@ export function ProfileBadge() {
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    apiFetch('/api/orgs/me').then(r => r.json()).then(setOrgInfo).catch(() => {})
+    apiFetch('/api/orgs/me')
+      .then((r) => r.json())
+      .then(setOrgInfo)
+      .catch(() => {})
   }, [apiFetch])
 
   useEffect(() => {
@@ -42,7 +46,12 @@ export function ProfileBadge() {
   const avatarUrl = orgInfo?.membership?.avatarUrl
   const orgName = orgInfo?.org?.name ?? ''
   const role = orgInfo?.membership?.role
-  const initials = displayName.split(' ').map(w => w.charAt(0)).join('').slice(0, 2).toUpperCase()
+  const initials = displayName
+    .split(' ')
+    .map((w) => w.charAt(0))
+    .join('')
+    .slice(0, 2)
+    .toUpperCase()
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>
@@ -113,12 +122,12 @@ export function ProfileBadge() {
         >
           {/* User info */}
           <div style={{ padding: '16px', borderBottom: `1px solid ${tokens.color.border}` }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: tokens.color.text, marginBottom: 2 }}>
+            <div
+              style={{ fontSize: 14, fontWeight: 700, color: tokens.color.text, marginBottom: 2 }}
+            >
               {displayName}
             </div>
-            {email && (
-              <div style={{ fontSize: 12, color: tokens.color.textMuted }}>{email}</div>
-            )}
+            {email && <div style={{ fontSize: 12, color: tokens.color.textMuted }}>{email}</div>}
             {orgName && (
               <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span
@@ -139,6 +148,8 @@ export function ProfileBadge() {
               </div>
             )}
           </div>
+
+          <CredentialManager />
 
           {/* Actions */}
           <div style={{ padding: '8px' }}>

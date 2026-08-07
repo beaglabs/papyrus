@@ -16,7 +16,9 @@
     "./auth/types": "./src/auth/types.ts",
     "./auth/middleware": "./src/auth/middleware.ts",
     "./auth/keygen": "./src/auth/keygen.ts",
-    "./sync/protocol": "./src/sync/protocol.ts"
+    "./sync/protocol": "./src/sync/protocol.ts",
+    "./auth/license": "./src/auth/license.ts",
+    "./auth/deployment-identity": "./src/auth/deployment-identity.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

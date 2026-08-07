@@ -53,6 +53,7 @@ export type {
   LicenseFile,
   LicenseStatus,
   StoredLicense,
+  DeploymentIdentity,
   AuthAdapter,
   AuthChallenge,
   AuthResponse,
@@ -73,8 +74,10 @@ export {
   validateLicense,
   loadStoredLicense,
   storeLicense,
-  generateAuthorityKeyPair,
+  canonicalLicenseJson,
 } from './auth/license.js'
+
+export { deploymentFingerprint, loadOrGenerateDeploymentIdentity } from './auth/deployment-identity.js'
 
 export { createAdapter, adaptersForProfile, WebAuthnAdapter, OIDCAdapter, CACPIVAdapter, SAMLAdapter } from './auth/adapter.js'
 

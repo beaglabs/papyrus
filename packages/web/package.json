@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@papyrus/core": "workspace:*",
-    "@simplewebauthn/browser": "^10.0.0",
+    "@simplewebauthn/browser": "^13.3.0",
     "@xyflow/react": "^12.11.2",
     "gsap": "^3.15.0",
     "react": "^18.3.1",

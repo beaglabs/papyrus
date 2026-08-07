@@ -65,14 +65,16 @@ export function Login() {
   const passkeySignIn = () =>
     run('webauthn', async () => {
       const { memberKey } = await localIdentity()
-      const start = await responseJson<{ options: Parameters<typeof startAuthentication>[0] }>(
+      const start = await responseJson<{
+        options: Parameters<typeof startAuthentication>[0]['optionsJSON']
+      }>(
         await fetch(`${API}/api/auth/webauthn/authenticate/start`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ memberKey }),
         }),
       )
-      const credential = await startAuthentication(start.options)
+      const credential = await startAuthentication({ optionsJSON: start.options })
       const session = await responseJson<{ token: string; memberKey: string; displayName: string }>(
         await fetch(`${API}/api/auth/webauthn/authenticate/finish`, {
           method: 'POST',

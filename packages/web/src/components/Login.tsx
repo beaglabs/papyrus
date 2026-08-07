@@ -11,6 +11,12 @@ interface AuthConfig {
 const API = window.location.origin
 
 async function responseJson<T>(response: Response): Promise<T> {
+  const contentType = response.headers.get('content-type') ?? ''
+  if (!contentType.includes('application/json')) {
+    throw new Error(
+      `Papyrus daemon returned ${contentType || 'a non-JSON response'} for ${response.url}. Is the daemon running on port 3777?`,
+    )
+  }
   const body = (await response.json()) as T & { error?: string }
   if (!response.ok) throw new Error(body.error ?? `Authentication failed (${response.status})`)
   return body

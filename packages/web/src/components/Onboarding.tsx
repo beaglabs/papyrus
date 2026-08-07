@@ -1,10 +1,16 @@
 import { tokens } from '@papyrus/core/design'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 
 const FREE_EMAIL_DOMAINS = [
-  'gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com',
-  'aol.com', 'icloud.com', 'protonmail.com', 'zoho.com',
+  'gmail.com',
+  'yahoo.com',
+  'outlook.com',
+  'hotmail.com',
+  'aol.com',
+  'icloud.com',
+  'protonmail.com',
+  'zoho.com',
 ]
 
 const PROFILES: Record<string, { label: string; hint: string }> = {
@@ -17,14 +23,21 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
   const { apiFetch, user, logout } = useAuth()
   const [step, setStep] = useState<'profile' | 'org'>('profile')
   const [displayName, setDisplayName] = useState(user?.displayName ?? '')
+  const [avatarUrl, setAvatarUrl] = useState('')
   const [email, setEmail] = useState('')
   const [orgName, setOrgName] = useState('')
   const [domain, setDomain] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const avatarInputRef = useRef<HTMLInputElement>(null)
 
-  const profile = (import.meta as unknown as { env?: { VITE_PAPYRUS_PROFILE?: string } }).env?.VITE_PAPYRUS_PROFILE ?? 'commercial'
-  const profileInfo = PROFILES[profile] ?? PROFILES.commercial!
+  const profile =
+    (import.meta as unknown as { env?: { VITE_PAPYRUS_PROFILE?: string } }).env
+      ?.VITE_PAPYRUS_PROFILE ?? 'commercial'
+  const profileInfo = PROFILES[profile] ?? {
+    label: 'Commercial',
+    hint: 'Requires a business email address.',
+  }
 
   async function handleProfileNext() {
     if (!displayName.trim()) {
@@ -33,6 +46,24 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
     }
     setError('')
     setStep('org')
+  }
+
+  function handleAvatar(file: File | undefined) {
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      setError('Profile picture must be an image')
+      return
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setError('Profile picture must be smaller than 2 MB')
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => {
+      setAvatarUrl(typeof reader.result === 'string' ? reader.result : '')
+      setError('')
+    }
+    reader.readAsDataURL(file)
   }
 
   async function handleSubmit() {
@@ -53,6 +84,7 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
           displayName: displayName.trim(),
           orgName: orgName.trim(),
           domain: domain.trim(),
+          avatarUrl,
         }),
       })
 
@@ -111,7 +143,14 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
             >
               P
             </div>
-            <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: '0.08em', color: tokens.color.text }}>
+            <span
+              style={{
+                fontSize: 14,
+                fontWeight: 700,
+                letterSpacing: '0.08em',
+                color: tokens.color.text,
+              }}
+            >
               PAPYRUS
             </span>
           </div>
@@ -119,9 +158,7 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
             {step === 'profile' ? 'Set up your profile' : 'Tell us about your organization'}
           </h1>
           <p style={{ fontSize: 13, color: tokens.color.textDim }}>
-            {step === 'profile'
-              ? 'This is how others will see you.'
-              : profileInfo.hint}
+            {step === 'profile' ? 'This is how others will see you.' : profileInfo.hint}
           </p>
         </div>
 
@@ -129,6 +166,47 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
         <div style={{ padding: '24px 40px' }}>
           {step === 'profile' ? (
             <>
+              <div style={{ display: 'grid', justifyItems: 'center', gap: 10, marginBottom: 24 }}>
+                <button
+                  type="button"
+                  onClick={() => avatarInputRef.current?.click()}
+                  aria-label="Choose profile picture"
+                  style={{
+                    width: 104,
+                    height: 104,
+                    borderRadius: '50%',
+                    border: `3px solid ${tokens.color.black}`,
+                    boxShadow: '5px 5px 0 #111',
+                    background: avatarUrl
+                      ? `url(${avatarUrl}) center / cover`
+                      : tokens.color.accent,
+                    color: tokens.color.black,
+                    fontSize: 30,
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    overflow: 'hidden',
+                  }}
+                >
+                  {!avatarUrl && (displayName.trim().charAt(0).toUpperCase() || '+')}
+                </button>
+                <input
+                  ref={avatarInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  onChange={(event) => handleAvatar(event.target.files?.[0])}
+                  style={{ display: 'none' }}
+                />
+                <button
+                  type="button"
+                  onClick={() => avatarInputRef.current?.click()}
+                  style={avatarBtn}
+                >
+                  {avatarUrl ? 'Change photo' : 'Add profile photo'}
+                </button>
+                <span style={{ color: tokens.color.textDim, fontSize: 11 }}>
+                  PNG, JPG, WebP or GIF · 2 MB max
+                </span>
+              </div>
               <Field label="Display Name">
                 <input
                   type="text"
@@ -136,14 +214,9 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
                   onChange={(e) => setDisplayName(e.target.value)}
                   placeholder="John Smith"
                   style={inputStyle}
-                  autoFocus
                 />
               </Field>
-              <button
-                type="button"
-                onClick={handleProfileNext}
-                style={primaryBtn}
-              >
+              <button type="button" onClick={handleProfileNext} style={primaryBtn}>
                 Continue
               </button>
             </>
@@ -156,7 +229,6 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="john.smith@agency.gov"
                   style={inputStyle}
-                  autoFocus
                 />
                 <p style={hintStyle}>{profileInfo.hint}</p>
               </Field>
@@ -180,24 +252,13 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
                 <p style={hintStyle}>All users with this email domain can join your org.</p>
               </Field>
 
-              {error && (
-                <div style={errorStyle}>{error}</div>
-              )}
+              {error && <div style={errorStyle}>{error}</div>}
 
               <div style={{ display: 'flex', gap: 8 }}>
-                <button
-                  type="button"
-                  onClick={() => setStep('profile')}
-                  style={secondaryBtn}
-                >
+                <button type="button" onClick={() => setStep('profile')} style={secondaryBtn}>
                   Back
                 </button>
-                <button
-                  type="button"
-                  onClick={handleSubmit}
-                  disabled={loading}
-                  style={primaryBtn}
-                >
+                <button type="button" onClick={handleSubmit} disabled={loading} style={primaryBtn}>
                   {loading ? 'Setting up...' : 'Complete Setup'}
                 </button>
               </div>
@@ -249,7 +310,7 @@ const inputStyle: React.CSSProperties = {
   width: '100%',
   padding: '10px 12px',
   background: tokens.color.bg,
-  border: `1px solid ${tokens.color.border}`,
+  border: `2px solid ${tokens.color.border}`,
   borderRadius: 8,
   color: tokens.color.text,
   fontSize: 14,
@@ -262,13 +323,25 @@ const primaryBtn: React.CSSProperties = {
   flex: 1,
   padding: '12px 16px',
   background: tokens.color.accent,
-  border: 'none',
+  border: `2px solid ${tokens.color.black}`,
   borderRadius: 8,
-  color: '#fff',
+  color: tokens.color.black,
   fontSize: 14,
   fontWeight: 600,
   cursor: 'pointer',
   marginTop: 16,
+  boxShadow: '4px 4px 0 #111',
+}
+
+const avatarBtn: React.CSSProperties = {
+  padding: '7px 12px',
+  background: tokens.color.surface,
+  border: `2px solid ${tokens.color.black}`,
+  borderRadius: 999,
+  color: tokens.color.text,
+  fontSize: 12,
+  fontWeight: 700,
+  cursor: 'pointer',
 }
 
 const secondaryBtn: React.CSSProperties = {
@@ -303,7 +376,7 @@ const errorStyle: React.CSSProperties = {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div style={{ marginBottom: 16 }}>
-      <label
+      <div
         style={{
           display: 'block',
           fontSize: 12,
@@ -315,7 +388,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
         }}
       >
         {label}
-      </label>
+      </div>
       {children}
     </div>
   )

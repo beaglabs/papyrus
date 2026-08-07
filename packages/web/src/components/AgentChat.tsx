@@ -24,6 +24,7 @@ interface AgentChatProps {
   onPersonaChange: (p: Persona) => void
   projectId: string
   peerId: string
+  canvasContext: string
 }
 
 const SEED_MESSAGES: Record<string, ChatMessage[]> = {
@@ -66,24 +67,84 @@ interface TemplateBtn {
 
 const TEMPLATES: Record<string, TemplateBtn[]> = {
   pm: [
-    { id: 'prd', label: 'PRD', icon: '\u{1F4CB}', prompt: 'Create a comprehensive Product Requirements Document for this project.' },
-    { id: 'stories', label: 'User Stories', icon: '\u{1F4DD}', prompt: 'Draft user stories with acceptance criteria.' },
-    { id: 'metrics', label: 'Success Metrics', icon: '\u{1F3AF}', prompt: 'Define success metrics and KPIs for this project.' },
+    {
+      id: 'prd',
+      label: 'PRD',
+      icon: '\u{1F4CB}',
+      prompt: 'Create a comprehensive Product Requirements Document for this project.',
+    },
+    {
+      id: 'stories',
+      label: 'User Stories',
+      icon: '\u{1F4DD}',
+      prompt: 'Draft user stories with acceptance criteria.',
+    },
+    {
+      id: 'metrics',
+      label: 'Success Metrics',
+      icon: '\u{1F3AF}',
+      prompt: 'Define success metrics and KPIs for this project.',
+    },
   ],
   designer: [
-    { id: 'wireframe', label: 'Wireframe', icon: '\u{1F3A8}', prompt: 'Create a wireframe for the main dashboard interface.' },
-    { id: 'design-sys', label: 'Design System', icon: '\u{1F4A1}', prompt: 'Define a design system with colors, typography, and spacing.' },
-    { id: 'journey', label: 'User Journey', icon: '\u{1F9ED}', prompt: 'Map the end-to-end user journey.' },
+    {
+      id: 'wireframe',
+      label: 'Wireframe',
+      icon: '\u{1F3A8}',
+      prompt: 'Create a wireframe for the main dashboard interface.',
+    },
+    {
+      id: 'design-sys',
+      label: 'Design System',
+      icon: '\u{1F4A1}',
+      prompt: 'Define a design system with colors, typography, and spacing.',
+    },
+    {
+      id: 'journey',
+      label: 'User Journey',
+      icon: '\u{1F9ED}',
+      prompt: 'Map the end-to-end user journey.',
+    },
   ],
   engineer: [
-    { id: 'arch', label: 'Architecture', icon: '\u{1F3D7}\u{FE0F}', prompt: 'Design the system architecture for this project.' },
-    { id: 'api', label: 'API Spec', icon: '\u{1F527}', prompt: 'Design a REST API specification with all endpoints.' },
-    { id: 'data', label: 'Data Model', icon: '\u{1F4BE}', prompt: 'Plan the data model and database schema.' },
+    {
+      id: 'arch',
+      label: 'Architecture',
+      icon: '\u{1F3D7}\u{FE0F}',
+      prompt: 'Design the system architecture for this project.',
+    },
+    {
+      id: 'api',
+      label: 'API Spec',
+      icon: '\u{1F527}',
+      prompt: 'Design a REST API specification with all endpoints.',
+    },
+    {
+      id: 'data',
+      label: 'Data Model',
+      icon: '\u{1F4BE}',
+      prompt: 'Plan the data model and database schema.',
+    },
   ],
   security: [
-    { id: 'stride', label: 'Threat Model', icon: '\u{1F6E1}\u{FE0F}', prompt: 'Perform a STRIDE threat model analysis.' },
-    { id: 'compliance', label: 'Compliance', icon: '\u{2705}', prompt: 'Check compliance requirements (NIST, FedRAMP).' },
-    { id: 'access', label: 'Access Control', icon: '\u{1F510}', prompt: 'Review access controls and authentication.' },
+    {
+      id: 'stride',
+      label: 'Threat Model',
+      icon: '\u{1F6E1}\u{FE0F}',
+      prompt: 'Perform a STRIDE threat model analysis.',
+    },
+    {
+      id: 'compliance',
+      label: 'Compliance',
+      icon: '\u{2705}',
+      prompt: 'Check compliance requirements (NIST, FedRAMP).',
+    },
+    {
+      id: 'access',
+      label: 'Access Control',
+      icon: '\u{1F510}',
+      prompt: 'Review access controls and authentication.',
+    },
   ],
 }
 
@@ -93,12 +154,24 @@ function renderMarkdown(text: string): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/^### (.*$)/gm, '<h3 style="font-size:13px;font-weight:600;color:#e5e5e5;margin:8px 0 4px;">$1</h3>')
-    .replace(/^## (.*$)/gm, '<h2 style="font-size:14px;font-weight:700;color:#e5e5e5;margin:10px 0 6px;">$1</h2>')
-    .replace(/^# (.*$)/gm, '<h1 style="font-size:16px;font-weight:700;color:#e5e5e5;margin:12px 0 8px;">$1</h1>')
+    .replace(
+      /^### (.*$)/gm,
+      '<h3 style="font-size:13px;font-weight:700;color:#0a0a0a;margin:8px 0 4px;">$1</h3>',
+    )
+    .replace(
+      /^## (.*$)/gm,
+      '<h2 style="font-size:14px;font-weight:800;color:#0a0a0a;margin:10px 0 6px;">$1</h2>',
+    )
+    .replace(
+      /^# (.*$)/gm,
+      '<h1 style="font-size:16px;font-weight:800;color:#0a0a0a;margin:12px 0 8px;">$1</h1>',
+    )
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.*?)\*/g, '<em>$1</em>')
-    .replace(/`(.*?)`/g, '<code style="background:#1c1c1c;padding:1px 4px;border-radius:3px;font-family:monospace;font-size:11px;">$1</code>')
+    .replace(
+      /`(.*?)`/g,
+      '<code style="background:#ffe1d2;border:1px solid #111;padding:1px 4px;border-radius:4px;font-family:monospace;font-size:11px;">$1</code>',
+    )
     .replace(/^- (.*$)/gm, '<div style="padding-left:16px;text-indent:-12px;">\u{2022} $1</div>')
     .replace(/^\d+\. (.*$)/gm, '<div style="padding-left:20px;">$1</div>')
     .replace(/\n/g, '<br />')
@@ -109,6 +182,7 @@ export function AgentChat({
   personas,
   onPersonaChange,
   projectId,
+  canvasContext,
 }: AgentChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(() => SEED_MESSAGES[persona.id] ?? [])
   const [input, setInput] = useState('')
@@ -120,11 +194,7 @@ export function AgentChat({
   const { apiFetch } = useAuth()
 
   useEffect(() => {
-    setMessages(SEED_MESSAGES[persona.id] ?? [])
-    chatHistoryRef.current = []
-  }, [persona.id])
-
-  useEffect(() => {
+    void messages.length
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
@@ -146,7 +216,14 @@ export function AgentChat({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           persona: persona.id,
-          messages: chatHistoryRef.current,
+          messages: chatHistoryRef.current.map((message, index, history) =>
+            index === history.length - 1 && message.role === 'user' && canvasContext
+              ? {
+                  ...message,
+                  content: `${message.content}\n\n--- Current Shared Canvas ---\n${canvasContext}`,
+                }
+              : message,
+          ),
           projectId,
           attachments,
         }),
@@ -256,6 +333,7 @@ export function AgentChat({
             </div>
             <div className="bubble">
               <div
+                // biome-ignore lint/security/noDangerouslySetInnerHtml: renderMarkdown escapes the source string before adding limited markup.
                 dangerouslySetInnerHTML={{
                   __html: renderMarkdown(msg.text),
                 }}
@@ -303,9 +381,9 @@ export function AgentChat({
             borderTop: `1px solid ${tokens.color.border}`,
           }}
         >
-          {attachments.map((_, i) => (
+          {attachments.map((attachment, i) => (
             <span
-              key={i}
+              key={attachment}
               style={{
                 display: 'flex',
                 alignItems: 'center',

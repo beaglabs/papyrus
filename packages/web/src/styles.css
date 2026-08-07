@@ -1,14 +1,14 @@
-/* Papyrus — dark theme, agent-driven product canvas. */
+/* Papyrus — Beag Labs white/orange neobrutalist product canvas. */
 :root {
-  --bg: #0a0a0a;
-  --surface: #141414;
-  --surface-hover: #1c1c1c;
-  --surface-active: #222222;
-  --border: #2a2a2a;
-  --border-light: #333333;
-  --text: #e5e5e5;
-  --text-muted: #888888;
-  --text-dim: #555555;
+  --bg: #f7f7f5;
+  --surface: #ffffff;
+  --surface-hover: #fff1e9;
+  --surface-active: #ffe1d2;
+  --border: #111111;
+  --border-light: #292929;
+  --text: #0a0a0a;
+  --text-muted: #3f3f3f;
+  --text-dim: #6b6b6b;
   --accent: #ff5f1f;
   --accent-hover: #ff7a1a;
   --accent-muted: rgba(255, 95, 31, 0.15);
@@ -57,7 +57,7 @@ body {
 .sidebar {
   width: 260px;
   background: var(--surface);
-  border-right: 1px solid var(--border);
+  border-right: 2px solid var(--border);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -149,7 +149,7 @@ body {
 .chat-panel {
   width: 380px;
   background: var(--surface);
-  border-right: 1px solid var(--border);
+  border-right: 2px solid var(--border);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -398,7 +398,7 @@ body {
   max-width: 280px;
 }
 
-/* ReactFlow overrides for dark theme */
+/* ReactFlow overrides */
 .react-flow__background {
   background: var(--bg) !important;
 }
@@ -410,10 +410,10 @@ body {
 }
 
 .react-flow__controls {
-  border: 1px solid var(--border) !important;
+  border: 2px solid var(--border) !important;
   border-radius: var(--radius-md) !important;
   overflow: hidden;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5) !important;
+  box-shadow: 4px 4px 0 #111 !important;
 }
 
 .react-flow__controls-button {
@@ -430,6 +430,14 @@ body {
 .react-flow__edge-path {
   stroke: var(--border-light) !important;
   stroke-width: 2 !important;
+}
+
+.react-flow__node {
+  border-radius: 14px;
+}
+
+.react-flow__node.selected {
+  filter: drop-shadow(3px 3px 0 var(--accent));
 }
 
 .react-flow__handle {
@@ -695,7 +703,8 @@ body {
 }
 
 @keyframes pulse {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 1;
   }
   50% {

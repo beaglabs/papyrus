@@ -60,6 +60,8 @@ const PERSONA_LIST = [
   },
 ]
 
+type CanvasPersona = (typeof PERSONA_LIST)[number]
+
 const NODE_ICONS: Record<string, string> = {
   specification: '\u{1F4C4}',
   'ui-mockup': '\u{1F3A8}',
@@ -74,6 +76,27 @@ interface CanvasProps {
   projectId: string
   projectName: string
   onBack: () => void
+}
+
+const nodeActionStyle: React.CSSProperties = {
+  marginTop: 8,
+  padding: '6px 10px',
+  background: tokens.color.accent,
+  border: `2px solid ${tokens.color.black}`,
+  borderRadius: tokens.radius.sm,
+  boxShadow: '2px 2px 0 #111',
+  color: tokens.color.black,
+  fontSize: 10,
+  fontWeight: 800,
+  cursor: 'pointer',
+  fontFamily: tokens.font.mono,
+  textTransform: 'uppercase',
+}
+
+const nodeSecondaryActionStyle: React.CSSProperties = {
+  ...nodeActionStyle,
+  background: tokens.color.surface,
+  color: tokens.color.text,
 }
 
 /** Animate a new node appearing. */
@@ -93,6 +116,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
     nodes,
     edges,
     connected,
+    upsertNode,
     deleteNode,
     addEdge,
     deleteEdge,
@@ -116,8 +140,8 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
   >(new Map())
   const prevNodeCount = useRef(nodes.length)
   const prevEdgeCount = useRef(edges.length)
-  const defaultPersona = PERSONA_LIST.find((p) => p.id === 'pm') ?? PERSONA_LIST[0]!
-  const [activePersona, setActivePersona] = useState(defaultPersona)
+  const defaultPersona = PERSONA_LIST[0] as CanvasPersona
+  const [activePersona, setActivePersona] = useState<CanvasPersona>(defaultPersona)
 
   useEffect(() => {
     if (nodes.length > prevNodeCount.current) {
@@ -178,7 +202,8 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
       const now = Date.now()
       if (now - lastCursorSend.current < 50) return
       lastCursorSend.current = now
-      if (sendCursor) sendCursor(e.clientX, e.clientY)
+      const rect = e.currentTarget.getBoundingClientRect()
+      sendCursor(e.clientX - rect.left, e.clientY - rect.top)
     },
     [sendCursor],
   )
@@ -207,6 +232,18 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
     [edges],
   )
 
+  const agentCanvasContext = useMemo(
+    () =>
+      nodes
+        .map((node) => {
+          const title = String(node.fields.title ?? node.type)
+          const content = String(node.fields.content ?? '')
+          return `### ${title} [${node.type}]\n${content}`
+        })
+        .join('\n\n'),
+    [nodes],
+  )
+
   // ── Node renderer with preview, name, retry ──────────────────
   const nodeTypes: NodeTypes = useMemo(
     () => ({
@@ -222,6 +259,17 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
         const [showPreview, setShowPreview] = useState(false)
         const [editingName, setEditingName] = useState(false)
         const [nameValue, setNameValue] = useState(title)
+        const [editingContent, setEditingContent] = useState(false)
+        const [contentValue, setContentValue] = useState(content)
+        const isEditableSpec = doc.type === 'specification'
+
+        useEffect(() => {
+          if (!editingName) setNameValue(title)
+        }, [title, editingName])
+
+        useEffect(() => {
+          if (!editingContent) setContentValue(content)
+        }, [content, editingContent])
 
         async function handleRetry() {
           try {
@@ -239,30 +287,37 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
           }
         }
 
-        async function handleNameSave() {
+        function handleNameSave() {
           if (nameValue.trim() && nameValue !== title) {
-            try {
-              await apiFetch('/api/projects', {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ nodeId: doc.id, fields: { ...doc.fields, title: nameValue.trim() } }),
-              })
-            } catch {
-              // best-effort
-            }
+            upsertNode({
+              ...doc,
+              fields: { ...doc.fields, title: nameValue.trim() },
+              updatedAt: Date.now(),
+            })
           }
           setEditingName(false)
+        }
+
+        function handleContentSave() {
+          if (contentValue !== content) {
+            upsertNode({
+              ...doc,
+              fields: { ...doc.fields, content: contentValue },
+              updatedAt: Date.now(),
+            })
+          }
+          setEditingContent(false)
         }
 
         return (
           <div
             style={{
               background: tokens.color.surface,
-              border: `1px solid ${selected ? tokens.color.accent : isSource ? color : tokens.color.border}`,
-              borderRadius: tokens.radius.md,
+              border: `2px solid ${selected ? tokens.color.accent : tokens.color.black}`,
+              borderRadius: tokens.radius.lg,
               minWidth: 240,
               maxWidth: 340,
-              boxShadow: selected ? tokens.shadow.glow : tokens.shadow.sm,
+              boxShadow: selected ? tokens.shadow.glow : '5px 5px 0 #111',
               transition: 'border-color 0.15s, box-shadow 0.15s',
               overflow: 'hidden',
             }}
@@ -278,7 +333,9 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
                 background: isSource ? `${color}15` : 'transparent',
               }}
             >
-              <span style={{ fontSize: 14, flexShrink: 0 }}>{isGenerating ? '\u{23F3}' : icon}</span>
+              <span style={{ fontSize: 14, flexShrink: 0 }}>
+                {isGenerating ? '\u{23F3}' : icon}
+              </span>
               {editingName ? (
                 <input
                   type="text"
@@ -292,7 +349,6 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
                       setEditingName(false)
                     }
                   }}
-                  autoFocus
                   style={{
                     flex: 1,
                     background: tokens.color.bg,
@@ -336,22 +392,85 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
               </span>
             </div>
 
-            {/* Content preview */}
+            {/* Editable specification / content preview */}
             <div style={{ padding: '10px 12px' }}>
-              <div
-                style={{
-                  fontSize: 12,
-                  color: tokens.color.textMuted,
-                  lineHeight: 1.5,
-                  maxHeight: showPreview ? 300 : 60,
-                  overflow: showPreview ? 'auto' : 'hidden',
-                  position: 'relative',
-                  whiteSpace: 'pre-wrap',
-                }}
-              >
-                {content.slice(0, showPreview ? 5000 : 150)}
-                {!showPreview && content.length > 150 ? '...' : ''}
-              </div>
+              {editingContent ? (
+                <>
+                  <textarea
+                    className="nodrag nowheel"
+                    value={contentValue}
+                    onChange={(event) => setContentValue(event.target.value)}
+                    onKeyDown={(event) => {
+                      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter')
+                        handleContentSave()
+                      if (event.key === 'Escape') {
+                        setContentValue(content)
+                        setEditingContent(false)
+                      }
+                    }}
+                    rows={12}
+                    style={{
+                      width: '100%',
+                      minWidth: 300,
+                      resize: 'vertical',
+                      background: tokens.color.bg,
+                      color: tokens.color.text,
+                      border: `2px solid ${tokens.color.black}`,
+                      borderRadius: tokens.radius.md,
+                      padding: 10,
+                      fontFamily: tokens.font.mono,
+                      fontSize: 12,
+                      lineHeight: 1.5,
+                      outline: 'none',
+                    }}
+                  />
+                  <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                    <button type="button" onClick={handleContentSave} style={nodeActionStyle}>
+                      Save & sync
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setContentValue(content)
+                        setEditingContent(false)
+                      }}
+                      style={nodeSecondaryActionStyle}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div
+                  onDoubleClick={() => isEditableSpec && canEdit && setEditingContent(true)}
+                  style={{
+                    fontSize: 12,
+                    color: tokens.color.textMuted,
+                    lineHeight: 1.5,
+                    maxHeight: showPreview ? 300 : 60,
+                    overflow: showPreview ? 'auto' : 'hidden',
+                    position: 'relative',
+                    whiteSpace: 'pre-wrap',
+                    cursor: isEditableSpec && canEdit ? 'text' : 'default',
+                  }}
+                  title={
+                    isEditableSpec && canEdit ? 'Double-click to edit specification' : undefined
+                  }
+                >
+                  {content.slice(0, showPreview ? 5000 : 150)}
+                  {!showPreview && content.length > 150 ? '...' : ''}
+                </div>
+              )}
+
+              {isEditableSpec && canEdit && !editingContent && (
+                <button
+                  type="button"
+                  onClick={() => setEditingContent(true)}
+                  style={nodeActionStyle}
+                >
+                  Edit specification
+                </button>
+              )}
 
               {/* Toggle preview */}
               {content.length > 150 && (
@@ -433,7 +552,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
         )
       },
     }),
-    [apiFetch, canEdit, activePersona.id],
+    [apiFetch, canEdit, activePersona.id, upsertNode],
   )
 
   const onConnect = useCallback(
@@ -457,7 +576,10 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
     <div className="app-layout">
       {/* Sidebar — collapsible */}
       <nav className="sidebar" style={{ width: sidebarCollapsed ? 48 : 260 }}>
-        <div className="sidebar-brand" style={{ justifyContent: sidebarCollapsed ? 'center' : 'flex-start' }}>
+        <div
+          className="sidebar-brand"
+          style={{ justifyContent: sidebarCollapsed ? 'center' : 'flex-start' }}
+        >
           {!sidebarCollapsed && (
             <>
               <span className="logo">P</span>
@@ -538,15 +660,22 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
       </nav>
 
       {/* Agent chat panel */}
-      {canEdit && (
-        <AgentChat
-          persona={activePersona}
-          personas={PERSONA_LIST}
-          onPersonaChange={setActivePersona}
-          projectId={projectId}
-          peerId={PEER_ID}
-        />
-      )}
+      {canEdit &&
+        PERSONA_LIST.map((persona) => (
+          <div
+            key={persona.id}
+            style={{ display: persona.id === activePersona.id ? 'contents' : 'none' }}
+          >
+            <AgentChat
+              persona={persona}
+              personas={PERSONA_LIST}
+              onPersonaChange={setActivePersona}
+              projectId={projectId}
+              peerId={PEER_ID}
+              canvasContext={agentCanvasContext}
+            />
+          </div>
+        ))}
 
       {/* Canvas */}
       <div className="canvas-area" onMouseMove={handleMouseMove}>

@@ -62,7 +62,7 @@ export function Landing({ projects, loading, onSelectProject, onProjectCreated }
       {/* Top bar */}
       <div className="landing-topbar">
         <div className="brand">
-          <span className="logo">P</span>
+          <img className="papyrus-logo" src="/papyrus-logo.svg" alt="" />
           <span className="name">PAPYRUS</span>
         </div>
         <div className="spacer" />

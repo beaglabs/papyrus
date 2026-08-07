@@ -247,13 +247,13 @@ export class WebAuthnAdapter implements AuthAdapter {
       throw new Error('WebAuthn registration verification failed')
     }
 
-    const { credentialID, credentialPublicKey, counter, aaguid } = verification.registrationInfo
+    const { credential, aaguid } = verification.registrationInfo
 
     return {
-      credentialId: credentialID,
-      publicKey: Buffer.from(credentialPublicKey).toString('base64'),
-      counter,
-      aaguid: Buffer.from(aaguid).toString('hex'),
+      credentialId: credential.id,
+      publicKey: Buffer.from(credential.publicKey).toString('base64'),
+      counter: credential.counter,
+      aaguid,
     }
   }
 
@@ -305,9 +305,9 @@ export class WebAuthnAdapter implements AuthAdapter {
       expectedChallenge,
       expectedOrigin,
       expectedRPID,
-      authenticator: {
-        credentialID: credentialId,
-        credentialPublicKey: Buffer.from(credentialPublicKey, 'base64'),
+      credential: {
+        id: credentialId,
+        publicKey: Buffer.from(credentialPublicKey, 'base64'),
         counter: currentCounter,
         transports: ['internal', 'hybrid', 'usb', 'ble', 'nfc'],
       },

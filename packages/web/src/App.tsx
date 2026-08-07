@@ -6,37 +6,10 @@ import { Login } from './components/Login'
 import { Onboarding } from './components/Onboarding'
 import { ProfileBadge } from './components/ProfileBadge'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
-import { ThemeProvider, useTheme } from './contexts/ThemeContext'
+import { ThemeProvider } from './contexts/ThemeContext'
 import { ToastProvider, useToast } from './contexts/ToastContext'
 
 type Project = { id: string; name: string; createdAt: string }
-
-function ThemeToggle() {
-  const { theme, toggle } = useTheme()
-  return (
-    <button
-      type="button"
-      onClick={toggle}
-      title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
-      style={{
-        background: tokens.color.surface,
-        border: `1px solid ${tokens.color.border}`,
-        color: tokens.color.textMuted,
-        fontSize: 14,
-        cursor: 'pointer',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: 36,
-        height: 36,
-        borderRadius: '50%',
-        transition: 'background 0.2s, color 0.2s',
-      }}
-    >
-      {theme === 'dark' ? '\u{2600}\u{FE0F}' : '\u{1F319}'}
-    </button>
-  )
-}
 
 function AppContent() {
   const { user, token, loading, apiFetch } = useAuth()
@@ -103,8 +76,9 @@ function AppContent() {
   if (activeProject) {
     return (
       <>
-        <div style={{ position: 'fixed', top: 16, right: 16, zIndex: 9999, display: 'flex', gap: 8 }}>
-          <ThemeToggle />
+        <div
+          style={{ position: 'fixed', top: 16, right: 16, zIndex: 9999, display: 'flex', gap: 8 }}
+        >
           <ProfileBadge />
         </div>
         <Canvas
@@ -119,7 +93,6 @@ function AppContent() {
   return (
     <>
       <div style={{ position: 'fixed', top: 16, right: 16, zIndex: 9999, display: 'flex', gap: 8 }}>
-        <ThemeToggle />
         <ProfileBadge />
       </div>
       <Landing

@@ -1,153 +1,206 @@
 import { tokens } from '@papyrus/core/design'
+import { startAuthentication } from '@simplewebauthn/browser'
 import { useEffect, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 
+interface AuthConfig {
+  profile: string
+  methods: { local: boolean; webauthn: boolean; oidc: boolean; saml: boolean; cac: boolean }
+}
+
+const API = window.location.origin
+
+async function responseJson<T>(response: Response): Promise<T> {
+  const body = (await response.json()) as T & { error?: string }
+  if (!response.ok) throw new Error(body.error ?? `Authentication failed (${response.status})`)
+  return body
+}
+
 export function Login() {
-  const { login, loading } = useAuth()
+  const { login, acceptSession } = useAuth()
+  const [config, setConfig] = useState<AuthConfig | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState('')
-  const [autoSigningIn, setAutoSigningIn] = useState(true)
 
-  const API = `${window.location.protocol}//${window.location.hostname}:${window.location.port}`
-
-  // Auto-sign-in using the daemon's local member identity
   useEffect(() => {
-    async function autoLogin() {
-      try {
-        // 1. Fetch the local member identity (no auth required — local daemon)
-        const idRes = await fetch(`${API}/api/auth/local-identity`)
-        if (!idRes.ok) throw new Error('Failed to get local identity')
-        const { memberKey } = (await idRes.json()) as { memberKey: string }
+    fetch(`${API}/api/auth/config`)
+      .then((response) => responseJson<AuthConfig>(response))
+      .then(setConfig)
+      .catch((cause) =>
+        setError(cause instanceof Error ? cause.message : 'Could not load auth configuration'),
+      )
+  }, [])
 
-        if (!memberKey) throw new Error('No member key')
+  async function localIdentity(): Promise<{ memberKey: string }> {
+    return responseJson(await fetch(`${API}/api/auth/local-identity`))
+  }
 
-        // 2. Fetch CSRF token
-        const csrfRes = await fetch(`${API}/api/auth/csrf-token`)
-        const { csrfToken } = (await csrfRes.json()) as { csrfToken: string }
-
-        // 3. Sign in
-        await login(memberKey, 'Local User', csrfToken)
-      } catch (err) {
-        setAutoSigningIn(false)
-        setError(err instanceof Error ? err.message : 'Auto-login failed')
-      }
+  async function run(name: string, action: () => Promise<void>) {
+    setBusy(name)
+    setError('')
+    try {
+      await action()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Authentication failed')
+    } finally {
+      setBusy(null)
     }
-    autoLogin()
-  }, [login, API])
+  }
 
-  if (loading || autoSigningIn) {
-    return (
-      <div
+  const localSignIn = () =>
+    run('local', async () => {
+      const { memberKey } = await localIdentity()
+      const { csrfToken } = await responseJson<{ csrfToken: string }>(
+        await fetch(`${API}/api/auth/csrf-token`),
+      )
+      await login(memberKey, 'Local User', csrfToken)
+    })
+
+  const passkeySignIn = () =>
+    run('webauthn', async () => {
+      const { memberKey } = await localIdentity()
+      const start = await responseJson<{ options: Parameters<typeof startAuthentication>[0] }>(
+        await fetch(`${API}/api/auth/webauthn/authenticate/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ memberKey }),
+        }),
+      )
+      const credential = await startAuthentication(start.options)
+      const session = await responseJson<{ token: string; memberKey: string; displayName: string }>(
+        await fetch(`${API}/api/auth/webauthn/authenticate/finish`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ memberKey, credential, origin: window.location.origin }),
+        }),
+      )
+      acceptSession(session)
+    })
+
+  const cacSignIn = () =>
+    run('cac', async () => {
+      const session = await responseJson<{ token: string; memberKey: string; displayName: string }>(
+        await fetch(`${API}/api/auth/cac/verify`, { method: 'POST' }),
+      )
+      acceptSession(session)
+    })
+
+  const button = (label: string, method: string, onClick: () => void, primary = false) => (
+    <button
+      type="button"
+      disabled={Boolean(busy)}
+      onClick={onClick}
+      style={{
+        width: '100%',
+        padding: '12px 16px',
+        background: primary ? tokens.color.accent : tokens.color.surface,
+        border: `1px solid ${primary ? tokens.color.accent : tokens.color.border}`,
+        borderRadius: 8,
+        color: primary ? '#fff' : tokens.color.text,
+        fontSize: 14,
+        fontWeight: 600,
+        cursor: busy ? 'wait' : 'pointer',
+        opacity: busy && busy !== method ? 0.5 : 1,
+      }}
+    >
+      {busy === method ? 'Connecting…' : label}
+    </button>
+  )
+
+  return (
+    <main
+      style={{
+        minHeight: '100vh',
+        background: tokens.color.bg,
+        display: 'grid',
+        placeItems: 'center',
+        padding: 24,
+      }}
+    >
+      <section
         style={{
-          minHeight: '100vh',
-          background: tokens.color.bg,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 16,
+          width: '100%',
+          maxWidth: 420,
+          padding: 40,
+          background: tokens.color.surface,
+          border: `1px solid ${tokens.color.border}`,
+          borderRadius: 16,
         }}
       >
         <div
           style={{
-            width: 32,
-            height: 32,
-            border: `3px solid ${tokens.color.border}`,
-            borderTopColor: tokens.color.accent,
-            borderRadius: '50%',
-            animation: 'spin 0.8s linear infinite',
+            width: 48,
+            height: 48,
+            margin: '0 auto 16px',
+            background: tokens.color.accent,
+            color: tokens.color.bg,
+            borderRadius: 8,
+            display: 'grid',
+            placeItems: 'center',
+            fontWeight: 800,
+            fontSize: 24,
           }}
-        />
-        <div style={{ color: tokens.color.textDim, fontSize: 13, fontFamily: tokens.font.mono }}>
-          Connecting to Papyrus...
+        >
+          P
         </div>
-      </div>
-    )
-  }
-
-  // Only shown if auto-login fails
-  return (
-    <div
-      style={{
-        minHeight: '100vh',
-        background: tokens.color.bg,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-    >
-      <div
-        style={{
-          width: 400,
-          padding: 40,
-          background: tokens.color.surface,
-          borderRadius: 16,
-          border: `1px solid ${tokens.color.border}`,
-        }}
-      >
-        <div style={{ textAlign: 'center', marginBottom: 24 }}>
-          <div
-            style={{
-              width: 48,
-              height: 48,
-              background: tokens.color.accent,
-              borderRadius: 8,
-              display: 'grid',
-              placeItems: 'center',
-              fontWeight: 800,
-              fontSize: 24,
-              color: tokens.color.bg,
-              margin: '0 auto 16px',
-            }}
-          >
-            P
-          </div>
-          <div style={{ fontSize: 18, fontWeight: 700, color: tokens.color.text, marginBottom: 4 }}>
-            PAPYRUS
-          </div>
-          <div style={{ fontSize: 13, color: tokens.color.textDim }}>
-            Couldn't auto-connect. Make sure the daemon is running.
-          </div>
-        </div>
-
+        <h1
+          style={{
+            textAlign: 'center',
+            color: tokens.color.text,
+            fontSize: 20,
+            letterSpacing: '0.08em',
+          }}
+        >
+          PAPYRUS
+        </h1>
+        <p
+          style={{
+            textAlign: 'center',
+            color: tokens.color.textDim,
+            fontSize: 13,
+            margin: '8px 0 24px',
+          }}
+        >
+          {config
+            ? `${config.profile.toUpperCase()} identity profile`
+            : 'Loading identity profile…'}
+        </p>
         {error && (
           <div
+            role="alert"
             style={{
-              padding: '10px 12px',
-              background: 'rgba(239,68,68,0.1)',
-              border: '1px solid rgba(239,68,68,0.3)',
-              borderRadius: 8,
-              color: '#ef4444',
-              fontSize: 12,
-              fontFamily: tokens.font.mono,
+              padding: 12,
               marginBottom: 16,
+              color: '#ef4444',
+              background: 'rgba(239,68,68,.1)',
+              border: '1px solid rgba(239,68,68,.3)',
+              borderRadius: 8,
+              fontSize: 12,
             }}
           >
             {error}
           </div>
         )}
-
-        <button
-          type="button"
-          onClick={() => window.location.reload()}
-          style={{
-            width: '100%',
-            padding: '12px 16px',
-            background: tokens.color.accent,
-            border: 'none',
-            borderRadius: 8,
-            color: '#fff',
-            fontSize: 14,
-            fontWeight: 600,
-            cursor: 'pointer',
-          }}
-        >
-          Retry Connection
-        </button>
-
-        <div style={{ marginTop: 16, fontSize: 12, color: tokens.color.textDim, textAlign: 'center' }}>
-          Start the daemon with: <code style={{ color: tokens.color.accent }}>pnpm --filter @papyrus/daemon start</code>
+        <div style={{ display: 'grid', gap: 10 }}>
+          {config?.methods.cac && button('Sign in with CAC / PIV', 'cac', cacSignIn, true)}
+          {config?.methods.webauthn &&
+            button('Sign in with a passkey', 'webauthn', passkeySignIn, !config.methods.cac)}
+          {config?.methods.oidc &&
+            button('Sign in with OIDC', 'oidc', () =>
+              window.location.assign(`${API}/api/auth/oidc/authorize`),
+            )}
+          {config?.methods.saml &&
+            button('Sign in with SAML', 'saml', () =>
+              window.location.assign(`${API}/api/auth/saml/authorize`),
+            )}
+          {config?.methods.local && button('Continue with local identity', 'local', localSignIn)}
         </div>
-      </div>
-    </div>
+        {config && !Object.values(config.methods).some(Boolean) && (
+          <p style={{ color: tokens.color.textMuted, fontSize: 13 }}>
+            No authentication method is configured for this profile.
+          </p>
+        )}
+      </section>
+    </main>
   )
 }

@@ -40,14 +40,16 @@ export function CredentialManager() {
     setBusy(true)
     setError('')
     try {
-      const start = await json<{ options: Parameters<typeof startRegistration>[0] }>(
+      const start = await json<{
+        options: Parameters<typeof startRegistration>[0]['optionsJSON']
+      }>(
         await apiFetch('/api/auth/webauthn/register/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ displayName: user.displayName }),
         }),
       )
-      const credential = await startRegistration(start.options)
+      const credential = await startRegistration({ optionsJSON: start.options })
       await json(
         await apiFetch('/api/auth/webauthn/register/finish', {
           method: 'POST',

@@ -6,7 +6,7 @@
  *   - CAC/PIV: PKCS#11 smart card middleware (ActivClient, CoolKey, etc.)
  *   - WebAuthn: @simplewebauthn/server
  *   - OIDC: openid-client
- *   - SAML: passport-saml / saml2-js
+ *   - SAML: @node-saml/node-saml
  *
  * The daemon's HTTP auth endpoints delegate to these adapters.
  */
@@ -536,8 +536,7 @@ export class OIDCAdapter implements AuthAdapter {
   }
 }
 
-/** Mock SAML adapter — simulates a SAML 2.0 SSO redirect. */
-/** Real SAML 2.0 adapter using saml2-js for SSO with XML signature verification. */
+/** Real SAML 2.0 adapter using @node-saml/node-saml for XML signature verification. */
 export class SAMLAdapter implements AuthAdapter {
   readonly method = 'saml' as const
 
@@ -550,68 +549,50 @@ export class SAMLAdapter implements AuthAdapter {
    */
   async start(): Promise<AuthChallenge> {
     const relayState = randomUUID()
-    const entryPoint = this.config?.entryPoint ?? 'https://idp.example.com/sso'
     const issuer = this.config?.issuer ?? 'papyrus'
-
-    // Build SAML AuthnRequest URL
-    const samlRequest = this.buildAuthnRequest(issuer, entryPoint)
+    const saml = await this.createSaml()
+    const ssoUrl = await saml.getAuthorizeUrlAsync(relayState, undefined, {})
 
     return {
       method: 'saml',
       challenge: {
         type: 'saml',
-        ssoUrl: `${entryPoint}?SAMLRequest=${encodeURIComponent(samlRequest)}&RelayState=${relayState}`,
+        ssoUrl,
         relayState,
         issuer,
-        samlRequest,
       },
     }
   }
 
   /**
    * Verify a SAML response from the IdP.
-   * Uses saml2-js for signature verification and attribute extraction.
+   * Uses @node-saml/node-saml for signature verification and attribute extraction.
    */
   async complete(response: AuthResponse): Promise<AuthResult> {
     const samlResponse = response.data.SAMLResponse as string
-    const relayState = response.data.RelayState as string
-
     if (!samlResponse) {
       throw new Error('SAMLResponse required for SAML verification')
     }
 
     try {
-      const saml2 = await import('saml2-js')
-
-      const spOptions = {
-        entity_id: this.config?.issuer ?? 'papyrus',
-        private_key: '',
-        certificate: '',
-        assert_endpoint: this.config?.entryPoint ?? '',
-        allow_unencrypted_assertion: true,
+      const saml = await this.createSaml()
+      const { profile, loggedOut } = await saml.validatePostResponseAsync({ SAMLResponse: samlResponse })
+      if (loggedOut || !profile) {
+        throw new Error('SAML response did not contain an authenticated profile')
       }
 
-      const idpOptions = {
-        sso_login_url: this.config?.entryPoint ?? 'https://idp.example.com/sso',
-        sso_logout_url: this.config?.entryPoint ?? 'https://idp.example.com/slo',
-        certificates: this.config?.cert ? [this.config.cert] : [],
-        sign_metadata: false,
-        want_authn_signed: false,
-      }
-
-      const sp = new saml2.ServiceProvider(spOptions)
-      const idp = new saml2.IdentityProvider(idpOptions)
-
-      const result = await new Promise<{ user: { name_id: string; name?: string; email?: string; given_name?: string; session_index?: string; attributes?: Record<string, string | string[]> } }>((resolve, reject) => {
-        sp.post_assert(idp, { request_body: { SAMLResponse: samlResponse }, require_session_index: false }, (err, res) => {
-          if (err) reject(err)
-          else if (!res) reject(new Error('Empty SAML response'))
-          else resolve(res)
-        })
-      })
-
-      const nameId = result.user.name_id
-      const displayName = result.user.name ?? result.user.email ?? result.user.given_name ?? nameId
+      const nameId = profile.nameID
+      const displayName = this.firstString(
+        profile.displayName,
+        profile.name,
+        profile.email,
+        profile.mail,
+        profile.given_name,
+        nameId,
+      )
+      const attributes = Object.fromEntries(
+        Object.entries(profile).filter(([, value]) => typeof value !== 'function'),
+      )
 
       return {
         method: 'saml',
@@ -619,8 +600,8 @@ export class SAMLAdapter implements AuthAdapter {
         externalId: nameId,
         provenance: {
           issuer: this.config?.issuer ?? 'papyrus',
-          sessionIndex: result.user.session_index ?? '',
-          attributes: result.user.attributes ?? {},
+          sessionIndex: profile.sessionIndex ?? '',
+          attributes,
         },
       }
     } catch (e) {
@@ -629,25 +610,27 @@ export class SAMLAdapter implements AuthAdapter {
   }
 
   /**
-   * Build a base64-encoded SAML AuthnRequest XML.
+   * Construct a SAML client with signature verification enabled.
    */
-  private buildAuthnRequest(issuer: string, destination: string): string {
-    const requestId = `_${randomUUID().replace(/-/g, '')}`
-    const issueInstant = new Date().toISOString()
+  private async createSaml() {
+    if (!this.config?.cert) {
+      throw new Error('SAML identity provider certificate is required')
+    }
 
-    const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<samlp:AuthnRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
-  ID="${requestId}"
-  Version="2.0"
-  IssueInstant="${issueInstant}"
-  Destination="${destination}"
-  AssertionConsumerServiceURL="${destination}"
-  ProtocolBinding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST">
-  <saml:Issuer xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">${issuer}</saml:Issuer>
-  <samlp:NameIDPolicy Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress" AllowCreate="true"/>
-</samlp:AuthnRequest>`
+    const { SAML } = await import('@node-saml/node-saml')
+    return new SAML({
+      callbackUrl: 'http://localhost:3777/api/auth/saml/acs',
+      entryPoint: this.config.entryPoint,
+      issuer: this.config.issuer,
+      idpCert: this.config.cert,
+      disableRequestedAuthnContext: true,
+      wantAssertionsSigned: true,
+      wantAuthnResponseSigned: true,
+    })
+  }
 
-    return Buffer.from(xml).toString('base64')
+  private firstString(...values: unknown[]): string {
+    return values.find((value): value is string => typeof value === 'string' && value.length > 0) ?? 'SAML User'
   }
 }
 

@@ -71,6 +71,19 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
+.papyrus-logo {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  object-fit: contain;
+  filter: drop-shadow(2px 2px 0 rgba(17, 17, 17, 0.28));
+}
+
+.sidebar-brand .papyrus-logo {
+  width: 34px;
+  height: 34px;
+}
+
 .sidebar-brand .logo {
   width: 28px;
   height: 28px;

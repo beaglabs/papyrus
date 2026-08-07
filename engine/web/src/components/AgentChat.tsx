@@ -1,4 +1,5 @@
 import { tokens } from '@papyrus/core/design'
+import { type LucideIcon, Paperclip, Send, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -7,7 +8,7 @@ interface Persona {
   name: string
   role: string
   color: string
-  icon: string
+  icon: LucideIcon
   description: string
 }
 
@@ -308,7 +309,7 @@ export function AgentChat({
               transition: 'all 0.15s',
             }}
           >
-            <span style={{ fontSize: 16 }}>{p.icon}</span>
+            <p.icon size={17} strokeWidth={2.2} aria-hidden="true" />
             <span>{p.role}</span>
           </button>
         ))}
@@ -329,7 +330,7 @@ export function AgentChat({
               className="avatar"
               style={msg.role === 'agent' ? { background: persona.color } : undefined}
             >
-              {msg.role === 'agent' ? persona.icon : 'U'}
+              {msg.role === 'agent' ? <persona.icon size={15} aria-hidden="true" /> : 'U'}
             </div>
             <div className="bubble">
               <div
@@ -360,7 +361,7 @@ export function AgentChat({
         {loading && (
           <div className={'chat-msg agent'}>
             <div className="avatar" style={{ background: persona.color }}>
-              {persona.icon}
+              <persona.icon size={15} aria-hidden="true" />
             </div>
             <div className="bubble" style={{ color: tokens.color.textDim }}>
               <span className="typing-dots">Thinking...</span>
@@ -396,7 +397,7 @@ export function AgentChat({
                 color: tokens.color.textMuted,
               }}
             >
-              {'\u{1F4CE}'} Attachment {i + 1}
+              <Paperclip size={12} aria-hidden="true" /> Attachment {i + 1}
               <button
                 type="button"
                 onClick={() => setAttachments((prev) => prev.filter((_, idx) => idx !== i))}
@@ -410,7 +411,7 @@ export function AgentChat({
                   lineHeight: 1,
                 }}
               >
-                {'\u{2715}'}
+                <X size={12} aria-hidden="true" />
               </button>
             </span>
           ))}
@@ -435,22 +436,27 @@ export function AgentChat({
 
       {/* Input */}
       <div className="chat-input-area">
+        <div className="chat-input-label">
+          <span>Prompt {persona.role}</span>
+          <span>Enter to send · Shift + Enter for a new line</span>
+        </div>
         <div className="chat-input-wrapper">
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
             style={{
-              background: 'none',
-              border: 'none',
+              background: tokens.color.surface,
+              border: `1px solid ${tokens.color.border}`,
+              borderRadius: tokens.radius.sm,
               color: tokens.color.textDim,
               cursor: 'pointer',
               fontSize: 16,
-              padding: 0,
+              padding: 7,
               flexShrink: 0,
             }}
             title="Attach file"
           >
-            {'\u{1F4CE}'}
+            <Paperclip size={16} aria-hidden="true" />
           </button>
           <input
             ref={fileInputRef}
@@ -479,8 +485,9 @@ export function AgentChat({
             className="chat-send"
             onClick={handleSend}
             disabled={loading || !input.trim()}
+            aria-label={`Send prompt to ${persona.name}`}
           >
-            {'\u{2191}'}
+            <Send size={16} aria-hidden="true" />
           </button>
         </div>
       </div>

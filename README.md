@@ -78,6 +78,12 @@ The daemon records security-relevant activity and supports audit-chain verificat
 | `engine/web` | Vite, React, and XYFlow canvas; onboarding, auth, presence, persona history, editable product nodes, and collaboration UI |
 | `engine/cli` | Local administration for licensing, projects, skills, artifacts, assets, organizations, and roles |
 
+## Offline licensing
+
+Papyrus validates licenses locally against the pinned Beag Labs Ed25519 authority key. Each installation generates a deployment identity; Beag Labs binds a 90-day pilot or perpetual organization license to that identity. Validation requires no network connection, and unlicensed deployments remain limited to health, diagnostics, activation request, and offline license installation.
+
+See [Offline licensing and air-gapped activation](./docs/licensing.md).
+
 ## OSCAL and customer authorization support
 
 The [`compliance`](./compliance) directory contains an OSCAL Component Definition covering 35 selected NIST SP 800-53 Revision 5 controls and a detailed shared-responsibility guide. It is intended to be imported and tailored within a customer-owned SSP; it is not an authorization or assessment result.

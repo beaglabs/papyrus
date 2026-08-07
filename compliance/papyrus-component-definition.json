@@ -1,0 +1,859 @@
+{
+  "component-definition": {
+    "uuid": "4f5a392c-cd42-4da7-9a55-875875499b19",
+    "metadata": {
+      "title": "Papyrus Security Control Component Definition",
+      "last-modified": "2026-08-07T19:45:00-04:00",
+      "version": "0.1.0",
+      "oscal-version": "1.2.1",
+      "remarks": "This machine-readable component definition documents potential control contributions of Papyrus when deployed in a customer-managed environment. It is not a certification, authorization, assessment result, System Security Plan, or claim that any deployment satisfies NIST SP 800-53. Control effectiveness and applicability must be assessed within the customer's system boundary.",
+      "roles": [
+        {
+          "id": "component-provider",
+          "title": "Component Provider"
+        }
+      ],
+      "parties": [
+        {
+          "uuid": "b70d2fc1-830b-4bde-9fa5-d5b4e6b4a938",
+          "type": "organization",
+          "name": "Beag Labs, Inc.",
+          "links": [
+            {
+              "href": "https://www.beaglabs.com",
+              "rel": "website"
+            }
+          ]
+        }
+      ],
+      "responsible-parties": [
+        {
+          "role-id": "component-provider",
+          "party-uuids": ["b70d2fc1-830b-4bde-9fa5-d5b4e6b4a938"]
+        }
+      ]
+    },
+    "components": [
+      {
+        "uuid": "65d5f633-63f1-48cf-a13e-7e75e991d882",
+        "type": "software",
+        "title": "Papyrus",
+        "description": "A local-first, multiplayer product-development canvas for regulated and disconnected environments, with profile-gated identity, Iroh-based peer synchronization, locally persisted project data, auditable agent and skill execution, and human-reviewed AI assistance.",
+        "purpose": "Provide a self-hosted collaboration and product-development component that can contribute security mechanisms and evidence to a customer-owned authorization boundary.",
+        "props": [
+          {
+            "name": "asset-type",
+            "value": "software"
+          },
+          {
+            "name": "deployment-model",
+            "value": "self-hosted"
+          },
+          {
+            "name": "supported-profile",
+            "value": "commercial"
+          },
+          {
+            "name": "supported-profile",
+            "value": "niprnet-il4"
+          },
+          {
+            "name": "supported-profile",
+            "value": "siprnet-il6"
+          }
+        ],
+        "links": [
+          {
+            "href": "https://github.com/beaglabs/papyrus",
+            "rel": "repository"
+          },
+          {
+            "href": "https://www.beaglabs.com/trust/papyrus",
+            "rel": "trust-center"
+          }
+        ],
+        "control-implementations": [
+          {
+            "uuid": "54c3e220-7367-49f3-b253-036af16df75f",
+            "source": "#ab905bde-549a-4133-989a-237663ef78ee",
+            "description": "Potential Papyrus contributions to selected NIST SP 800-53 Revision 5 controls. Responsibility properties identify Papyrus, shared, customer, or inherited implementation boundaries.",
+            "implemented-requirements": [
+              {
+                "uuid": "7b3c8f21-0010-4a61-9b7d-100000000010",
+                "control-id": "ac-2",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Account Management"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "shared"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "partial"
+                  }
+                ],
+                "description": "Papyrus provides project membership, organization membership, invitation, credential, and role records. Deploying organizations remain responsible for identity proofing, account approval, periodic review, disablement policy, and upstream identity-provider lifecycle management."
+              },
+              {
+                "uuid": "7b3c8f21-0011-4a61-9b7d-100000000011",
+                "control-id": "ac-3",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Access Enforcement"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "papyrus"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "partial"
+                  }
+                ],
+                "description": "The daemon enforces authenticated sessions and project-scoped RBAC before protected operations. REST and WebSocket operations are evaluated against the caller identity and assigned project permissions."
+              },
+              {
+                "uuid": "7b3c8f21-0012-4a61-9b7d-100000000012",
+                "control-id": "ac-6",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Least Privilege"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "shared"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "partial"
+                  }
+                ],
+                "description": "Papyrus exposes role-based project permissions and separates ordinary member actions from administrative operations. Customers define role assignments, privileged administrators, and separation-of-duties policy."
+              },
+              {
+                "uuid": "7b3c8f21-0013-4a61-9b7d-100000000013",
+                "control-id": "ac-7",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Unsuccessful Logon Attempts"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "shared"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "partial"
+                  }
+                ],
+                "description": "Papyrus applies request rate limits to authentication-sensitive endpoints and rejects invalid challenges and credentials. Customers configure upstream IdP, reverse-proxy, and enclave account-lockout thresholds."
+              },
+              {
+                "uuid": "7b3c8f21-0014-4a61-9b7d-100000000014",
+                "control-id": "ac-12",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Session Termination"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "shared"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "partial"
+                  }
+                ],
+                "description": "Papyrus issues bounded sessions and supports explicit logout and credential revocation workflows. Deployment owners set session lifetime, inactivity, and emergency termination requirements."
+              },
+              {
+                "uuid": "7b3c8f21-0015-4a61-9b7d-100000000015",
+                "control-id": "ia-2",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Identification and Authentication (Organizational Users)"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "shared"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "partial"
+                  }
+                ],
+                "description": "Profile-gated authentication supports CAC/PIV for SIPRNet/IL6, CAC/PIV and WebAuthn for NIPRNet/IL4, and WebAuthn, OIDC, or SAML for commercial deployments. Authentication strength depends on customer-selected providers and configuration."
+              },
+              {
+                "uuid": "7b3c8f21-0016-4a61-9b7d-100000000016",
+                "control-id": "ia-4",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Identifier Management"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "shared"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "partial"
+                  }
+                ],
+                "description": "Papyrus binds an externally authenticated identity to a locally generated member public key and records provenance for the binding. Customers remain authoritative for enterprise identifiers and reassignment policy."
+              },
+              {
+                "uuid": "7b3c8f21-0017-4a61-9b7d-100000000017",
+                "control-id": "ia-5",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Authenticator Management"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "shared"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "partial"
+                  }
+                ],
+                "description": "Papyrus supports WebAuthn credential enrollment and removal, CAC/PIV certificate validation, OIDC key discovery, and SAML IdP certificates. Customers control certificate issuance, trust anchors, provider keys, recovery, rotation, and revocation."
+              },
+              {
+                "uuid": "7b3c8f21-0018-4a61-9b7d-100000000018",
+                "control-id": "ia-8",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Identification and Authentication (Non-Organizational Users)"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "customer"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "customer-configured"
+                  }
+                ],
+                "description": "Commercial deployments may federate external identities through OIDC or SAML. The customer determines whether non-organizational access is permitted and configures federation claims, assurance requirements, and sponsorship."
+              },
+              {
+                "uuid": "7b3c8f21-0019-4a61-9b7d-100000000019",
+                "control-id": "au-2",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Event Logging"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "papyrus"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "partial"
+                  }
+                ],
+                "description": "Papyrus defines security-relevant audit events for authentication, membership, role changes, project lifecycle, canvas mutation, agent and skill execution, export, configuration, and integrity verification."
+              },
+              {
+                "uuid": "7b3c8f21-0020-4a61-9b7d-100000000020",
+                "control-id": "au-3",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Content of Audit Records"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "papyrus"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "partial"
+                  }
+                ],
+                "description": "Audit records identify time, actor, action, target, outcome, project context, and integrity-chain data where applicable. Secrets, raw authenticators, private keys, and bearer tokens are excluded from normal audit content."
+              },
+              {
+                "uuid": "7b3c8f21-0021-4a61-9b7d-100000000021",
+                "control-id": "au-6",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Audit Record Review, Analysis, and Reporting"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "shared"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "partial"
+                  }
+                ],
+                "description": "Authorized users can retrieve and review project audit history and verify the audit chain. Customers establish review cadence, alert rules, escalation paths, and correlation with enclave monitoring systems."
+              },
+              {
+                "uuid": "7b3c8f21-0022-4a61-9b7d-100000000022",
+                "control-id": "au-8",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Time Stamps"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "inherited"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "customer-configured"
+                  }
+                ],
+                "description": "Papyrus records ISO 8601 timestamps from the host operating system. Accurate, synchronized, and authoritative time is inherited from the deployment platform and must be configured by the customer."
+              },
+              {
+                "uuid": "7b3c8f21-0023-4a61-9b7d-100000000023",
+                "control-id": "au-9",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Protection of Audit Information"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "shared"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "partial"
+                  }
+                ],
+                "description": "Papyrus uses append-oriented, hash-linked audit records to make modification detectable. Customers protect database files, exports, backups, host access, and external log destinations."
+              },
+              {
+                "uuid": "7b3c8f21-0024-4a61-9b7d-100000000024",
+                "control-id": "au-12",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Audit Record Generation"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "papyrus"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "partial"
+                  }
+                ],
+                "description": "The daemon generates audit records at server-side enforcement points for supported security and business operations, allowing consistent collection regardless of client interface."
+              },
+              {
+                "uuid": "7b3c8f21-0025-4a61-9b7d-100000000025",
+                "control-id": "cm-2",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Baseline Configuration"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "shared"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "partial"
+                  }
+                ],
+                "description": "Papyrus provides profile-driven defaults for commercial, NIPRNet/IL4, and SIPRNet/IL6 modes. Customers document the approved deployment manifest, operating system, container, network, IdP, model endpoint, relay, and storage configuration."
+              },
+              {
+                "uuid": "7b3c8f21-0026-4a61-9b7d-100000000026",
+                "control-id": "cm-3",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Configuration Change Control"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "customer"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "customer-configured"
+                  }
+                ],
+                "description": "Papyrus configuration is file- and environment-driven and can be version controlled. Approval, testing, deployment, rollback, and emergency-change processes are customer operational responsibilities."
+              },
+              {
+                "uuid": "7b3c8f21-0027-4a61-9b7d-100000000027",
+                "control-id": "cm-5",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Access Restrictions for Change"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "shared"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "partial"
+                  }
+                ],
+                "description": "Administrative and project permissions restrict application-level changes. Repository, deployment pipeline, host, secret-store, and production configuration access are controlled by the customer."
+              },
+              {
+                "uuid": "7b3c8f21-0028-4a61-9b7d-100000000028",
+                "control-id": "cm-6",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Configuration Settings"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "shared"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "partial"
+                  }
+                ],
+                "description": "PAPYRUS_PROFILE gates authentication, model endpoint, internet use, agent availability, and cross-domain features. Customers set secure values and validate them against the authorized environment."
+              },
+              {
+                "uuid": "7b3c8f21-0029-4a61-9b7d-100000000029",
+                "control-id": "cm-7",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Least Functionality"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "shared"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "partial"
+                  }
+                ],
+                "description": "Papyrus can disable agents, external model endpoints, internet-assisted discovery, and cross-domain export by profile. Customers remove unused services, block unnecessary ports, and constrain runtime capabilities."
+              },
+              {
+                "uuid": "7b3c8f21-0030-4a61-9b7d-100000000030",
+                "control-id": "cm-8",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "System Component Inventory"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "shared"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "partial"
+                  }
+                ],
+                "description": "Papyrus publishes a lockfile and can produce SPDX or CycloneDX SBOMs for application dependencies. Customers add operating system, container, hardware, IdP, database, model server, relay, and infrastructure components."
+              },
+              {
+                "uuid": "7b3c8f21-0031-4a61-9b7d-100000000031",
+                "control-id": "sc-7",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Boundary Protection"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "shared"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "partial"
+                  }
+                ],
+                "description": "Papyrus supports explicit peers, local service binding, profile-based internet restrictions, and customer-controlled Iroh discovery or relay topology. Firewalls, proxies, segmentation, CDS boundaries, and enclave routing remain customer controls."
+              },
+              {
+                "uuid": "7b3c8f21-0032-4a61-9b7d-100000000032",
+                "control-id": "sc-8",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Transmission Confidentiality and Integrity"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "shared"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "partial"
+                  }
+                ],
+                "description": "Browser/API traffic can use TLS and peer synchronization uses encrypted QUIC transport through Iroh. Customers provision certificates, approved cipher policy, termination architecture, and any required FIPS-validated modules."
+              },
+              {
+                "uuid": "7b3c8f21-0033-4a61-9b7d-100000000033",
+                "control-id": "sc-12",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Cryptographic Key Establishment and Management"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "shared"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "partial"
+                  }
+                ],
+                "description": "Papyrus uses member identity keys, TLS certificates, SAML certificates, OIDC verification keys, Iroh identities, and license-signing keys. Customers define key custody, approved generation, backup, rotation, revocation, escrow, and destruction."
+              },
+              {
+                "uuid": "7b3c8f21-0034-4a61-9b7d-100000000034",
+                "control-id": "sc-13",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Cryptographic Protection"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "shared"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "partial"
+                  }
+                ],
+                "description": "Papyrus relies on platform cryptographic implementations for TLS, WebAuthn, X.509, token signatures, signed licenses, and QUIC. Algorithm availability does not itself establish FIPS validation; customers select validated modules when required."
+              },
+              {
+                "uuid": "7b3c8f21-0035-4a61-9b7d-100000000035",
+                "control-id": "sc-23",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Session Authenticity"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "papyrus"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "partial"
+                  }
+                ],
+                "description": "Papyrus binds requests to validated session tokens, protects state-changing browser flows with CSRF challenges, validates WebAuthn challenges, and validates OIDC state and PKCE data."
+              },
+              {
+                "uuid": "7b3c8f21-0036-4a61-9b7d-100000000036",
+                "control-id": "sc-28",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Protection of Information at Rest"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "customer"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "customer-configured"
+                  }
+                ],
+                "description": "Papyrus stores projects, credentials, audit records, and configuration locally. Encryption at rest is inherited from customer-managed full-disk, volume, database, or platform encryption and associated key management."
+              },
+              {
+                "uuid": "7b3c8f21-0037-4a61-9b7d-100000000037",
+                "control-id": "si-2",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Flaw Remediation"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "shared"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "partial"
+                  }
+                ],
+                "description": "Beag Labs tracks application and dependency defects, publishes updated releases, and maintains lockfile changes. Customers define patch windows, test updates, deploy remediations, and document risk acceptance."
+              },
+              {
+                "uuid": "7b3c8f21-0038-4a61-9b7d-100000000038",
+                "control-id": "si-4",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "System Monitoring"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "shared"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "partial"
+                  }
+                ],
+                "description": "Papyrus exposes audit, authentication, peer, agent, and integrity events suitable for operational monitoring. Customers collect, retain, correlate, alert on, and respond to those events in their monitoring platform."
+              },
+              {
+                "uuid": "7b3c8f21-0039-4a61-9b7d-100000000039",
+                "control-id": "si-7",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Software, Firmware, and Information Integrity"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "shared"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "partial"
+                  }
+                ],
+                "description": "Papyrus supports deterministic dependency resolution, signed-license validation, bundle verification, and hash-linked audit verification. Customers verify release provenance, hashes or signatures, container provenance, and deployment integrity."
+              },
+              {
+                "uuid": "7b3c8f21-0040-4a61-9b7d-100000000040",
+                "control-id": "si-10",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Information Input Validation"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "papyrus"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "partial"
+                  }
+                ],
+                "description": "The daemon validates authentication responses, request bodies, project permissions, cross-domain bundles, node types, and security-sensitive configuration before processing."
+              },
+              {
+                "uuid": "7b3c8f21-0041-4a61-9b7d-100000000041",
+                "control-id": "si-11",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Error Handling"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "shared"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "partial"
+                  }
+                ],
+                "description": "Papyrus returns bounded error responses and avoids intentionally exposing private keys, tokens, or internal credential material. Customers configure production logging and reverse proxies to prevent diagnostic leakage."
+              },
+              {
+                "uuid": "7b3c8f21-0042-4a61-9b7d-100000000042",
+                "control-id": "ra-5",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Vulnerability Monitoring and Scanning"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "shared"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "partial"
+                  }
+                ],
+                "description": "Beag Labs performs source, dependency, license, and SBOM analysis and remediates supported product vulnerabilities. Customers scan deployed hosts, containers, infrastructure, model servers, and customer integrations."
+              },
+              {
+                "uuid": "7b3c8f21-0043-4a61-9b7d-100000000043",
+                "control-id": "sa-11",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Developer Testing and Evaluation"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "papyrus"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "partial"
+                  }
+                ],
+                "description": "The repository includes type checking, linting, unit tests, daemon tests, authentication verification paths, and dependency review. Release evidence should record executed checks and known exceptions."
+              },
+              {
+                "uuid": "7b3c8f21-0044-4a61-9b7d-100000000044",
+                "control-id": "sr-4",
+                "props": [
+                  {
+                    "name": "control-title",
+                    "value": "Provenance"
+                  },
+                  {
+                    "name": "responsibility",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "shared"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "ns": "https://www.beaglabs.com/ns/oscal/papyrus",
+                    "value": "partial"
+                  }
+                ],
+                "description": "Papyrus records dependency versions in pnpm lockfiles and is designed to publish SBOMs and release hashes. Beag Labs maintains source-to-release traceability; customers preserve artifacts and verify them during intake and deployment."
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "back-matter": {
+      "resources": [
+        {
+          "uuid": "ab905bde-549a-4133-989a-237663ef78ee",
+          "title": "NIST SP 800-53 Revision 5 OSCAL Catalog",
+          "description": "Authoritative control catalog referenced by the Papyrus control implementation.",
+          "rlinks": [
+            {
+              "href": "https://raw.githubusercontent.com/usnistgov/oscal-content/main/nist.gov/SP800-53/rev5/json/NIST_SP-800-53_rev5_catalog.json",
+              "media-type": "application/oscal.catalog+json"
+            }
+          ]
+        },
+        {
+          "uuid": "46b3e02e-a1ac-490b-bc65-ad39ddf553cd",
+          "title": "Papyrus Repository",
+          "description": "Source, configuration, tests, and release history for Papyrus.",
+          "rlinks": [
+            {
+              "href": "https://github.com/beaglabs/papyrus",
+              "media-type": "text/html"
+            }
+          ]
+        },
+        {
+          "uuid": "afc24235-fae9-4eb4-85a9-116cf8f6a9a6",
+          "title": "Papyrus Trust Center",
+          "description": "Human-readable security architecture, shared-responsibility, and evidence overview.",
+          "rlinks": [
+            {
+              "href": "https://www.beaglabs.com/trust/papyrus",
+              "media-type": "text/html"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

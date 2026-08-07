@@ -128,21 +128,11 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-            <div
-              style={{
-                width: 32,
-                height: 32,
-                background: tokens.color.accent,
-                borderRadius: 6,
-                display: 'grid',
-                placeItems: 'center',
-                fontWeight: 800,
-                fontSize: 14,
-                color: tokens.color.bg,
-              }}
-            >
-              P
-            </div>
+            <img
+              src="/papyrus-logo.svg"
+              alt=""
+              style={{ width: 42, height: 42, objectFit: 'contain' }}
+            />
             <span
               style={{
                 fontSize: 14,

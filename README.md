@@ -4,6 +4,15 @@
 
 <h1 align="center">Papyrus</h1>
 
+<p align="center">
+  <a href="https://app.fossa.com/projects/custom%2B63623%2Fgithub.com%2Fbeaglabs%2Fpapyrus?ref=badge_shield&amp;issueType=security">
+    <img src="https://app.fossa.com/api/projects/custom%2B63623%2Fgithub.com%2Fbeaglabs%2Fpapyrus.svg?type=shield&amp;issueType=security" alt="FOSSA security status" />
+  </a>
+  <a href="https://app.fossa.com/projects/custom%2B63623%2Fgithub.com%2Fbeaglabs%2Fpapyrus?ref=badge_shield&amp;issueType=license">
+    <img src="https://app.fossa.com/api/projects/custom%2B63623%2Fgithub.com%2Fbeaglabs%2Fpapyrus.svg?type=shield&amp;issueType=license" alt="FOSSA license status" />
+  </a>
+</p>
+
 <p align="center"><strong>The local-first product-development canvas for regulated and disconnected teams.</strong></p>
 
 <p align="center">

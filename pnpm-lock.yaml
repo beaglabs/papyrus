@@ -128,19 +128,6 @@ importers:
         specifier: ^5.6.3
         version: 5.9.3
 
-  packages/p2panda-node:
-    dependencies:
-      '@papyrus/core':
-        specifier: workspace:*
-        version: link:../core
-    devDependencies:
-      typescript:
-        specifier: ^5.6.3
-        version: 5.9.3
-      vitest:
-        specifier: ^2.1.8
-        version: 2.1.9(@types/node@22.20.1)
-
   packages/web:
     dependencies:
       '@papyrus/core':

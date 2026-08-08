@@ -12,7 +12,13 @@ import { type IncomingMessage, type ServerResponse, createServer } from 'node:ht
 import { createServer as createHttpsServer } from 'node:https'
 import { extname, join } from 'node:path'
 import { TLSSocket } from 'node:tls'
-import { type AgentMessage, createPersonaAgent, listSkills, runSkill } from '@papyrus/agents'
+import {
+  type AgentMessage,
+  createPersonaAgent,
+  listSkills,
+  resolveModelProvider,
+  runSkill,
+} from '@papyrus/agents'
 import {
   CACPIVAdapter,
   type LicenseFile,
@@ -1517,7 +1523,7 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
     const body = await parseBody(req)
     const skillId = body.skillId as string
     const projectId = body.projectId as string
-    const apiKey = process.env.OPENROUTER_API_KEY ?? process.env.OPENAI_API_KEY ?? ''
+    const modelProvider = resolveModelProvider()
 
     if (!skillId || !projectId) {
       json(res, 400, { error: 'skillId and projectId required' })
@@ -1529,8 +1535,8 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       return true
     }
 
-    if (!apiKey) {
-      json(res, 500, { error: 'OPENROUTER_API_KEY not configured' })
+    if (!modelProvider) {
+      json(res, 500, { error: 'LLM provider is not fully configured' })
       return true
     }
 
@@ -1579,7 +1585,7 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
     }
 
     // Run the skill
-    const result = await runSkill(skillId, inputs, apiKey)
+    const result = await runSkill(skillId, inputs, modelProvider)
 
     // Create output nodes
     const createdNodes: CanvasNodeDoc[] = []
@@ -1646,7 +1652,7 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
     const messages = body.messages as AgentMessage[] | undefined
     const projectId = body.projectId as string | undefined
     const attachments = body.attachments as string[] | undefined
-    const apiKey = process.env.OPENROUTER_API_KEY ?? process.env.OPENAI_API_KEY ?? ''
+    const modelProvider = resolveModelProvider()
 
     if (!persona || !messages) {
       json(res, 400, { error: 'persona and messages required' })
@@ -1658,8 +1664,8 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       return true
     }
 
-    if (!apiKey) {
-      json(res, 500, { error: 'OPENROUTER_API_KEY not configured' })
+    if (!modelProvider) {
+      json(res, 500, { error: 'LLM provider is not fully configured' })
       return true
     }
 
@@ -1675,7 +1681,7 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
     tasks.set(taskId, task)
 
     try {
-      const agent = createPersonaAgent(persona, apiKey)
+      const agent = createPersonaAgent(persona, modelProvider)
 
       // Inject attachment context into the last user message if provided
       const effectiveMessages =
@@ -1779,7 +1785,7 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
     const nodeId = body.nodeId as string
     const projectId = body.projectId as string
     const persona = (body.persona as string) ?? 'pm'
-    const apiKey = process.env.OPENROUTER_API_KEY ?? process.env.OPENAI_API_KEY ?? ''
+    const modelProvider = resolveModelProvider()
 
     if (!nodeId || !projectId) {
       json(res, 400, { error: 'nodeId and projectId required' })
@@ -1814,7 +1820,8 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
     tasks.set(taskId, task)
 
     try {
-      const agent = createPersonaAgent(persona, apiKey)
+      if (!modelProvider) throw new Error('LLM provider is not fully configured')
+      const agent = createPersonaAgent(persona, modelProvider)
       const response = await agent.chat([
         {
           role: 'user',

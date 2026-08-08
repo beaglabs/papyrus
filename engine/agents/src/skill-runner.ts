@@ -9,10 +9,9 @@
  * 4. Call the LLM to produce output
  * 5. Parse and return the produced nodes
  */
-import { createOpenAI } from '@ai-sdk/openai'
 import { AI_SKILLS, type SkillSpec } from '@papyrus/core/nodes/catalog/ai-skill'
 import type { CanvasNodeDoc } from '@papyrus/core/nodes/types'
-import { generateText } from 'ai'
+import { type ModelProviderConfig, generateModelText } from './model-provider.js'
 
 export interface SkillInput {
   node: CanvasNodeDoc
@@ -53,14 +52,12 @@ export function listSkills(): SkillSpec[] {
  *
  * @param skillId - The skill to run
  * @param inputs - Upstream nodes that satisfy the skill's `consumes` contract
- * @param apiKey - OpenRouter API key
- * @param model - Model to use
+ * @param provider - Configured model provider
  */
 export async function runSkill(
   skillId: string,
   inputs: SkillInput[],
-  apiKey: string,
-  model = 'inclusionai/ling-3.0-tiny:free',
+  provider: ModelProviderConfig,
 ): Promise<SkillRunResult> {
   const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
   const spec = getSkillSpec(skillId)
@@ -79,25 +76,19 @@ export async function runSkill(
     }
   }
 
-  const openrouter = createOpenAI({
-    baseURL: 'https://openrouter.ai/api/v1',
-    apiKey,
-  })
-
   // Build the skill execution prompt
   const systemPrompt = buildSkillPrompt(spec, inputs)
   const userMessage = `Execute the "${spec.title}" skill with the provided inputs. Produce the expected outputs: ${spec.produces.join(', ')}.`
 
   try {
-    const result = await generateText({
-      model: openrouter(model),
+    const text = await generateModelText(provider, {
       system: systemPrompt,
       messages: [{ role: 'user', content: userMessage }],
       temperature: 0.7,
       maxOutputTokens: 4096,
     })
 
-    const outputs = parseSkillOutputs(result.text, spec)
+    const outputs = parseSkillOutputs(text, spec)
 
     return { skillId, status: 'done', outputs, runId }
   } catch (err) {

@@ -23,3 +23,8 @@ export {
   type SkillOutput,
   type SkillRunResult,
 } from './skill-runner.js'
+export {
+  generateModelText,
+  resolveModelProvider,
+  type ModelProviderConfig,
+} from './model-provider.js'

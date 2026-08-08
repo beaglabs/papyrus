@@ -1652,6 +1652,9 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
     const messages = body.messages as AgentMessage[] | undefined
     const projectId = body.projectId as string | undefined
     const attachments = body.attachments as string[] | undefined
+    const parentNodeIds = Array.isArray(body.parentNodeIds)
+      ? body.parentNodeIds.filter((id): id is string => typeof id === 'string')
+      : []
     const modelProvider = resolveModelProvider()
 
     if (!persona || !messages) {
@@ -1704,13 +1707,19 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
         const state = getOrCreateState(projectId)
         const row = Math.max(0, Math.floor(state.nodes.length / 3))
         for (const [index, proposedNode] of response.nodes.entries()) {
+          const parentNode =
+            state.nodes.find((node) => node.id === proposedNode.parentId) ??
+            state.nodes.find((node) => parentNodeIds.includes(node.id)) ??
+            state.nodes.find((node) => node.flowRole === 'source')
           const nodeDoc: CanvasNodeDoc = {
             id: `node-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 6)}`,
             projectId,
             type: proposedNode.type,
             category: proposedNode.category as CanvasNodeDoc['category'],
             flowRole: 'review',
-            position: { x: 340 + (index % 3) * 380, y: 140 + row * 300 },
+            position: parentNode
+              ? { x: parentNode.position.x + 420, y: parentNode.position.y + index * 240 }
+              : { x: 340 + (index % 3) * 380, y: 140 + row * 300 },
             fields: {
               title: proposedNode.title,
               content: proposedNode.content,
@@ -1733,6 +1742,27 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
           // Broadcast to all connected clients
           broadcast(state, { type: 'node:upsert', data: nodeDoc })
           createdNodes.push(nodeDoc)
+
+          if (parentNode) {
+            const edge: EdgeDoc = {
+              id: `edge-${parentNode.id}-${nodeDoc.id}`,
+              projectId,
+              from: parentNode.id,
+              to: nodeDoc.id,
+              kind: 'derives',
+              createdBy: `agent:${persona}`,
+              updatedAt: Date.now(),
+            }
+            state.edges.push(edge)
+            commitStateMutation(projectId, state, {
+              actorKey: authCtx.memberKey,
+              entityType: 'edge',
+              entityId: edge.id,
+              operationType: 'create',
+              payload: edge,
+            })
+            broadcast(state, { type: 'edge:add', data: edge })
+          }
         }
 
         const primaryNode = createdNodes[0]

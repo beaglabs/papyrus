@@ -76,6 +76,8 @@ type CanvasPersona = (typeof PERSONA_LIST)[number]
 
 const NODE_ICONS: Record<string, string> = {
   specification: '\u{1F4C4}',
+  'user-story': '\u{1F4DD}',
+  'success-metric': '\u{1F3AF}',
   'ui-mockup': '\u{1F3A8}',
   application: '\u{1F4BB}',
   'mcp-server': '\u{1F5C4}\u{FE0F}',
@@ -147,6 +149,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
   const presence = usePresence()
   const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([])
   const [editingDocumentId, setEditingDocumentId] = useState<string | null>(null)
   const [documentDraft, setDocumentDraft] = useState('')
 
@@ -259,11 +262,17 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
         .map((node) => {
           const title = String(node.fields.title ?? node.type)
           const content = String(node.fields.content ?? '')
-          return `### ${title} [${node.type}]\n${content}`
+          return `### ${title} [${node.type}; id=${node.id}]\n${content}`
         })
         .join('\n\n'),
     [nodes],
   )
+
+  const agentParentNodeIds = useMemo(() => {
+    if (selectedNodeIds.length > 0) return selectedNodeIds
+    const source = nodes.find((node) => node.flowRole === 'source')
+    return source ? [source.id] : []
+  }, [nodes, selectedNodeIds])
 
   // ── Node renderer with preview, name, retry ──────────────────
   const nodeTypes: NodeTypes = useMemo(
@@ -800,6 +809,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
               projectId={projectId}
               peerId={peerId}
               canvasContext={agentCanvasContext}
+              parentNodeIds={agentParentNodeIds}
             />
           </div>
         ))}
@@ -821,6 +831,9 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
+          onSelectionChange={({ nodes: selectedNodes }) =>
+            setSelectedNodeIds(selectedNodes.map((node) => node.id))
+          }
           onInit={setRfInstance}
           nodeTypes={nodeTypes}
           fitView

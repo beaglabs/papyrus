@@ -20,6 +20,7 @@ export interface CanvasNode {
   title: string
   content: string
   status: string
+  parentId?: string
 }
 
 export interface AgentResponse {
@@ -82,17 +83,22 @@ export function createPersonaAgent(personaId: string, provider: ModelProviderCon
  * Also handles legacy JSON format for backwards compatibility.
  */
 export function extractArtifacts(rawText: string): { text: string; nodes: CanvasNode[] } {
-  const artifactRegex = /<artifact\s+type="([^"]+)"\s+title="([^"]*)"[^>]*>([\s\S]*?)<\/artifact>/gi
+  const artifactRegex = /<artifact\s+([^>]+)>([\s\S]*?)<\/artifact>/gi
   const nodes: CanvasNode[] = []
   for (const match of rawText.matchAll(artifactRegex)) {
-    const type = match[1] ?? 'specification'
-    const title = match[2] || type
+    const attributes = new Map<string, string>()
+    for (const attribute of (match[1] ?? '').matchAll(/([\w-]+)="([^"]*)"/g)) {
+      if (attribute[1]) attributes.set(attribute[1], attribute[2] ?? '')
+    }
+    const type = attributes.get('type') || 'specification'
+    const title = attributes.get('title') || type
     nodes.push({
       type,
       category: 'output',
       title,
-      content: (match[3] ?? '').trim(),
+      content: (match[2] ?? '').trim(),
       status: 'proposed',
+      parentId: attributes.get('parent') || undefined,
     })
   }
 

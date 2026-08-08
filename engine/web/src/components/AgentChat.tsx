@@ -27,6 +27,7 @@ interface AgentChatProps {
   projectId: string
   peerId: string
   canvasContext: string
+  parentNodeIds: string[]
 }
 
 const SEED_MESSAGES: Record<string, ChatMessage[]> = {
@@ -79,13 +80,15 @@ const TEMPLATES: Record<string, TemplateBtn[]> = {
       id: 'stories',
       label: 'User Stories',
       icon: '\u{1F4DD}',
-      prompt: 'Draft user stories with acceptance criteria.',
+      prompt:
+        'Draft user stories with acceptance criteria. Create one separate user-story node for each story.',
     },
     {
       id: 'metrics',
       label: 'Success Metrics',
       icon: '\u{1F3AF}',
-      prompt: 'Define success metrics and KPIs for this project.',
+      prompt:
+        'Define success metrics and KPIs for this project. Create one separate success-metric node for each metric.',
     },
   ],
   designer: [
@@ -185,6 +188,7 @@ export function AgentChat({
   onPersonaChange,
   projectId,
   canvasContext,
+  parentNodeIds,
 }: AgentChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(() => SEED_MESSAGES[persona.id] ?? [])
   const [input, setInput] = useState('')
@@ -254,6 +258,7 @@ export function AgentChat({
           ),
           projectId,
           attachments,
+          parentNodeIds,
         }),
       })
 

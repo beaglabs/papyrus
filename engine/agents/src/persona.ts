@@ -1,13 +1,12 @@
-import { createOpenAI } from '@ai-sdk/openai'
 /**
- * Persona agent — calls an OpenAI-compatible LLM (OpenRouter) with a persona
+ * Persona agent — calls the configured model provider with a persona
  * system prompt and returns structured responses.
  *
  * The agent produces two types of responses:
  * 1. Conversational text (clean markdown — no raw JSON)
  * 2. Artifact creation commands via <artifact> tags — extracted automatically
  */
-import { generateText } from 'ai'
+import { type ModelProviderConfig, generateModelText } from './model-provider.js'
 import { PERSONA_PROMPTS } from './prompts.js'
 
 export interface AgentMessage {
@@ -40,18 +39,9 @@ export interface PersonaAgent {
 /**
  * Create an agent for a given persona.
  */
-export function createPersonaAgent(
-  personaId: string,
-  apiKey: string,
-  model = 'inclusionai/ling-3.0-tiny:free',
-): PersonaAgent {
+export function createPersonaAgent(personaId: string, provider: ModelProviderConfig): PersonaAgent {
   const systemPrompt = PERSONA_PROMPTS[personaId]
   if (!systemPrompt) throw new Error(`Unknown persona: ${personaId}`)
-
-  const openrouter = createOpenAI({
-    baseURL: 'https://openrouter.ai/api/v1',
-    apiKey,
-  })
 
   const personaNames: Record<string, { name: string; role: string }> = {
     pm: { name: 'Product Manager', role: 'PM' },
@@ -70,15 +60,12 @@ export function createPersonaAgent(
     name,
     role,
     chat: async (messages: AgentMessage[]): Promise<AgentResponse> => {
-      const result = await generateText({
-        model: openrouter(model),
+      const rawText = await generateModelText(provider, {
         system: systemPrompt,
         messages: messages.map((m) => ({ role: m.role, content: m.content })),
         temperature: 0.7,
         maxOutputTokens: 4096,
       })
-
-      const rawText = result.text
 
       // Extract artifact and clean the text
       const { text, node } = extractArtifact(rawText)
@@ -100,15 +87,17 @@ export function extractArtifact(rawText: string): { text: string; node?: CanvasN
   const match = rawText.match(artifactRegex)
 
   if (match) {
-    const [, type, title, content] = match
+    const type = match[1] ?? 'artifact'
+    const title = match[2] ?? ''
+    const content = match[3] ?? ''
     const cleanedText = rawText.replace(artifactRegex, '').trim()
     return {
       text: cleanedText || `Created **${title || type}** and added it to the canvas.`,
       node: {
-        type: type!,
+        type,
         category: 'output',
-        title: title || type!,
-        content: content!.trim(),
+        title: title || type,
+        content: content.trim(),
         status: 'generated',
       },
     }
@@ -122,7 +111,8 @@ export function extractArtifact(rawText: string): { text: string; node?: CanvasN
       if (parsed.action === 'create_node' && parsed.node) {
         const cleaned = rawText.replace(codeBlockMatch[0], '').trim()
         return {
-          text: cleaned || `Created **${(parsed.node as { title?: string }).title ?? 'artifact'}**.`,
+          text:
+            cleaned || `Created **${(parsed.node as { title?: string }).title ?? 'artifact'}**.`,
           node: parsed.node as CanvasNode,
         }
       }

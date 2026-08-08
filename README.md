@@ -21,7 +21,7 @@
 
 Papyrus is a self-hosted, multiplayer workspace where product artifacts live on a typed directed canvas. Discovery, strategy, specification, design, engineering, validation, and transition artifacts remain connected; human and AI collaborators work against the same project state; and every generated change remains subject to human review.
 
-Papyrus is designed for environments where cloud-only collaboration and public model APIs are not acceptable. Each agency or security boundary runs an authoritative Papyrus service and SQLite database. Authenticated browsers collaborate through server-sequenced WebSocket operations, while model access uses configurable OpenAI-compatible endpoints and the selected network profile constrains authentication, agents, and export behavior.
+Papyrus is designed for environments where cloud-only collaboration and public model APIs are not acceptable. Each agency or security boundary runs an authoritative Papyrus service and SQLite database. Authenticated browsers collaborate through server-sequenced WebSocket operations, while model access uses either Cloudflare Workers AI or a configurable OpenAI-compatible endpoint. The selected network profile constrains authentication, agents, and export behavior.
 
 > **Development status:** active prototype. The repository demonstrates the architecture and security seams, but it is not currently represented as production-authorized, FedRAMP-authorized, or certified for a particular impact level.
 
@@ -33,7 +33,7 @@ flowchart LR
   WEB[React canvas] -->|REST + WebSocket| D
   D --> DB[(SQLite + operation log)]
   D --> AG[Persona agents + skills]
-  AG --> LLM[OpenAI-compatible model endpoint]
+  AG --> LLM[Cloudflare or OpenAI-compatible model endpoint]
   D --> IDP[CAC/PIV · WebAuthn · OIDC · SAML]
 ```
 
@@ -47,7 +47,7 @@ The service is the deployment policy and coordination boundary. The `papyrus ser
 
 | Profile | Authentication | Model access | Connectivity |
 | --- | --- | --- | --- |
-| `commercial` | WebAuthn, OIDC, SAML | Customer-configured local or remote OpenAI-compatible endpoint | Customer-hosted HTTPS/WebSocket service |
+| `commercial` | WebAuthn, OIDC, SAML | Cloudflare Workers AI or customer-configured OpenAI-compatible endpoint | Customer-hosted HTTPS/WebSocket service |
 | `niprnet-il4` | CAC/PIV, WebAuthn | Approved enclave endpoint | Enclave-local service only |
 | `siprnet-il6` | CAC/PIV | Self-hosted endpoint inside the enclave | Disconnected enclave-local service |
 
@@ -69,7 +69,7 @@ Project state, credential records, audit information, immutable canvas operation
 
 ### Agents, skills, and tools
 
-Persona agents consume canvas context and produce proposed artifacts through explicit skills. The intended trust boundary requires endpoint allowlisting, tool authorization, human approval, input validation, secret redaction, execution limits, and auditable tool calls. Commercial endpoints can be replaced by customer-hosted OpenAI-compatible inference services for disconnected deployments.
+Persona agents consume canvas context and produce proposed artifacts through explicit skills. The intended trust boundary requires endpoint allowlisting, tool authorization, human approval, input validation, secret redaction, execution limits, and auditable tool calls. Cloudflare Workers AI is supported through its Anthropic-compatible Messages API; customer-hosted OpenAI-compatible inference services remain available for disconnected deployments.
 
 ### Audit and transfer
 
@@ -114,6 +114,32 @@ pnpm lint
 ```
 
 Package scripts currently run directly from each workspace. Deployment-specific configuration, certificates, model endpoints, trusted transfer deployment IDs, and secrets should be supplied through the approved environment rather than committed to source.
+
+### Model provider configuration
+
+To use Cloudflare Workers AI with Inkling 256K, configure the daemon with a scoped API token and account ID:
+
+```bash
+export PAPYRUS_LLM_PROVIDER=cloudflare
+export CLOUDFLARE_ACCOUNT_ID="your-account-id"
+export CLOUDFLARE_API_TOKEN="your-scoped-api-token"
+export PAPYRUS_LLM_MODEL="thinkingmachines/inkling-256k"
+pnpm cli serve --no-open
+```
+
+Papyrus calls Cloudflare's hosted Messages API from the self-hosted daemon. The `env.AI.run(...)` binding is only available when the calling application itself runs as a Cloudflare Worker.
+
+For an OpenAI-compatible service, including a local inference server:
+
+```bash
+export PAPYRUS_LLM_PROVIDER=openai-compatible
+export PAPYRUS_LLM_BASE_URL="http://127.0.0.1:8000/v1"
+export PAPYRUS_LLM_API_KEY="your-provider-api-key"
+export PAPYRUS_LLM_MODEL="your-model-id"
+pnpm cli serve --no-open
+```
+
+Never commit API tokens. Supply them through the deployment environment or its secret manager.
 
 ## Trust boundaries and customer responsibilities
 

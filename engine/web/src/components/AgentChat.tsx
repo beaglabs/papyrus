@@ -252,7 +252,7 @@ export function AgentChat({
       const errMsg: ChatMessage = {
         id: `msg-${Date.now() + 1}`,
         role: 'agent',
-        text: `Sorry, I encountered an error: **${errorMsg}**.\n\nMake sure \`OPENROUTER_API_KEY\` is set in your environment.`,
+        text: `Sorry, I encountered an error: **${errorMsg}**.\n\nCheck the daemon's LLM provider configuration.`,
       }
       setMessages((prev) => [...prev, errMsg])
     } finally {

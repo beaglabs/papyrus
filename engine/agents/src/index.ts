@@ -9,6 +9,7 @@
 export {
   createPersonaAgent,
   extractArtifact,
+  extractArtifacts,
   type PersonaAgent,
   type AgentMessage,
   type AgentResponse,

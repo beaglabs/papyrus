@@ -1652,6 +1652,9 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
     const messages = body.messages as AgentMessage[] | undefined
     const projectId = body.projectId as string | undefined
     const attachments = body.attachments as string[] | undefined
+    const parentNodeIds = Array.isArray(body.parentNodeIds)
+      ? body.parentNodeIds.filter((id): id is string => typeof id === 'string')
+      : []
     const modelProvider = resolveModelProvider()
 
     if (!persona || !messages) {
@@ -1698,40 +1701,75 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
 
       const response = await agent.chat(effectiveMessages)
 
-      // If the agent produced a node, add it to the canvas
-      if (response.node && projectId) {
-        const nodeDoc: CanvasNodeDoc = {
-          id: `node-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          projectId,
-          type: response.node.type,
-          category: response.node.category as CanvasNodeDoc['category'],
-          flowRole: 'exit',
-          position: { x: 300 + Math.random() * 400, y: 100 + Math.random() * 300 },
-          fields: {
-            title: response.node.title,
-            content: response.node.content,
-          },
-          status: response.node.status ?? 'generated',
-          createdBy: `agent:${persona}`,
-          updatedAt: Date.now(),
+      // Materialize each agent deliverable as a reviewable canvas proposal.
+      const createdNodes: CanvasNodeDoc[] = []
+      if (response.nodes.length > 0 && projectId) {
+        const state = getOrCreateState(projectId)
+        const row = Math.max(0, Math.floor(state.nodes.length / 3))
+        for (const [index, proposedNode] of response.nodes.entries()) {
+          const parentNode =
+            state.nodes.find((node) => node.id === proposedNode.parentId) ??
+            state.nodes.find((node) => parentNodeIds.includes(node.id)) ??
+            state.nodes.find((node) => node.flowRole === 'source')
+          const nodeDoc: CanvasNodeDoc = {
+            id: `node-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 6)}`,
+            projectId,
+            type: proposedNode.type,
+            category: proposedNode.category as CanvasNodeDoc['category'],
+            flowRole: 'review',
+            position: parentNode
+              ? { x: parentNode.position.x + 420, y: parentNode.position.y + index * 240 }
+              : { x: 340 + (index % 3) * 380, y: 140 + row * 300 },
+            fields: {
+              title: proposedNode.title,
+              content: proposedNode.content,
+              requestedPersona: persona,
+            },
+            status: 'proposed',
+            createdBy: `agent:${persona}`,
+            updatedAt: Date.now(),
+          }
+
+          state.nodes.push(nodeDoc)
+          commitStateMutation(projectId, state, {
+            actorKey: authCtx.memberKey,
+            entityType: 'node',
+            entityId: nodeDoc.id,
+            operationType: 'create',
+            payload: nodeDoc,
+          })
+
+          // Broadcast to all connected clients
+          broadcast(state, { type: 'node:upsert', data: nodeDoc })
+          createdNodes.push(nodeDoc)
+
+          if (parentNode) {
+            const edge: EdgeDoc = {
+              id: `edge-${parentNode.id}-${nodeDoc.id}`,
+              projectId,
+              from: parentNode.id,
+              to: nodeDoc.id,
+              kind: 'derives',
+              createdBy: `agent:${persona}`,
+              updatedAt: Date.now(),
+            }
+            state.edges.push(edge)
+            commitStateMutation(projectId, state, {
+              actorKey: authCtx.memberKey,
+              entityType: 'edge',
+              entityId: edge.id,
+              operationType: 'create',
+              payload: edge,
+            })
+            broadcast(state, { type: 'edge:add', data: edge })
+          }
         }
 
-        // Add to project state
-        const state = getOrCreateState(projectId)
-        state.nodes.push(nodeDoc)
-        commitStateMutation(projectId, state, {
-          actorKey: authCtx.memberKey,
-          entityType: 'node',
-          entityId: nodeDoc.id,
-          operationType: 'create',
-          payload: nodeDoc,
-        })
-
-        // Broadcast to all connected clients
-        broadcast(state, { type: 'node:upsert', data: nodeDoc })
-
-        task.nodeId = nodeDoc.id
-        task.nodeTitle = response.node.title
+        const primaryNode = createdNodes[0]
+        if (primaryNode) {
+          task.nodeId = primaryNode.id
+          task.nodeTitle = String(primaryNode.fields.title ?? primaryNode.type)
+        }
       }
 
       task.status = 'done'
@@ -1739,7 +1777,12 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
 
       json(res, 200, {
         text: response.text,
-        node: response.node ?? null,
+        nodes: createdNodes.map((node) => ({
+          id: node.id,
+          type: node.type,
+          title: node.fields.title,
+          status: node.status,
+        })),
         taskId,
       })
     } catch (err) {
@@ -1829,10 +1872,11 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
         },
       ])
 
-      if (response.node) {
+      const replacement = response.nodes[0]
+      if (replacement) {
         // Update the existing node
-        existingNode.fields.title = response.node.title
-        existingNode.fields.content = response.node.content
+        existingNode.fields.title = replacement.title
+        existingNode.fields.content = replacement.content
         existingNode.updatedAt = Date.now()
         existingNode.status = 'regenerated'
 
@@ -1846,13 +1890,13 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
         broadcast(state, { type: 'node:upsert', data: existingNode })
 
         task.nodeId = nodeId
-        task.nodeTitle = response.node.title
+        task.nodeTitle = replacement.title
       }
 
       task.status = 'done'
       task.completedAt = new Date().toISOString()
 
-      json(res, 200, { text: response.text, node: response.node ?? null, taskId })
+      json(res, 200, { text: response.text, node: replacement ?? null, taskId })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Retry error'
       task.status = 'error'

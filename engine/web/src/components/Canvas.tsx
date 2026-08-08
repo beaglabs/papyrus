@@ -15,14 +15,18 @@ import gsap from 'gsap'
 import {
   ArrowLeft,
   BriefcaseBusiness,
+  Check,
   ChevronDown,
   ChevronUp,
+  CircleX,
   Code2,
+  Edit3,
   LayoutPanelLeft,
   Palette,
   PanelLeftClose,
   PanelLeftOpen,
   ShieldCheck,
+  X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
@@ -72,6 +76,8 @@ type CanvasPersona = (typeof PERSONA_LIST)[number]
 
 const NODE_ICONS: Record<string, string> = {
   specification: '\u{1F4C4}',
+  'user-story': '\u{1F4DD}',
+  'success-metric': '\u{1F3AF}',
   'ui-mockup': '\u{1F3A8}',
   application: '\u{1F4BB}',
   'mcp-server': '\u{1F5C4}\u{FE0F}',
@@ -143,6 +149,9 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
   const presence = usePresence()
   const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([])
+  const [editingDocumentId, setEditingDocumentId] = useState<string | null>(null)
+  const [documentDraft, setDocumentDraft] = useState('')
 
   useEffect(() => {
     loadProjectRole(projectId)
@@ -253,11 +262,17 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
         .map((node) => {
           const title = String(node.fields.title ?? node.type)
           const content = String(node.fields.content ?? '')
-          return `### ${title} [${node.type}]\n${content}`
+          return `### ${title} [${node.type}; id=${node.id}]\n${content}`
         })
         .join('\n\n'),
     [nodes],
   )
+
+  const agentParentNodeIds = useMemo(() => {
+    if (selectedNodeIds.length > 0) return selectedNodeIds
+    const source = nodes.find((node) => node.flowRole === 'source')
+    return source ? [source.id] : []
+  }, [nodes, selectedNodeIds])
 
   // ── Node renderer with preview, name, retry ──────────────────
   const nodeTypes: NodeTypes = useMemo(
@@ -305,6 +320,25 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
             })
           }
           setEditingName(false)
+        }
+
+        function openDocumentEditor() {
+          setEditingDocumentId(doc.id)
+          setDocumentDraft(content)
+        }
+
+        function setProposalStatus(status: 'approved' | 'rejected') {
+          upsertNode({
+            ...doc,
+            flowRole: status === 'approved' ? 'artifact' : 'review',
+            status,
+            fields: {
+              ...doc.fields,
+              reviewedBy: peerId,
+              reviewedAt: new Date().toISOString(),
+            },
+            updatedAt: Date.now(),
+          })
         }
 
         return (
@@ -420,51 +454,63 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
                     </div>
                   </div>
                   {canEdit && (
-                    <span
+                    <button
+                      type="button"
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        openDocumentEditor()
+                      }}
                       style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 5,
                         padding: '4px 8px',
-                        border: `1px solid ${tokens.color.border}`,
+                        border: `2px solid ${tokens.color.black}`,
                         borderRadius: tokens.radius.full,
+                        background: tokens.color.surface,
                         color: tokens.color.accent,
                         fontFamily: tokens.font.mono,
                         fontSize: 9,
                         fontWeight: 700,
                         textTransform: 'uppercase',
+                        cursor: 'pointer',
                       }}
                     >
-                      Live document
-                    </span>
+                      <Edit3 size={12} aria-hidden="true" /> Edit prompt
+                    </button>
                   )}
                 </div>
               )}
 
-              {isEditableSpec && canEdit ? (
-                <textarea
-                  aria-label="Source specification content"
-                  className="nodrag nowheel"
-                  value={content}
-                  placeholder="Describe what you are building, who it serves, and the problem it solves…"
+              {isEditableSpec ? (
+                <button
+                  className="nodrag"
+                  type="button"
                   onPointerDown={(event) => event.stopPropagation()}
-                  onClick={(event) => event.stopPropagation()}
-                  onKeyDown={(event) => event.stopPropagation()}
-                  onChange={(event) => updateDocumentText(doc.id, content, event.target.value)}
-                  rows={12}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    if (canEdit) openDocumentEditor()
+                  }}
                   style={{
                     width: '100%',
-                    minHeight: 220,
-                    resize: 'vertical',
+                    minHeight: 150,
+                    padding: 12,
+                    textAlign: 'left',
+                    whiteSpace: 'pre-wrap',
                     background: tokens.color.bg,
-                    color: tokens.color.text,
+                    color: content ? tokens.color.text : tokens.color.textDim,
                     border: `2px solid ${tokens.color.black}`,
                     borderRadius: tokens.radius.md,
-                    boxShadow: '3px 3px 0 #111',
-                    padding: 12,
                     fontFamily: tokens.font.mono,
                     fontSize: 12,
                     lineHeight: 1.6,
-                    outline: 'none',
+                    cursor: canEdit ? 'text' : 'default',
                   }}
-                />
+                >
+                  {content ||
+                    'Describe what you are building, who it serves, and the problem it solves…'}
+                </button>
               ) : (
                 <div
                   style={{
@@ -524,6 +570,36 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
                   borderTop: `1px solid ${tokens.color.border}`,
                 }}
               >
+                {doc.status === 'proposed' && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        setProposalStatus('approved')
+                      }}
+                      style={{ ...nodeActionStyle, flex: 1, marginTop: 0 }}
+                    >
+                      <Check size={13} aria-hidden="true" /> Approve
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        setProposalStatus('rejected')
+                      }}
+                      style={{
+                        ...nodeActionStyle,
+                        flex: 1,
+                        marginTop: 0,
+                        background: tokens.color.surface,
+                        color: tokens.color.text,
+                      }}
+                    >
+                      <CircleX size={13} aria-hidden="true" /> Reject
+                    </button>
+                  </>
+                )}
                 <button
                   type="button"
                   onClick={(e) => {
@@ -532,7 +608,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
                   }}
                   disabled={isGenerating}
                   style={{
-                    flex: 1,
+                    flex: doc.status === 'proposed' ? 0 : 1,
                     padding: '4px 8px',
                     background: 'transparent',
                     border: `1px solid ${tokens.color.border}`,
@@ -545,7 +621,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
                     opacity: isGenerating ? 0.5 : 1,
                   }}
                 >
-                  {isGenerating ? '\u{23F3} Generating...' : '\u{21BB} Retry'}
+                  {isGenerating ? '\u{23F3} Generating...' : 'Retry'}
                 </button>
               </div>
             )}
@@ -571,8 +647,24 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
         )
       },
     }),
-    [apiFetch, canEdit, activePersona.id, upsertNode, updateDocumentText],
+    [apiFetch, canEdit, activePersona.id, peerId, upsertNode],
   )
+
+  const editingDocument = editingDocumentId
+    ? nodes.find((node) => node.id === editingDocumentId)
+    : undefined
+
+  function closeDocumentEditor() {
+    setEditingDocumentId(null)
+    setDocumentDraft('')
+  }
+
+  function saveDocumentEditor() {
+    if (!editingDocument) return
+    const current = String(editingDocument.fields.content ?? '')
+    updateDocumentText(editingDocument.id, current, documentDraft)
+    closeDocumentEditor()
+  }
 
   const onConnect = useCallback(
     (connection: { source?: string | null; target?: string | null }) => {
@@ -717,6 +809,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
               projectId={projectId}
               peerId={peerId}
               canvasContext={agentCanvasContext}
+              parentNodeIds={agentParentNodeIds}
             />
           </div>
         ))}
@@ -738,6 +831,9 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
+          onSelectionChange={({ nodes: selectedNodes }) =>
+            setSelectedNodeIds(selectedNodes.map((node) => node.id))
+          }
           onInit={setRfInstance}
           nodeTypes={nodeTypes}
           fitView
@@ -850,6 +946,122 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
       </div>
 
       {/* Network health popout */}
+      {editingDocument && (
+        <div
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeDocumentEditor()
+          }}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 4000,
+            display: 'grid',
+            placeItems: 'center',
+            padding: 24,
+            background: 'rgba(17, 17, 17, 0.38)',
+          }}
+        >
+          <dialog
+            open
+            aria-modal="true"
+            aria-labelledby="source-editor-title"
+            style={{
+              width: 'min(760px, 100%)',
+              maxHeight: 'min(760px, calc(100vh - 48px))',
+              display: 'flex',
+              flexDirection: 'column',
+              background: tokens.color.surface,
+              border: `3px solid ${tokens.color.black}`,
+              borderRadius: tokens.radius.lg,
+              boxShadow: '10px 10px 0 #111',
+              overflow: 'hidden',
+            }}
+          >
+            <header
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                padding: '14px 16px',
+                borderBottom: `2px solid ${tokens.color.black}`,
+              }}
+            >
+              <div style={{ flex: 1 }}>
+                <div
+                  id="source-editor-title"
+                  style={{ fontSize: 16, fontWeight: 850, color: tokens.color.text }}
+                >
+                  Edit source prompt
+                </div>
+                <div style={{ marginTop: 2, fontSize: 11, color: tokens.color.textDim }}>
+                  Saved changes sync to collaborators and become agent context.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={closeDocumentEditor}
+                aria-label="Close source editor"
+                style={{ ...nodeActionStyle, marginTop: 0, background: tokens.color.surface }}
+              >
+                <X size={15} aria-hidden="true" />
+              </button>
+            </header>
+            <textarea
+              value={documentDraft}
+              onChange={(event) => setDocumentDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') saveDocumentEditor()
+                if (event.key === 'Escape') closeDocumentEditor()
+              }}
+              placeholder="Describe what you are building, who it serves, constraints, and desired outcomes…"
+              style={{
+                flex: 1,
+                minHeight: 420,
+                padding: 18,
+                resize: 'vertical',
+                border: 0,
+                outline: 0,
+                background: tokens.color.bg,
+                color: tokens.color.text,
+                fontFamily: tokens.font.mono,
+                fontSize: 14,
+                lineHeight: 1.65,
+              }}
+            />
+            <footer
+              style={{
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: 10,
+                padding: 14,
+                borderTop: `2px solid ${tokens.color.black}`,
+              }}
+            >
+              <button
+                type="button"
+                onClick={closeDocumentEditor}
+                style={{ ...nodeActionStyle, marginTop: 0, background: tokens.color.surface }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={saveDocumentEditor}
+                disabled={documentDraft === String(editingDocument.fields.content ?? '')}
+                style={{
+                  ...nodeActionStyle,
+                  marginTop: 0,
+                  opacity:
+                    documentDraft === String(editingDocument.fields.content ?? '') ? 0.45 : 1,
+                }}
+              >
+                <Check size={14} aria-hidden="true" /> Save shared prompt
+              </button>
+            </footer>
+          </dialog>
+        </div>
+      )}
     </div>
   )
 }

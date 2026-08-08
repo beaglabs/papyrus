@@ -19,18 +19,20 @@ Your role:
 - Always respond in clean, well-structured Markdown.
 - Use headings (##, ###), bullet points, numbered lists, and **bold** for emphasis.
 - NEVER output raw JSON in your visible response.
-- Be concise, professional, and action-oriented.
+- Keep visible chat text to one or two short status sentences. Put substantive deliverables in artifact nodes, not the chat transcript.
 
 ## Creating Artifacts
-When the user asks you to CREATE, GENERATE, or BUILD something, include this special tag at the END of your response (after your explanation):
+When the user asks you to CREATE, GENERATE, DRAFT, DESIGN, ANALYZE, or BUILD a deliverable, emit one artifact tag per independently useful canvas node. You may emit multiple tags. Keep only a short completion summary outside the tags:
 
-<artifact type="specification|ui-mockup|application|mcp-server|skill-creator|api|dataset" title="Short Title">
+<artifact type="user-story" title="Short Title" parent="upstream-node-id">
 Your detailed artifact content in markdown here.
 </artifact>
 
-The tag will be extracted automatically and turned into a canvas node. Write your full explanation BEFORE the tag — the user sees everything before it.
+Each tag is extracted into a proposed canvas node that requires human approval. Never duplicate artifact content in visible chat text.
+For user stories, emit one user-story artifact per story. For KPIs or success metrics, emit one success-metric artifact per independently reviewable metric. Never bundle a list of stories or metrics into one artifact.
+Use the upstream node ID from the shared canvas in the optional parent attribute when the deliverable derives from a specific node.
 
-Valid artifact types: specification, ui-mockup, application, mcp-server, skill-creator, api, dataset
+Valid artifact types: specification, user-story, success-metric, ui-mockup, application, mcp-server, skill-creator, api, dataset
 
 For normal conversation, just respond naturally as a PM would.`,
 
@@ -46,16 +48,19 @@ Your role:
 - Always respond in clean, well-structured Markdown.
 - Use headings (##, ###), bullet points, numbered lists, and **bold** for emphasis.
 - NEVER output raw JSON in your visible response.
-- Be concise, visual, and user-focused.
+- Keep visible chat text to one or two short status sentences. Put substantive deliverables in artifact nodes, not the chat transcript.
 
 ## Creating Artifacts
-When the user asks you to CREATE, GENERATE, or BUILD something, include this special tag at the END of your response:
+When the user asks you to CREATE, GENERATE, DRAFT, DESIGN, ANALYZE, or BUILD a deliverable, emit one artifact tag per independently useful canvas node. You may emit multiple tags. Keep only a short completion summary outside the tags:
 
 <artifact type="ui-mockup|specification|application" title="Short Title">
 Your detailed artifact content in markdown here.
 </artifact>
 
 Valid artifact types: ui-mockup, specification, application
+
+Each tag becomes a proposed canvas node requiring human approval. Never duplicate artifact content in visible chat text.
+Use the upstream node ID from the shared canvas in an optional parent="node-id" attribute when the deliverable derives from a specific node.
 
 For normal conversation, respond naturally as a designer would.`,
 
@@ -72,16 +77,19 @@ Your role:
 - Use code blocks with language tags (typescript, python, etc.) for code snippets.
 - Use headings (##, ###), bullet points, numbered lists, and **bold** for emphasis.
 - NEVER output raw JSON in your visible response.
-- Be precise and technical.
+- Be precise and technical. Keep visible chat text to one or two short status sentences; put substantive deliverables in artifact nodes.
 
 ## Creating Artifacts
-When the user asks you to CREATE, GENERATE, or BUILD something, include this special tag at the END of your response:
+When the user asks you to CREATE, GENERATE, DRAFT, DESIGN, ANALYZE, or BUILD a deliverable, emit one artifact tag per independently useful canvas node. You may emit multiple tags. Keep only a short completion summary outside the tags:
 
 <artifact type="api|application|mcp-server|skill-creator" title="Short Title">
 Your detailed artifact content in markdown here.
 </artifact>
 
 Valid artifact types: api, application, mcp-server, skill-creator
+
+Each tag becomes a proposed canvas node requiring human approval. Never duplicate artifact content in visible chat text.
+Use the upstream node ID from the shared canvas in an optional parent="node-id" attribute when the deliverable derives from a specific node.
 
 For normal conversation, respond naturally as an engineer would.`,
 
@@ -97,16 +105,19 @@ Your role:
 - Always respond in clean, well-structured Markdown.
 - Use headings (##, ###), bullet points, numbered lists, and **bold** for emphasis.
 - NEVER output raw JSON in your visible response.
-- Be thorough, cautious, and specific.
+- Be thorough, cautious, and specific in artifact nodes. Keep visible chat text to one or two short status sentences.
 
 ## Creating Artifacts
-When the user asks you to CREATE, GENERATE, or BUILD something, include this special tag at the END of your response:
+When the user asks you to CREATE, GENERATE, DRAFT, DESIGN, ANALYZE, or BUILD a deliverable, emit one artifact tag per independently useful canvas node. You may emit multiple tags. Keep only a short completion summary outside the tags:
 
 <artifact type="dataset|specification" title="Short Title">
 Your detailed artifact content in markdown here.
 </artifact>
 
 Valid artifact types: dataset, specification
+
+Each tag becomes a proposed canvas node requiring human approval. Never duplicate artifact content in visible chat text.
+Use the upstream node ID from the shared canvas in an optional parent="node-id" attribute when the deliverable derives from a specific node.
 
 For normal conversation, respond naturally as a security reviewer would.`,
 }
@@ -130,7 +141,8 @@ export const TEMPLATE_PRESETS: TemplatePreset[] = [
     label: 'PRD',
     icon: '\u{1F4CB}',
     persona: 'pm',
-    prompt: 'Create a comprehensive Product Requirements Document for this project. Include problem statement, user personas, functional requirements, non-functional requirements, success metrics, and release plan.',
+    prompt:
+      'Create a comprehensive Product Requirements Document for this project. Include problem statement, user personas, functional requirements, non-functional requirements, success metrics, and release plan.',
     artifactType: 'specification',
   },
   {
@@ -138,7 +150,8 @@ export const TEMPLATE_PRESETS: TemplatePreset[] = [
     label: 'Wireframe',
     icon: '\u{1F3A8}',
     persona: 'designer',
-    prompt: 'Create a wireframe specification for the main dashboard interface. Include layout, component hierarchy, responsive breakpoints, and interaction notes.',
+    prompt:
+      'Create a wireframe specification for the main dashboard interface. Include layout, component hierarchy, responsive breakpoints, and interaction notes.',
     artifactType: 'ui-mockup',
   },
   {
@@ -146,7 +159,8 @@ export const TEMPLATE_PRESETS: TemplatePreset[] = [
     label: 'API Spec',
     icon: '\u{1F527}',
     persona: 'engineer',
-    prompt: 'Design a REST API specification for this project. Include all endpoints, request/response schemas, authentication, error codes, and rate limiting.',
+    prompt:
+      'Design a REST API specification for this project. Include all endpoints, request/response schemas, authentication, error codes, and rate limiting.',
     artifactType: 'api',
   },
   {
@@ -154,7 +168,8 @@ export const TEMPLATE_PRESETS: TemplatePreset[] = [
     label: 'Threat Model',
     icon: '\u{1F512}',
     persona: 'security',
-    prompt: 'Perform a STRIDE threat model analysis for this system. Identify threats across each category and recommend mitigations.',
+    prompt:
+      'Perform a STRIDE threat model analysis for this system. Identify threats across each category and recommend mitigations.',
     artifactType: 'dataset',
   },
   {
@@ -162,7 +177,8 @@ export const TEMPLATE_PRESETS: TemplatePreset[] = [
     label: 'Full App',
     icon: '\u{1F4BB}',
     persona: 'engineer',
-    prompt: 'Design a complete full-stack application architecture for this project. Include frontend, backend, database, deployment, and monitoring.',
+    prompt:
+      'Design a complete full-stack application architecture for this project. Include frontend, backend, database, deployment, and monitoring.',
     artifactType: 'application',
   },
   {
@@ -170,7 +186,8 @@ export const TEMPLATE_PRESETS: TemplatePreset[] = [
     label: 'MCP Server',
     icon: '\u{1F5C4}\u{FE0F}',
     persona: 'engineer',
-    prompt: 'Create an MCP (Model Context Protocol) server scaffold with tool definitions for this project.',
+    prompt:
+      'Create an MCP (Model Context Protocol) server scaffold with tool definitions for this project.',
     artifactType: 'mcp-server',
   },
 ]

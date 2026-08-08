@@ -1,5 +1,5 @@
 import { tokens } from '@papyrus/core/design'
-import { type LucideIcon, Paperclip, Send, X } from 'lucide-react'
+import { AtSign, Boxes, type LucideIcon, Paperclip, Send, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -16,7 +16,8 @@ interface ChatMessage {
   id: string
   role: 'agent' | 'user'
   text: string
-  nodeCreated?: boolean
+  nodesCreated?: number
+  personaId?: string
 }
 
 interface AgentChatProps {
@@ -26,6 +27,7 @@ interface AgentChatProps {
   projectId: string
   peerId: string
   canvasContext: string
+  parentNodeIds: string[]
 }
 
 const SEED_MESSAGES: Record<string, ChatMessage[]> = {
@@ -78,13 +80,15 @@ const TEMPLATES: Record<string, TemplateBtn[]> = {
       id: 'stories',
       label: 'User Stories',
       icon: '\u{1F4DD}',
-      prompt: 'Draft user stories with acceptance criteria.',
+      prompt:
+        'Draft user stories with acceptance criteria. Create one separate user-story node for each story.',
     },
     {
       id: 'metrics',
       label: 'Success Metrics',
       icon: '\u{1F3AF}',
-      prompt: 'Define success metrics and KPIs for this project.',
+      prompt:
+        'Define success metrics and KPIs for this project. Create one separate success-metric node for each metric.',
     },
   ],
   designer: [
@@ -184,6 +188,7 @@ export function AgentChat({
   onPersonaChange,
   projectId,
   canvasContext,
+  parentNodeIds,
 }: AgentChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(() => SEED_MESSAGES[persona.id] ?? [])
   const [input, setInput] = useState('')
@@ -193,22 +198,48 @@ export function AgentChat({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const chatHistoryRef = useRef<Array<{ role: 'user' | 'assistant'; content: string }>>([])
   const { apiFetch } = useAuth()
+  const mentionQuery = input.match(/(?:^|\s)@([\w-]*)$/)?.[1]?.toLowerCase()
+  const mentionMatches =
+    mentionQuery === undefined
+      ? []
+      : personas.filter((candidate) =>
+          [candidate.id, candidate.name, candidate.role]
+            .join(' ')
+            .toLowerCase()
+            .includes(mentionQuery),
+        )
 
   useEffect(() => {
     void messages.length
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
+  function resolveMention(text: string): { prompt: string; target: Persona } {
+    const match = text.match(/^@([\w-]+)\s+/)
+    if (!match) return { prompt: text, target: persona }
+    const mention = match[1]?.toLowerCase()
+    const aliases: Record<string, string> = {
+      design: 'designer',
+      eng: 'engineer',
+      sec: 'security',
+      'product-manager': 'pm',
+    }
+    const targetId = aliases[mention ?? ''] ?? mention
+    const target = personas.find((candidate) => candidate.id === targetId) ?? persona
+    return { prompt: text.slice(match[0].length).trim(), target }
+  }
+
   async function sendToAgent(text: string) {
+    const { prompt, target } = resolveMention(text)
     setLoading(true)
 
     const userMsg: ChatMessage = {
       id: `msg-${Date.now()}`,
       role: 'user',
-      text,
+      text: target.id === persona.id ? prompt : `@${target.id} ${prompt}`,
     }
     setMessages((prev) => [...prev, userMsg])
-    chatHistoryRef.current.push({ role: 'user', content: text })
+    chatHistoryRef.current.push({ role: 'user', content: prompt })
     setInput('')
 
     try {
@@ -216,7 +247,7 @@ export function AgentChat({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          persona: persona.id,
+          persona: target.id,
           messages: chatHistoryRef.current.map((message, index, history) =>
             index === history.length - 1 && message.role === 'user' && canvasContext
               ? {
@@ -227,6 +258,7 @@ export function AgentChat({
           ),
           projectId,
           attachments,
+          parentNodeIds,
         }),
       })
 
@@ -235,7 +267,10 @@ export function AgentChat({
         throw new Error(err.error ?? 'Agent request failed')
       }
 
-      const data = (await res.json()) as { text: string; node?: { type: string; title: string } }
+      const data = (await res.json()) as {
+        text: string
+        nodes?: Array<{ id: string; type: string; title: string; status: string }>
+      }
 
       chatHistoryRef.current.push({ role: 'assistant', content: data.text })
 
@@ -243,7 +278,8 @@ export function AgentChat({
         id: `msg-${Date.now() + 1}`,
         role: 'agent',
         text: data.text,
-        nodeCreated: !!data.node,
+        nodesCreated: data.nodes?.length ?? 0,
+        personaId: target.id,
       }
       setMessages((prev) => [...prev, agentMsg])
       setAttachments([])
@@ -267,6 +303,12 @@ export function AgentChat({
 
   function handleTemplate(template: TemplateBtn) {
     sendToAgent(template.prompt)
+  }
+
+  function insertMention(target: Persona) {
+    setInput((current) =>
+      current.replace(/(?:^|\s)@[\w-]*$/, `${current.trim() ? ' ' : ''}@${target.id} `),
+    )
   }
 
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -324,40 +366,46 @@ export function AgentChat({
 
       {/* Messages */}
       <div className="chat-messages">
-        {messages.map((msg) => (
-          <div key={msg.id} className={`chat-msg ${msg.role}`}>
-            <div
-              className="avatar"
-              style={msg.role === 'agent' ? { background: persona.color } : undefined}
-            >
-              {msg.role === 'agent' ? <persona.icon size={15} aria-hidden="true" /> : 'U'}
-            </div>
-            <div className="bubble">
+        {messages.map((msg) => {
+          const messagePersona =
+            personas.find((candidate) => candidate.id === msg.personaId) ?? persona
+          const MessageIcon = messagePersona.icon
+          return (
+            <div key={msg.id} className={`chat-msg ${msg.role}`}>
               <div
-                // biome-ignore lint/security/noDangerouslySetInnerHtml: renderMarkdown escapes the source string before adding limited markup.
-                dangerouslySetInnerHTML={{
-                  __html: renderMarkdown(msg.text),
-                }}
-              />
-              {msg.nodeCreated && (
+                className="avatar"
+                style={msg.role === 'agent' ? { background: messagePersona.color } : undefined}
+              >
+                {msg.role === 'agent' ? <MessageIcon size={15} aria-hidden="true" /> : 'U'}
+              </div>
+              <div className="bubble">
                 <div
-                  style={{
-                    marginTop: 8,
-                    padding: '6px 10px',
-                    background: `${persona.color}22`,
-                    border: `1px solid ${persona.color}44`,
-                    borderRadius: tokens.radius.sm,
-                    fontSize: 11,
-                    color: persona.color,
-                    fontFamily: tokens.font.mono,
+                  // biome-ignore lint/security/noDangerouslySetInnerHtml: renderMarkdown escapes the source string before adding limited markup.
+                  dangerouslySetInnerHTML={{
+                    __html: renderMarkdown(msg.text),
                   }}
-                >
-                  {'\u{2713}'} Artifact added to canvas
-                </div>
-              )}
+                />
+                {!!msg.nodesCreated && (
+                  <div
+                    style={{
+                      marginTop: 8,
+                      padding: '6px 10px',
+                      background: `${messagePersona.color}18`,
+                      border: `1px solid ${messagePersona.color}55`,
+                      borderRadius: tokens.radius.sm,
+                      fontSize: 11,
+                      color: messagePersona.color,
+                      fontFamily: tokens.font.mono,
+                    }}
+                  >
+                    <Boxes size={13} aria-hidden="true" /> {msg.nodesCreated}{' '}
+                    {msg.nodesCreated === 1 ? 'proposal' : 'proposals'} added to canvas for review
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
         {loading && (
           <div className={'chat-msg agent'}>
             <div className="avatar" style={{ background: persona.color }}>
@@ -436,10 +484,17 @@ export function AgentChat({
 
       {/* Input */}
       <div className="chat-input-area">
-        <div className="chat-input-label">
-          <span>Prompt {persona.role}</span>
-          <span>Enter to send · Shift + Enter for a new line</span>
-        </div>
+        {mentionMatches.length > 0 && (
+          <div className="mention-menu">
+            {mentionMatches.map((candidate) => (
+              <button key={candidate.id} type="button" onClick={() => insertMention(candidate)}>
+                <candidate.icon size={14} aria-hidden="true" />
+                <span>@{candidate.id}</span>
+                <small>{candidate.description}</small>
+              </button>
+            ))}
+          </div>
+        )}
         <div className="chat-input-wrapper">
           <button
             type="button"
@@ -468,7 +523,7 @@ export function AgentChat({
           />
           <textarea
             className="chat-input"
-            placeholder={loading ? 'Agent is thinking...' : `Ask the ${persona.name}...`}
+            placeholder={loading ? 'Working…' : `Ask ${persona.role} or @mention another agent…`}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
@@ -480,6 +535,15 @@ export function AgentChat({
             rows={1}
             disabled={loading}
           />
+          <button
+            type="button"
+            className="mention-trigger"
+            onClick={() => setInput((current) => `${current}${current ? ' ' : ''}@`)}
+            title="Mention an agent"
+            aria-label="Mention an agent"
+          >
+            <AtSign size={15} aria-hidden="true" />
+          </button>
           <button
             type="button"
             className="chat-send"

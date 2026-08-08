@@ -26,6 +26,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   ShieldCheck,
+  Trash2,
   X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -288,6 +289,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
         const isGenerating = doc.status === 'running'
         const [showPreview, setShowPreview] = useState(false)
         const [editingName, setEditingName] = useState(false)
+        const [confirmingDelete, setConfirmingDelete] = useState(false)
         const [nameValue, setNameValue] = useState(title)
         const isEditableSpec = doc.type === 'specification' || doc.flowRole === 'source'
 
@@ -339,6 +341,11 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
             },
             updatedAt: Date.now(),
           })
+        }
+
+        function handleDelete() {
+          if (editingDocumentId === doc.id) closeDocumentEditor()
+          deleteNode(doc.id)
         }
 
         return (
@@ -423,6 +430,34 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
               >
                 {doc.type}
               </span>
+              {canEdit && (
+                <button
+                  className="nodrag"
+                  type="button"
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    setConfirmingDelete(true)
+                  }}
+                  aria-label={`Delete ${title}`}
+                  title="Delete node"
+                  style={{
+                    width: 25,
+                    height: 25,
+                    display: 'grid',
+                    placeItems: 'center',
+                    flexShrink: 0,
+                    padding: 0,
+                    background: 'transparent',
+                    border: 0,
+                    borderRadius: tokens.radius.sm,
+                    color: tokens.color.textDim,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <Trash2 size={14} aria-hidden="true" />
+                </button>
+              )}
             </div>
 
             {/* Editable specification / content preview */}
@@ -560,6 +595,48 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
               )}
             </div>
 
+            {confirmingDelete && (
+              <div
+                className="nodrag"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '8px 12px',
+                  background: '#fff0eb',
+                  borderTop: `2px solid ${tokens.color.black}`,
+                  color: tokens.color.text,
+                  fontSize: 10,
+                  fontWeight: 700,
+                }}
+              >
+                <span style={{ flex: 1 }}>
+                  Delete this node{isSource ? ' and its source document' : ''}? Connected edges will
+                  also be removed.
+                </span>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    setConfirmingDelete(false)
+                  }}
+                  style={{ ...nodeActionStyle, marginTop: 0, background: tokens.color.surface }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    handleDelete()
+                  }}
+                  style={{ ...nodeActionStyle, marginTop: 0, background: '#ff5f1f' }}
+                >
+                  <Trash2 size={12} aria-hidden="true" /> Delete
+                </button>
+              </div>
+            )}
+
             {/* Node footer with actions */}
             {isOutput && canEdit && !isSource && (
               <div
@@ -647,7 +724,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
         )
       },
     }),
-    [apiFetch, canEdit, activePersona.id, peerId, upsertNode],
+    [apiFetch, canEdit, activePersona.id, peerId, upsertNode, deleteNode, editingDocumentId],
   )
 
   const editingDocument = editingDocumentId

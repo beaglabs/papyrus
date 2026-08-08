@@ -2315,12 +2315,16 @@ function handleClientMsg(
       break
     }
     case 'node:delete': {
+      const deletedEdgeIds = state.edges
+        .filter((edge) => edge.from === msg.data.id || edge.to === msg.data.id)
+        .map((edge) => edge.id)
       state.nodes = state.nodes.filter((n) => n.id !== msg.data.id)
       state.edges = state.edges.filter(
         (edge) => edge.from !== msg.data.id && edge.to !== msg.data.id,
       )
       entityId = msg.data.id
       operationType = 'delete'
+      payload = { nodeId: msg.data.id, deletedEdgeIds }
       broadcastMessage = { type: 'node:delete', data: msg.data }
       break
     }

@@ -131,6 +131,11 @@ export function useCanvasSync(
           }
           case 'node:delete':
             setNodes((prev) => prev.filter((n) => n.id !== msg.data.id))
+            setEdges((prev) =>
+              prev.filter((edge) => edge.from !== msg.data.id && edge.to !== msg.data.id),
+            )
+            documentsRef.current.get(msg.data.id)?.destroy()
+            documentsRef.current.delete(msg.data.id)
             break
           case 'edge:add':
             setEdges((prev) => {
@@ -232,6 +237,9 @@ export function useCanvasSync(
   const deleteNode = useCallback(
     (id: string) => {
       setNodes((prev) => prev.filter((n) => n.id !== id))
+      setEdges((prev) => prev.filter((edge) => edge.from !== id && edge.to !== id))
+      documentsRef.current.get(id)?.destroy()
+      documentsRef.current.delete(id)
       void queueMutation({
         type: 'node:delete',
         data: { id },

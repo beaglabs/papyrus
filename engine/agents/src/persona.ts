@@ -23,10 +23,10 @@ export interface CanvasNode {
 }
 
 export interface AgentResponse {
-  /** Clean markdown text shown to the user (artifact tags stripped). */
+  /** Short status text shown to the user (artifact tags stripped). */
   text: string
-  /** Extracted artifact node, if the agent created one. */
-  node?: CanvasNode
+  /** Extracted artifact nodes proposed for human review. */
+  nodes: CanvasNode[]
 }
 
 export interface PersonaAgent {
@@ -68,9 +68,9 @@ export function createPersonaAgent(personaId: string, provider: ModelProviderCon
       })
 
       // Extract artifact and clean the text
-      const { text, node } = extractArtifact(rawText)
+      const { text, nodes } = extractArtifacts(rawText)
 
-      return { text, node }
+      return { text, nodes }
     },
   }
 }
@@ -81,25 +81,28 @@ export function createPersonaAgent(personaId: string, provider: ModelProviderCon
  *
  * Also handles legacy JSON format for backwards compatibility.
  */
-export function extractArtifact(rawText: string): { text: string; node?: CanvasNode } {
-  // Match <artifact type="..." title="...">content</artifact>
-  const artifactRegex = /<artifact\s+type="([^"]+)"\s+title="([^"]*)"[^>]*>([\s\S]*?)<\/artifact>/i
-  const match = rawText.match(artifactRegex)
+export function extractArtifacts(rawText: string): { text: string; nodes: CanvasNode[] } {
+  const artifactRegex = /<artifact\s+type="([^"]+)"\s+title="([^"]*)"[^>]*>([\s\S]*?)<\/artifact>/gi
+  const nodes: CanvasNode[] = []
+  for (const match of rawText.matchAll(artifactRegex)) {
+    const type = match[1] ?? 'specification'
+    const title = match[2] || type
+    nodes.push({
+      type,
+      category: 'output',
+      title,
+      content: (match[3] ?? '').trim(),
+      status: 'proposed',
+    })
+  }
 
-  if (match) {
-    const type = match[1] ?? 'artifact'
-    const title = match[2] ?? ''
-    const content = match[3] ?? ''
+  if (nodes.length > 0) {
     const cleanedText = rawText.replace(artifactRegex, '').trim()
     return {
-      text: cleanedText || `Created **${title || type}** and added it to the canvas.`,
-      node: {
-        type,
-        category: 'output',
-        title: title || type,
-        content: content.trim(),
-        status: 'generated',
-      },
+      text:
+        cleanedText ||
+        `Created ${nodes.length} canvas ${nodes.length === 1 ? 'proposal' : 'proposals'} for review.`,
+      nodes,
     }
   }
 
@@ -113,7 +116,7 @@ export function extractArtifact(rawText: string): { text: string; node?: CanvasN
         return {
           text:
             cleaned || `Created **${(parsed.node as { title?: string }).title ?? 'artifact'}**.`,
-          node: parsed.node as CanvasNode,
+          nodes: [parsed.node as CanvasNode],
         }
       }
     } catch {
@@ -121,5 +124,11 @@ export function extractArtifact(rawText: string): { text: string; node?: CanvasN
     }
   }
 
-  return { text: rawText }
+  return { text: rawText, nodes: [] }
+}
+
+/** Backwards-compatible single-artifact helper for existing callers. */
+export function extractArtifact(rawText: string): { text: string; node?: CanvasNode } {
+  const result = extractArtifacts(rawText)
+  return { text: result.text, node: result.nodes[0] }
 }

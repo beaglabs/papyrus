@@ -2,7 +2,7 @@
 
 This directory contains Papyrus security-control documentation intended to help a customer incorporate the self-hosted product into its own Risk Management Framework (RMF), System Security Plan (SSP), assessment, and authorization workflow.
 
-## Artifact
+## Artifacts
 
 [`papyrus-component-definition.json`](./papyrus-component-definition.json) is an OSCAL 1.2.1 Component Definition covering 35 selected NIST SP 800-53 Revision 5 controls. It describes potential contributions made by the Papyrus software component and identifies responsibility as:
 
@@ -12,6 +12,8 @@ This directory contains Papyrus security-control documentation intended to help 
 - `inherited` — supplied by the operating system, platform, enclave, or another provider.
 
 The artifact is not a FedRAMP package, SSP, Security Assessment Report, certification, authorization, or assertion that a deployment satisfies the referenced controls. A customer must tailor the statements, bind them to deployed component instances, supply inherited controls, attach evidence, and assess effectiveness within its actual boundary.
+
+[`papyrus-ssp.json`](./papyrus-ssp.json) is an OSCAL 1.2.1 System Security Plan (SSP) derived from the Component Definition. It documents the system boundary, FIPS 199 categorization (Moderate), authorization boundary, network architecture, data flows, components, inventory, and implementation statements for the same 35 controls across 9 families (AC, AU, CM, IA, RA, SA, SC, SI, SR). The SSP imports the FedRAMP Rev 5 Moderate resolved profile and uses placeholder parties, components, and inventory items that the customer must replace with deployment-specific values before assessment. It is a tailorable template, not an authorization or assessment result.
 
 ## Papyrus-specific security topics
 

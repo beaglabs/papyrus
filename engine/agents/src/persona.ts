@@ -37,12 +37,31 @@ export interface PersonaAgent {
   chat: (messages: AgentMessage[]) => Promise<AgentResponse>
 }
 
+export interface PersonaAgentOptions {
+  /** Editable project-level instructions supplied by the source specification node. */
+  projectSystemPrompt?: string
+}
+
+export function buildPersonaSystemPrompt(
+  personaPrompt: string,
+  projectSystemPrompt?: string,
+): string {
+  const projectPrompt = projectSystemPrompt?.trim()
+  if (!projectPrompt) return personaPrompt
+  return `${personaPrompt}\n\n## Project System Prompt\nThe following project-specific instructions are authoritative for the work product. Follow them while retaining your assigned professional role.\n\n${projectPrompt}`
+}
+
 /**
  * Create an agent for a given persona.
  */
-export function createPersonaAgent(personaId: string, provider: ModelProviderConfig): PersonaAgent {
-  const systemPrompt = PERSONA_PROMPTS[personaId]
-  if (!systemPrompt) throw new Error(`Unknown persona: ${personaId}`)
+export function createPersonaAgent(
+  personaId: string,
+  provider: ModelProviderConfig,
+  options: PersonaAgentOptions = {},
+): PersonaAgent {
+  const personaPrompt = PERSONA_PROMPTS[personaId]
+  if (!personaPrompt) throw new Error(`Unknown persona: ${personaId}`)
+  const systemPrompt = buildPersonaSystemPrompt(personaPrompt, options.projectSystemPrompt)
 
   const personaNames: Record<string, { name: string; role: string }> = {
     pm: { name: 'Product Manager', role: 'PM' },

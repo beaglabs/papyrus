@@ -90,6 +90,7 @@ import {
   removeRole,
   requirePermission,
 } from './rbac.js'
+import { createSourceSpecificationNode, getProjectSystemPrompt } from './source-specification.js'
 
 const PORT = Number(process.env.PAPYRUS_PORT ?? 3777)
 const HOST = process.env.PAPYRUS_HOST ?? '127.0.0.1'
@@ -242,6 +243,29 @@ function getOrCreateState(id: string): ProjectState {
   }
   projects.set(id, state)
   return state
+}
+
+function ensureSourceSpecification(
+  projectId: string,
+  state: ProjectState,
+  actorKey: string,
+): CanvasNodeDoc | undefined {
+  const existing = state.nodes.find((node) => node.flowRole === 'source')
+  if (existing) return existing
+
+  const project = loadProject(projectId)
+  if (!project) return undefined
+
+  const source = createSourceSpecificationNode(projectId, project.name, actorKey)
+  state.nodes = [source, ...state.nodes]
+  commitStateMutation(projectId, state, {
+    actorKey,
+    entityType: 'node',
+    entityId: source.id,
+    operationType: 'create',
+    payload: source,
+  })
+  return source
 }
 
 function broadcast(state: ProjectState, msg: ServerMsg, exclude?: WebSocket): void {
@@ -962,23 +986,8 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
     // Assign owner role to creator
     assignRole(project.id, authCtx.memberKey, 'owner', authCtx.memberKey)
 
-    // Auto-create a Specification source node
-    const specNode: CanvasNodeDoc = {
-      id: `node-spec-${Date.now()}`,
-      projectId: project.id,
-      type: 'specification',
-      category: 'output',
-      flowRole: 'source',
-      position: { x: 100, y: 200 },
-      fields: {
-        title: name,
-        content: `# ${name}\n\nDescribe your project vision here. What are we building? Who is it for? What problem does it solve?`,
-        format: 'freeform',
-      },
-      status: 'draft',
-      createdBy: authCtx.memberKey,
-      updatedAt: Date.now(),
-    }
+    // Every project begins with an editable project-level system prompt.
+    const specNode = createSourceSpecificationNode(project.id, name, authCtx.memberKey)
 
     const state = getOrCreateState(project.id)
     state.nodes = [specNode]
@@ -1684,7 +1693,13 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
     tasks.set(taskId, task)
 
     try {
-      const agent = createPersonaAgent(persona, modelProvider)
+      const projectState = projectId ? getOrCreateState(projectId) : undefined
+      if (projectId && projectState) {
+        ensureSourceSpecification(projectId, projectState, authCtx.memberKey)
+      }
+      const agent = createPersonaAgent(persona, modelProvider, {
+        projectSystemPrompt: projectState ? getProjectSystemPrompt(projectState.nodes) : undefined,
+      })
 
       // Inject attachment context into the last user message if provided
       const effectiveMessages =
@@ -1864,7 +1879,10 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
 
     try {
       if (!modelProvider) throw new Error('LLM provider is not fully configured')
-      const agent = createPersonaAgent(persona, modelProvider)
+      ensureSourceSpecification(projectId, state, authCtx.memberKey)
+      const agent = createPersonaAgent(persona, modelProvider, {
+        projectSystemPrompt: getProjectSystemPrompt(state.nodes),
+      })
       const response = await agent.chat([
         {
           role: 'user',
@@ -2155,6 +2173,9 @@ function getDocument(state: ProjectState, projectId: string, nodeId: string): Y.
 
 function handleWS(ws: WebSocket, projectId: string, auth: AuthContext): void {
   const state = getOrCreateState(projectId)
+  // Backfill projects created before source specifications were introduced.
+  // This makes the editable system prompt a project invariant, not a new-project-only feature.
+  ensureSourceSpecification(projectId, state, auth.memberKey)
   state.clients.add(ws)
   state.wsPeerMap.set(ws, auth.memberKey)
 

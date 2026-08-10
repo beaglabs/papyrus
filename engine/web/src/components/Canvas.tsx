@@ -148,6 +148,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
   } = useCanvasSync(projectId, peerId, peerName, peerColor, token)
   const presence = usePresence()
   const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null)
+  const fittedProjectRef = useRef<string | null>(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([])
   const [editingDocumentId, setEditingDocumentId] = useState<string | null>(null)
@@ -174,6 +175,12 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
     }
     prevNodeCount.current = nodes.length
   }, [nodes])
+
+  useEffect(() => {
+    if (!rfInstance || nodes.length === 0 || fittedProjectRef.current === projectId) return
+    fittedProjectRef.current = projectId
+    requestAnimationFrame(() => rfInstance.fitView({ padding: 0.16, duration: 300 }))
+  }, [nodes.length, projectId, rfInstance])
 
   useEffect(() => {
     if (edges.length > prevEdgeCount.current) {
@@ -447,10 +454,12 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
                         letterSpacing: '0.06em',
                       }}
                     >
-                      Source specification
+                      Project system prompt
                     </div>
                     <div style={{ color: tokens.color.textDim, fontSize: 10, marginTop: 2 }}>
-                      {canEdit ? 'Shared with collaborators and agents' : 'Read-only access'}
+                      {canEdit
+                        ? 'Shared with collaborators and injected into every agent'
+                        : 'Read-only access'}
                     </div>
                   </div>
                   {canEdit && (
@@ -477,7 +486,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
                         cursor: 'pointer',
                       }}
                     >
-                      <Edit3 size={12} aria-hidden="true" /> Edit prompt
+                      <Edit3 size={12} aria-hidden="true" /> Edit system prompt
                     </button>
                   )}
                 </div>
@@ -640,7 +649,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
                   textAlign: 'center',
                 }}
               >
-                Source
+                System prompt
               </div>
             )}
           </div>
@@ -992,10 +1001,10 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
                   id="source-editor-title"
                   style={{ fontSize: 16, fontWeight: 850, color: tokens.color.text }}
                 >
-                  Edit source prompt
+                  Edit project system prompt
                 </div>
                 <div style={{ marginTop: 2, fontSize: 11, color: tokens.color.textDim }}>
-                  Saved changes sync to collaborators and become agent context.
+                  Saved changes sync to collaborators and become project-level agent instructions.
                 </div>
               </div>
               <button

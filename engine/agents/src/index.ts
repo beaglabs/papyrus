@@ -14,6 +14,8 @@ export {
   type AgentMessage,
   type AgentResponse,
   type CanvasNode,
+  type PersonaAgentOptions,
+  buildPersonaSystemPrompt,
 } from './persona.js'
 export { PERSONA_PROMPTS, TEMPLATE_PRESETS, type TemplatePreset } from './prompts.js'
 export {

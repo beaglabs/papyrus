@@ -668,11 +668,10 @@ body {
 }
 
 .canvas-node-surface {
-  cursor: grab;
   touch-action: none;
 }
 
-.react-flow__node.dragging .canvas-node-surface {
+.react-flow__node.dragging .canvas-node-drag-handle {
   cursor: grabbing;
   user-select: none;
 }

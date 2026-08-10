@@ -185,6 +185,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
         id: doc.id,
         type: 'canvasNode',
         position: doc.position,
+        dragHandle: '.canvas-node-drag-handle',
         draggable: true,
         selectable: true,
         data: doc as unknown as Record<string, unknown>,

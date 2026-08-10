@@ -667,6 +667,21 @@ body {
   border-radius: 14px;
 }
 
+.canvas-node-surface {
+  cursor: grab;
+  touch-action: none;
+}
+
+.react-flow__node.dragging .canvas-node-surface {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.canvas-node-surface .nodrag {
+  cursor: auto;
+  touch-action: auto;
+}
+
 .react-flow__handle {
   width: 8px !important;
   height: 8px !important;
@@ -1327,30 +1342,6 @@ body {
   background: var(--text-dim);
 }
 
-/* ── Presence avatars in toolbar ──────────────────────────────── */
-
-.presence-avatars {
-  display: flex;
-  align-items: center;
-}
-
-.presence-avatar {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--bg);
-  border: 2px solid var(--bg);
-  margin-left: -6px;
-}
-
-.presence-avatar:first-child {
-  margin-left: 0;
-}
-
 /* ── Connection status ────────────────────────────────────────── */
 
 .conn-status {
@@ -1370,6 +1361,9 @@ body {
 
 .conn-dot.live {
   background: var(--success);
+}
+.conn-dot.saving {
+  background: var(--accent);
 }
 .conn-dot.offline {
   background: var(--error);

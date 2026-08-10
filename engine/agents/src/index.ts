@@ -19,6 +19,12 @@ export {
 } from './persona.js'
 export { PERSONA_PROMPTS, TEMPLATE_PRESETS, type TemplatePreset } from './prompts.js'
 export {
+  PERSONA_CAPABILITIES,
+  routeAgentRequest,
+  type OrchestrationRoute,
+  type PersonaId,
+} from './orchestrator.js'
+export {
   runSkill,
   getSkillSpec,
   listSkills,

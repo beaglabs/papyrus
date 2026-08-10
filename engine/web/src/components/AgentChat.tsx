@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
-import { UswdsWireframePreview } from './UswdsWireframePreview'
+import { ArtifactRenderer } from './ArtifactRenderer'
 
 interface Persona {
   id: string
@@ -42,18 +42,24 @@ interface ChatArtifactNode {
   artifact?: unknown
 }
 
+function artifactPersona(nodes: ChatArtifactNode[]): string {
+  const artifact = nodes.find((node) => node.artifact)?.artifact
+  if (!artifact || typeof artifact !== 'object') return 'pm'
+  const producer = (artifact as { producer?: { persona?: string } }).producer
+  return producer?.persona ?? 'pm'
+}
+
 interface AgentChatProps {
-  persona: Persona
   personas: Persona[]
-  onPersonaChange: (p: Persona) => void
   projectId: string
   peerId: string
   canvasContext: string
   parentNodeIds: string[]
-  composerDraft?: { id: number; text: string }
+  composerDraft?: { id: number; text: string; targetNodeId?: string }
   onReviewNode: (nodeId: string, status: 'approved' | 'rejected') => void
   onRetryNode: (nodeId: string) => Promise<void>
   onFocusNode: (nodeId: string) => void
+  onCanvasChanged?: () => void | Promise<void>
 }
 
 const SEED_MESSAGES: Record<string, ChatMessage[]> = {
@@ -61,7 +67,7 @@ const SEED_MESSAGES: Record<string, ChatMessage[]> = {
     {
       id: 'seed-1',
       role: 'agent',
-      text: "I'm your **Product Manager**. I'll help define requirements, create user stories, and shape the product vision.\n\nWhat are we building?",
+      text: "I'm your **Papyrus agent team**. Describe the outcome you want and I'll invite the right specialist, choose the artifact, and connect it to the canvas.",
     },
   ],
   designer: [
@@ -210,9 +216,7 @@ function renderMarkdown(text: string): string {
 }
 
 export function AgentChat({
-  persona,
   personas,
-  onPersonaChange,
   projectId,
   canvasContext,
   parentNodeIds,
@@ -220,8 +224,10 @@ export function AgentChat({
   onReviewNode,
   onRetryNode,
   onFocusNode,
+  onCanvasChanged,
 }: AgentChatProps) {
-  const [messages, setMessages] = useState<ChatMessage[]>(() => SEED_MESSAGES[persona.id] ?? [])
+  const persona = personas[0] as Persona
+  const [messages, setMessages] = useState<ChatMessage[]>(() => SEED_MESSAGES.pm ?? [])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [attachments, setAttachments] = useState<string[]>([])
@@ -230,6 +236,7 @@ export function AgentChat({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const chatHistoryRef = useRef<Array<{ role: 'user' | 'assistant'; content: string }>>([])
+  const lastPersonaRef = useRef<string>()
   const { apiFetch } = useAuth()
   const mentionQuery = input.match(/(?:^|\s)@([\w-]*)$/)?.[1]?.toLowerCase()
   const mentionMatches =
@@ -250,14 +257,13 @@ export function AgentChat({
   useEffect(() => {
     if (!composerDraft) return
     setInput(composerDraft.text)
+    if (composerDraft.targetNodeId) setActiveArtifactNodeId(composerDraft.targetNodeId)
     requestAnimationFrame(() => composerRef.current?.focus())
   }, [composerDraft])
 
   useEffect(() => {
     let cancelled = false
-    void apiFetch(
-      `/api/chat?projectId=${encodeURIComponent(projectId)}&persona=${encodeURIComponent(persona.id)}`,
-    )
+    void apiFetch(`/api/chat?projectId=${encodeURIComponent(projectId)}&persona=orchestrator`)
       .then(async (response) => {
         if (!response.ok) throw new Error('Unable to load conversation')
         return response.json() as Promise<{
@@ -281,7 +287,7 @@ export function AgentChat({
             role: message.role === 'assistant' ? 'agent' : 'user',
             text: message.content,
             nodesCreated: message.nodes.length,
-            personaId: persona.id,
+            personaId: artifactPersona(message.nodes),
             nodes: message.nodes,
             artifacts: message.nodes.flatMap((node) => (node.artifact ? [node.artifact] : [])),
           })),
@@ -289,18 +295,19 @@ export function AgentChat({
         const latestArtifact = [...stored]
           .reverse()
           .flatMap((message) => message.nodes)
-          .find((node) => node.type === 'ui-mockup')
+          .find(Boolean)
         setActiveArtifactNodeId(latestArtifact?.id)
+        if (latestArtifact) lastPersonaRef.current = artifactPersona([latestArtifact])
       })
       .catch((error) => console.error('Chat history load failed:', error))
     return () => {
       cancelled = true
     }
-  }, [apiFetch, persona.id, projectId])
+  }, [apiFetch, projectId])
 
-  function resolveMention(text: string): { prompt: string; target: Persona } {
+  function resolveMention(text: string): { prompt: string; target?: Persona } {
     const match = text.match(/^@([\w-]+)\s+/)
-    if (!match) return { prompt: text, target: persona }
+    if (!match) return { prompt: text }
     const mention = match[1]?.toLowerCase()
     const aliases: Record<string, string> = {
       design: 'designer',
@@ -309,7 +316,7 @@ export function AgentChat({
       'product-manager': 'pm',
     }
     const targetId = aliases[mention ?? ''] ?? mention
-    const target = personas.find((candidate) => candidate.id === targetId) ?? persona
+    const target = personas.find((candidate) => candidate.id === targetId)
     return { prompt: text.slice(match[0].length).trim(), target }
   }
 
@@ -320,7 +327,7 @@ export function AgentChat({
     const userMsg: ChatMessage = {
       id: `msg-${Date.now()}`,
       role: 'user',
-      text: target.id === persona.id ? prompt : `@${target.id} ${prompt}`,
+      text: target ? `@${target.id} ${prompt}` : prompt,
     }
     setMessages((prev) => [...prev, userMsg])
     chatHistoryRef.current.push({ role: 'user', content: prompt })
@@ -331,7 +338,7 @@ export function AgentChat({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          persona: target.id,
+          persona: target?.id ?? lastPersonaRef.current,
           prompt,
           messages: chatHistoryRef.current.map((message, index, history) =>
             index === history.length - 1 && message.role === 'user' && canvasContext
@@ -345,9 +352,7 @@ export function AgentChat({
           attachments,
           parentNodeIds,
           targetNodeId:
-            reviseExisting &&
-            target.id === 'designer' &&
-            !/\b(new|another|separate)\b/i.test(prompt)
+            reviseExisting && !/\b(new|another|separate)\b/i.test(prompt)
               ? activeArtifactNodeId
               : undefined,
         }),
@@ -361,22 +366,25 @@ export function AgentChat({
       const data = (await res.json()) as {
         text: string
         nodes?: ChatArtifactNode[]
+        routing?: { primaryPersona: string; announcement: string }
       }
+      if (data.routing?.primaryPersona) lastPersonaRef.current = data.routing.primaryPersona
 
       chatHistoryRef.current.push({ role: 'assistant', content: data.text })
 
       const agentMsg: ChatMessage = {
         id: `msg-${Date.now() + 1}`,
         role: 'agent',
-        text: data.text,
+        text: `${data.routing?.announcement ? `${data.routing.announcement}\n\n` : ''}${data.text}`,
         nodesCreated: data.nodes?.length ?? 0,
-        personaId: target.id,
+        personaId: data.routing?.primaryPersona ?? target?.id ?? 'pm',
         artifacts: data.nodes?.flatMap((node) => (node.artifact ? [node.artifact] : [])),
         nodes: data.nodes,
       }
       setMessages((prev) => [...prev, agentMsg])
-      const latestArtifact = data.nodes?.find((node) => node.type === 'ui-mockup')
+      const latestArtifact = data.nodes?.at(-1)
       if (latestArtifact) setActiveArtifactNodeId(latestArtifact.id)
+      await onCanvasChanged?.()
       setAttachments([])
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Something went wrong'
@@ -431,42 +439,11 @@ export function AgentChat({
 
   return (
     <div className="chat-panel">
-      {/* Persona tabs */}
-      <div style={{ display: 'flex', borderBottom: `1px solid ${tokens.color.border}` }}>
-        {personas.map((p) => (
-          <button
-            key={p.id}
-            type="button"
-            onClick={() => onPersonaChange(p)}
-            style={{
-              flex: 1,
-              padding: '10px 8px',
-              background: p.id === persona.id ? tokens.color.surfaceHover : 'transparent',
-              border: 'none',
-              borderBottom: p.id === persona.id ? `2px solid ${p.color}` : '2px solid transparent',
-              color: p.id === persona.id ? tokens.color.text : tokens.color.textDim,
-              cursor: 'pointer',
-              fontFamily: tokens.font.body,
-              fontSize: 11,
-              fontWeight: 600,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: 4,
-              transition: 'all 0.15s',
-            }}
-          >
-            <p.icon size={17} strokeWidth={2.2} aria-hidden="true" />
-            <span>{p.role}</span>
-          </button>
-        ))}
-      </div>
-
       {/* Header */}
       <div className="chat-header">
-        <span className="persona-dot" style={{ background: persona.color }} />
-        <span className="persona-name">{persona.name}</span>
-        <span className="persona-role">{persona.role}</span>
+        <span className="persona-dot" style={{ background: tokens.color.accent }} />
+        <span className="persona-name">Papyrus</span>
+        <span className="persona-role">AGENT TEAM</span>
       </div>
 
       {/* Messages */}
@@ -493,7 +470,7 @@ export function AgentChat({
                   }}
                 />
                 {msg.artifacts?.map((artifact, index) => (
-                  <UswdsWireframePreview
+                  <ArtifactRenderer
                     key={`${msg.id}-artifact-${index}`}
                     artifact={artifact}
                     compact
@@ -625,18 +602,20 @@ export function AgentChat({
 
       {/* Template buttons */}
       <div className="skill-bar">
-        {(TEMPLATES[persona.id] ?? []).map((tpl) => (
-          <button
-            key={tpl.id}
-            type="button"
-            className="skill-btn"
-            onClick={() => handleTemplate(tpl)}
-            disabled={loading}
-          >
-            <span className="icon">{tpl.icon}</span>
-            {tpl.label}
-          </button>
-        ))}
+        {Object.values(TEMPLATES)
+          .flat()
+          .map((tpl) => (
+            <button
+              key={tpl.id}
+              type="button"
+              className="skill-btn"
+              onClick={() => handleTemplate(tpl)}
+              disabled={loading}
+            >
+              <span className="icon">{tpl.icon}</span>
+              {tpl.label}
+            </button>
+          ))}
       </div>
 
       {/* Input */}
@@ -681,7 +660,7 @@ export function AgentChat({
           <textarea
             ref={composerRef}
             className="chat-input"
-            placeholder={loading ? 'Working…' : `Ask ${persona.role} or @mention another agent…`}
+            placeholder={loading ? 'Working…' : 'Ask Papyrus or @mention a specialist…'}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
@@ -707,7 +686,7 @@ export function AgentChat({
             className="chat-send"
             onClick={handleSend}
             disabled={loading || !input.trim()}
-            aria-label={`Send prompt to ${persona.name}`}
+            aria-label="Send prompt to Papyrus"
           >
             <Send size={16} aria-hidden="true" />
           </button>

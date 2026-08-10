@@ -1342,6 +1342,605 @@ body {
   background: var(--text-dim);
 }
 
+/* ── Agent-first project workspace ───────────────────────────── */
+
+.agent-workspace-layout {
+  display: grid;
+  grid-template-columns: minmax(390px, 31vw) minmax(0, 1fr);
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.agent-workspace-sidebar {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-right: 2px solid var(--border);
+  overflow: hidden;
+}
+
+.agent-workspace-brand {
+  flex: 0 0 auto;
+  padding: 14px 18px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.agent-workspace-brand-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+}
+
+.agent-workspace-brand-row .papyrus-logo {
+  width: 34px;
+  height: 34px;
+}
+
+.agent-workspace-brand-row .workspace-icon-button {
+  margin-left: auto;
+}
+
+.workspace-icon-button,
+.workspace-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-muted);
+  font: 700 10px var(--font);
+  cursor: pointer;
+}
+
+.workspace-icon-button:hover,
+.workspace-control:hover {
+  color: var(--accent);
+  background: var(--surface-hover);
+}
+
+.workspace-control.icon-only {
+  width: 34px;
+  padding: 0;
+}
+
+.agent-project-heading {
+  display: grid;
+  gap: 3px;
+  margin-top: 10px;
+  min-width: 0;
+}
+
+.agent-project-heading span {
+  color: var(--accent);
+  font: 800 9px var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.agent-project-heading strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-workspace-sidebar > .chat-panel {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  border-right: 0;
+}
+
+.agent-workspace-sidebar .chat-header {
+  padding: 11px 18px;
+  background: var(--bg);
+}
+
+.agent-workspace-sidebar .chat-messages {
+  padding: 16px 18px;
+}
+
+.agent-workspace-sidebar .skill-bar {
+  padding: 8px 14px;
+}
+
+.agent-workspace-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  min-height: 42px;
+  padding: 8px 18px;
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font: 10px var(--font-mono);
+}
+
+.workspace-role {
+  margin-left: auto;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--accent-muted);
+  color: var(--accent);
+  text-transform: uppercase;
+}
+
+.workspace-readonly {
+  padding: 24px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.artifact-workspace {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  background: var(--bg);
+}
+
+.artifact-workspace.expanded {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+}
+
+.artifact-workspace-header {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  min-height: 72px;
+  padding: 12px 20px;
+  border-bottom: 2px solid var(--border);
+  background: var(--surface);
+}
+
+.artifact-workspace-header > div:first-child {
+  min-width: 130px;
+}
+
+.artifact-workspace-eyebrow {
+  display: block;
+  color: var(--accent);
+  font: 800 9px var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.artifact-workspace-header h1 {
+  margin-top: 2px;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.artifact-workspace-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  margin-left: auto;
+}
+
+.mcp-connection {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 190px;
+  padding: 6px 7px 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: #eff8f1;
+}
+
+.mcp-connection > span {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+}
+
+.mcp-connection small {
+  color: var(--text-dim);
+  font: 8px var(--font-mono);
+  text-transform: uppercase;
+}
+
+.mcp-connection strong {
+  font-size: 10px;
+}
+
+.mcp-connection button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.mcp-connection button:disabled {
+  opacity: 0.35;
+  cursor: wait;
+}
+
+.artifact-workspace-body {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+}
+
+.artifact-index {
+  min-width: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.artifact-index-heading {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 42px;
+  padding: 10px 13px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-dim);
+  font: 700 9px var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.artifact-index-heading button {
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.artifact-index-item {
+  position: relative;
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  padding: 14px 14px 15px;
+  border: 0;
+  border-bottom: 1px solid #dedede;
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.artifact-index-item:hover {
+  background: var(--surface-hover);
+}
+
+.artifact-index-item.active {
+  background: var(--surface-active);
+  box-shadow: inset 4px 0 0 var(--accent);
+}
+
+.artifact-index-type {
+  color: var(--accent);
+  font: 800 8px var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.artifact-index-item strong {
+  padding-right: 52px;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifact-index-item p {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: 10px;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.artifact-status {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #eee;
+  color: var(--text-dim);
+  font: 700 7px var(--font-mono);
+  text-transform: uppercase;
+}
+
+.artifact-status.approved {
+  background: #d8f3df;
+  color: #176b35;
+}
+
+.artifact-status.proposed {
+  background: #fff2cc;
+  color: #7a4f00;
+}
+
+.artifact-status.rejected {
+  background: #fde3e3;
+  color: #9c1c1c;
+}
+
+.artifact-index-empty {
+  padding: 22px 14px;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.artifact-detail {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.artifact-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.artifact-detail-header > div:first-child {
+  min-width: 0;
+  flex: 1;
+}
+
+.artifact-detail-header span {
+  color: var(--accent);
+  font: 800 8px var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.artifact-detail-header h2 {
+  overflow: hidden;
+  margin: 3px 0;
+  font-size: 17px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifact-detail-header p {
+  color: var(--text-dim);
+  font: 9px var(--font-mono);
+}
+
+.artifact-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.artifact-detail-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-muted);
+  font: 700 9px var(--font);
+  cursor: pointer;
+}
+
+.artifact-detail-actions button:hover {
+  color: var(--accent);
+  background: var(--surface-hover);
+}
+
+.artifact-detail-content {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 22px;
+  background: var(--bg);
+}
+
+.artifact-detail-content > .nodrag,
+.artifact-detail-content > div {
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.artifact-detail-content pre {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 20px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  white-space: pre-wrap;
+  font: 12px / 1.65 var(--font-mono);
+}
+
+.artifact-detail-empty {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  min-height: 100%;
+  padding: 40px;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.artifact-detail-empty h2 {
+  color: var(--text);
+  font-size: 18px;
+}
+
+.artifact-detail-empty p {
+  max-width: 420px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.brief-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  max-height: none;
+  padding: 0;
+  border: 0;
+  background: rgba(17, 17, 17, 0.55);
+}
+
+.brief-dialog-card {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  grid-template-rows: auto auto minmax(280px, 55vh) auto;
+  gap: 12px;
+  width: min(760px, calc(100vw - 40px));
+  max-height: calc(100vh - 40px);
+  padding: 20px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: 8px 8px 0 var(--border);
+  transform: translate(-50%, -50%);
+}
+
+.brief-dialog-card header,
+.brief-dialog-card footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brief-dialog-card header > div {
+  flex: 1;
+}
+
+.brief-dialog-card header span {
+  color: var(--accent);
+  font: 800 9px var(--font-mono);
+  text-transform: uppercase;
+}
+
+.brief-dialog-card header h2 {
+  margin-top: 2px;
+  font-size: 21px;
+}
+
+.brief-dialog-card header button,
+.brief-dialog-card footer button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 6px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: 700 10px var(--font);
+  cursor: pointer;
+}
+
+.brief-dialog-card > p {
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.brief-dialog-card textarea {
+  width: 100%;
+  min-height: 0;
+  padding: 15px;
+  resize: none;
+  border: 2px solid var(--border);
+  border-radius: var(--radius-md);
+  outline: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 12px / 1.65 var(--font-mono);
+}
+
+.brief-dialog-card textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 3px 3px 0 var(--accent-muted);
+}
+
+.brief-dialog-card footer span {
+  flex: 1;
+  color: var(--text-dim);
+  font: 9px var(--font-mono);
+}
+
+.brief-dialog-card footer button.primary {
+  background: var(--accent);
+}
+
+.brief-dialog-card footer button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+@media (max-width: 900px) {
+  .agent-workspace-layout {
+    grid-template-columns: minmax(320px, 42vw) minmax(0, 1fr);
+  }
+
+  .artifact-workspace-body {
+    grid-template-columns: 190px minmax(0, 1fr);
+  }
+
+  .mcp-connection {
+    min-width: 0;
+  }
+
+  .mcp-connection > span {
+    display: none;
+  }
+}
+
 /* ── Connection status ────────────────────────────────────────── */
 
 .conn-status {

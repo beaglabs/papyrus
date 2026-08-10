@@ -182,6 +182,27 @@ const migrations: Migration[] = [
       `)
     },
   },
+  {
+    version: 4,
+    name: 'persistent MCP project sessions',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS mcp_sessions (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          member_key TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          last_used_at TEXT NOT NULL,
+          revoked_at TEXT,
+          UNIQUE(project_id, member_key),
+          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_mcp_sessions_project
+          ON mcp_sessions(project_id, member_key);
+      `)
+    },
+  },
 ]
 
 export function runMigrations(db: Database.Database): void {

@@ -43,6 +43,8 @@ import {
   deleteWebAuthnCredential,
   getChatMessages,
   getInvite,
+  getMcpSession,
+  getOrCreateMcpSession,
   getStoredOperations,
   getWebAuthnCredential,
   getWebAuthnCredentialsForMember,
@@ -304,6 +306,268 @@ function json(res: ServerResponse, status: number, data: unknown): void {
   res.end(JSON.stringify(data))
 }
 
+interface McpRequest {
+  jsonrpc?: string
+  id?: string | number | null
+  method?: string
+  params?: Record<string, unknown>
+}
+
+const MCP_PROTOCOL_VERSION = '2025-11-25'
+
+function mcpResponse(res: ServerResponse, status: number, sessionId: string, body?: unknown): void {
+  res.writeHead(status, {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Expose-Headers': 'Mcp-Session-Id, MCP-Protocol-Version',
+    'Mcp-Session-Id': sessionId,
+    'MCP-Protocol-Version': MCP_PROTOCOL_VERSION,
+  })
+  res.end(body === undefined ? undefined : JSON.stringify(body))
+}
+
+function validMcpOrigin(req: IncomingMessage): boolean {
+  const origin = req.headers.origin
+  if (!origin) return true
+  try {
+    const originUrl = new URL(origin)
+    const requestHost = req.headers.host
+    return originUrl.host === requestHost
+  } catch {
+    return false
+  }
+}
+
+function mcpToolResult(value: unknown, isError = false): Record<string, unknown> {
+  return {
+    content: [
+      { type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) },
+    ],
+    isError,
+  }
+}
+
+const MCP_TOOLS = [
+  {
+    name: 'papyrus_get_project_context',
+    description: 'Read the project brief and a summary of the artifacts in this Papyrus session.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'papyrus_list_artifacts',
+    description: 'List typed artifacts in this Papyrus session.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'papyrus_get_artifact',
+    description: 'Read one complete Papyrus artifact by node ID.',
+    inputSchema: {
+      type: 'object',
+      properties: { nodeId: { type: 'string', description: 'Artifact node ID' } },
+      required: ['nodeId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'papyrus_get_conversation',
+    description: 'Read the persisted agent conversation for this Papyrus session.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'papyrus_update_project_brief',
+    description: 'Replace the shared project brief used as context by the Papyrus agent.',
+    inputSchema: {
+      type: 'object',
+      properties: { brief: { type: 'string', description: 'Complete replacement brief' } },
+      required: ['brief'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'papyrus_review_artifact',
+    description: 'Approve or reject a proposed Papyrus artifact.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        nodeId: { type: 'string' },
+        status: { type: 'string', enum: ['approved', 'rejected'] },
+      },
+      required: ['nodeId', 'status'],
+      additionalProperties: false,
+    },
+  },
+]
+
+async function handleMcp(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  if (!validMcpOrigin(req)) {
+    json(res, 403, { error: 'MCP Origin header does not match this Papyrus host' })
+    return
+  }
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Accept, Mcp-Session-Id, MCP-Protocol-Version',
+    })
+    res.end()
+    return
+  }
+
+  const url = new URL(req.url ?? '/mcp', `http://localhost:${PORT}`)
+  const sessionId =
+    url.searchParams.get('sessionId') ??
+    (typeof req.headers['mcp-session-id'] === 'string' ? req.headers['mcp-session-id'] : '')
+  const session = sessionId ? getMcpSession(sessionId) : null
+  if (!session || !hasPermission(session.projectId, session.memberKey, 'project:read')) {
+    json(res, 401, { error: 'Invalid or unauthorized Papyrus MCP session' })
+    return
+  }
+
+  if (req.method === 'GET') {
+    res.writeHead(405, { Allow: 'POST', 'Mcp-Session-Id': session.id })
+    res.end('This Papyrus MCP session uses request-scoped JSON responses; send requests with POST.')
+    return
+  }
+  if (req.method !== 'POST') {
+    res.writeHead(405, { Allow: 'GET, POST' })
+    res.end()
+    return
+  }
+
+  const request = (await parseBody(req)) as McpRequest
+  if (request.jsonrpc !== '2.0' || !request.method) {
+    mcpResponse(res, 400, session.id, {
+      jsonrpc: '2.0',
+      id: request.id ?? null,
+      error: { code: -32600, message: 'Invalid JSON-RPC request' },
+    })
+    return
+  }
+  if (request.id === undefined) {
+    mcpResponse(res, 202, session.id)
+    return
+  }
+
+  let result: unknown
+  if (request.method === 'initialize') {
+    result = {
+      protocolVersion: MCP_PROTOCOL_VERSION,
+      capabilities: { tools: { listChanged: false } },
+      serverInfo: { name: 'Papyrus Project Session', version: '0.1.0' },
+      instructions:
+        'This server is scoped to one Papyrus project and the member who created the connection.',
+    }
+  } else if (request.method === 'ping') {
+    result = {}
+  } else if (request.method === 'tools/list') {
+    result = { tools: MCP_TOOLS }
+  } else if (request.method === 'tools/call') {
+    const name = String(request.params?.name ?? '')
+    const args =
+      request.params?.arguments && typeof request.params.arguments === 'object'
+        ? (request.params.arguments as Record<string, unknown>)
+        : {}
+    const state = getOrCreateState(session.projectId)
+    const artifacts = state.nodes.filter((node) => node.flowRole !== 'source')
+
+    if (name === 'papyrus_get_project_context') {
+      result = mcpToolResult({
+        projectId: session.projectId,
+        brief: getProjectSystemPrompt(state.nodes),
+        artifacts: artifacts.map((node) => ({
+          id: node.id,
+          type: node.type,
+          title: node.fields.title ?? node.type,
+          status: node.status,
+          updatedAt: node.updatedAt,
+        })),
+      })
+    } else if (name === 'papyrus_list_artifacts') {
+      result = mcpToolResult(
+        artifacts.map((node) => ({
+          id: node.id,
+          type: node.type,
+          title: node.fields.title ?? node.type,
+          status: node.status,
+          updatedAt: node.updatedAt,
+        })),
+      )
+    } else if (name === 'papyrus_get_artifact') {
+      const node = artifacts.find((candidate) => candidate.id === String(args.nodeId ?? ''))
+      result = node
+        ? mcpToolResult(node)
+        : mcpToolResult(`Artifact not found: ${String(args.nodeId ?? '')}`, true)
+    } else if (name === 'papyrus_get_conversation') {
+      result = mcpToolResult(getChatMessages(session.projectId, session.memberKey, 'orchestrator'))
+    } else if (name === 'papyrus_update_project_brief') {
+      if (!hasPermission(session.projectId, session.memberKey, 'node:update')) {
+        result = mcpToolResult('Project mutation access denied', true)
+      } else {
+        const brief = String(args.brief ?? '').trim()
+        const source = state.nodes.find((node) => node.flowRole === 'source')
+        if (!brief || !source) {
+          result = mcpToolResult('A non-empty brief and source node are required', true)
+        } else {
+          source.fields = { ...source.fields, content: brief }
+          source.updatedAt = Date.now()
+          commitStateMutation(session.projectId, state, {
+            actorKey: session.memberKey,
+            entityType: 'node',
+            entityId: source.id,
+            operationType: 'update',
+            payload: source,
+          })
+          result = mcpToolResult({ updated: true, nodeId: source.id })
+        }
+      }
+    } else if (name === 'papyrus_review_artifact') {
+      if (!hasPermission(session.projectId, session.memberKey, 'node:update')) {
+        result = mcpToolResult('Project mutation access denied', true)
+      } else {
+        const status = String(args.status ?? '')
+        const node = artifacts.find((candidate) => candidate.id === String(args.nodeId ?? ''))
+        if (!node || !['approved', 'rejected'].includes(status)) {
+          result = mcpToolResult('A valid artifact node and review status are required', true)
+        } else {
+          node.status = status
+          node.flowRole = status === 'approved' ? 'artifact' : 'review'
+          node.fields = {
+            ...node.fields,
+            reviewedBy: session.memberKey,
+            reviewedAt: new Date().toISOString(),
+          }
+          node.updatedAt = Date.now()
+          commitStateMutation(session.projectId, state, {
+            actorKey: session.memberKey,
+            entityType: 'node',
+            entityId: node.id,
+            operationType: 'update',
+            payload: node,
+          })
+          result = mcpToolResult({ nodeId: node.id, status })
+        }
+      }
+    } else {
+      mcpResponse(res, 200, session.id, {
+        jsonrpc: '2.0',
+        id: request.id,
+        error: { code: -32601, message: `Unknown MCP tool or method: ${name || request.method}` },
+      })
+      return
+    }
+  } else {
+    mcpResponse(res, 200, session.id, {
+      jsonrpc: '2.0',
+      id: request.id,
+      error: { code: -32601, message: `Method not found: ${request.method}` },
+    })
+    return
+  }
+
+  mcpResponse(res, 200, session.id, { jsonrpc: '2.0', id: request.id, result })
+}
+
 async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
   const url = new URL(req.url ?? '/', `http://localhost:${PORT}`)
   const method = req.method ?? 'GET'
@@ -325,6 +589,30 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       ok: true,
       licensed: license.valid,
       projects: license.valid ? listProjects().length : 0,
+    })
+    return true
+  }
+
+  if (url.pathname === '/api/mcp/session' && method === 'GET') {
+    const authCtx = requireAuth(req, res)
+    if (!authCtx) return true
+    const projectId = url.searchParams.get('projectId')
+    if (!projectId || !hasPermission(projectId, authCtx.memberKey, 'project:read')) {
+      json(res, 403, { error: 'Project access denied' })
+      return true
+    }
+    const session = getOrCreateMcpSession(projectId, authCtx.memberKey)
+    const forwardedProto = req.headers['x-forwarded-proto']
+    const protocol =
+      typeof forwardedProto === 'string'
+        ? forwardedProto.split(',')[0]
+        : req.socket instanceof TLSSocket
+          ? 'https'
+          : 'http'
+    const host = req.headers.host ?? `${HOST}:${PORT}`
+    json(res, 200, {
+      sessionId: session.id,
+      url: `${protocol}://${host}/mcp?sessionId=${encodeURIComponent(session.id)}`,
     })
     return true
   }
@@ -2387,6 +2675,11 @@ function getDocument(state: ProjectState, projectId: string, nodeId: string): Y.
 // ── Start server ─────────────────────────────────────────────────
 
 const requestHandler = async (req: IncomingMessage, res: ServerResponse) => {
+  if (req.url?.startsWith('/mcp')) {
+    await handleMcp(req, res)
+    return
+  }
+
   // API routes
   if (req.url?.startsWith('/api/')) {
     const handled = await handleAPI(req, res)

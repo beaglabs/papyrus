@@ -475,6 +475,85 @@ export function getChatMessages(
   }))
 }
 
+export interface McpProjectSession {
+  id: string
+  projectId: string
+  memberKey: string
+  createdAt: string
+  lastUsedAt: string
+}
+
+/** Return a stable, opaque MCP bearer session for one member and project. */
+export function getOrCreateMcpSession(projectId: string, memberKey: string): McpProjectSession {
+  const database = getDb()
+  const existing = database
+    .prepare(
+      `SELECT id, project_id, member_key, created_at, last_used_at
+       FROM mcp_sessions
+       WHERE project_id = ? AND member_key = ? AND revoked_at IS NULL`,
+    )
+    .get(projectId, memberKey) as
+    | {
+        id: string
+        project_id: string
+        member_key: string
+        created_at: string
+        last_used_at: string
+      }
+    | undefined
+
+  if (existing) {
+    return {
+      id: existing.id,
+      projectId: existing.project_id,
+      memberKey: existing.member_key,
+      createdAt: existing.created_at,
+      lastUsedAt: existing.last_used_at,
+    }
+  }
+
+  const id = randomUUID()
+  const now = new Date().toISOString()
+  database
+    .prepare(
+      `INSERT INTO mcp_sessions
+       (id, project_id, member_key, created_at, last_used_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    )
+    .run(id, projectId, memberKey, now, now)
+  return { id, projectId, memberKey, createdAt: now, lastUsedAt: now }
+}
+
+/** Resolve and touch an active MCP bearer session. */
+export function getMcpSession(id: string): McpProjectSession | null {
+  const database = getDb()
+  const row = database
+    .prepare(
+      `SELECT id, project_id, member_key, created_at, last_used_at
+       FROM mcp_sessions
+       WHERE id = ? AND revoked_at IS NULL`,
+    )
+    .get(id) as
+    | {
+        id: string
+        project_id: string
+        member_key: string
+        created_at: string
+        last_used_at: string
+      }
+    | undefined
+  if (!row) return null
+  const lastUsedAt = new Date().toISOString()
+  database.prepare('UPDATE mcp_sessions SET last_used_at = ? WHERE id = ?').run(lastUsedAt, id)
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    memberKey: row.member_key,
+    createdAt: row.created_at,
+    lastUsedAt,
+  }
+}
+
 /** Delete a project and all its data. */
 export function deleteProject(id: string): boolean {
   const db = getDb()

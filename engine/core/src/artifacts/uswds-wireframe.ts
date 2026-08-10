@@ -36,6 +36,7 @@ export interface UswdsWireframeArtifact {
   title: string
   viewport: 'desktop' | 'tablet' | 'mobile'
   description?: string
+  theme?: { primaryColor?: string; accentColor?: string }
   sections: UswdsWireframeSection[]
 }
 
@@ -48,6 +49,13 @@ export const USWDS_WIREFRAME_JSON_SCHEMA = {
     title: { type: 'string', minLength: 1 },
     viewport: { enum: ['desktop', 'tablet', 'mobile'] },
     description: { type: 'string' },
+    theme: {
+      type: 'object',
+      properties: {
+        primaryColor: { type: 'string', pattern: '^#[0-9a-fA-F]{6}$' },
+        accentColor: { type: 'string', pattern: '^#[0-9a-fA-F]{6}$' },
+      },
+    },
     sections: {
       type: 'array',
       minItems: 1,
@@ -80,6 +88,9 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const isStringArray = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((item) => typeof item === 'string')
+
+const isHexColor = (value: unknown): value is string =>
+  typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value)
 
 function validSection(value: unknown): value is UswdsWireframeSection {
   if (!isRecord(value) || typeof value.kind !== 'string') return false
@@ -157,6 +168,10 @@ export function isUswdsWireframeArtifact(value: unknown): value is UswdsWirefram
     typeof value.title === 'string' &&
     value.title.trim().length > 0 &&
     ['desktop', 'tablet', 'mobile'].includes(String(value.viewport)) &&
+    (value.theme === undefined ||
+      (isRecord(value.theme) &&
+        (value.theme.primaryColor === undefined || isHexColor(value.theme.primaryColor)) &&
+        (value.theme.accentColor === undefined || isHexColor(value.theme.accentColor)))) &&
     Array.isArray(value.sections) &&
     value.sections.length > 0 &&
     value.sections.length <= 20 &&

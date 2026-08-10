@@ -412,6 +412,69 @@ export function saveDocumentState(
     )
 }
 
+export interface StoredChatMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  nodes: unknown[]
+  createdAt: string
+}
+
+export function appendChatMessage(input: {
+  id: string
+  projectId: string
+  memberKey: string
+  persona: string
+  role: 'user' | 'assistant'
+  content: string
+  nodes?: unknown[]
+}): void {
+  getDb()
+    .prepare(
+      `INSERT INTO chat_messages
+        (id, project_id, member_key, persona, role, content, nodes, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      input.id,
+      input.projectId,
+      input.memberKey,
+      input.persona,
+      input.role,
+      input.content,
+      JSON.stringify(input.nodes ?? []),
+      new Date().toISOString(),
+    )
+}
+
+export function getChatMessages(
+  projectId: string,
+  memberKey: string,
+  persona: string,
+): StoredChatMessage[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT id, role, content, nodes, created_at
+       FROM chat_messages
+       WHERE project_id = ? AND member_key = ? AND persona = ?
+       ORDER BY created_at ASC, rowid ASC`,
+    )
+    .all(projectId, memberKey, persona) as Array<{
+    id: string
+    role: 'user' | 'assistant'
+    content: string
+    nodes: string
+    created_at: string
+  }>
+  return rows.map((row) => ({
+    id: row.id,
+    role: row.role,
+    content: row.content,
+    nodes: JSON.parse(row.nodes) as unknown[],
+    createdAt: row.created_at,
+  }))
+}
+
 /** Delete a project and all its data. */
 export function deleteProject(id: string): boolean {
   const db = getDb()

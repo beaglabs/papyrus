@@ -160,6 +160,28 @@ const migrations: Migration[] = [
       `)
     },
   },
+  {
+    version: 3,
+    name: 'persistent persona conversations',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS chat_messages (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          member_key TEXT NOT NULL,
+          persona TEXT NOT NULL,
+          role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
+          content TEXT NOT NULL,
+          nodes TEXT NOT NULL DEFAULT '[]',
+          created_at TEXT NOT NULL,
+          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_chat_messages_session
+          ON chat_messages(project_id, member_key, persona, created_at);
+      `)
+    },
+  },
 ]
 
 export function runMigrations(db: Database.Database): void {

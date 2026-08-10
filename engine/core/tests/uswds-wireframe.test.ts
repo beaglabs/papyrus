@@ -52,6 +52,15 @@ describe('USWDS wireframe artifacts', () => {
     expect(artifact.sections.some((section) => section.kind === 'card-grid')).toBe(true)
   })
 
+  it('accepts safe theme colors and rejects arbitrary CSS values', () => {
+    expect(
+      isUswdsWireframeArtifact({ ...validWireframe, theme: { primaryColor: '#b50909' } }),
+    ).toBe(true)
+    expect(
+      isUswdsWireframeArtifact({ ...validWireframe, theme: { primaryColor: 'url(evil)' } }),
+    ).toBe(false)
+  })
+
   it('rejects ASCII and malformed component data', () => {
     expect(parseUswdsWireframeArtifact('| HEADER |\n| CARD |')).toBeUndefined()
     expect(

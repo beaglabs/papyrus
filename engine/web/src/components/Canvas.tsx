@@ -201,6 +201,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
     if (edges.length > prevEdgeCount.current) {
       const newEdge = edges[edges.length - 1]
       if (newEdge) {
+        requestAnimationFrame(() => rfInstance?.fitView({ padding: 0.14, duration: 450 }))
         const el = document.querySelector(`[data-id="${newEdge.id}"] .react-flow__edge-path`)
         if (el) {
           const length = (el as SVGPathElement).getTotalLength?.() ?? 200
@@ -213,7 +214,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
       }
     }
     prevEdgeCount.current = edges.length
-  }, [edges])
+  }, [edges, rfInstance])
 
   useEffect(() => {
     function handleCursorUpdate(e: Event) {
@@ -261,6 +262,8 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
         type: 'canvasNode',
         position: doc.position,
         dragHandle: '.canvas-node-drag-handle',
+        draggable: true,
+        selectable: true,
         data: doc as unknown as Record<string, unknown>,
       })),
     [nodes],
@@ -297,6 +300,53 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
     return source ? [source.id] : []
   }, [nodes, selectedNodeIds])
 
+  const reviewAgentNode = useCallback(
+    (nodeId: string, status: 'approved' | 'rejected') => {
+      const doc = nodes.find((node) => node.id === nodeId)
+      if (!doc) return
+      upsertNode({
+        ...doc,
+        flowRole: status === 'approved' ? 'artifact' : 'review',
+        status,
+        fields: {
+          ...doc.fields,
+          reviewedBy: peerId,
+          reviewedAt: new Date().toISOString(),
+        },
+        updatedAt: Date.now(),
+      })
+    },
+    [nodes, peerId, upsertNode],
+  )
+
+  const retryAgentNode = useCallback(
+    async (nodeId: string) => {
+      const response = await apiFetch('/api/retry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nodeId, projectId, persona: activePersona.id }),
+      })
+      if (!response.ok) {
+        const body = (await response.json()) as { error?: string }
+        throw new Error(body.error ?? 'Retry failed')
+      }
+    },
+    [activePersona.id, apiFetch, projectId],
+  )
+
+  const focusAgentNode = useCallback(
+    (nodeId: string) => {
+      const node = nodes.find((candidate) => candidate.id === nodeId)
+      if (!node || !rfInstance) return
+      rfInstance.setCenter(node.position.x + 320, node.position.y + 220, {
+        zoom: 0.85,
+        duration: 500,
+      })
+      setSelectedNodeIds([nodeId])
+    },
+    [nodes, rfInstance],
+  )
+
   // ── Node renderer with preview, name, retry ──────────────────
   const nodeTypes: NodeTypes = useMemo(
     () => ({
@@ -323,15 +373,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
 
         async function handleRetry() {
           try {
-            await apiFetch('/api/retry', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                nodeId: doc.id,
-                projectId: doc.projectId,
-                persona: activePersona.id,
-              }),
-            })
+            await retryAgentNode(doc.id)
           } catch (err) {
             console.error('Retry failed:', err)
           }
@@ -349,17 +391,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
         }
 
         function setProposalStatus(status: 'approved' | 'rejected') {
-          upsertNode({
-            ...doc,
-            flowRole: status === 'approved' ? 'artifact' : 'review',
-            status,
-            fields: {
-              ...doc.fields,
-              reviewedBy: peerId,
-              reviewedAt: new Date().toISOString(),
-            },
-            updatedAt: Date.now(),
-          })
+          reviewAgentNode(doc.id, status)
         }
 
         return (
@@ -595,6 +627,8 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
             {/* Node footer with actions */}
             {isOutput && canEdit && !isSource && (
               <div
+                className="nodrag"
+                onPointerDown={(event) => event.stopPropagation()}
                 style={{
                   display: 'flex',
                   gap: 4,
@@ -679,7 +713,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
         )
       },
     }),
-    [apiFetch, canEdit, activePersona.id, askPmToRefine, openProjectBrief, peerId, upsertNode],
+    [canEdit, askPmToRefine, openProjectBrief, retryAgentNode, reviewAgentNode, upsertNode],
   )
 
   const onConnect = useCallback(
@@ -859,6 +893,9 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
               canvasContext={agentCanvasContext}
               parentNodeIds={agentParentNodeIds}
               composerDraft={persona.id === 'pm' ? agentComposerDraft : undefined}
+              onReviewNode={reviewAgentNode}
+              onRetryNode={retryAgentNode}
+              onFocusNode={focusAgentNode}
             />
           </div>
         ))}

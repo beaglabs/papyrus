@@ -4,6 +4,7 @@ import {
   isUswdsWireframeArtifact,
 } from '@papyrus/core/artifacts/uswds-wireframe'
 import { Search } from 'lucide-react'
+import type { CSSProperties } from 'react'
 
 interface UswdsWireframePreviewProps {
   artifact: unknown
@@ -157,10 +158,15 @@ function Section({ section }: { section: UswdsWireframeSection }) {
 export function UswdsWireframePreview({ artifact, compact = false }: UswdsWireframePreviewProps) {
   if (!isUswdsWireframeArtifact(artifact)) return null
   const wireframe: UswdsWireframeArtifact = artifact
+  const themeStyle = {
+    '--uswds-preview-primary': wireframe.theme?.primaryColor ?? '#005ea8',
+    '--uswds-preview-accent': wireframe.theme?.accentColor ?? '#00bde3',
+  } as CSSProperties
   return (
     <div
       className={`uswds-wireframe-preview ${compact ? 'compact' : ''} viewport-${wireframe.viewport}`}
       aria-label={`${wireframe.title} wireframe preview`}
+      style={themeStyle}
     >
       <div className="uswds-preview-browser-bar">
         <span /> <span /> <span />

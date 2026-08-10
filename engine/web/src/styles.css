@@ -727,7 +727,7 @@ body {
 }
 
 .uswds-preview-browser-bar em {
-  color: #005ea8;
+  color: var(--uswds-preview-primary, #005ea8);
   font: 800 8px var(--font-mono);
   letter-spacing: 0.08em;
 }
@@ -763,14 +763,14 @@ body {
 }
 
 .uswds-preview-header strong {
-  color: #1a4480;
+  color: var(--uswds-preview-primary, #1a4480);
   font-size: 15px;
 }
 
 .uswds-preview-header nav {
   display: flex;
   gap: 12px;
-  color: #1a4480;
+  color: var(--uswds-preview-primary, #1a4480);
   font-size: 9px;
   font-weight: 700;
 }
@@ -781,7 +781,7 @@ body {
 }
 
 .uswds-preview-hero small {
-  color: #005ea8;
+  color: var(--uswds-preview-primary, #005ea8);
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -790,7 +790,7 @@ body {
 .uswds-preview-hero h3 {
   max-width: 520px;
   margin: 4px 0 7px;
-  color: #1a4480;
+  color: var(--uswds-preview-primary, #1a4480);
   font-size: 22px;
   line-height: 1.12;
 }
@@ -814,16 +814,16 @@ body {
   padding: 7px 11px;
   border: 0;
   border-radius: 4px;
-  background: #005ea8;
+  background: var(--uswds-preview-primary, #005ea8);
   color: #fff;
   font-size: 9px;
   font-weight: 800;
 }
 
 .uswds-preview-actions button + button {
-  border: 1px solid #005ea8;
+  border: 1px solid var(--uswds-preview-primary, #005ea8);
   background: #fff;
-  color: #005ea8;
+  color: var(--uswds-preview-primary, #005ea8);
 }
 
 .uswds-preview-search,
@@ -869,7 +869,7 @@ body {
 .uswds-preview-section h4,
 .uswds-preview-summary h4 {
   margin: 0 0 10px;
-  color: #1a4480;
+  color: var(--uswds-preview-primary, #1a4480);
   font-size: 14px;
 }
 
@@ -894,7 +894,7 @@ body {
 
 .uswds-preview-cards h5 {
   margin: 4px 0 5px;
-  color: #1a4480;
+  color: var(--uswds-preview-primary, #1a4480);
   font-size: 11px;
 }
 
@@ -906,7 +906,7 @@ body {
 }
 
 .uswds-preview-cards a {
-  color: #005ea8;
+  color: var(--uswds-preview-primary, #005ea8);
   font-size: 9px;
   font-weight: 700;
   text-decoration: underline;
@@ -915,7 +915,7 @@ body {
 .uswds-preview-summary {
   margin: 4px 18px 16px;
   padding: 13px;
-  border-left: 5px solid #00bde3;
+  border-left: 5px solid var(--uswds-preview-accent, #00bde3);
   background: #e7f6f8;
 }
 

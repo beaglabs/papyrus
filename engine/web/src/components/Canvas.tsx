@@ -185,7 +185,6 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
         id: doc.id,
         type: 'canvasNode',
         position: doc.position,
-        dragHandle: '.canvas-node-drag-handle',
         draggable: true,
         selectable: true,
         data: doc as unknown as Record<string, unknown>,
@@ -512,7 +511,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
             nodesDraggable
             selectNodesOnDrag
             nodeDragThreshold={1}
-            panOnDrag={[1, 2]}
+            panOnDrag
             noDragClassName="nodrag"
             noPanClassName="nopan"
             fitView

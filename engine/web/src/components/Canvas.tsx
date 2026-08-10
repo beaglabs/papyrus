@@ -269,7 +269,6 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
         position: doc.position,
         draggable: true,
         selectable: true,
-        dragHandle: '.canvas-node-drag-surface',
         data: doc as unknown as Record<string, unknown>,
       })),
     [nodes],
@@ -455,7 +454,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
 
         return (
           <div
-            className="canvas-node-drag-surface"
+            className="canvas-node-surface"
             data-canvas-node-id={doc.id}
             style={{
               background: tokens.color.surface,
@@ -999,6 +998,10 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
           }
           onInit={setRfInstance}
           nodeTypes={nodeTypes}
+          nodesDraggable
+          selectNodesOnDrag
+          nodeDragThreshold={1}
+          panOnDrag={[1, 2]}
           noDragClassName="nodrag"
           noPanClassName="nopan"
           fitView

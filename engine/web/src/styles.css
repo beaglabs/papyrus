@@ -667,17 +667,17 @@ body {
   border-radius: 14px;
 }
 
-.canvas-node-drag-surface {
+.canvas-node-surface {
   cursor: grab;
   touch-action: none;
 }
 
-.react-flow__node.dragging .canvas-node-drag-surface {
+.react-flow__node.dragging .canvas-node-surface {
   cursor: grabbing;
   user-select: none;
 }
 
-.canvas-node-drag-surface .nodrag {
+.canvas-node-surface .nodrag {
   cursor: auto;
   touch-action: auto;
 }

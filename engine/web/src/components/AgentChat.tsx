@@ -54,7 +54,7 @@ interface AgentChatProps {
   peerId: string
   canvasContext: string
   parentNodeIds: string[]
-  composerDraft?: { id: number; text: string }
+  composerDraft?: { id: number; text: string; targetNodeId?: string }
   onReviewNode: (nodeId: string, status: 'approved' | 'rejected') => void
   onRetryNode: (nodeId: string) => Promise<void>
   onFocusNode: (nodeId: string) => void
@@ -254,6 +254,7 @@ export function AgentChat({
   useEffect(() => {
     if (!composerDraft) return
     setInput(composerDraft.text)
+    if (composerDraft.targetNodeId) setActiveArtifactNodeId(composerDraft.targetNodeId)
     requestAnimationFrame(() => composerRef.current?.focus())
   }, [composerDraft])
 

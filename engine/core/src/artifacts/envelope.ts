@@ -33,6 +33,7 @@ export interface ArtifactEnvelope {
   entrypoint?: string
   producer?: { persona: string; skill?: string; tool?: string }
   lineage?: { parentNodeIds?: string[]; revisionOf?: string }
+  revision?: { number: number; savedAt: string; savedBy?: string }
   permissions?: {
     network?: 'none' | 'approval' | 'allowed'
     credentials?: string[]

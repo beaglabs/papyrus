@@ -11,7 +11,11 @@ import {
   type ReactFlowInstance,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { isArtifactEnvelope, unwrapUswdsArtifact } from '@papyrus/core/artifacts/envelope'
+import {
+  type ArtifactEnvelope,
+  isArtifactEnvelope,
+  unwrapUswdsArtifact,
+} from '@papyrus/core/artifacts/envelope'
 import { tokens } from '@papyrus/core/design'
 import type { CanvasNodeDoc, EdgeDoc } from '@papyrus/core/nodes/types'
 import gsap from 'gsap'
@@ -147,7 +151,11 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([])
   const [briefDraft, setBriefDraft] = useState('')
   const [briefEditing, setBriefEditing] = useState(false)
-  const [agentComposerDraft, setAgentComposerDraft] = useState<{ id: number; text: string }>()
+  const [agentComposerDraft, setAgentComposerDraft] = useState<{
+    id: number
+    text: string
+    targetNodeId?: string
+  }>()
   const briefEditorRef = useRef<HTMLTextAreaElement>(null)
   const lastSyncedBriefRef = useRef('')
 
@@ -418,6 +426,32 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
           reviewAgentNode(doc.id, status)
         }
 
+        function saveArtifactRevision(artifact: ArtifactEnvelope) {
+          const savedArtifact: ArtifactEnvelope = {
+            ...artifact,
+            revision: artifact.revision ? { ...artifact.revision, savedBy: peerId } : undefined,
+          }
+          upsertNode({
+            ...doc,
+            fields: {
+              ...doc.fields,
+              artifact: savedArtifact,
+              content: JSON.stringify(savedArtifact, null, 2),
+              humanEditedAt: new Date().toISOString(),
+              humanEditedBy: peerId,
+            },
+            updatedAt: Date.now(),
+          })
+        }
+
+        function askAgentToModifyArtifact() {
+          setAgentComposerDraft({
+            id: Date.now(),
+            targetNodeId: doc.id,
+            text: `Modify the existing artifact "${title}". Describe the requested change here: `,
+          })
+        }
+
         return (
           <div
             data-canvas-node-id={doc.id}
@@ -542,7 +576,18 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
               )}
 
               {hasArtifact ? (
-                <ArtifactRenderer artifact={doc.fields.artifact} />
+                <ArtifactRenderer
+                  artifact={doc.fields.artifact}
+                  status={doc.status}
+                  onSaveArtifact={saveArtifactRevision}
+                  onAskAgent={askAgentToModifyArtifact}
+                  onApprove={
+                    doc.status === 'proposed' ? () => setProposalStatus('approved') : undefined
+                  }
+                  onReject={
+                    doc.status === 'proposed' ? () => setProposalStatus('rejected') : undefined
+                  }
+                />
               ) : isSource ? (
                 <>
                   <div
@@ -748,7 +793,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
         )
       },
     }),
-    [canEdit, askPmToRefine, openProjectBrief, retryAgentNode, reviewAgentNode, upsertNode],
+    [canEdit, askPmToRefine, openProjectBrief, peerId, retryAgentNode, reviewAgentNode, upsertNode],
   )
 
   const onConnect = useCallback(

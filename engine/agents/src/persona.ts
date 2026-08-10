@@ -3,7 +3,10 @@ import {
   coerceArtifactEnvelope,
   unwrapUswdsArtifact,
 } from '@papyrus/core/artifacts/envelope'
-import { createFallbackUswdsWireframe } from '@papyrus/core/artifacts/uswds-wireframe'
+import {
+  createFallbackUswdsWireframe,
+  parseUswdsWireframeArtifact,
+} from '@papyrus/core/artifacts/uswds-wireframe'
 /**
  * Persona agent — calls the configured model provider with a persona
  * system prompt and returns structured responses.
@@ -237,6 +240,12 @@ export function extractArtifacts(
 
   const standaloneWireframe = parseUswdsWireframeArtifact(rawText)
   if (standaloneWireframe) {
+    const artifact = coerceArtifactEnvelope(
+      'ui-mockup',
+      standaloneWireframe.title,
+      JSON.stringify(standaloneWireframe),
+      persona,
+    )
     return {
       text: 'Created a USWDS wireframe proposal for review.',
       nodes: [
@@ -246,7 +255,7 @@ export function extractArtifacts(
           title: standaloneWireframe.title,
           content: JSON.stringify(standaloneWireframe, null, 2),
           status: 'proposed',
-          artifact: standaloneWireframe,
+          artifact,
         },
       ],
     }

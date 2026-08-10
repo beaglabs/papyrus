@@ -1738,6 +1738,7 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
             fields: {
               title: proposedNode.title,
               content: proposedNode.content,
+              ...(proposedNode.artifact ? { artifact: proposedNode.artifact } : {}),
               requestedPersona: persona,
             },
             status: 'proposed',
@@ -1797,6 +1798,7 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
           type: node.type,
           title: node.fields.title,
           status: node.status,
+          artifact: node.fields.artifact,
         })),
         taskId,
       })
@@ -1895,6 +1897,7 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
         // Update the existing node
         existingNode.fields.title = replacement.title
         existingNode.fields.content = replacement.content
+        if (replacement.artifact) existingNode.fields.artifact = replacement.artifact
         existingNode.updatedAt = Date.now()
         existingNode.status = 'regenerated'
 

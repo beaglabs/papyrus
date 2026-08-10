@@ -2,6 +2,7 @@ import { tokens } from '@papyrus/core/design'
 import { AtSign, Boxes, type LucideIcon, Paperclip, Send, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
+import { UswdsWireframePreview } from './UswdsWireframePreview'
 
 interface Persona {
   id: string
@@ -18,6 +19,7 @@ interface ChatMessage {
   text: string
   nodesCreated?: number
   personaId?: string
+  artifacts?: unknown[]
 }
 
 interface AgentChatProps {
@@ -97,7 +99,8 @@ const TEMPLATES: Record<string, TemplateBtn[]> = {
       id: 'wireframe',
       label: 'Wireframe',
       icon: '\u{1F3A8}',
-      prompt: 'Create a wireframe for the main dashboard interface.',
+      prompt:
+        'Create and render a desktop wireframe for the primary user workflow. Return a ui-mockup artifact using the papyrus.uswds-wireframe/v1 JSON schema and USWDS components. Do not return ASCII art, markdown diagrams, or prose in place of the artifact.',
     },
     {
       id: 'design-sys',
@@ -278,7 +281,13 @@ export function AgentChat({
 
       const data = (await res.json()) as {
         text: string
-        nodes?: Array<{ id: string; type: string; title: string; status: string }>
+        nodes?: Array<{
+          id: string
+          type: string
+          title: string
+          status: string
+          artifact?: unknown
+        }>
       }
 
       chatHistoryRef.current.push({ role: 'assistant', content: data.text })
@@ -289,6 +298,7 @@ export function AgentChat({
         text: data.text,
         nodesCreated: data.nodes?.length ?? 0,
         personaId: target.id,
+        artifacts: data.nodes?.flatMap((node) => (node.artifact ? [node.artifact] : [])),
       }
       setMessages((prev) => [...prev, agentMsg])
       setAttachments([])
@@ -394,6 +404,13 @@ export function AgentChat({
                     __html: renderMarkdown(msg.text),
                   }}
                 />
+                {msg.artifacts?.map((artifact, index) => (
+                  <UswdsWireframePreview
+                    key={`${msg.id}-artifact-${index}`}
+                    artifact={artifact}
+                    compact
+                  />
+                ))}
                 {!!msg.nodesCreated && (
                   <div
                     style={{

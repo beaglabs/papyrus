@@ -23,7 +23,12 @@ export const OUTPUT_NODES: NodeTypeSpec[] = [
     fields: [
       { key: 'title', label: 'Title', type: 'text', required: true },
       { key: 'content', label: 'Specification', type: 'markdown', required: true },
-      { key: 'format', label: 'Format', type: 'select', options: ['freeform', 'prd', 'rfp', 'user-story'] },
+      {
+        key: 'format',
+        label: 'Format',
+        type: 'select',
+        options: ['freeform', 'prd', 'rfp', 'user-story'],
+      },
     ],
   },
   {
@@ -36,9 +41,20 @@ export const OUTPUT_NODES: NodeTypeSpec[] = [
     fields: [
       { key: 'title', label: 'Title', type: 'text', required: true },
       { key: 'content', label: 'Description', type: 'markdown' },
+      {
+        key: 'artifact',
+        label: 'USWDS Wireframe',
+        type: 'schema',
+        schemaRef: 'papyrus.uswds-wireframe/v1',
+      },
       { key: 'preview', label: 'Preview HTML', type: 'blob' },
       { key: 'code', label: 'Source Code', type: 'blob' },
-      { key: 'framework', label: 'Framework', type: 'select', options: ['html', 'react', 'vue', 'svelte'] },
+      {
+        key: 'framework',
+        label: 'Framework',
+        type: 'select',
+        options: ['html', 'react', 'vue', 'svelte'],
+      },
     ],
   },
   {
@@ -53,7 +69,12 @@ export const OUTPUT_NODES: NodeTypeSpec[] = [
       { key: 'content', label: 'Description', type: 'markdown' },
       { key: 'preview', label: 'Preview', type: 'blob' },
       { key: 'code', label: 'Source Code', type: 'blob' },
-      { key: 'stack', label: 'Stack', type: 'select', options: ['react-node', 'nextjs', 'vue-node', 'remix', 'sveltekit'] },
+      {
+        key: 'stack',
+        label: 'Stack',
+        type: 'select',
+        options: ['react-node', 'nextjs', 'vue-node', 'remix', 'sveltekit'],
+      },
     ],
   },
   {
@@ -97,7 +118,12 @@ export const OUTPUT_NODES: NodeTypeSpec[] = [
       { key: 'preview', label: 'Interactive Docs', type: 'blob' },
       { key: 'code', label: 'Source Code', type: 'blob' },
       { key: 'spec', label: 'OpenAPI Spec', type: 'json' },
-      { key: 'protocol', label: 'Protocol', type: 'select', options: ['rest', 'graphql', 'grpc', 'websocket'] },
+      {
+        key: 'protocol',
+        label: 'Protocol',
+        type: 'select',
+        options: ['rest', 'graphql', 'grpc', 'websocket'],
+      },
     ],
   },
   {
@@ -112,7 +138,12 @@ export const OUTPUT_NODES: NodeTypeSpec[] = [
       { key: 'content', label: 'Content', type: 'markdown' },
       { key: 'preview', label: 'Preview', type: 'blob' },
       { key: 'data', label: 'Data', type: 'json' },
-      { key: 'format', label: 'Format', type: 'select', options: ['pdf', 'docx', 'xlsx', 'pptx', 'csv', 'json'] },
+      {
+        key: 'format',
+        label: 'Format',
+        type: 'select',
+        options: ['pdf', 'docx', 'xlsx', 'pptx', 'csv', 'json'],
+      },
     ],
   },
 ]

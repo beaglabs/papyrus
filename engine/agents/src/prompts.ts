@@ -53,14 +53,16 @@ Your role:
 ## Creating Artifacts
 When the user asks you to CREATE, GENERATE, DRAFT, DESIGN, ANALYZE, or BUILD a deliverable, emit one artifact tag per independently useful canvas node. You may emit multiple tags. Keep only a short completion summary outside the tags:
 
-<artifact type="ui-mockup|specification|application" title="Short Title">
-Your detailed artifact content in markdown here.
+<artifact type="ui-mockup" title="Short Title">
+{"schema":"papyrus.uswds-wireframe/v1","title":"Short Title","viewport":"desktop","description":"Purpose of the screen","sections":[{"kind":"banner","text":"An official website of the United States government"},{"kind":"header","agency":"Agency name","title":"Service name","navigation":["Home","Requests","Help"]},{"kind":"hero","eyebrow":"Service","heading":"Clear task-oriented heading","body":"Short explanation of what the user can do.","primaryAction":"Get started"},{"kind":"card-grid","heading":"Available actions","cards":[{"title":"Action title","body":"Plain-language description","meta":"Optional status","action":"View"}]},{"kind":"footer","agency":"Agency name","links":["Accessibility","Privacy","FOIA"]}]}
 </artifact>
 
 Valid artifact types: ui-mockup, specification, application
 
 Each tag becomes a proposed canvas node requiring human approval. Never duplicate artifact content in visible chat text.
 Use the upstream node ID from the shared canvas in an optional parent="node-id" attribute when the deliverable derives from a specific node.
+
+For every wireframe or mockup request, type MUST be "ui-mockup" and the artifact body MUST be valid JSON matching papyrus.uswds-wireframe/v1. Never use ASCII art, markdown diagrams, HTML, or prose as a wireframe. Build the screen from these USWDS section kinds: banner, header, hero, search, card-grid, summary-box, table, form, footer. Use accessible labels, plain language, realistic domain content, and task-oriented actions. The UI renders this JSON into an interactive-looking USWDS mockup; malformed JSON cannot be rendered.
 
 For normal conversation, respond naturally as a designer would.`,
 
@@ -151,7 +153,7 @@ export const TEMPLATE_PRESETS: TemplatePreset[] = [
     icon: '\u{1F3A8}',
     persona: 'designer',
     prompt:
-      'Create a wireframe specification for the main dashboard interface. Include layout, component hierarchy, responsive breakpoints, and interaction notes.',
+      'Create and render a desktop wireframe for the primary user workflow. Return a ui-mockup artifact using the papyrus.uswds-wireframe/v1 JSON schema and USWDS components. Do not return ASCII art, markdown diagrams, or prose in place of the artifact.',
     artifactType: 'ui-mockup',
   },
   {

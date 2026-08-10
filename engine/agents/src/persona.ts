@@ -1,3 +1,7 @@
+import {
+  type UswdsWireframeArtifact,
+  parseUswdsWireframeArtifact,
+} from '@papyrus/core/artifacts/uswds-wireframe'
 /**
  * Persona agent — calls the configured model provider with a persona
  * system prompt and returns structured responses.
@@ -21,6 +25,7 @@ export interface CanvasNode {
   content: string
   status: string
   parentId?: string
+  artifact?: UswdsWireframeArtifact
 }
 
 export interface AgentResponse {
@@ -80,17 +85,38 @@ export function createPersonaAgent(
     name,
     role,
     chat: async (messages: AgentMessage[]): Promise<AgentResponse> => {
-      const rawText = await generateModelText(provider, {
+      let rawText = await generateModelText(provider, {
         system: systemPrompt,
         messages: messages.map((m) => ({ role: m.role, content: m.content })),
         temperature: 0.7,
         maxOutputTokens: 4096,
       })
 
-      // Extract artifact and clean the text
-      const { text, nodes } = extractArtifacts(rawText)
+      let result = extractArtifacts(rawText)
+      const request = messages.at(-1)?.content ?? ''
+      if (
+        personaId === 'designer' &&
+        /\b(wireframe|mockup)\b/i.test(request) &&
+        !result.nodes.some((node) => node.type === 'ui-mockup' && node.artifact)
+      ) {
+        rawText = await generateModelText(provider, {
+          system: systemPrompt,
+          messages: [
+            ...messages.map((message) => ({ role: message.role, content: message.content })),
+            { role: 'assistant', content: rawText },
+            {
+              role: 'user',
+              content:
+                'Repair the deliverable. Return one ui-mockup artifact whose body is valid papyrus.uswds-wireframe/v1 JSON. Use USWDS section kinds only. Do not use ASCII art, markdown, prose, or HTML inside the artifact.',
+            },
+          ],
+          temperature: 0.2,
+          maxOutputTokens: 4096,
+        })
+        result = extractArtifacts(rawText)
+      }
 
-      return { text, nodes }
+      return result
     },
   }
 }
@@ -104,6 +130,7 @@ export function createPersonaAgent(
 export function extractArtifacts(rawText: string): { text: string; nodes: CanvasNode[] } {
   const artifactRegex = /<artifact\s+([^>]+)>([\s\S]*?)<\/artifact>/gi
   const nodes: CanvasNode[] = []
+  let invalidWireframes = 0
   for (const match of rawText.matchAll(artifactRegex)) {
     const attributes = new Map<string, string>()
     for (const attribute of (match[1] ?? '').matchAll(/([\w-]+)="([^"]*)"/g)) {
@@ -111,22 +138,31 @@ export function extractArtifacts(rawText: string): { text: string; nodes: Canvas
     }
     const type = attributes.get('type') || 'specification'
     const title = attributes.get('title') || type
+    const content = (match[2] ?? '').trim()
+    const artifact = type === 'ui-mockup' ? parseUswdsWireframeArtifact(content) : undefined
+    if (type === 'ui-mockup' && !artifact) {
+      invalidWireframes++
+      continue
+    }
     nodes.push({
       type,
       category: 'output',
       title,
-      content: (match[2] ?? '').trim(),
+      content,
       status: 'proposed',
       parentId: attributes.get('parent') || undefined,
+      artifact,
     })
   }
 
-  if (nodes.length > 0) {
+  if (nodes.length > 0 || invalidWireframes > 0) {
     const cleanedText = rawText.replace(artifactRegex, '').trim()
     return {
       text:
         cleanedText ||
-        `Created ${nodes.length} canvas ${nodes.length === 1 ? 'proposal' : 'proposals'} for review.`,
+        (invalidWireframes > 0
+          ? 'The wireframe response did not match the required USWDS artifact schema. Please retry.'
+          : `Created ${nodes.length} canvas ${nodes.length === 1 ? 'proposal' : 'proposals'} for review.`),
       nodes,
     }
   }

@@ -9,6 +9,7 @@ import {
   type ReactFlowInstance,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
+import { isUswdsWireframeArtifact } from '@papyrus/core/artifacts/uswds-wireframe'
 import { tokens } from '@papyrus/core/design'
 import type { CanvasNodeDoc, EdgeDoc } from '@papyrus/core/nodes/types'
 import gsap from 'gsap'
@@ -34,6 +35,7 @@ import { useCanvasSync } from '../hooks/useCanvasSync'
 import { usePresence } from '../hooks/usePresence'
 import { AgentChat } from './AgentChat'
 import { TaskList } from './TaskList'
+import { UswdsWireframePreview } from './UswdsWireframePreview'
 
 const PEER_COLORS = ['#ff5f1f', '#a78bfa', '#60a5fa', '#34d399', '#facc15']
 
@@ -307,11 +309,13 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
         const isOutput = doc.category === 'output'
         const isSource = doc.flowRole === 'source'
         const isGenerating = doc.status === 'running'
+        const isWireframe =
+          doc.type === 'ui-mockup' && isUswdsWireframeArtifact(doc.fields.artifact)
         const [showPreview, setShowPreview] = useState(false)
         const [editingName, setEditingName] = useState(false)
         const [nameValue, setNameValue] = useState(title)
         const isEditableSpec = doc.type === 'specification' || doc.flowRole === 'source'
-        const nodeWidth = isSource ? 360 : isEditableSpec ? 520 : 340
+        const nodeWidth = isWireframe ? 640 : isSource ? 360 : isEditableSpec ? 520 : 340
 
         useEffect(() => {
           if (!editingName) setNameValue(title)
@@ -474,7 +478,9 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
                 </div>
               )}
 
-              {isSource ? (
+              {isWireframe ? (
+                <UswdsWireframePreview artifact={doc.fields.artifact} />
+              ) : isSource ? (
                 <>
                   <div
                     style={{

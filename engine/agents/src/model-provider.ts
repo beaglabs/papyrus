@@ -77,24 +77,7 @@ A peer-to-peer platform for real-time drone asset tracking across distributed te
 4. Geofencing with configurable alert rules
 </artifact>`,
   designer: `<artifact type="ui-mockup" title="Tracking Dashboard Wireframe">
-# Tracking Dashboard Wireframe
-
-## Layout
-- **Left Panel**: Drone fleet list with status indicators (online/offline/alert)
-- **Center**: Interactive map with drone positions, geofences, and flight paths
-- **Right Panel**: Selected drone details — telemetry, battery, signal strength
-
-## Key Screens
-1. **Mission Overview** — Full-screen map with all active assets
-2. **Drone Detail** — Telemetry charts, camera feed, command controls
-3. **Alert Center** — Prioritized notification feed with acknowledgment
-4. **Fleet Management** — Registration, maintenance scheduling, crew assignment
-
-## Design Principles
-- Dark theme for low-light operations
-- Large touch targets for gloved use
-- High-contrast status colors (green/yellow/red)
-- Minimal cognitive load — information at a glance
+{"schema":"papyrus.uswds-wireframe/v1","title":"UAS Marketplace","viewport":"desktop","description":"Federal marketplace discovery and onboarding dashboard","sections":[{"kind":"banner","text":"An official website of the United States government"},{"kind":"header","agency":"U.S. Army","title":"UAS Marketplace","navigation":["Marketplace","My requests","Vendors","Help"]},{"kind":"hero","eyebrow":"Commercial solutions","heading":"Find mission-ready UAS capabilities","body":"Search verified commercial systems, components, and enabling technologies available for evaluation.","primaryAction":"Browse capabilities","secondaryAction":"Submit a requirement"},{"kind":"search","label":"Search the UAS Marketplace","placeholder":"Search platforms, payloads, components, or vendors","buttonLabel":"Search"},{"kind":"card-grid","heading":"Featured capabilities","cards":[{"title":"Group 2 reconnaissance platform","body":"Modular ISR platform with government-defined interface documentation.","meta":"Assessment ready","action":"View capability"},{"title":"Navigation module","body":"Assured positioning component designed for contested environments.","meta":"Technical data available","action":"View capability"},{"title":"Payload integration kit","body":"Open interface kit for rapid sensor integration and evaluation.","meta":"New","action":"View capability"}]},{"kind":"summary-box","heading":"Need help defining a requirement?","body":"Start with a mission need and the marketplace team will help structure evaluation criteria.","items":["Describe the operational need","Identify constraints","Compare eligible capabilities"]},{"kind":"footer","agency":"U.S. Army","links":["Accessibility","Privacy","FOIA","Contact"]}]}
 </artifact>`,
   engineer: `<artifact type="application" title="System Architecture">
 # System Architecture

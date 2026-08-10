@@ -1,46 +1,29 @@
-import {
-  Background,
-  Controls,
-  type Edge,
-  MiniMap,
-  type Node,
-  ReactFlow,
-  type ReactFlowInstance,
-} from '@xyflow/react'
-import '@xyflow/react/dist/style.css'
+import type { ArtifactEnvelope } from '@papyrus/core/artifacts/envelope'
 import { tokens } from '@papyrus/core/design'
-import type { CanvasNodeDoc, EdgeDoc } from '@papyrus/core/nodes/types'
-import gsap from 'gsap'
+import type { CanvasNodeDoc } from '@papyrus/core/nodes/types'
 import {
   ArrowLeft,
-  BriefcaseBusiness,
+  Check,
+  Clipboard,
   Code2,
+  Copy,
   FileText,
+  Maximize2,
+  Minimize2,
+  Network,
   Palette,
-  PanelLeftClose,
-  PanelLeftOpen,
+  Pencil,
+  RefreshCw,
   Save,
   ShieldCheck,
   Sparkles,
+  X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useCanvas } from '../hooks/useCanvas'
 import { AgentChat } from './AgentChat'
-import {
-  type AgentComposerDraft,
-  CanvasNode,
-  type CanvasNodeActions,
-  CanvasNodeActionsContext,
-} from './CanvasNode'
-import { TaskList } from './TaskList'
-
-// Module-scope nodeTypes — stable reference forever. React Flow treats a new
-// nodeTypes object (or a new component inside it) as a brand-new node type and
-// remounts every node, which kills drags. The CanvasNode component reads its
-// mutable parent state through CanvasNodeActionsContext, so neither the
-// nodeTypes object nor the CanvasNode reference ever needs to change.
-const nodeTypes = { canvasNode: CanvasNode }
+import { ArtifactRenderer } from './ArtifactRenderer'
 
 const PERSONA_LIST = [
   {
@@ -48,7 +31,7 @@ const PERSONA_LIST = [
     name: 'Product Manager',
     role: 'PM',
     color: tokens.color.persona.pm ?? '#ff5f1f',
-    icon: BriefcaseBusiness,
+    icon: Clipboard,
     description: 'Defines requirements and product vision.',
   },
   {
@@ -83,154 +66,90 @@ interface CanvasProps {
   onBack: () => void
 }
 
+interface McpSessionInfo {
+  sessionId: string
+  url: string
+}
+
+function artifactTitle(node: CanvasNodeDoc): string {
+  return String(node.fields.title ?? node.type)
+}
+
+function artifactPreview(node: CanvasNodeDoc): string {
+  const content = String(node.fields.content ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return content.slice(0, 110) || 'No summary available.'
+}
+
 export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
   const { apiFetch, loadProjectRole, clearProjectRole, projectRole, user } = useAuth()
   const peerId = user?.memberKey ?? 'anonymous'
-  const {
-    nodes,
-    edges,
-    loading,
-    saving,
-    refresh,
-    persistNodePosition,
-    upsertNode,
-    deleteNode,
-    addEdge,
-    deleteEdge,
-    onNodesChange,
-    onEdgesChange,
-  } = useCanvas(projectId, apiFetch)
-  const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null)
-  const fittedProjectRef = useRef<string | null>(null)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([])
+  const { nodes, loading, saving, refresh, upsertNode } = useCanvas(projectId, apiFetch)
+  const [selectedNodeId, setSelectedNodeId] = useState<string>()
   const [briefDraft, setBriefDraft] = useState('')
-  const [briefEditing, setBriefEditing] = useState(false)
+  const [briefOpen, setBriefOpen] = useState(false)
+  const [workspaceExpanded, setWorkspaceExpanded] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const [mcpSession, setMcpSession] = useState<McpSessionInfo>()
   const [agentComposerDraft, setAgentComposerDraft] = useState<{
     id: number
     text: string
     targetNodeId?: string
   }>()
   const briefEditorRef = useRef<HTMLTextAreaElement>(null)
-  const lastSyncedBriefRef = useRef('')
 
   useEffect(() => {
     loadProjectRole(projectId)
     return () => clearProjectRole()
   }, [projectId, loadProjectRole, clearProjectRole])
 
+  useEffect(() => {
+    let cancelled = false
+    void apiFetch(`/api/mcp/session?projectId=${encodeURIComponent(projectId)}`)
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Unable to create MCP session')
+        return response.json() as Promise<McpSessionInfo>
+      })
+      .then((session) => {
+        if (!cancelled) setMcpSession(session)
+      })
+      .catch((error) => console.error('MCP session load failed', error))
+    return () => {
+      cancelled = true
+    }
+  }, [apiFetch, projectId])
+
   const canEdit = projectRole === 'owner' || projectRole === 'editor' || projectRole === null
   const sourceNode = useMemo(() => nodes.find((node) => node.flowRole === 'source'), [nodes])
   const sourceContent = String(sourceNode?.fields.content ?? '')
-  const briefDirty = briefDraft !== sourceContent
-
-  useEffect(() => {
-    if (!briefEditing && (briefDraft === '' || briefDraft === lastSyncedBriefRef.current)) {
-      setBriefDraft(sourceContent)
-    }
-    lastSyncedBriefRef.current = sourceContent
-  }, [briefDraft, briefEditing, sourceContent])
-
-  const saveProjectBrief = useCallback(() => {
-    if (!sourceNode || !briefDirty) return
-    upsertNode({
-      ...sourceNode,
-      fields: { ...sourceNode.fields, content: briefDraft },
-      updatedAt: Date.now(),
-    })
-  }, [briefDirty, briefDraft, sourceNode, upsertNode])
-
-  const openProjectBrief = useCallback(() => {
-    setSidebarCollapsed(false)
-    requestAnimationFrame(() => briefEditorRef.current?.focus())
-  }, [])
-
-  const askPmToRefine = useCallback(() => {
-    if (briefDirty) saveProjectBrief()
-    setAgentComposerDraft({
-      id: Date.now(),
-      text: `Review and refine the current project brief. Preserve the intent, remove ambiguity, and propose a clearer version for my approval.\n\nCurrent brief:\n${briefDraft || sourceContent}`,
-    })
-  }, [briefDirty, briefDraft, saveProjectBrief, sourceContent])
-
-  const prevEdgeCount = useRef(edges.length)
-  useEffect(() => {
-    if (!rfInstance || nodes.length === 0 || fittedProjectRef.current === projectId) return
-    fittedProjectRef.current = projectId
-    requestAnimationFrame(() => rfInstance.fitView({ padding: 0.16, duration: 300 }))
-  }, [nodes.length, projectId, rfInstance])
-
-  useEffect(() => {
-    if (edges.length > prevEdgeCount.current) {
-      const newEdge = edges[edges.length - 1]
-      if (newEdge) {
-        requestAnimationFrame(() => rfInstance?.fitView({ padding: 0.14, duration: 450 }))
-        const el = document.querySelector(`[data-id="${newEdge.id}"] .react-flow__edge-path`)
-        if (el) {
-          const length = (el as SVGPathElement).getTotalLength?.() ?? 200
-          gsap.fromTo(
-            el,
-            { strokeDasharray: length, strokeDashoffset: length },
-            { strokeDashoffset: 0, duration: 0.8, ease: 'power2.out' },
-          )
-        }
-      }
-    }
-    prevEdgeCount.current = edges.length
-  }, [edges, rfInstance])
-
-  const rfNodes: Node[] = useMemo(
+  const artifacts = useMemo(
     () =>
-      nodes.map((doc) => ({
-        id: doc.id,
-        type: 'canvasNode',
-        position: doc.position,
-        draggable: true,
-        selectable: true,
-        data: doc as unknown as Record<string, unknown>,
-      })),
+      nodes.filter((node) => node.flowRole !== 'source').sort((a, b) => b.updatedAt - a.updatedAt),
     [nodes],
   )
-
-  const repairedArtifactEdgesRef = useRef(new Set<string>())
-  useEffect(() => {
-    const source = nodes.find((node) => node.flowRole === 'source')
-    if (!source) return
-    for (const node of nodes) {
-      if (node.id === source.id || node.category !== 'output') continue
-      if (edges.some((edge) => edge.to === node.id)) continue
-      if (repairedArtifactEdgesRef.current.has(node.id)) continue
-      repairedArtifactEdgesRef.current.add(node.id)
-      addEdge({
-        id: `edge-${source.id}-${node.id}`,
-        projectId,
-        from: source.id,
-        to: node.id,
-        kind: 'derives',
-        createdBy: peerId,
-        updatedAt: Date.now(),
-      })
-    }
-  }, [addEdge, edges, nodes, peerId, projectId])
-
-  const rfEdges: Edge[] = useMemo(
-    () =>
-      edges.map((e) => ({
-        id: e.id,
-        source: e.from,
-        target: e.to,
-        type: 'smoothstep',
-        style: { stroke: tokens.color.borderLight, strokeWidth: 2 },
-        markerEnd: { type: 'arrowclosed', color: tokens.color.borderLight, width: 16, height: 16 },
-      })),
-    [edges],
+  const selectedNode = useMemo(
+    () => artifacts.find((node) => node.id === selectedNodeId) ?? artifacts[0],
+    [artifacts, selectedNodeId],
   )
 
-  const agentCanvasContext = useMemo(
+  useEffect(() => {
+    if (selectedNode && selectedNode.id !== selectedNodeId) setSelectedNodeId(selectedNode.id)
+  }, [selectedNode, selectedNodeId])
+
+  useEffect(() => {
+    if (!briefOpen) setBriefDraft(sourceContent)
+  }, [briefOpen, sourceContent])
+
+  useEffect(() => {
+    if (briefOpen) requestAnimationFrame(() => briefEditorRef.current?.focus())
+  }, [briefOpen])
+
+  const agentContext = useMemo(
     () =>
       nodes
         .map((node) => {
-          const title = String(node.fields.title ?? node.type)
+          const title = artifactTitle(node)
           const content = String(node.fields.content ?? '')
           return `### ${title} [${node.type}; id=${node.id}]\n${content}`
         })
@@ -238,22 +157,16 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
     [nodes],
   )
 
-  const agentParentNodeIds = useMemo(() => {
-    if (selectedNodeIds.length > 0) return selectedNodeIds
-    const source = nodes.find((node) => node.flowRole === 'source')
-    return source ? [source.id] : []
-  }, [nodes, selectedNodeIds])
-
-  const reviewAgentNode = useCallback(
+  const reviewArtifact = useCallback(
     (nodeId: string, status: 'approved' | 'rejected') => {
-      const doc = nodes.find((node) => node.id === nodeId)
-      if (!doc) return
+      const node = nodes.find((candidate) => candidate.id === nodeId)
+      if (!node) return
       upsertNode({
-        ...doc,
+        ...node,
         flowRole: status === 'approved' ? 'artifact' : 'review',
         status,
         fields: {
-          ...doc.fields,
+          ...node.fields,
           reviewedBy: peerId,
           reviewedAt: new Date().toISOString(),
         },
@@ -263,16 +176,16 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
     [nodes, peerId, upsertNode],
   )
 
-  const retryAgentNode = useCallback(
+  const retryArtifact = useCallback(
     async (nodeId: string) => {
-      const doc = nodes.find((node) => node.id === nodeId)
+      const node = nodes.find((candidate) => candidate.id === nodeId)
       const response = await apiFetch('/api/retry', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           nodeId,
           projectId,
-          persona: String(doc?.fields.requestedPersona ?? 'pm'),
+          persona: String(node?.fields.requestedPersona ?? 'pm'),
         }),
       })
       if (!response.ok) {
@@ -284,259 +197,261 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
     [apiFetch, nodes, projectId, refresh],
   )
 
-  const focusAgentNode = useCallback(
-    (nodeId: string) => {
-      const node = nodes.find((candidate) => candidate.id === nodeId)
-      if (!node || !rfInstance) return
-      rfInstance.setCenter(node.position.x + 320, node.position.y + 220, {
-        zoom: 0.85,
-        duration: 500,
-      })
-      setSelectedNodeIds([nodeId])
-    },
-    [nodes, rfInstance],
-  )
+  const saveBrief = useCallback(() => {
+    if (!sourceNode || briefDraft === sourceContent) return
+    upsertNode({
+      ...sourceNode,
+      fields: { ...sourceNode.fields, content: briefDraft },
+      updatedAt: Date.now(),
+    })
+    setBriefOpen(false)
+  }, [briefDraft, sourceContent, sourceNode, upsertNode])
 
-  const onConnect = useCallback(
-    (connection: { source?: string | null; target?: string | null }) => {
-      if (!connection.source || !connection.target) return
-      const edge: EdgeDoc = {
-        id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        projectId,
-        from: connection.source,
-        to: connection.target,
-        kind: 'flow',
-        createdBy: peerId,
+  const saveArtifact = useCallback(
+    (artifact: ArtifactEnvelope) => {
+      if (!selectedNode) return
+      upsertNode({
+        ...selectedNode,
+        fields: { ...selectedNode.fields, artifact },
         updatedAt: Date.now(),
-      }
-      addEdge(edge)
+      })
     },
-    [addEdge, peerId, projectId],
+    [selectedNode, upsertNode],
   )
 
-  const canvasNodeActions = useMemo<CanvasNodeActions>(
-    () => ({
-      canEdit,
-      peerId,
-      upsertNode,
-      retryAgentNode,
-      reviewAgentNode,
-      openProjectBrief,
-      askPmToRefine,
-      setAgentComposerDraft,
-    }),
-    [askPmToRefine, canEdit, openProjectBrief, peerId, retryAgentNode, reviewAgentNode, upsertNode],
-  )
+  const askAgentAboutArtifact = useCallback(() => {
+    if (!selectedNode) return
+    setAgentComposerDraft({
+      id: Date.now(),
+      text: `Review and improve "${artifactTitle(selectedNode)}".`,
+      targetNodeId: selectedNode.id,
+    })
+  }, [selectedNode])
+
+  async function copyMcpUrl() {
+    if (!mcpSession?.url) return
+    await navigator.clipboard.writeText(mcpSession.url)
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1800)
+  }
 
   return (
-    <div className="app-layout">
-      {/* Sidebar — collapsible */}
-      <nav className="sidebar" style={{ width: sidebarCollapsed ? 48 : 330 }}>
-        <div
-          className="sidebar-brand"
-          style={{ justifyContent: sidebarCollapsed ? 'center' : 'flex-start' }}
-        >
-          {!sidebarCollapsed && (
-            <>
-              <img className="papyrus-logo" src="/papyrus-logo.svg" alt="" />
-              <span className="name">PAPYRUS</span>
-            </>
-          )}
-          {sidebarCollapsed && (
-            <img className="papyrus-logo" src="/papyrus-logo.svg" alt="Papyrus" />
-          )}
-        </div>
-        {!sidebarCollapsed && (
-          <div className="project-brief-panel">
-            <div className="project-brief-heading">
-              <button type="button" className="project-brief-back" onClick={onBack}>
-                <ArrowLeft size={15} aria-hidden="true" /> Back
+    <div className="agent-workspace-layout">
+      <aside className="agent-workspace-sidebar">
+        <header className="agent-workspace-brand">
+          <div className="agent-workspace-brand-row">
+            <img className="papyrus-logo" src="/papyrus-logo.svg" alt="" />
+            <span>PAPYRUS</span>
+            <button type="button" className="workspace-icon-button" onClick={onBack}>
+              <ArrowLeft size={16} aria-hidden="true" /> Projects
+            </button>
+          </div>
+          <div className="agent-project-heading">
+            <span>Active project</span>
+            <strong>{projectName}</strong>
+          </div>
+        </header>
+
+        {canEdit ? (
+          <AgentChat
+            personas={PERSONA_LIST}
+            projectId={projectId}
+            peerId={peerId}
+            canvasContext={agentContext}
+            parentNodeIds={sourceNode ? [sourceNode.id] : []}
+            composerDraft={agentComposerDraft}
+            onReviewNode={reviewArtifact}
+            onRetryNode={retryArtifact}
+            onOpenArtifact={setSelectedNodeId}
+            onCanvasChanged={refresh}
+          />
+        ) : (
+          <div className="workspace-readonly">You have read-only access to this project.</div>
+        )}
+
+        <footer className="agent-workspace-status">
+          <span className={`conn-dot ${saving ? 'saving' : 'live'}`} aria-hidden="true" />
+          {saving ? 'Saving…' : 'Synced'}
+          {projectRole && <span className="workspace-role">{projectRole}</span>}
+        </footer>
+      </aside>
+
+      <main className={`artifact-workspace ${workspaceExpanded ? 'expanded' : ''}`}>
+        <header className="artifact-workspace-header">
+          <div>
+            <span className="artifact-workspace-eyebrow">Project workspace</span>
+            <h1>Artifacts</h1>
+          </div>
+          <div className="artifact-workspace-header-actions">
+            <button type="button" className="workspace-control" onClick={() => setBriefOpen(true)}>
+              <Pencil size={14} aria-hidden="true" /> Edit brief
+            </button>
+            <div className="mcp-connection" title={mcpSession?.url ?? 'Preparing MCP session'}>
+              <Network size={15} aria-hidden="true" />
+              <span>
+                <small>MCP session</small>
+                <strong>{mcpSession ? 'Ready to connect' : 'Preparing…'}</strong>
+              </span>
+              <button
+                type="button"
+                onClick={() => void copyMcpUrl()}
+                disabled={!mcpSession}
+                aria-label="Copy MCP session URL"
+              >
+                {copied ? <Check size={14} /> : <Copy size={14} />}
               </button>
-              <div className="project-brief-eyebrow">
-                <FileText size={13} aria-hidden="true" /> Project brief
-              </div>
-              <h1>{projectName}</h1>
-              <p>The shared context used by every agent working on this canvas.</p>
             </div>
+            <button
+              type="button"
+              className="workspace-control icon-only"
+              onClick={() => setWorkspaceExpanded((value) => !value)}
+              aria-label={workspaceExpanded ? 'Exit fullscreen workspace' : 'Expand workspace'}
+            >
+              {workspaceExpanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+            </button>
+          </div>
+        </header>
+
+        <div className="artifact-workspace-body">
+          <nav className="artifact-index" aria-label="Project artifacts">
+            <div className="artifact-index-heading">
+              <span>{artifacts.length} artifacts</span>
+              <button type="button" onClick={() => void refresh()} aria-label="Refresh artifacts">
+                <RefreshCw size={13} />
+              </button>
+            </div>
+            {loading ? (
+              <div className="artifact-index-empty">Loading artifacts…</div>
+            ) : artifacts.length === 0 ? (
+              <div className="artifact-index-empty">
+                Ask Papyrus to create a requirement, design, implementation, or review.
+              </div>
+            ) : (
+              artifacts.map((node) => (
+                <button
+                  key={node.id}
+                  type="button"
+                  className={`artifact-index-item ${selectedNode?.id === node.id ? 'active' : ''}`}
+                  onClick={() => setSelectedNodeId(node.id)}
+                >
+                  <span className="artifact-index-type">{node.type}</span>
+                  <strong>{artifactTitle(node)}</strong>
+                  <p>{artifactPreview(node)}</p>
+                  <span className={`artifact-status ${node.status}`}>{node.status}</span>
+                </button>
+              ))
+            )}
+          </nav>
+
+          <section className="artifact-detail">
+            {selectedNode ? (
+              <>
+                <header className="artifact-detail-header">
+                  <div>
+                    <span>{selectedNode.type}</span>
+                    <h2>{artifactTitle(selectedNode)}</h2>
+                    <p>
+                      Updated {new Date(selectedNode.updatedAt).toLocaleString()} ·{' '}
+                      {selectedNode.status}
+                    </p>
+                  </div>
+                  <div className="artifact-detail-actions">
+                    <button type="button" onClick={askAgentAboutArtifact}>
+                      <Sparkles size={14} /> Ask agent
+                    </button>
+                    <button type="button" onClick={() => void retryArtifact(selectedNode.id)}>
+                      <RefreshCw size={14} /> Retry
+                    </button>
+                    {selectedNode.status === 'proposed' && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => reviewArtifact(selectedNode.id, 'approved')}
+                        >
+                          <Check size={14} /> Approve
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => reviewArtifact(selectedNode.id, 'rejected')}
+                        >
+                          <X size={14} /> Reject
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </header>
+                <div className="artifact-detail-content">
+                  {selectedNode.fields.artifact ? (
+                    <ArtifactRenderer
+                      artifact={selectedNode.fields.artifact}
+                      status={selectedNode.status}
+                      onSaveArtifact={saveArtifact}
+                      onAskAgent={askAgentAboutArtifact}
+                      onApprove={() => reviewArtifact(selectedNode.id, 'approved')}
+                      onReject={() => reviewArtifact(selectedNode.id, 'rejected')}
+                    />
+                  ) : (
+                    <pre>{String(selectedNode.fields.content ?? '')}</pre>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="artifact-detail-empty">
+                <FileText size={28} aria-hidden="true" />
+                <h2>Your agent’s work will appear here</h2>
+                <p>
+                  Ask for an outcome. Papyrus will choose the specialist and create a typed
+                  artifact.
+                </p>
+              </div>
+            )}
+          </section>
+        </div>
+      </main>
+
+      {briefOpen && (
+        <dialog open className="brief-dialog" aria-label="Edit project brief">
+          <div className="brief-dialog-card">
+            <header>
+              <div>
+                <span>Shared agent context</span>
+                <h2>Project brief</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setBriefOpen(false)}
+                aria-label="Close brief editor"
+              >
+                <X size={17} />
+              </button>
+            </header>
+            <p>
+              This context is supplied to every specialist. Keep it focused on the problem, users,
+              constraints, and desired outcome.
+            </p>
             <textarea
               ref={briefEditorRef}
-              className="project-brief-editor"
-              aria-label="Project brief"
               value={briefDraft}
-              readOnly={!canEdit || !sourceNode}
-              onFocus={() => setBriefEditing(true)}
-              onBlur={() => setBriefEditing(false)}
               onChange={(event) => setBriefDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-                  event.preventDefault()
-                  saveProjectBrief()
-                }
-              }}
-              placeholder="Describe what you are building, who it serves, the problem it solves, constraints, and desired outcomes…"
+              readOnly={!canEdit || !sourceNode}
             />
-            <div className="project-brief-meta">
-              <span>{briefDirty ? 'Unsaved changes' : 'Saved'}</span>
-              {sourceNode && <span>Updated {new Date(sourceNode.updatedAt).toLocaleString()}</span>}
-            </div>
-            {canEdit && (
-              <div className="project-brief-actions">
-                <button
-                  type="button"
-                  className="project-brief-save"
-                  disabled={!sourceNode || !briefDirty}
-                  onClick={saveProjectBrief}
-                >
-                  <Save size={14} aria-hidden="true" /> Save brief
-                </button>
-                <button type="button" className="project-brief-refine" onClick={askPmToRefine}>
-                  <Sparkles size={14} aria-hidden="true" /> Ask PM to refine
-                </button>
-              </div>
-            )}
+            <footer>
+              <span>{briefDraft === sourceContent ? 'No unsaved changes' : 'Unsaved changes'}</span>
+              <button type="button" onClick={() => setBriefOpen(false)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary"
+                disabled={!sourceNode || briefDraft === sourceContent}
+                onClick={saveBrief}
+              >
+                <Save size={14} /> Save brief
+              </button>
+            </footer>
           </div>
-        )}
-        <div className="sidebar-footer">
-          {!sidebarCollapsed && projectRole && (
-            <div
-              style={{
-                fontSize: 11,
-                padding: '2px 8px',
-                borderRadius: 4,
-                background:
-                  projectRole === 'owner'
-                    ? 'rgba(255,95,31,0.15)'
-                    : projectRole === 'editor'
-                      ? 'rgba(96,165,250,0.15)'
-                      : 'rgba(156,163,175,0.15)',
-                color:
-                  projectRole === 'owner'
-                    ? tokens.color.accent
-                    : projectRole === 'editor'
-                      ? '#60a5fa'
-                      : '#9ca3af',
-                marginBottom: 8,
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em',
-                fontWeight: 600,
-              }}
-            >
-              {projectRole}
-            </div>
-          )}
-          {!sidebarCollapsed && (
-            <div className="conn-status" aria-live="polite">
-              <span className={`conn-dot ${saving ? 'saving' : 'live'}`} aria-hidden="true" />
-              {saving ? 'Saving…' : 'Synced'}
-            </div>
-          )}
-          {/* Collapse toggle */}
-          <button
-            type="button"
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            style={{
-              marginTop: 8,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 7,
-              background: tokens.color.surface,
-              border: `2px solid ${tokens.color.black}`,
-              borderRadius: tokens.radius.md,
-              boxShadow: '3px 3px 0 #111',
-              color: tokens.color.text,
-              padding: sidebarCollapsed ? '8px' : '7px 10px',
-              fontSize: 11,
-              cursor: 'pointer',
-              width: '100%',
-            }}
-          >
-            {sidebarCollapsed ? (
-              <PanelLeftOpen size={16} aria-label="Expand sidebar" />
-            ) : (
-              <>
-                <PanelLeftClose size={16} aria-hidden="true" /> Collapse sidebar
-              </>
-            )}
-          </button>
-        </div>
-      </nav>
-
-      {/* Agent chat panel */}
-      {canEdit && (
-        <AgentChat
-          personas={PERSONA_LIST}
-          projectId={projectId}
-          peerId={peerId}
-          canvasContext={agentCanvasContext}
-          parentNodeIds={agentParentNodeIds}
-          composerDraft={agentComposerDraft}
-          onReviewNode={reviewAgentNode}
-          onRetryNode={retryAgentNode}
-          onFocusNode={focusAgentNode}
-          onCanvasChanged={refresh}
-        />
+        </dialog>
       )}
-
-      {/* Canvas */}
-      <CanvasNodeActionsContext.Provider value={canvasNodeActions}>
-        <div className="canvas-area">
-          {!loading && nodes.length === 0 && (
-            <div className="canvas-empty">
-              <div className="canvas-empty-icon">{'\u{1F4A1}'}</div>
-              <div className="canvas-empty-title">Canvas is empty</div>
-              <div className="canvas-empty-desc">
-                Ask an agent to create something — they'll add nodes here.
-              </div>
-            </div>
-          )}
-          <ReactFlow
-            nodes={rfNodes}
-            edges={rfEdges}
-            onNodesChange={onNodesChange}
-            onNodeDragStop={(_event, node) => persistNodePosition(node.id, node.position)}
-            onNodesDelete={(deletedNodes) => {
-              for (const node of deletedNodes) deleteNode(node.id)
-            }}
-            onEdgesChange={onEdgesChange}
-            onEdgesDelete={(deletedEdges) => {
-              for (const edge of deletedEdges) deleteEdge(edge.id)
-            }}
-            onConnect={onConnect}
-            onSelectionChange={({ nodes: selectedNodes }) =>
-              setSelectedNodeIds(selectedNodes.map((node) => node.id))
-            }
-            onInit={setRfInstance}
-            nodeTypes={nodeTypes}
-            nodesDraggable
-            selectNodesOnDrag
-            nodeDragThreshold={1}
-            panOnDrag
-            noDragClassName="nodrag"
-            noPanClassName="nopan"
-            fitView
-            snapToGrid
-            snapGrid={[20, 20]}
-            defaultEdgeOptions={{
-              type: 'smoothstep',
-              style: { stroke: tokens.color.borderLight, strokeWidth: 2 },
-            }}
-          >
-            <Background gap={24} size={1} color={tokens.color.border} />
-            <Controls />
-            <MiniMap
-              nodeColor={(n) =>
-                tokens.color.category[(n.data as unknown as CanvasNodeDoc).category] ??
-                tokens.color.textMuted
-              }
-              maskColor="rgba(255, 95, 31, 0.08)"
-            />
-          </ReactFlow>
-
-          {/* Task List */}
-          <TaskList projectId={projectId} />
-        </div>
-      </CanvasNodeActionsContext.Provider>
     </div>
   )
 }

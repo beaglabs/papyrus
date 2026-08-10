@@ -6,6 +6,8 @@ import {
   createProject,
   deleteProject,
   getChatMessages,
+  getMcpSession,
+  getOrCreateMcpSession,
   getStoredOperations,
   listProjects,
   loadProject,
@@ -186,6 +188,23 @@ describe('Database', () => {
       expect(messages.map((message) => message.role)).toEqual(['user', 'assistant'])
       expect(messages[1]?.nodes).toEqual([{ id: 'wireframe-1', type: 'ui-mockup' }])
       expect(getChatMessages(project.id, 'member-2', 'designer')).toEqual([])
+    })
+  })
+
+  describe('MCP project sessions', () => {
+    it('creates one stable opaque session per project member', () => {
+      const project = createProject('MCP Project')
+      const first = getOrCreateMcpSession(project.id, 'member-1')
+      const second = getOrCreateMcpSession(project.id, 'member-1')
+
+      expect(first.id).toBe(second.id)
+      expect(first.id).not.toContain(project.id)
+      expect(getMcpSession(first.id)).toMatchObject({
+        id: first.id,
+        projectId: project.id,
+        memberKey: 'member-1',
+      })
+      expect(getMcpSession('missing-session')).toBeNull()
     })
   })
 })

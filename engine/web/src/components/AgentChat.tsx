@@ -58,7 +58,7 @@ interface AgentChatProps {
   composerDraft?: { id: number; text: string; targetNodeId?: string }
   onReviewNode: (nodeId: string, status: 'approved' | 'rejected') => void
   onRetryNode: (nodeId: string) => Promise<void>
-  onFocusNode: (nodeId: string) => void
+  onOpenArtifact: (nodeId: string) => void
   onCanvasChanged?: () => void | Promise<void>
 }
 
@@ -67,7 +67,7 @@ const SEED_MESSAGES: Record<string, ChatMessage[]> = {
     {
       id: 'seed-1',
       role: 'agent',
-      text: "I'm your **Papyrus agent team**. Describe the outcome you want and I'll invite the right specialist, choose the artifact, and connect it to the canvas.",
+      text: "I'm your **Papyrus agent team**. Describe the outcome you want and I'll invite the right specialist, choose the artifact, and add it to this workspace.",
     },
   ],
   designer: [
@@ -223,7 +223,7 @@ export function AgentChat({
   composerDraft,
   onReviewNode,
   onRetryNode,
-  onFocusNode,
+  onOpenArtifact,
   onCanvasChanged,
 }: AgentChatProps) {
   const persona = personas[0] as Persona
@@ -494,7 +494,7 @@ export function AgentChat({
                       ? `${proposedCount} ${proposedCount === 1 ? 'proposal' : 'proposals'} ready for review`
                       : approvedCount > 0
                         ? `${approvedCount} ${approvedCount === 1 ? 'artifact' : 'artifacts'} approved`
-                        : `${msg.nodesCreated} ${msg.nodesCreated === 1 ? 'artifact' : 'artifacts'} on canvas`}
+                        : `${msg.nodesCreated} ${msg.nodesCreated === 1 ? 'artifact' : 'artifacts'} in the workspace`}
                     {msg.nodes?.map((node) => (
                       <div
                         key={node.id}
@@ -528,9 +528,9 @@ export function AgentChat({
                         <button
                           type="button"
                           className="chat-artifact-action secondary nodrag"
-                          onClick={() => onFocusNode(node.id)}
+                          onClick={() => onOpenArtifact(node.id)}
                         >
-                          <LocateFixed size={12} aria-hidden="true" /> View on canvas
+                          <LocateFixed size={12} aria-hidden="true" /> Open artifact
                         </button>
                       </div>
                     ))}

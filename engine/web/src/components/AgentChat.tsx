@@ -28,6 +28,7 @@ interface AgentChatProps {
   peerId: string
   canvasContext: string
   parentNodeIds: string[]
+  composerDraft?: { id: number; text: string }
 }
 
 const SEED_MESSAGES: Record<string, ChatMessage[]> = {
@@ -189,6 +190,7 @@ export function AgentChat({
   projectId,
   canvasContext,
   parentNodeIds,
+  composerDraft,
 }: AgentChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(() => SEED_MESSAGES[persona.id] ?? [])
   const [input, setInput] = useState('')
@@ -196,6 +198,7 @@ export function AgentChat({
   const [attachments, setAttachments] = useState<string[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const composerRef = useRef<HTMLTextAreaElement>(null)
   const chatHistoryRef = useRef<Array<{ role: 'user' | 'assistant'; content: string }>>([])
   const { apiFetch } = useAuth()
   const mentionQuery = input.match(/(?:^|\s)@([\w-]*)$/)?.[1]?.toLowerCase()
@@ -213,6 +216,12 @@ export function AgentChat({
     void messages.length
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  useEffect(() => {
+    if (!composerDraft) return
+    setInput(composerDraft.text)
+    requestAnimationFrame(() => composerRef.current?.focus())
+  }, [composerDraft])
 
   function resolveMention(text: string): { prompt: string; target: Persona } {
     const match = text.match(/^@([\w-]+)\s+/)
@@ -522,6 +531,7 @@ export function AgentChat({
             accept=".txt,.md,.json,.csv,.yaml,.yml,.xml,.html,.css,.js,.ts,.py,.go,.rs"
           />
           <textarea
+            ref={composerRef}
             className="chat-input"
             placeholder={loading ? 'Working…' : `Ask ${persona.role} or @mention another agent…`}
             value={input}

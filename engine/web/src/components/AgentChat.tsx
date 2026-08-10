@@ -58,6 +58,7 @@ interface AgentChatProps {
   onReviewNode: (nodeId: string, status: 'approved' | 'rejected') => void
   onRetryNode: (nodeId: string) => Promise<void>
   onFocusNode: (nodeId: string) => void
+  onCanvasChanged?: () => void | Promise<void>
 }
 
 const SEED_MESSAGES: Record<string, ChatMessage[]> = {
@@ -222,6 +223,7 @@ export function AgentChat({
   onReviewNode,
   onRetryNode,
   onFocusNode,
+  onCanvasChanged,
 }: AgentChatProps) {
   const persona = personas[0] as Persona
   const [messages, setMessages] = useState<ChatMessage[]>(() => SEED_MESSAGES.pm ?? [])
@@ -381,6 +383,7 @@ export function AgentChat({
       setMessages((prev) => [...prev, agentMsg])
       const latestArtifact = data.nodes?.at(-1)
       if (latestArtifact) setActiveArtifactNodeId(latestArtifact.id)
+      await onCanvasChanged?.()
       setAttachments([])
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Something went wrong'

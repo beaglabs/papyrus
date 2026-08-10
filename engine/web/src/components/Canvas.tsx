@@ -2,19 +2,12 @@ import {
   Background,
   Controls,
   type Edge,
-  Handle,
   MiniMap,
   type Node,
-  Position,
   ReactFlow,
   type ReactFlowInstance,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import {
-  type ArtifactEnvelope,
-  isArtifactEnvelope,
-  unwrapUswdsArtifact,
-} from '@papyrus/core/artifacts/envelope'
 import { tokens } from '@papyrus/core/design'
 import type { CanvasNodeDoc, EdgeDoc } from '@papyrus/core/nodes/types'
 import gsap from 'gsap'
@@ -23,9 +16,9 @@ import {
   BriefcaseBusiness,
   Code2,
   FileText,
+  Palette,
   PanelLeftClose,
   PanelLeftOpen,
-  Palette,
   Save,
   ShieldCheck,
   Sparkles,
@@ -35,10 +28,10 @@ import { useAuth } from '../contexts/AuthContext'
 import { useCanvas } from '../hooks/useCanvas'
 import { AgentChat } from './AgentChat'
 import {
-  CanvasNode,
-  CanvasNodeActionsContext,
   type AgentComposerDraft,
+  CanvasNode,
   type CanvasNodeActions,
+  CanvasNodeActionsContext,
 } from './CanvasNode'
 import { TaskList } from './TaskList'
 
@@ -48,8 +41,6 @@ import { TaskList } from './TaskList'
 // mutable parent state through CanvasNodeActionsContext, so neither the
 // nodeTypes object nor the CanvasNode reference ever needs to change.
 const nodeTypes = { canvasNode: CanvasNode }
-
-const PEER_COLORS = ['#ff5f1f', '#a78bfa', '#60a5fa', '#34d399', '#facc15']
 
 const PERSONA_LIST = [
   {
@@ -86,33 +77,10 @@ const PERSONA_LIST = [
   },
 ]
 
-
 interface CanvasProps {
   projectId: string
   projectName: string
   onBack: () => void
-}
-
-const nodeActionStyle: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  gap: 5,
-  marginTop: 8,
-  padding: '6px 10px',
-  background: tokens.color.accent,
-  border: `2px solid ${tokens.color.black}`,
-  borderRadius: tokens.radius.sm,
-  boxShadow: '2px 2px 0 #111',
-  color: tokens.color.black,
-  fontSize: 10,
-  fontWeight: 800,
-  cursor: 'pointer',
-  pointerEvents: 'auto',
-  position: 'relative',
-  zIndex: 4,
-  fontFamily: tokens.font.mono,
-  textTransform: 'uppercase',
 }
 
 export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
@@ -122,13 +90,15 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
     nodes,
     edges,
     loading,
+    saving,
+    refresh,
+    persistNodePosition,
     upsertNode,
     deleteNode,
     addEdge,
     deleteEdge,
     onNodesChange,
     onEdgesChange,
-    setNodes,
   } = useCanvas(projectId, apiFetch)
   const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null)
   const fittedProjectRef = useRef<string | null>(null)
@@ -309,8 +279,9 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
         const body = (await response.json()) as { error?: string }
         throw new Error(body.error ?? 'Retry failed')
       }
+      await refresh()
     },
-    [apiFetch, nodes, projectId],
+    [apiFetch, nodes, projectId, refresh],
   )
 
   const focusAgentNode = useCallback(
@@ -341,6 +312,20 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
       addEdge(edge)
     },
     [addEdge, peerId, projectId],
+  )
+
+  const canvasNodeActions = useMemo<CanvasNodeActions>(
+    () => ({
+      canEdit,
+      peerId,
+      upsertNode,
+      retryAgentNode,
+      reviewAgentNode,
+      openProjectBrief,
+      askPmToRefine,
+      setAgentComposerDraft,
+    }),
+    [askPmToRefine, canEdit, openProjectBrief, peerId, retryAgentNode, reviewAgentNode, upsertNode],
   )
 
   return (
@@ -412,36 +397,38 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
           </div>
         )}
         <div className="sidebar-footer">
+          {!sidebarCollapsed && projectRole && (
+            <div
+              style={{
+                fontSize: 11,
+                padding: '2px 8px',
+                borderRadius: 4,
+                background:
+                  projectRole === 'owner'
+                    ? 'rgba(255,95,31,0.15)'
+                    : projectRole === 'editor'
+                      ? 'rgba(96,165,250,0.15)'
+                      : 'rgba(156,163,175,0.15)',
+                color:
+                  projectRole === 'owner'
+                    ? tokens.color.accent
+                    : projectRole === 'editor'
+                      ? '#60a5fa'
+                      : '#9ca3af',
+                marginBottom: 8,
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                fontWeight: 600,
+              }}
+            >
+              {projectRole}
+            </div>
+          )}
           {!sidebarCollapsed && (
-            <>
-              {projectRole && (
-                <div
-                  style={{
-                    fontSize: 11,
-                    padding: '2px 8px',
-                    borderRadius: 4,
-                    background:
-                      projectRole === 'owner'
-                        ? 'rgba(255,95,31,0.15)'
-                        : projectRole === 'editor'
-                          ? 'rgba(96,165,250,0.15)'
-                          : 'rgba(156,163,175,0.15)',
-                    color:
-                      projectRole === 'owner'
-                        ? tokens.color.accent
-                        : projectRole === 'editor'
-                          ? '#60a5fa'
-                          : '#9ca3af',
-                    marginBottom: 8,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em',
-                    fontWeight: 600,
-                  }}
-                >
-                  {projectRole}
-                </div>
-              )}
-            </>
+            <div className="conn-status" aria-live="polite">
+              <span className={`conn-dot ${saving ? 'saving' : 'live'}`} aria-hidden="true" />
+              {saving ? 'Saving…' : 'Synced'}
+            </div>
           )}
           {/* Collapse toggle */}
           <button
@@ -487,145 +474,69 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
           onReviewNode={reviewAgentNode}
           onRetryNode={retryAgentNode}
           onFocusNode={focusAgentNode}
+          onCanvasChanged={refresh}
         />
       )}
 
       {/* Canvas */}
-      <div className="canvas-area" onMouseMove={handleMouseMove}>
-        {nodes.length === 0 && (
-          <div className="canvas-empty">
-            <div className="canvas-empty-icon">{'\u{1F4A1}'}</div>
-            <div className="canvas-empty-title">Canvas is empty</div>
-            <div className="canvas-empty-desc">
-              Ask an agent to create something — they'll add nodes here.
+      <CanvasNodeActionsContext.Provider value={canvasNodeActions}>
+        <div className="canvas-area">
+          {!loading && nodes.length === 0 && (
+            <div className="canvas-empty">
+              <div className="canvas-empty-icon">{'\u{1F4A1}'}</div>
+              <div className="canvas-empty-title">Canvas is empty</div>
+              <div className="canvas-empty-desc">
+                Ask an agent to create something — they'll add nodes here.
+              </div>
             </div>
-          </div>
-        )}
-        <ReactFlow
-          nodes={rfNodes}
-          edges={rfEdges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          onSelectionChange={({ nodes: selectedNodes }) =>
-            setSelectedNodeIds(selectedNodes.map((node) => node.id))
-          }
-          onInit={setRfInstance}
-          nodeTypes={nodeTypes}
-          nodesDraggable
-          selectNodesOnDrag
-          nodeDragThreshold={1}
-          panOnDrag={[1, 2]}
-          noDragClassName="nodrag"
-          noPanClassName="nopan"
-          fitView
-          snapToGrid
-          snapGrid={[20, 20]}
-          defaultEdgeOptions={{
-            type: 'smoothstep',
-            style: { stroke: tokens.color.borderLight, strokeWidth: 2 },
-          }}
-        >
-          <Background gap={24} size={1} color={tokens.color.border} />
-          <Controls />
-          <MiniMap
-            nodeColor={(n) =>
-              tokens.color.category[(n.data as unknown as CanvasNodeDoc).category] ??
-              tokens.color.textMuted
+          )}
+          <ReactFlow
+            nodes={rfNodes}
+            edges={rfEdges}
+            onNodesChange={onNodesChange}
+            onNodeDragStop={(_event, node) => persistNodePosition(node.id, node.position)}
+            onNodesDelete={(deletedNodes) => {
+              for (const node of deletedNodes) deleteNode(node.id)
+            }}
+            onEdgesChange={onEdgesChange}
+            onEdgesDelete={(deletedEdges) => {
+              for (const edge of deletedEdges) deleteEdge(edge.id)
+            }}
+            onConnect={onConnect}
+            onSelectionChange={({ nodes: selectedNodes }) =>
+              setSelectedNodeIds(selectedNodes.map((node) => node.id))
             }
-            maskColor="rgba(255, 95, 31, 0.08)"
-          />
-        </ReactFlow>
+            onInit={setRfInstance}
+            nodeTypes={nodeTypes}
+            nodesDraggable
+            selectNodesOnDrag
+            nodeDragThreshold={1}
+            panOnDrag={[1, 2]}
+            noDragClassName="nodrag"
+            noPanClassName="nopan"
+            fitView
+            snapToGrid
+            snapGrid={[20, 20]}
+            defaultEdgeOptions={{
+              type: 'smoothstep',
+              style: { stroke: tokens.color.borderLight, strokeWidth: 2 },
+            }}
+          >
+            <Background gap={24} size={1} color={tokens.color.border} />
+            <Controls />
+            <MiniMap
+              nodeColor={(n) =>
+                tokens.color.category[(n.data as unknown as CanvasNodeDoc).category] ??
+                tokens.color.textMuted
+              }
+              maskColor="rgba(255, 95, 31, 0.08)"
+            />
+          </ReactFlow>
 
-        {/* Remote cursors */}
-        {[...remoteCursors.entries()].map(([peerId, cursor]) => {
-          const initials = cursor.displayName
-            .split(' ')
-            .map((w) => w.charAt(0))
-            .join('')
-            .slice(0, 2)
-            .toUpperCase()
-          return (
-            <div
-              key={peerId}
-              style={{
-                position: 'absolute',
-                left: cursor.x,
-                top: cursor.y,
-                pointerEvents: 'none',
-                zIndex: 1000,
-                transition: 'left 0.1s, top 0.1s',
-              }}
-            >
-              <div
-                style={{
-                  width: 28,
-                  height: 28,
-                  borderRadius: '50%',
-                  background: cursor.color || tokens.color.accent,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: 10,
-                  fontWeight: 700,
-                  color: '#fff',
-                  boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
-                  border: '2px solid rgba(255,255,255,0.2)',
-                }}
-              >
-                {initials}
-              </div>
-              {cursor.displayName && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    left: 30,
-                    top: 4,
-                    background: cursor.color || tokens.color.accent,
-                    color: '#fff',
-                    fontSize: 10,
-                    fontFamily: tokens.font.mono,
-                    padding: '1px 6px',
-                    borderRadius: tokens.radius.sm,
-                    whiteSpace: 'nowrap',
-                    fontWeight: 600,
-                  }}
-                >
-                  {cursor.displayName}
-                </div>
-              )}
-            </div>
-          )
-        })}
-
-        {/* Presence */}
-        <div
-          style={{
-            position: 'absolute',
-            bottom: 16,
-            right: 16,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-          }}
-        >
-          <div className="presence-avatars">
-            {[...presence.values()].map((p) => (
-              <div
-                key={p.peerId}
-                className="presence-avatar"
-                style={{ background: p.color }}
-                title={p.displayName}
-              >
-                {p.displayName.charAt(0)}
-              </div>
-            ))}
-          </div>
+          {/* Task List */}
+          <TaskList projectId={projectId} />
         </div>
-
-        {/* Task List */}
-        <TaskList projectId={projectId} />
-      </div>
+      </CanvasNodeActionsContext.Provider>
     </div>
   )
 }

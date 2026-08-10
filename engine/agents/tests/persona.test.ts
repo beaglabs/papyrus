@@ -13,6 +13,11 @@ describe('designer artifact extraction', () => {
     const result = extractArtifacts(`Here is the revision:\n${JSON.stringify(wireframe)}`)
     expect(result.nodes).toHaveLength(1)
     expect(result.nodes[0]?.type).toBe('ui-mockup')
-    expect(result.nodes[0]?.artifact).toEqual(wireframe)
+    expect(result.nodes[0]?.artifact).toMatchObject({
+      schema: 'papyrus.artifact/v1',
+      kind: 'ui-mockup',
+      renderer: { type: 'uswds-wireframe' },
+      payload: wireframe,
+    })
   })
 })

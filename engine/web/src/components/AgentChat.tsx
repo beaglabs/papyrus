@@ -1,10 +1,10 @@
+import type { ArtifactEnvelope } from '@papyrus/core/artifacts/envelope'
 import { tokens } from '@papyrus/core/design'
 import {
   AtSign,
   Boxes,
   Check,
   CircleX,
-  LocateFixed,
   type LucideIcon,
   Paperclip,
   RefreshCw,
@@ -30,7 +30,6 @@ interface ChatMessage {
   text: string
   nodesCreated?: number
   personaId?: string
-  artifacts?: unknown[]
   nodes?: ChatArtifactNode[]
 }
 
@@ -58,7 +57,7 @@ interface AgentChatProps {
   composerDraft?: { id: number; text: string; targetNodeId?: string }
   onReviewNode: (nodeId: string, status: 'approved' | 'rejected') => void
   onRetryNode: (nodeId: string) => Promise<void>
-  onOpenArtifact: (nodeId: string) => void
+  onSaveArtifact: (nodeId: string, artifact: ArtifactEnvelope) => void
   onCanvasChanged?: () => void | Promise<void>
 }
 
@@ -223,7 +222,7 @@ export function AgentChat({
   composerDraft,
   onReviewNode,
   onRetryNode,
-  onOpenArtifact,
+  onSaveArtifact,
   onCanvasChanged,
 }: AgentChatProps) {
   const persona = personas[0] as Persona
@@ -289,7 +288,6 @@ export function AgentChat({
             nodesCreated: message.nodes.length,
             personaId: artifactPersona(message.nodes),
             nodes: message.nodes,
-            artifacts: message.nodes.flatMap((node) => (node.artifact ? [node.artifact] : [])),
           })),
         )
         const latestArtifact = [...stored]
@@ -378,7 +376,6 @@ export function AgentChat({
         text: `${data.routing?.announcement ? `${data.routing.announcement}\n\n` : ''}${data.text}`,
         nodesCreated: data.nodes?.length ?? 0,
         personaId: data.routing?.primaryPersona ?? target?.id ?? 'pm',
-        artifacts: data.nodes?.flatMap((node) => (node.artifact ? [node.artifact] : [])),
         nodes: data.nodes,
       }
       setMessages((prev) => [...prev, agentMsg])
@@ -469,13 +466,32 @@ export function AgentChat({
                     __html: renderMarkdown(msg.text),
                   }}
                 />
-                {msg.artifacts?.map((artifact, index) => (
-                  <ArtifactRenderer
-                    key={`${msg.id}-artifact-${index}`}
-                    artifact={artifact}
-                    compact
-                  />
-                ))}
+                {msg.nodes?.map((node) =>
+                  node.artifact ? (
+                    <div key={`${msg.id}-${node.id}`} className="chat-artifact-card">
+                      <ArtifactRenderer
+                        artifact={node.artifact}
+                        status={node.status}
+                        onSaveArtifact={(artifact) => onSaveArtifact(node.id, artifact)}
+                        onAskAgent={() => {
+                          setActiveArtifactNodeId(node.id)
+                          setInput(`Improve "${node.title}" by `)
+                          requestAnimationFrame(() => composerRef.current?.focus())
+                        }}
+                        onApprove={
+                          node.status === 'proposed'
+                            ? () => reviewFromChat(node.id, 'approved')
+                            : undefined
+                        }
+                        onReject={
+                          node.status === 'proposed'
+                            ? () => reviewFromChat(node.id, 'rejected')
+                            : undefined
+                        }
+                      />
+                    </div>
+                  ) : null,
+                )}
                 {!!msg.nodesCreated && (
                   <div
                     style={{
@@ -524,13 +540,6 @@ export function AgentChat({
                           onClick={() => void onRetryNode(node.id)}
                         >
                           <RefreshCw size={12} aria-hidden="true" /> Retry
-                        </button>
-                        <button
-                          type="button"
-                          className="chat-artifact-action secondary nodrag"
-                          onClick={() => onOpenArtifact(node.id)}
-                        >
-                          <LocateFixed size={12} aria-hidden="true" /> Open artifact
                         </button>
                       </div>
                     ))}

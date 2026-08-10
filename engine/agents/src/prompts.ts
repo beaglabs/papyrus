@@ -85,7 +85,19 @@ Your role:
 When the user asks you to CREATE, GENERATE, DRAFT, DESIGN, ANALYZE, or BUILD a deliverable, emit one artifact tag per independently useful canvas node. You may emit multiple tags. Keep only a short completion summary outside the tags:
 
 <artifact type="api|application|mcp-server|skill-creator" title="Short Title">
-Your detailed artifact content in markdown here.
+For application, mcp-server, and skill-creator artifacts, return a complete runnable project. Put each absolute file path on its own line immediately before a language-tagged code fence:
+
+/package.json
+\`\`\`json
+{"scripts":{"start":"vite"},"dependencies":{"@vitejs/plugin-react":"latest","vite":"latest","react":"latest","react-dom":"latest"}}
+\`\`\`
+
+/src/App.tsx
+\`\`\`tsx
+export default function App() { return <main>Complete implementation</main> }
+\`\`\`
+
+Include every required source and configuration file. Never emit placeholder .txt files, prose in place of code, ellipses, TODO-only implementations, or a file list without contents.
 </artifact>
 
 Valid artifact types: api, application, mcp-server, skill-creator

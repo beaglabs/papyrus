@@ -65,7 +65,8 @@ function codeFiles(content: string): ArtifactFile[] {
   let index = 0
   for (const match of content.matchAll(/```([\w.+-]*)\s*(?:file=([^\s]+))?\n([\s\S]*?)```/g)) {
     const language = (match[1] || '').toLowerCase()
-    const explicitPath = match[2]
+    const precedingPath = content.slice(0, match.index).match(/(?:^|\n)(\/[^\s\n]+)\s*\n\s*$/)?.[1]
+    const explicitPath = match[2] ?? precedingPath
     const extension: Record<string, string> = {
       typescript: 'ts',
       ts: 'ts',

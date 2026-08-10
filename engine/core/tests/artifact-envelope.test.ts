@@ -31,6 +31,17 @@ describe('artifact envelope', () => {
     expect(artifact.files?.[0]?.path).toBe('/App.tsx')
   })
 
+  it('uses the path preceding a fenced source file', () => {
+    const artifact = coerceArtifactEnvelope(
+      'application',
+      'App',
+      '/package.json\n```json\n{"scripts":{"start":"vite"}}\n```\n\n/src/App.tsx\n```tsx\nexport default () => <h1>Hello</h1>\n```',
+      'engineer',
+    )
+    expect(artifact.renderer.type).toBe('code')
+    expect(artifact.files?.map((file) => file.path)).toEqual(['/package.json', '/src/App.tsx'])
+  })
+
   it('preserves unknown output as markdown instead of dropping it', () => {
     const artifact = coerceArtifactEnvelope('specification', 'Plan', 'A useful plan')
     expect(artifact.renderer.type).toBe('markdown')

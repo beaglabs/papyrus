@@ -3,10 +3,7 @@ import {
   coerceArtifactEnvelope,
   unwrapUswdsArtifact,
 } from '@papyrus/core/artifacts/envelope'
-import {
-  createFallbackUswdsWireframe,
-  parseUswdsWireframeArtifact,
-} from '@papyrus/core/artifacts/uswds-wireframe'
+import { parseUswdsWireframeArtifact } from '@papyrus/core/artifacts/uswds-wireframe'
 /**
  * Persona agent — calls the configured model provider with a persona
  * system prompt and returns structured responses.
@@ -139,29 +136,37 @@ export function createPersonaAgent(
             (node) => node.type === 'ui-mockup' && unwrapUswdsArtifact(node.artifact),
           )
         ) {
-          const wireframe = createFallbackUswdsWireframe(request)
-          const artifact = coerceArtifactEnvelope(
-            'ui-mockup',
-            wireframe.title,
-            JSON.stringify(wireframe),
-            personaId,
+          throw new Error(
+            'The designer did not return a valid papyrus.uswds-wireframe/v1 artifact after repair.',
           )
-          console.warn(
-            '[papyrus] Designer output failed papyrus.uswds-wireframe/v1 validation after repair; using a schema-valid recovery artifact.',
-          )
-          result = {
-            text: 'Created a schema-valid USWDS wireframe proposal for review.',
-            nodes: [
+        }
+      }
+
+      const requiresRunnableProject = ['application', 'mcp-server', 'skill-creator'].includes(
+        options.expectedArtifact ?? '',
+      )
+      if (requiresRunnableProject && !result.nodes.some(hasRunnableProject)) {
+        for (let attempt = 0; attempt < 2 && !result.nodes.some(hasRunnableProject); attempt++) {
+          rawText = await generateModelText(provider, {
+            system: systemPrompt,
+            messages: [
+              ...messages.map((message) => ({ role: message.role, content: message.content })),
+              { role: 'assistant', content: rawText },
               {
-                type: 'ui-mockup',
-                category: 'output',
-                title: wireframe.title,
-                content: JSON.stringify(wireframe, null, 2),
-                status: 'proposed',
-                artifact,
+                role: 'user',
+                content:
+                  'The deliverable is not runnable. Return the complete artifact again with every required source file in a separate language-tagged code fence. Put the absolute artifact path on the line immediately before each fence (for example /package.json, /src/App.tsx, /src/styles.css). Include package.json and a browser entrypoint. Do not return placeholders, prose-only files, or a summary instead of source code.',
               },
             ],
-          }
+            temperature: 0.2,
+            maxOutputTokens: 8192,
+          })
+          result = extractArtifacts(rawText, personaId, options.expectedArtifact)
+        }
+        if (!result.nodes.some(hasRunnableProject)) {
+          throw new Error(
+            'The agent did not return a runnable multi-file project after validation and repair.',
+          )
         }
       }
 
@@ -207,6 +212,15 @@ export function createPersonaAgent(
       return result
     },
   }
+}
+
+function hasRunnableProject(node: CanvasNode): boolean {
+  return (
+    node.artifact?.renderer.type === 'code' &&
+    !!node.artifact.files?.length &&
+    node.artifact.files.some((file) => /(^|\/)package\.json$/.test(file.path)) &&
+    node.artifact.files.some((file) => /\.(tsx|jsx|ts|js|html)$/.test(file.path))
+  )
 }
 
 /**

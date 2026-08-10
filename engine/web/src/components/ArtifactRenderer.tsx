@@ -16,7 +16,7 @@ import {
   unwrapUswdsArtifact,
 } from '@papyrus/core/artifacts/envelope'
 import { tokens } from '@papyrus/core/design'
-import { Check, Code2, Expand, RefreshCw, Save, Sparkles, X } from 'lucide-react'
+import { Check, Code2, Expand, Eye, FolderTree, RefreshCw, Save, Sparkles, X } from 'lucide-react'
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { UswdsWireframePreview } from './UswdsWireframePreview'
@@ -345,33 +345,140 @@ function WorkspaceShell({
   )
 }
 
-function WorkspaceModal(
-  props: Omit<Parameters<typeof WorkspaceShell>[0], 'onClose'> & { onClose: () => void },
-) {
-  const { artifact } = props
-  const template = detectSandpackTemplate(artifact.files ?? [])
-  const bundlerURL = import.meta.env.VITE_SANDPACK_BUNDLER_URL as string | undefined
-  return createPortal(
-    <SandpackProvider
-      template={template}
-      files={normalizedFiles(artifact)}
-      customSetup={{ dependencies: packageDependencies(artifact) }}
-      options={{
-        activeFile: artifact.entrypoint,
-        visibleFiles: (artifact.files ?? []).map((file) =>
-          file.path.startsWith('/') ? file.path : `/${file.path}`,
-        ),
-        autorun: true,
-        autoReload: true,
-        recompileMode: 'delayed',
-        recompileDelay: 350,
-        bundlerURL,
-      }}
-      theme="light"
-    >
-      <WorkspaceShell {...props} />
-    </SandpackProvider>,
-    document.body,
+function InlineCodeArtifact({
+  artifact,
+  compact,
+  status,
+  ...actions
+}: {
+  artifact: ArtifactEnvelope
+  compact: boolean
+  status?: string
+  onSaveArtifact?: (artifact: ArtifactEnvelope) => void
+  onAskAgent?: () => void
+  onApprove?: () => void
+  onReject?: () => void
+}) {
+  const { sandpack } = useSandpack()
+  const [activeView, setActiveView] = useState<'preview' | 'code'>('preview')
+  const [expanded, setExpanded] = useState(false)
+  const files = artifact.files ?? []
+  const template = detectSandpackTemplate(files)
+  const artifactPaths = new Set(canonicalFiles(files).map((file) => file.path))
+  const [lastSaved, setLastSaved] = useState(() => JSON.stringify(canonicalFiles(files)))
+  const currentFiles = filesFromSandpack(sandpack.files, artifactPaths)
+  const currentSnapshot = JSON.stringify(currentFiles)
+  const dirty = currentSnapshot !== lastSaved
+  const buildFailed = !!sandpack.error || sandpack.status === 'timeout'
+
+  function saveRevision() {
+    const next: ArtifactEnvelope = {
+      ...artifact,
+      files: currentFiles,
+      revision: {
+        number: (artifact.revision?.number ?? 0) + 1,
+        savedAt: new Date().toISOString(),
+      },
+    }
+    actions.onSaveArtifact?.(next)
+    setLastSaved(currentSnapshot)
+  }
+
+  return (
+    <section className={`inline-code-artifact ${compact ? 'compact' : ''}`}>
+      <header className="inline-code-artifact-header">
+        <div>
+          <span>{artifact.kind}</span>
+          <strong>{artifact.title}</strong>
+        </div>
+        <span className={`inline-build-status ${buildFailed ? 'error' : ''}`}>
+          {buildFailed
+            ? 'Build failed'
+            : sandpack.status === 'running'
+              ? 'Building…'
+              : dirty
+                ? 'Modified'
+                : (status ?? 'Ready')}
+        </span>
+        <div className="inline-artifact-tabs" role="tablist" aria-label="Artifact view">
+          <button
+            type="button"
+            className={activeView === 'preview' ? 'active' : ''}
+            onClick={() => setActiveView('preview')}
+          >
+            <Eye size={13} /> Preview
+          </button>
+          <button
+            type="button"
+            className={activeView === 'code' ? 'active' : ''}
+            onClick={() => setActiveView('code')}
+          >
+            <Code2 size={13} /> Code
+          </button>
+        </div>
+      </header>
+
+      <div className="inline-code-artifact-stage nodrag nopan nowheel">
+        {activeView === 'preview' ? (
+          <SandpackPreview
+            showNavigator
+            showRefreshButton
+            showOpenInCodeSandbox={false}
+            showOpenNewtab
+            style={{ height: compact ? 300 : 480 }}
+          />
+        ) : (
+          <SandpackLayout style={{ height: compact ? 300 : 480, border: 0, borderRadius: 0 }}>
+            <div className="inline-code-editor-layout">
+              <SandpackFileExplorer />
+              <SandpackCodeEditor
+                showTabs
+                showLineNumbers
+                showInlineErrors
+                closableTabs
+                wrapContent
+                style={{ height: '100%' }}
+              />
+            </div>
+          </SandpackLayout>
+        )}
+      </div>
+
+      <footer className="inline-code-artifact-footer">
+        <span>
+          <FolderTree size={12} /> {files.length} files · {template}
+        </span>
+        <div>
+          <button type="button" onClick={actions.onAskAgent}>
+            <Sparkles size={12} /> Ask agent
+          </button>
+          <button type="button" disabled={!dirty} onClick={() => sandpack.resetAllFiles()}>
+            <RefreshCw size={12} /> Revert
+          </button>
+          <button type="button" disabled={!dirty || !actions.onSaveArtifact} onClick={saveRevision}>
+            <Save size={12} /> Save
+          </button>
+          {actions.onApprove && (
+            <button type="button" onClick={actions.onApprove}>
+              <Check size={12} /> Approve
+            </button>
+          )}
+          {actions.onReject && (
+            <button type="button" onClick={actions.onReject}>
+              Reject
+            </button>
+          )}
+          <button type="button" onClick={() => setExpanded(true)}>
+            <Expand size={12} /> Expand
+          </button>
+        </div>
+      </footer>
+      {expanded &&
+        createPortal(
+          <WorkspaceShell artifact={artifact} onClose={() => setExpanded(false)} {...actions} />,
+          document.body,
+        )}
+    </section>
   )
 }
 
@@ -389,86 +496,28 @@ function CodeArtifactCard({
   onApprove?: () => void
   onReject?: () => void
 }) {
-  const [workspaceOpen, setWorkspaceOpen] = useState(false)
-  const files = artifact.files ?? []
-  const template = detectSandpackTemplate(files)
-  const webProject = files.some((file) => /\.(tsx|jsx|js|ts|html|css|vue|svelte)$/.test(file.path))
-  if (compact)
-    return (
-      <div
-        style={{
-          border: `1px solid ${tokens.color.border}`,
-          padding: 8,
-          fontFamily: tokens.font.mono,
-          fontSize: 10,
-        }}
-      >
-        {files.map((file) => (
-          <div key={file.path}>{file.path}</div>
-        ))}
-      </div>
-    )
-
+  const template = detectSandpackTemplate(artifact.files ?? [])
   return (
-    <div style={{ display: 'grid', gap: 8 }}>
-      <div
-        className="nodrag nopan nowheel"
-        style={{
-          border: `1px solid ${tokens.color.border}`,
-          background: '#f7f7f7',
-          minHeight: 180,
-          overflow: 'hidden',
-        }}
-      >
-        {webProject ? (
-          <SandpackProvider
-            template={template}
-            files={normalizedFiles(artifact)}
-            customSetup={{ dependencies: packageDependencies(artifact) }}
-            options={{
-              autorun: true,
-              initMode: 'user-visible',
-              bundlerURL: import.meta.env.VITE_SANDPACK_BUNDLER_URL as string | undefined,
-            }}
-          >
-            <SandpackPreview
-              showNavigator={false}
-              showRefreshButton={false}
-              showOpenInCodeSandbox={false}
-              style={{ height: 220 }}
-            />
-          </SandpackProvider>
-        ) : (
-          <StructuredData value={files.map((file) => file.path)} />
-        )}
-      </div>
-      <div
-        className="nodrag nopan"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          fontSize: 10,
-          fontFamily: tokens.font.mono,
-        }}
-      >
-        <span>{template}</span>
-        <span>·</span>
-        <span>{files.length} files</span>
-        <span>·</span>
-        <span>{status ?? 'artifact'}</span>
-        <span style={{ flex: 1 }} />
-        <button type="button" className="skill-btn" onClick={actions.onAskAgent}>
-          <Sparkles size={12} /> Ask agent
-        </button>
-        <button type="button" className="skill-btn" onClick={() => setWorkspaceOpen(true)}>
-          <Expand size={12} /> Open workspace
-        </button>
-      </div>
-      {workspaceOpen && (
-        <WorkspaceModal artifact={artifact} onClose={() => setWorkspaceOpen(false)} {...actions} />
-      )}
-    </div>
+    <SandpackProvider
+      template={template}
+      files={normalizedFiles(artifact)}
+      customSetup={{ dependencies: packageDependencies(artifact) }}
+      options={{
+        activeFile: artifact.entrypoint,
+        visibleFiles: (artifact.files ?? []).map((file) =>
+          file.path.startsWith('/') ? file.path : `/${file.path}`,
+        ),
+        autorun: true,
+        autoReload: true,
+        initMode: 'user-visible',
+        recompileMode: 'delayed',
+        recompileDelay: 350,
+        bundlerURL: import.meta.env.VITE_SANDPACK_BUNDLER_URL as string | undefined,
+      }}
+      theme="light"
+    >
+      <InlineCodeArtifact artifact={artifact} compact={compact} status={status} {...actions} />
+    </SandpackProvider>
   )
 }
 

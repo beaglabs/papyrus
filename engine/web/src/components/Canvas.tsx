@@ -7,6 +7,7 @@ import {
   type NodeTypes,
   ReactFlow,
   type ReactFlowInstance,
+  useReactFlow,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { tokens } from '@papyrus/core/design'
@@ -107,6 +108,87 @@ const nodeActionStyle: React.CSSProperties = {
   cursor: 'pointer',
   fontFamily: tokens.font.mono,
   textTransform: 'uppercase',
+}
+
+interface SourcePromptEditorProps {
+  nodeId: string
+  content: string
+  onSave: (current: string, next: string) => void
+}
+
+function SourcePromptEditor({ nodeId, content, onSave }: SourcePromptEditorProps) {
+  const { updateNodeData } = useReactFlow()
+  const [draft, setDraft] = useState(content)
+  const [editing, setEditing] = useState(false)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => {
+    if (!editing) setDraft(content)
+  }, [content, editing])
+
+  const save = useCallback(() => {
+    setEditing(false)
+    if (draft === content) return
+    updateNodeData(nodeId, (node) => {
+      const document = node.data as unknown as CanvasNodeDoc
+      return { ...document, fields: { ...document.fields, content: draft } }
+    })
+    onSave(content, draft)
+  }, [content, draft, nodeId, onSave, updateNodeData])
+
+  return (
+    <div className="nodrag nowheel">
+      <textarea
+        ref={textareaRef}
+        className="nodrag nowheel"
+        aria-label="Project system prompt"
+        value={draft}
+        onFocus={() => setEditing(true)}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={save}
+        onKeyDown={(event) => {
+          event.stopPropagation()
+          if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+            event.preventDefault()
+            textareaRef.current?.blur()
+          }
+          if (event.key === 'Escape') {
+            setDraft(content)
+            textareaRef.current?.blur()
+          }
+        }}
+        placeholder="Describe what the agents are building, who it serves, constraints, and desired outcomes…"
+        style={{
+          display: 'block',
+          width: '100%',
+          minHeight: 150,
+          padding: 12,
+          textAlign: 'left',
+          resize: 'vertical',
+          background: tokens.color.bg,
+          color: tokens.color.text,
+          border: `2px solid ${editing ? tokens.color.accent : tokens.color.black}`,
+          borderRadius: tokens.radius.md,
+          fontFamily: tokens.font.mono,
+          fontSize: 12,
+          lineHeight: 1.6,
+          cursor: 'text',
+          outline: 'none',
+        }}
+      />
+      <div
+        style={{
+          marginTop: 5,
+          color: tokens.color.textDim,
+          fontFamily: tokens.font.mono,
+          fontSize: 9,
+          textAlign: 'right',
+        }}
+      >
+        {editing ? 'Editing · click outside or press ⌘/Ctrl + Enter to save' : 'Saved'}
+      </div>
+    </div>
+  )
 }
 
 export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
@@ -437,34 +519,10 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
               )}
 
               {isEditableSpec && canEdit ? (
-                <textarea
-                  className="nodrag nowheel"
-                  aria-label="Project system prompt"
-                  value={content}
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onKeyDown={(event) => event.stopPropagation()}
-                  onChange={(event) => {
-                    event.stopPropagation()
-                    updateDocumentText(doc.id, content, event.target.value)
-                  }}
-                  placeholder="Describe what the agents are building, who it serves, constraints, and desired outcomes…"
-                  style={{
-                    display: 'block',
-                    width: '100%',
-                    minHeight: 150,
-                    padding: 12,
-                    textAlign: 'left',
-                    resize: 'vertical',
-                    background: tokens.color.bg,
-                    color: tokens.color.text,
-                    border: `2px solid ${tokens.color.black}`,
-                    borderRadius: tokens.radius.md,
-                    fontFamily: tokens.font.mono,
-                    fontSize: 12,
-                    lineHeight: 1.6,
-                    cursor: 'text',
-                    outline: 'none',
-                  }}
+                <SourcePromptEditor
+                  nodeId={doc.id}
+                  content={content}
+                  onSave={(current, next) => updateDocumentText(doc.id, current, next)}
                 />
               ) : isEditableSpec ? (
                 <div

@@ -7,7 +7,6 @@ import {
   type NodeTypes,
   ReactFlow,
   type ReactFlowInstance,
-  useReactFlow,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { tokens } from '@papyrus/core/design'
@@ -21,11 +20,13 @@ import {
   ChevronUp,
   CircleX,
   Code2,
-  LayoutPanelLeft,
+  FileText,
   Palette,
   PanelLeftClose,
   PanelLeftOpen,
+  Save,
   ShieldCheck,
+  Sparkles,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
@@ -110,87 +111,6 @@ const nodeActionStyle: React.CSSProperties = {
   textTransform: 'uppercase',
 }
 
-interface SourcePromptEditorProps {
-  nodeId: string
-  content: string
-  onSave: (current: string, next: string) => void
-}
-
-function SourcePromptEditor({ nodeId, content, onSave }: SourcePromptEditorProps) {
-  const { updateNodeData } = useReactFlow()
-  const [draft, setDraft] = useState(content)
-  const [editing, setEditing] = useState(false)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
-
-  useEffect(() => {
-    if (!editing) setDraft(content)
-  }, [content, editing])
-
-  const save = useCallback(() => {
-    setEditing(false)
-    if (draft === content) return
-    updateNodeData(nodeId, (node) => {
-      const document = node.data as unknown as CanvasNodeDoc
-      return { ...document, fields: { ...document.fields, content: draft } }
-    })
-    onSave(content, draft)
-  }, [content, draft, nodeId, onSave, updateNodeData])
-
-  return (
-    <div className="nodrag nowheel">
-      <textarea
-        ref={textareaRef}
-        className="nodrag nowheel"
-        aria-label="Project system prompt"
-        value={draft}
-        onFocus={() => setEditing(true)}
-        onChange={(event) => setDraft(event.target.value)}
-        onBlur={save}
-        onKeyDown={(event) => {
-          event.stopPropagation()
-          if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-            event.preventDefault()
-            textareaRef.current?.blur()
-          }
-          if (event.key === 'Escape') {
-            setDraft(content)
-            textareaRef.current?.blur()
-          }
-        }}
-        placeholder="Describe what the agents are building, who it serves, constraints, and desired outcomes…"
-        style={{
-          display: 'block',
-          width: '100%',
-          minHeight: 150,
-          padding: 12,
-          textAlign: 'left',
-          resize: 'vertical',
-          background: tokens.color.bg,
-          color: tokens.color.text,
-          border: `2px solid ${editing ? tokens.color.accent : tokens.color.black}`,
-          borderRadius: tokens.radius.md,
-          fontFamily: tokens.font.mono,
-          fontSize: 12,
-          lineHeight: 1.6,
-          cursor: 'text',
-          outline: 'none',
-        }}
-      />
-      <div
-        style={{
-          marginTop: 5,
-          color: tokens.color.textDim,
-          fontFamily: tokens.font.mono,
-          fontSize: 9,
-          textAlign: 'right',
-        }}
-      >
-        {editing ? 'Editing · click outside or press ⌘/Ctrl + Enter to save' : 'Saved'}
-      </div>
-    </div>
-  )
-}
-
 export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
   const { apiFetch, loadProjectRole, clearProjectRole, projectRole, user, token } = useAuth()
   const peerId = user?.memberKey ?? 'anonymous'
@@ -220,6 +140,11 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
   const fittedProjectRef = useRef<string | null>(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([])
+  const [briefDraft, setBriefDraft] = useState('')
+  const [briefEditing, setBriefEditing] = useState(false)
+  const [agentComposerDraft, setAgentComposerDraft] = useState<{ id: number; text: string }>()
+  const briefEditorRef = useRef<HTMLTextAreaElement>(null)
+  const lastSyncedBriefRef = useRef('')
 
   useEffect(() => {
     loadProjectRole(projectId)
@@ -227,6 +152,36 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
   }, [projectId, loadProjectRole, clearProjectRole])
 
   const canEdit = projectRole === 'owner' || projectRole === 'editor' || projectRole === null
+  const sourceNode = useMemo(() => nodes.find((node) => node.flowRole === 'source'), [nodes])
+  const sourceContent = String(sourceNode?.fields.content ?? '')
+  const briefDirty = briefDraft !== sourceContent
+
+  useEffect(() => {
+    if (!briefEditing && (briefDraft === '' || briefDraft === lastSyncedBriefRef.current)) {
+      setBriefDraft(sourceContent)
+    }
+    lastSyncedBriefRef.current = sourceContent
+  }, [briefDraft, briefEditing, sourceContent])
+
+  const saveProjectBrief = useCallback(() => {
+    if (!sourceNode || !briefDirty) return
+    updateDocumentText(sourceNode.id, sourceContent, briefDraft)
+  }, [briefDirty, briefDraft, sourceContent, sourceNode, updateDocumentText])
+
+  const openProjectBrief = useCallback(() => {
+    setSidebarCollapsed(false)
+    requestAnimationFrame(() => briefEditorRef.current?.focus())
+  }, [])
+
+  const askPmToRefine = useCallback(() => {
+    if (briefDirty) saveProjectBrief()
+    const pm = PERSONA_LIST[0] as CanvasPersona
+    setActivePersona(pm)
+    setAgentComposerDraft({
+      id: Date.now(),
+      text: `Review and refine the current project brief. Preserve the intent, remove ambiguity, and propose a clearer version for my approval.\n\nCurrent brief:\n${briefDraft || sourceContent}`,
+    })
+  }, [briefDirty, briefDraft, saveProjectBrief, sourceContent])
   const [remoteCursors, setRemoteCursors] = useState<
     Map<string, { x: number; y: number; displayName: string; color: string }>
   >(new Map())
@@ -356,6 +311,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
         const [editingName, setEditingName] = useState(false)
         const [nameValue, setNameValue] = useState(title)
         const isEditableSpec = doc.type === 'specification' || doc.flowRole === 'source'
+        const nodeWidth = isSource ? 360 : isEditableSpec ? 520 : 340
 
         useEffect(() => {
           if (!editingName) setNameValue(title)
@@ -408,9 +364,9 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
               background: tokens.color.surface,
               border: `2px solid ${selected ? tokens.color.accent : tokens.color.black}`,
               borderRadius: tokens.radius.lg,
-              width: isEditableSpec ? 520 : 340,
-              minWidth: isEditableSpec ? 520 : 240,
-              maxWidth: isEditableSpec ? 520 : 340,
+              width: nodeWidth,
+              minWidth: isSource ? 320 : isEditableSpec ? 520 : 240,
+              maxWidth: nodeWidth,
               boxShadow: selected ? tokens.shadow.glow : '5px 5px 0 #111',
               transition: 'border-color 0.15s, box-shadow 0.15s',
               overflow: 'hidden',
@@ -487,9 +443,9 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
               </span>
             </div>
 
-            {/* Editable specification / content preview */}
+            {/* Read-only project brief / content preview */}
             <div className="nodrag" style={{ padding: '10px 12px' }}>
-              {isEditableSpec && (
+              {isSource && (
                 <div
                   style={{
                     display: 'flex',
@@ -509,23 +465,60 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
                         letterSpacing: '0.06em',
                       }}
                     >
-                      Project system prompt
+                      Project Brief
                     </div>
                     <div style={{ color: tokens.color.textDim, fontSize: 10, marginTop: 2 }}>
-                      {canEdit
-                        ? 'Edit directly below · changes sync to collaborators and agents'
-                        : 'Read-only access'}
+                      Updated {new Date(doc.updatedAt).toLocaleString()}
                     </div>
                   </div>
                 </div>
               )}
 
-              {isEditableSpec && canEdit ? (
-                <SourcePromptEditor
-                  nodeId={doc.id}
-                  content={content}
-                  onSave={(current, next) => updateDocumentText(doc.id, current, next)}
-                />
+              {isSource ? (
+                <>
+                  <div
+                    style={{
+                      color: content ? tokens.color.textMuted : tokens.color.textDim,
+                      fontSize: 12,
+                      lineHeight: 1.55,
+                      maxHeight: 96,
+                      overflow: 'hidden',
+                      whiteSpace: 'pre-wrap',
+                    }}
+                  >
+                    {content ? content.slice(0, 280) : 'No project brief has been provided yet.'}
+                    {content.length > 280 ? '…' : ''}
+                  </div>
+                  {canEdit && (
+                    <div style={{ display: 'flex', gap: 7, marginTop: 10 }}>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          openProjectBrief()
+                        }}
+                        style={{ ...nodeActionStyle, flex: 1, marginTop: 0 }}
+                      >
+                        <FileText size={13} aria-hidden="true" /> Open brief
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          askPmToRefine()
+                        }}
+                        style={{
+                          ...nodeActionStyle,
+                          flex: 1,
+                          marginTop: 0,
+                          background: tokens.color.surface,
+                        }}
+                      >
+                        <Sparkles size={13} aria-hidden="true" /> Ask PM
+                      </button>
+                    </div>
+                  )}
+                </>
               ) : isEditableSpec ? (
                 <div
                   style={{
@@ -542,7 +535,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
                     lineHeight: 1.6,
                   }}
                 >
-                  {content || 'No project system prompt has been provided.'}
+                  {content || 'No specification content has been provided.'}
                 </div>
               ) : (
                 <div
@@ -561,7 +554,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
               )}
 
               {/* Toggle preview */}
-              {(!isEditableSpec || !canEdit) && content.length > 220 && (
+              {!isSource && content.length > 220 && (
                 <button
                   className="nodrag"
                   type="button"
@@ -673,14 +666,14 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
                   textAlign: 'center',
                 }}
               >
-                System prompt
+                Project brief
               </div>
             )}
           </div>
         )
       },
     }),
-    [apiFetch, canEdit, activePersona.id, peerId, updateDocumentText, upsertNode],
+    [apiFetch, canEdit, activePersona.id, askPmToRefine, openProjectBrief, peerId, upsertNode],
   )
 
   const onConnect = useCallback(
@@ -703,7 +696,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
   return (
     <div className="app-layout">
       {/* Sidebar — collapsible */}
-      <nav className="sidebar" style={{ width: sidebarCollapsed ? 48 : 260 }}>
+      <nav className="sidebar" style={{ width: sidebarCollapsed ? 48 : 330 }}>
         <div
           className="sidebar-brand"
           style={{ justifyContent: sidebarCollapsed ? 'center' : 'flex-start' }}
@@ -719,26 +712,58 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
           )}
         </div>
         {!sidebarCollapsed && (
-          <div className="sidebar-nav">
-            <button type="button" onClick={onBack}>
-              <span className="icon">
-                <ArrowLeft size={16} aria-hidden="true" />
-              </span>
-              Back
-            </button>
-            <button type="button" className="active">
-              <span className="icon">
-                <LayoutPanelLeft size={16} aria-hidden="true" />
-              </span>
-              Canvas
-            </button>
+          <div className="project-brief-panel">
+            <div className="project-brief-heading">
+              <button type="button" className="project-brief-back" onClick={onBack}>
+                <ArrowLeft size={15} aria-hidden="true" /> Back
+              </button>
+              <div className="project-brief-eyebrow">
+                <FileText size={13} aria-hidden="true" /> Project brief
+              </div>
+              <h1>{projectName}</h1>
+              <p>The shared context used by every agent working on this canvas.</p>
+            </div>
+            <textarea
+              ref={briefEditorRef}
+              className="project-brief-editor"
+              aria-label="Project brief"
+              value={briefDraft}
+              readOnly={!canEdit || !sourceNode}
+              onFocus={() => setBriefEditing(true)}
+              onBlur={() => setBriefEditing(false)}
+              onChange={(event) => setBriefDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                  event.preventDefault()
+                  saveProjectBrief()
+                }
+              }}
+              placeholder="Describe what you are building, who it serves, the problem it solves, constraints, and desired outcomes…"
+            />
+            <div className="project-brief-meta">
+              <span>{briefDirty ? 'Unsaved changes' : 'Saved'}</span>
+              {sourceNode && <span>Updated {new Date(sourceNode.updatedAt).toLocaleString()}</span>}
+            </div>
+            {canEdit && (
+              <div className="project-brief-actions">
+                <button
+                  type="button"
+                  className="project-brief-save"
+                  disabled={!sourceNode || !briefDirty}
+                  onClick={saveProjectBrief}
+                >
+                  <Save size={14} aria-hidden="true" /> Save brief
+                </button>
+                <button type="button" className="project-brief-refine" onClick={askPmToRefine}>
+                  <Sparkles size={14} aria-hidden="true" /> Ask PM to refine
+                </button>
+              </div>
+            )}
           </div>
         )}
-        <div className="sidebar-spacer" />
         <div className="sidebar-footer">
           {!sidebarCollapsed && (
             <>
-              <div style={{ marginBottom: 4 }}>{projectName}</div>
               {projectRole && (
                 <div
                   style={{
@@ -827,6 +852,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
               peerId={peerId}
               canvasContext={agentCanvasContext}
               parentNodeIds={agentParentNodeIds}
+              composerDraft={persona.id === 'pm' ? agentComposerDraft : undefined}
             />
           </div>
         ))}

@@ -149,6 +149,129 @@ body {
   flex: 1;
 }
 
+.project-brief-panel {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 18px 18px 14px;
+  overflow: hidden;
+}
+
+.project-brief-heading {
+  flex: 0 0 auto;
+}
+
+.project-brief-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 22px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font: 600 12px var(--font);
+  cursor: pointer;
+}
+
+.project-brief-back:hover {
+  color: var(--accent);
+}
+
+.project-brief-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent);
+  font: 800 10px var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.project-brief-heading h1 {
+  margin: 7px 0 5px;
+  color: var(--text);
+  font-size: 17px;
+  line-height: 1.25;
+}
+
+.project-brief-heading p {
+  margin: 0 0 14px;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.project-brief-editor {
+  min-height: 0;
+  flex: 1;
+  width: 100%;
+  padding: 13px;
+  resize: none;
+  border: 2px solid var(--border);
+  border-radius: var(--radius-md);
+  outline: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 12px / 1.6 var(--font-mono);
+}
+
+.project-brief-editor:focus {
+  border-color: var(--accent);
+  box-shadow: 3px 3px 0 var(--accent-muted);
+}
+
+.project-brief-editor:read-only {
+  cursor: default;
+  color: var(--text-muted);
+}
+
+.project-brief-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 1px 10px;
+  color: var(--text-dim);
+  font: 9px var(--font-mono);
+}
+
+.project-brief-actions {
+  display: grid;
+  grid-template-columns: 0.9fr 1.1fr;
+  gap: 8px;
+}
+
+.project-brief-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 7px 8px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 3px 3px 0 var(--border);
+  color: var(--text);
+  font: 800 9px var(--font-mono);
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.project-brief-save {
+  background: var(--accent);
+}
+
+.project-brief-refine {
+  background: var(--surface);
+}
+
+.project-brief-actions button:disabled {
+  opacity: 0.4;
+  cursor: default;
+  box-shadow: none;
+}
+
 .sidebar-footer {
   padding: 12px 20px;
   border-top: 1px solid var(--border);

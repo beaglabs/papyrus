@@ -410,12 +410,9 @@ function CodeArtifactCard({
     )
 
   return (
-    <div
-      className="nodrag nowheel"
-      onPointerDown={(event) => event.stopPropagation()}
-      style={{ display: 'grid', gap: 8 }}
-    >
+    <div style={{ display: 'grid', gap: 8 }}>
       <div
+        className="nodrag nopan nowheel"
         style={{
           border: `1px solid ${tokens.color.border}`,
           background: '#f7f7f7',
@@ -446,6 +443,7 @@ function CodeArtifactCard({
         )}
       </div>
       <div
+        className="nodrag nopan"
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -481,7 +479,12 @@ export function ArtifactRenderer({
   ...actions
 }: ArtifactRendererProps) {
   const wireframe = unwrapUswdsArtifact(artifact)
-  if (wireframe) return <UswdsWireframePreview artifact={wireframe} compact={compact} />
+  if (wireframe)
+    return (
+      <div className="nodrag nopan nowheel">
+        <UswdsWireframePreview artifact={wireframe} compact={compact} />
+      </div>
+    )
   if (!isArtifactEnvelope(artifact)) return <StructuredData value={artifact} />
   if (artifact.renderer.type === 'code' || artifact.renderer.type === 'web-preview')
     return <CodeArtifactCard artifact={artifact} compact={compact} status={status} {...actions} />

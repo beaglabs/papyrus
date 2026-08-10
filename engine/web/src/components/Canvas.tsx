@@ -303,6 +303,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
         id: doc.id,
         type: 'canvasNode',
         position: doc.position,
+        dragHandle: '.canvas-node-drag-handle',
         data: doc as unknown as Record<string, unknown>,
       })),
     [nodes],
@@ -417,6 +418,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
           >
             {/* Node header */}
             <div
+              className="canvas-node-drag-handle"
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -851,6 +853,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
           }
           onInit={setRfInstance}
           nodeTypes={nodeTypes}
+          noDragClassName="nodrag"
           fitView
           snapToGrid
           snapGrid={[20, 20]}

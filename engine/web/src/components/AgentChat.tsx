@@ -3,6 +3,7 @@ import {
   AtSign,
   Boxes,
   Check,
+  CircleX,
   LocateFixed,
   type LucideIcon,
   Paperclip,
@@ -474,6 +475,8 @@ export function AgentChat({
           const messagePersona =
             personas.find((candidate) => candidate.id === msg.personaId) ?? persona
           const MessageIcon = messagePersona.icon
+          const proposedCount = msg.nodes?.filter((node) => node.status === 'proposed').length ?? 0
+          const approvedCount = msg.nodes?.filter((node) => node.status === 'approved').length ?? 0
           return (
             <div key={msg.id} className={`chat-msg ${msg.role}`}>
               <div
@@ -509,32 +512,45 @@ export function AgentChat({
                       fontFamily: tokens.font.mono,
                     }}
                   >
-                    <Boxes size={13} aria-hidden="true" /> {msg.nodesCreated}{' '}
-                    {msg.nodesCreated === 1 ? 'proposal' : 'proposals'} added to canvas for review
+                    <Boxes size={13} aria-hidden="true" />{' '}
+                    {proposedCount > 0
+                      ? `${proposedCount} ${proposedCount === 1 ? 'proposal' : 'proposals'} ready for review`
+                      : approvedCount > 0
+                        ? `${approvedCount} ${approvedCount === 1 ? 'artifact' : 'artifacts'} approved`
+                        : `${msg.nodesCreated} ${msg.nodesCreated === 1 ? 'artifact' : 'artifacts'} on canvas`}
                     {msg.nodes?.map((node) => (
                       <div
                         key={node.id}
                         style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}
                       >
                         {node.status === 'proposed' && (
-                          <button
-                            type="button"
-                            className="nodrag"
-                            onClick={() => reviewFromChat(node.id, 'approved')}
-                          >
-                            <Check size={12} aria-hidden="true" /> Confirm
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              className="chat-artifact-action nodrag"
+                              onClick={() => reviewFromChat(node.id, 'approved')}
+                            >
+                              <Check size={12} aria-hidden="true" /> Confirm
+                            </button>
+                            <button
+                              type="button"
+                              className="chat-artifact-action secondary nodrag"
+                              onClick={() => reviewFromChat(node.id, 'rejected')}
+                            >
+                              <CircleX size={12} aria-hidden="true" /> Reject
+                            </button>
+                          </>
                         )}
                         <button
                           type="button"
-                          className="nodrag"
+                          className="chat-artifact-action secondary nodrag"
                           onClick={() => void onRetryNode(node.id)}
                         >
                           <RefreshCw size={12} aria-hidden="true" /> Retry
                         </button>
                         <button
                           type="button"
-                          className="nodrag"
+                          className="chat-artifact-action secondary nodrag"
                           onClick={() => onFocusNode(node.id)}
                         >
                           <LocateFixed size={12} aria-hidden="true" /> View on canvas

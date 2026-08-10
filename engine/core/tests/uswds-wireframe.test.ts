@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   createFallbackUswdsWireframe,
+  createRevisionFallbackUswdsWireframe,
   isUswdsWireframeArtifact,
   parseUswdsWireframeArtifact,
 } from '../src/artifacts/uswds-wireframe.js'
@@ -43,6 +44,19 @@ describe('USWDS wireframe artifacts', () => {
     expect(parseUswdsWireframeArtifact(JSON.stringify({ artifact: validWireframe }))).toEqual(
       validWireframe,
     )
+  })
+
+  it('finds a wireframe embedded in larger revision context', () => {
+    const context = `Current canvas\n${JSON.stringify({ unrelated: true })}\nArtifact to revise\n${JSON.stringify(validWireframe)}\nReturn it.`
+    expect(parseUswdsWireframeArtifact(context)).toEqual(validWireframe)
+  })
+
+  it('preserves an existing artifact while applying a requested button color', () => {
+    const request = `Make the buttons red\n\nArtifact to revise in place:\n${JSON.stringify(validWireframe)}`
+    const revised = createRevisionFallbackUswdsWireframe(request)
+    expect(revised?.title).toBe(validWireframe.title)
+    expect(revised?.sections).toEqual(validWireframe.sections)
+    expect(revised?.theme?.primaryColor).toBe('#b50909')
   })
 
   it('creates a schema-valid desktop recovery wireframe', () => {

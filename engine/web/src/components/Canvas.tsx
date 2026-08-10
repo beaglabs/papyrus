@@ -513,7 +513,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
             </div>
 
             {/* Read-only project brief / content preview */}
-            <div className="nodrag" style={{ padding: '10px 12px' }}>
+            <div className="nowheel" style={{ padding: '10px 12px', cursor: 'grab' }}>
               {isSource && (
                 <div
                   style={{
@@ -961,6 +961,8 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
           nodeTypes={nodeTypes}
           noDragClassName="nodrag"
           noPanClassName="nopan"
+          nodesDraggable
+          elementsSelectable
           fitView
           snapToGrid
           snapGrid={[20, 20]}

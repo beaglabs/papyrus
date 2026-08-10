@@ -189,6 +189,7 @@ export function parseUswdsWireframeArtifact(content: string): UswdsWireframeArti
   if (firstBrace >= 0 && lastBrace > firstBrace) {
     sources.add(content.slice(firstBrace, lastBrace + 1))
   }
+  for (const source of extractJsonObjectsContainingSchema(content)) sources.add(source)
 
   for (const source of sources) {
     try {
@@ -206,6 +207,63 @@ export function parseUswdsWireframeArtifact(content: string): UswdsWireframeArti
     }
   }
   return undefined
+}
+
+function extractJsonObjectsContainingSchema(content: string): string[] {
+  const results: string[] = []
+  for (let start = 0; start < content.length; start++) {
+    if (content[start] !== '{') continue
+    let depth = 0
+    let inString = false
+    let escaped = false
+    for (let index = start; index < content.length; index++) {
+      const character = content[index]
+      if (inString) {
+        if (escaped) escaped = false
+        else if (character === '\\') escaped = true
+        else if (character === '"') inString = false
+        continue
+      }
+      if (character === '"') inString = true
+      else if (character === '{') depth++
+      else if (character === '}') {
+        depth--
+        if (depth === 0) {
+          const candidate = content.slice(start, index + 1)
+          if (candidate.includes(USWDS_WIREFRAME_SCHEMA_ID)) results.push(candidate)
+          break
+        }
+      }
+    }
+  }
+  return results
+}
+
+export function createRevisionFallbackUswdsWireframe(
+  request: string,
+): UswdsWireframeArtifact | undefined {
+  const existing = parseUswdsWireframeArtifact(request)
+  if (!existing) return undefined
+  const artifact = structuredClone(existing)
+  const namedColors: Record<string, string> = {
+    red: '#b50909',
+    orange: '#e66f0e',
+    yellow: '#ffbe2e',
+    green: '#008817',
+    blue: '#005ea8',
+    purple: '#54278f',
+    black: '#1b1b1b',
+  }
+  const hex = request.match(/#[0-9a-f]{6}\b/i)?.[0]
+  const named = Object.entries(namedColors).find(([name]) =>
+    new RegExp(`\\b${name}\\b`, 'i').test(request),
+  )?.[1]
+  const requestedColor = hex ?? named
+  if (requestedColor && /\b(buttons?|actions?|primary|colou?r|theme)\b/i.test(request)) {
+    artifact.theme = { ...artifact.theme, primaryColor: requestedColor }
+  }
+  artifact.description = 'Recovered revision of the existing USWDS wireframe artifact.'
+  return artifact
 }
 
 export function createFallbackUswdsWireframe(request: string): UswdsWireframeArtifact {

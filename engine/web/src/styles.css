@@ -544,10 +544,6 @@ body {
   border-radius: 14px;
 }
 
-.react-flow__node.selected {
-  filter: drop-shadow(3px 3px 0 var(--accent));
-}
-
 .react-flow__handle {
   width: 8px !important;
   height: 8px !important;

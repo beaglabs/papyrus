@@ -235,6 +235,23 @@ export function extractArtifacts(
     }
   }
 
+  const standaloneWireframe = parseUswdsWireframeArtifact(rawText)
+  if (standaloneWireframe) {
+    return {
+      text: 'Created a USWDS wireframe proposal for review.',
+      nodes: [
+        {
+          type: 'ui-mockup',
+          category: 'output',
+          title: standaloneWireframe.title,
+          content: JSON.stringify(standaloneWireframe, null, 2),
+          status: 'proposed',
+          artifact: standaloneWireframe,
+        },
+      ],
+    }
+  }
+
   // Legacy: try JSON code block format
   const codeBlockMatch = rawText.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/)
   if (codeBlockMatch?.[1]) {

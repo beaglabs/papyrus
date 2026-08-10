@@ -42,6 +42,21 @@ describe('artifact envelope', () => {
     expect(artifact.files?.map((file) => file.path)).toEqual(['/package.json', '/src/App.tsx'])
   })
 
+  it('turns a design-system workspace into a code renderer', () => {
+    const artifact = coerceArtifactEnvelope(
+      'design-system',
+      'Digital Service DS',
+      '/package.json\n```json\n{"name":"ds","scripts":{"storybook":"storybook dev"}}\n```\n\n/index.html\n```html\n<h1>Gallery</h1>\n```\n\n/src/tokens.css\n```css\n:root { --color-primary: #005ea2; }\n```',
+      'designer',
+    )
+    expect(artifact.renderer.type).toBe('code')
+    expect(artifact.files?.map((file) => file.path)).toEqual([
+      '/package.json',
+      '/index.html',
+      '/src/tokens.css',
+    ])
+  })
+
   it('preserves unknown output as markdown instead of dropping it', () => {
     const artifact = coerceArtifactEnvelope('specification', 'Plan', 'A useful plan')
     expect(artifact.renderer.type).toBe('markdown')

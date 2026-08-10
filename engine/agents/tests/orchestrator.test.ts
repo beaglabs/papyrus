@@ -6,7 +6,7 @@ describe('artifact routing', () => {
     ['Create a comprehensive PRD', 'pm', 'specification'],
     ['Draft user stories with acceptance criteria', 'pm', 'user-story'],
     ['Define success metrics and KPIs', 'pm', 'success-metric'],
-    ['Define a design system with colors and typography', 'designer', 'specification'],
+    ['Define a design system with colors and typography', 'designer', 'design-system'],
     ['Create a desktop wireframe', 'designer', 'ui-mockup'],
     ['Design a REST API with all endpoints', 'engineer', 'api'],
     ['Generate React source code', 'engineer', 'application'],
@@ -32,5 +32,11 @@ describe('artifact routing', () => {
     const route = routeAgentRequest('@designer create a PRD')
     expect(route.primaryPersona).toBe('designer')
     expect(route.expectedArtifact).toBe('specification')
+  })
+
+  it('routes a component library request to the design-system artifact', () => {
+    const route = routeAgentRequest('Build a reusable component library for the portal')
+    expect(route.primaryPersona).toBe('designer')
+    expect(route.expectedArtifact).toBe('design-system')
   })
 })

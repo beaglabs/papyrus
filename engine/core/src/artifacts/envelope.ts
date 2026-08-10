@@ -134,7 +134,9 @@ export function coerceArtifactEnvelope(
   }
 
   const files = codeFiles(content)
-  if (['application', 'source-code', 'mcp-server', 'skill-creator'].includes(kind)) {
+  if (
+    ['application', 'source-code', 'mcp-server', 'skill-creator', 'design-system'].includes(kind)
+  ) {
     return {
       schema: ARTIFACT_SCHEMA,
       kind,

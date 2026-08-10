@@ -1,4 +1,4 @@
-import { buildPersonaSystemPrompt } from '@papyrus/agents'
+import { buildSystemPrompt } from '@papyrus/agents'
 import { describe, expect, it } from 'vitest'
 import { createSourceSpecificationNode, getProjectSystemPrompt } from './source-specification.js'
 
@@ -21,15 +21,11 @@ describe('source specification', () => {
   })
 
   it('places the editable project prompt in the model system instructions', () => {
-    const system = buildPersonaSystemPrompt(
-      'You are the product manager.',
+    const system = buildSystemPrompt(
       'Do not propose cloud dependencies.',
     )
 
-    expect(system).toContain('## Project System Prompt')
+    expect(system).toContain('## Project Context')
     expect(system).toContain('Do not propose cloud dependencies.')
-    expect(system.indexOf('You are the product manager.')).toBeLessThan(
-      system.indexOf('Do not propose cloud dependencies.'),
-    )
   })
 })

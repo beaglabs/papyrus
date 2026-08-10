@@ -58,6 +58,20 @@ export const OUTPUT_NODES: NodeTypeSpec[] = [
     ],
   },
   {
+    type: 'design-system',
+    category: 'output',
+    flowRole: 'exit',
+    icon: 'brick',
+    title: 'Design System',
+    description:
+      'Reusable component library — tokens, components, Storybook project with the AI assistant addon.',
+    fields: [
+      { key: 'title', label: 'Title', type: 'text', required: true },
+      { key: 'content', label: 'Description', type: 'markdown' },
+      { key: 'artifact', label: 'Workspace', type: 'blob' },
+    ],
+  },
+  {
     type: 'application',
     category: 'output',
     flowRole: 'exit',

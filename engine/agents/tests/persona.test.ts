@@ -48,4 +48,18 @@ describe('designer artifact extraction', () => {
       renderer: { type: 'markdown' },
     })
   })
+
+  it('extracts a design-system workspace into a runnable code artifact', () => {
+    const result = extractArtifacts(
+      '<artifact type="design-system" title="Portal DS">/package.json\n```json\n{"name":"portal-ds"}\n```\n\n/index.html\n```html\n<h1>Gallery</h1>\n```\n\n/src/tokens.css\n```css\n:root { --color-primary: #005ea2; }\n```</artifact>',
+      'designer',
+      'design-system',
+    )
+    expect(result.nodes[0]?.type).toBe('design-system')
+    expect(result.nodes[0]?.artifact).toMatchObject({
+      kind: 'design-system',
+      renderer: { type: 'code' },
+    })
+    expect(result.nodes[0]?.artifact?.files?.some((file) => file.path === '/index.html')).toBe(true)
+  })
 })

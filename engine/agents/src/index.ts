@@ -1,28 +1,23 @@
 /**
- * @papyrus/agents — persona-driven agent definitions and skill execution.
+ * @papyrus/agents — single code-generation agent.
  *
- * Each persona has a system prompt, a set of tools it can invoke,
+ * The agent takes user prompts and project context, generates code,
  * and produces structured output that the canvas can render as nodes.
- * Skills are packaged agent workflows that consume upstream artifacts
- * and produce new ones.
  */
 export {
   createPersonaAgent,
-  extractArtifact,
   extractArtifacts,
   type PersonaAgent,
   type AgentMessage,
   type AgentResponse,
   type CanvasNode,
   type PersonaAgentOptions,
-  buildPersonaSystemPrompt,
+  buildSystemPrompt,
 } from './persona.js'
-export { PERSONA_PROMPTS, TEMPLATE_PRESETS, type TemplatePreset } from './prompts.js'
+export { AGENT_PROMPT, TEMPLATE_PRESETS, type TemplatePreset } from './prompts.js'
 export {
-  PERSONA_CAPABILITIES,
   routeAgentRequest,
   type OrchestrationRoute,
-  type PersonaId,
 } from './orchestrator.js'
 export {
   runSkill,

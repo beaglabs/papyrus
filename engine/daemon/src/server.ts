@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { exec } from 'node:child_process'
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
 /**
  * Papyrus daemon — HTTP server serving the SPA and REST API.
@@ -10,6 +11,7 @@ import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
 import { type IncomingMessage, type ServerResponse, createServer } from 'node:http'
 import { createServer as createHttpsServer } from 'node:https'
 import { extname, join } from 'node:path'
+import { promisify } from 'node:util'
 import { TLSSocket } from 'node:tls'
 import {
   type AgentMessage,
@@ -304,6 +306,20 @@ function parseBody(req: IncomingMessage): Promise<Record<string, unknown>> {
 function json(res: ServerResponse, status: number, data: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' })
   res.end(JSON.stringify(data))
+}
+
+function sseStart(res: ServerResponse): void {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+    'Access-Control-Allow-Origin': '*',
+  })
+  res.flushHeaders()
+}
+
+function sseSend(res: ServerResponse, event: string, data: unknown): void {
+  res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
 }
 
 interface McpRequest {
@@ -2084,7 +2100,6 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
     if (!authCtx) return true
 
     const body = await parseBody(req)
-    const requestedPersona = body.persona as string | undefined
     const messages = body.messages as AgentMessage[] | undefined
     const projectId = body.projectId as string | undefined
     const attachments = body.attachments as string[] | undefined
@@ -2112,15 +2127,13 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
 
     const route = routeAgentRequest(
       prompt ?? messages[messages.length - 1]?.content ?? '',
-      requestedPersona,
     )
-    const persona = route.primaryPersona
     const conversationPersona = 'orchestrator'
     const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
     const task: GenerationTask = {
       id: taskId,
       projectId: projectId ?? 'unknown',
-      persona,
+      persona: 'engineer',
       prompt: messages[messages.length - 1]?.content ?? '',
       status: 'running',
       startedAt: new Date().toISOString(),
@@ -2136,7 +2149,7 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
         targetNodeId && projectState
           ? projectState.nodes.find((node) => node.id === targetNodeId)
           : undefined
-      const agent = createPersonaAgent(persona, modelProvider, {
+      const agent = createPersonaAgent(modelProvider, {
         projectSystemPrompt: projectState ? getProjectSystemPrompt(projectState.nodes) : undefined,
         expectedArtifact: revisionNode?.type ?? route.expectedArtifact,
       })
@@ -2207,10 +2220,10 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
               title: proposedNode.title,
               content: proposedNode.content,
               ...(proposedNode.artifact ? { artifact: proposedNode.artifact } : {}),
-              requestedPersona: persona,
+              requestedPersona: 'engineer',
             },
             status: 'proposed',
-            createdBy: `agent:${persona}`,
+            createdBy: 'agent:engineer',
             updatedAt: Date.now(),
           }
 
@@ -2220,7 +2233,7 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
               title: proposedNode.title,
               content: proposedNode.content,
               ...(proposedNode.artifact ? { artifact: proposedNode.artifact } : {}),
-              requestedPersona: persona,
+              requestedPersona: 'engineer',
               revisedAt: new Date().toISOString(),
             }
             nodeDoc.status = 'proposed'
@@ -2246,7 +2259,7 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
               from: parentNode.id,
               to: nodeDoc.id,
               kind: 'derives',
-              createdBy: `agent:${persona}`,
+              createdBy: 'agent:engineer',
               updatedAt: Date.now(),
             }
             state.edges.push(edge)
@@ -2310,6 +2323,194 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
     return true
   }
 
+  // ── Agent stream (SSE) ──────────────────────────────────────
+  if (url.pathname === '/api/agent/stream' && method === 'POST') {
+    const authCtx = requireAuth(req, res)
+    if (!authCtx) return true
+
+    const body = await parseBody(req)
+    const messages = body.messages as AgentMessage[] | undefined
+    const projectId = body.projectId as string | undefined
+    const attachments = body.attachments as string[] | undefined
+    const prompt = body.prompt as string | undefined
+    const existingFiles = body.existingFiles as Array<{ path: string; content: string; language?: string }> | undefined
+    const modelProvider = resolveModelProvider()
+
+    if (!messages) {
+      json(res, 400, { error: 'messages required' })
+      return true
+    }
+
+    if (projectId && !hasPermission(projectId, authCtx.memberKey, 'node:update')) {
+      json(res, 403, { error: 'Project mutation access denied' })
+      return true
+    }
+
+    if (!modelProvider) {
+      json(res, 500, { error: 'LLM provider is not fully configured' })
+      return true
+    }
+
+    const route = routeAgentRequest(
+      prompt ?? messages[messages.length - 1]?.content ?? '',
+    )
+    const conversationPersona = 'orchestrator'
+    const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+    const task: GenerationTask = {
+      id: taskId,
+      projectId: projectId ?? 'unknown',
+      persona: 'engineer',
+      prompt: messages[messages.length - 1]?.content ?? '',
+      status: 'running',
+      startedAt: new Date().toISOString(),
+    }
+    tasks.set(taskId, task)
+
+    sseStart(res)
+    sseSend(res, 'start', { taskId, persona: 'engineer' })
+
+    try {
+      const projectState = projectId ? getOrCreateState(projectId) : undefined
+      if (projectId && projectState) {
+        ensureSourceSpecification(projectId, projectState, authCtx.memberKey)
+      }
+      const agent = createPersonaAgent(modelProvider, {
+        projectSystemPrompt: projectState ? getProjectSystemPrompt(projectState.nodes) : undefined,
+        expectedArtifact: route.expectedArtifact,
+        existingFiles,
+      })
+
+      let effectiveMessages =
+        attachments && attachments.length > 0
+          ? messages.map((m, i) =>
+              i === messages.length - 1 && m.role === 'user'
+                ? {
+                    ...m,
+                    content: `${m.content}\n\n--- Attached Context ---\n${attachments.join('\n\n')}`,
+                  }
+                : m,
+            )
+          : messages
+
+      if (projectId) {
+        appendChatMessage({
+          id: `chat-${randomUUID()}`,
+          projectId,
+          memberKey: authCtx.memberKey,
+          persona: conversationPersona,
+          role: 'user',
+          content: prompt ?? messages[messages.length - 1]?.content ?? '',
+        })
+      }
+
+      const response = await agent.chatStream(effectiveMessages, {
+        onToken: (token) => sseSend(res, 'token', { text: token }),
+        onComplete: (fullText) => sseSend(res, 'done', { text: fullText }),
+        onError: (err) => sseSend(res, 'error', { message: err.message }),
+      })
+
+      // Materialize canvas nodes
+      const createdNodes: CanvasNodeDoc[] = []
+      if (response.nodes.length > 0 && projectId) {
+        const state = getOrCreateState(projectId)
+        const row = Math.max(0, Math.floor(state.nodes.length / 3))
+        for (const [index, proposedNode] of response.nodes.entries()) {
+          const parentNode =
+            state.nodes.find((node) => node.id === proposedNode.parentId) ??
+            state.nodes.find((node) => node.flowRole === 'source')
+          const nodeDoc: CanvasNodeDoc = {
+            id: `node-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 6)}`,
+            projectId,
+            type: proposedNode.type,
+            category: proposedNode.category as CanvasNodeDoc['category'],
+            flowRole: 'review' as CanvasNodeDoc['flowRole'],
+            position: { x: 140 + index * 320, y: 140 + row * 200 },
+            fields: {
+              title: proposedNode.title,
+              content: proposedNode.content,
+              artifact: proposedNode.artifact,
+              requestedPersona: 'engineer',
+            },
+            status: 'proposed',
+            createdBy: 'agent:engineer',
+            updatedAt: Date.now(),
+          }
+
+          state.nodes.push(nodeDoc)
+          commitStateMutation(projectId, state, {
+            actorKey: authCtx.memberKey,
+            entityType: 'node',
+            entityId: nodeDoc.id,
+            operationType: 'create',
+            payload: nodeDoc,
+          })
+
+          createdNodes.push(nodeDoc)
+
+          if (parentNode) {
+            const edge: EdgeDoc = {
+              id: `edge-${parentNode.id}-${nodeDoc.id}`,
+              projectId,
+              from: parentNode.id,
+              to: nodeDoc.id,
+              kind: 'derives',
+              createdBy: 'agent:engineer',
+              updatedAt: Date.now(),
+            }
+            state.edges.push(edge)
+            commitStateMutation(projectId, state, {
+              actorKey: authCtx.memberKey,
+              entityType: 'edge',
+              entityId: edge.id,
+              operationType: 'create',
+              payload: edge,
+            })
+          }
+        }
+      }
+
+      if (projectId) {
+        appendChatMessage({
+          id: `chat-${randomUUID()}`,
+          projectId,
+          memberKey: authCtx.memberKey,
+          persona: conversationPersona,
+          role: 'assistant',
+          content: response.text,
+          nodes: createdNodes.map((node) => ({
+            id: node.id,
+            type: node.type,
+            title: node.fields.title,
+            status: node.status,
+          })),
+        })
+      }
+
+      task.status = 'done'
+      task.completedAt = new Date().toISOString()
+
+      sseSend(res, 'nodes', {
+        nodes: createdNodes.map((node) => ({
+          id: node.id,
+          type: node.type,
+          title: node.fields.title,
+          status: node.status,
+          artifact: node.fields.artifact,
+        })),
+      })
+      sseSend(res, 'end', { taskId })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Agent error'
+      task.status = 'error'
+      task.error = message
+      task.completedAt = new Date().toISOString()
+      sseSend(res, 'error', { message })
+      sseSend(res, 'end', { taskId })
+    }
+    res.end()
+    return true
+  }
+
   // ── Task list ───────────────────────────────────────────────
   if (url.pathname === '/api/tasks' && method === 'GET') {
     const authCtx = requireAuth(req, res)
@@ -2370,7 +2571,7 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
     const task: GenerationTask = {
       id: taskId,
       projectId,
-      persona,
+      persona: 'engineer',
       prompt: `Retry: regenerate ${type} "${title}"`,
       status: 'running',
       startedAt: new Date().toISOString(),
@@ -2380,7 +2581,7 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
     try {
       if (!modelProvider) throw new Error('LLM provider is not fully configured')
       ensureSourceSpecification(projectId, state, authCtx.memberKey)
-      const agent = createPersonaAgent(persona, modelProvider, {
+      const agent = createPersonaAgent(modelProvider, {
         projectSystemPrompt: getProjectSystemPrompt(state.nodes),
         expectedArtifact: type,
       })
@@ -2444,6 +2645,51 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
     const attachmentText = `### ${filename}\n\`\`\`\n${content.slice(0, 5000)}\n\`\`\``
 
     json(res, 200, { text: attachmentText, filename, size: content.length })
+    return true
+  }
+
+  // ── Shell execution ────────────────────────────────────────
+  if (url.pathname === '/api/shell' && method === 'POST') {
+    const authCtx = requireAuth(req, res)
+    if (!authCtx) return true
+
+    const body = await parseBody(req)
+    const command = body.command as string | undefined
+    const cwd = body.cwd as string | undefined
+
+    if (!command) {
+      json(res, 400, { error: 'command required' })
+      return true
+    }
+
+    // Basic safety: block obviously dangerous commands
+    const blocked = /^\s*(rm\s+-rf\s+\/|mkfs|dd\s+if=|:(){ :|shutdown|reboot|halt|init\s+6)/i
+    if (blocked.test(command)) {
+      json(res, 403, { error: 'Command blocked for safety' })
+      return true
+    }
+
+    const execAsync = promisify(exec)
+    try {
+      const result = await execAsync(command, {
+        cwd: cwd || process.cwd(),
+        timeout: 30_000,
+        maxBuffer: 1024 * 1024,
+        env: { ...process.env, FORCE_COLOR: '0' },
+      })
+      json(res, 200, {
+        stdout: result.stdout,
+        stderr: result.stderr,
+        exitCode: 0,
+      })
+    } catch (err: unknown) {
+      const execErr = err as { stdout?: string; stderr?: string; code?: number }
+      json(res, 200, {
+        stdout: execErr.stdout ?? '',
+        stderr: execErr.stderr ?? String(err),
+        exitCode: execErr.code ?? 1,
+      })
+    }
     return true
   }
 

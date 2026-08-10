@@ -1,5 +1,5 @@
 import { createOpenAI } from '@ai-sdk/openai'
-import { generateText } from 'ai'
+import { generateText, streamText } from 'ai'
 
 export interface ModelProviderConfig {
   provider: 'cloudflare-messages' | 'openai-compatible' | 'demo'
@@ -216,4 +216,63 @@ export async function generateModelText(
     maxOutputTokens: input.maxOutputTokens ?? 4096,
   })
   return result.text
+}
+
+export interface StreamCallbacks {
+  onToken: (token: string) => void
+  onComplete: (fullText: string) => void
+  onError: (error: Error) => void
+}
+
+export async function generateModelTextStream(
+  config: ModelProviderConfig,
+  input: {
+    system: string
+    messages: ModelMessage[]
+    temperature?: number
+    maxOutputTokens?: number
+  },
+  callbacks: StreamCallbacks,
+): Promise<void> {
+  if (config.provider === 'demo') {
+    const systemLower = input.system.toLowerCase()
+    let persona = 'pm'
+    if (systemLower.includes('designer')) persona = 'designer'
+    else if (systemLower.includes('engineer')) persona = 'engineer'
+    else if (systemLower.includes('security')) persona = 'security'
+    const response = getDemoResponse(persona)
+    const words = response.split(/(?<=\s)/)
+    let full = ''
+    for (const word of words) {
+      full += word
+      callbacks.onToken(word)
+      await new Promise((r) => setTimeout(r, 15 + Math.random() * 25))
+    }
+    callbacks.onComplete(full)
+    return
+  }
+
+  if (config.provider === 'cloudflare-messages') {
+    // Cloudflare doesn't support streaming via the messages API — fall back to non-streaming
+    const full = await generateModelText(config, input)
+    callbacks.onToken(full)
+    callbacks.onComplete(full)
+    return
+  }
+
+  const provider = createOpenAI({ baseURL: config.baseURL, apiKey: config.apiKey })
+  const result = streamText({
+    model: provider(config.model),
+    system: input.system,
+    messages: input.messages,
+    temperature: input.temperature ?? 0.7,
+    maxOutputTokens: input.maxOutputTokens ?? 4096,
+  })
+
+  let full = ''
+  for await (const delta of result.textStream) {
+    full += delta
+    callbacks.onToken(delta)
+  }
+  callbacks.onComplete(full)
 }

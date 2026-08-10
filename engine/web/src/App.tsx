@@ -1,6 +1,6 @@
 import { tokens } from '@papyrus/core/design'
 import { useEffect, useState } from 'react'
-import { Canvas } from './components/Canvas'
+import { DevEnvironment } from './components/DevEnvironment'
 import { Landing } from './components/Landing'
 import { Login } from './components/Login'
 import { Onboarding } from './components/Onboarding'
@@ -75,18 +75,11 @@ function AppContent() {
 
   if (activeProject) {
     return (
-      <>
-        <div
-          style={{ position: 'fixed', top: 16, right: 16, zIndex: 9999, display: 'flex', gap: 8 }}
-        >
-          <ProfileBadge />
-        </div>
-        <Canvas
-          projectId={activeProject.id}
-          projectName={activeProject.name}
-          onBack={() => setActiveProject(null)}
-        />
-      </>
+      <DevEnvironment
+        projectId={activeProject.id}
+        projectName={activeProject.name}
+        onBack={() => setActiveProject(null)}
+      />
     )
   }
 

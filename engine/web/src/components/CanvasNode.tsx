@@ -57,6 +57,7 @@ const NODE_ICONS: Record<string, string> = {
   'user-story': '\u{1F4DD}',
   'success-metric': '\u{1F3AF}',
   'ui-mockup': '\u{1F3A8}',
+  'design-system': '\u{1F9F1}',
   application: '\u{1F4BB}',
   'mcp-server': '\u{1F5C3}\u{FE0F}',
   'skill-creator': '\u{1F9E9}',

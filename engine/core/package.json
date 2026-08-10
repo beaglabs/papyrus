@@ -8,6 +8,7 @@
     ".": "./src/index.ts",
     "./design": "./src/design/tokens.ts",
     "./artifacts/uswds-wireframe": "./src/artifacts/uswds-wireframe.ts",
+    "./artifacts/envelope": "./src/artifacts/envelope.ts",
     "./profiles": "./src/profiles/config.ts",
     "./nodes/types": "./src/nodes/types.ts",
     "./nodes/registry": "./src/nodes/registry.ts",

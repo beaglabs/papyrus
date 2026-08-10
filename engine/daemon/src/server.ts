@@ -17,6 +17,7 @@ import {
   createPersonaAgent,
   listSkills,
   resolveModelProvider,
+  routeAgentRequest,
   runSkill,
 } from '@papyrus/agents'
 import {
@@ -1693,7 +1694,7 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
     if (!authCtx) return true
 
     const body = await parseBody(req)
-    const persona = body.persona as string
+    const requestedPersona = body.persona as string | undefined
     const messages = body.messages as AgentMessage[] | undefined
     const projectId = body.projectId as string | undefined
     const attachments = body.attachments as string[] | undefined
@@ -1704,8 +1705,8 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       : []
     const modelProvider = resolveModelProvider()
 
-    if (!persona || !messages) {
-      json(res, 400, { error: 'persona and messages required' })
+    if (!messages) {
+      json(res, 400, { error: 'messages required' })
       return true
     }
 
@@ -1719,6 +1720,12 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       return true
     }
 
+    const route = routeAgentRequest(
+      prompt ?? messages[messages.length - 1]?.content ?? '',
+      requestedPersona,
+    )
+    const persona = route.primaryPersona
+    const conversationPersona = 'orchestrator'
     const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
     const task: GenerationTask = {
       id: taskId,
@@ -1756,12 +1763,12 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
         targetNodeId && projectState
           ? projectState.nodes.find((node) => node.id === targetNodeId)
           : undefined
-      if (revisionNode?.type === 'ui-mockup' && revisionNode.fields.artifact) {
+      if (revisionNode?.fields.artifact) {
         effectiveMessages = effectiveMessages.map((message, index) =>
           index === effectiveMessages.length - 1 && message.role === 'user'
             ? {
                 ...message,
-                content: `${message.content}\n\n--- Artifact to revise in place ---\n${JSON.stringify(revisionNode.fields.artifact)}\n\nReturn the complete updated ui-mockup artifact. Preserve unaffected content and apply the requested change to this artifact rather than creating an unrelated wireframe.`,
+                content: `${message.content}\n\n--- Artifact to revise in place ---\n${JSON.stringify(revisionNode.fields.artifact)}\n\nReturn the complete updated artifact using the same artifact type. Preserve unaffected content and apply the requested change instead of creating an unrelated deliverable.`,
               }
             : message,
         )
@@ -1772,7 +1779,7 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
           id: `chat-${randomUUID()}`,
           projectId,
           memberKey: authCtx.memberKey,
-          persona,
+          persona: conversationPersona,
           role: 'user',
           content: prompt ?? messages[messages.length - 1]?.content ?? '',
         })
@@ -1789,10 +1796,7 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
           const revisionTarget =
             index === 0 && targetNodeId
               ? state.nodes.find(
-                  (node) =>
-                    node.id === targetNodeId &&
-                    node.type === 'ui-mockup' &&
-                    proposedNode.type === 'ui-mockup',
+                  (node) => node.id === targetNodeId && node.type === proposedNode.type,
                 )
               : undefined
           const parentNode =
@@ -1883,7 +1887,7 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
           id: `chat-${randomUUID()}`,
           projectId,
           memberKey: authCtx.memberKey,
-          persona,
+          persona: conversationPersona,
           role: 'assistant',
           content: response.text,
           nodes: createdNodes.map((node) => ({
@@ -1898,6 +1902,7 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
 
       json(res, 200, {
         text: response.text,
+        routing: route,
         nodes: createdNodes.map((node) => ({
           id: node.id,
           type: node.type,

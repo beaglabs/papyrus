@@ -667,6 +667,21 @@ body {
   border-radius: 14px;
 }
 
+.canvas-node-drag-surface {
+  cursor: grab;
+  touch-action: none;
+}
+
+.react-flow__node.dragging .canvas-node-drag-surface {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.canvas-node-drag-surface .nodrag {
+  cursor: auto;
+  touch-action: auto;
+}
+
 .react-flow__handle {
   width: 8px !important;
   height: 8px !important;

@@ -269,6 +269,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
         position: doc.position,
         draggable: true,
         selectable: true,
+        dragHandle: '.canvas-node-drag-surface',
         data: doc as unknown as Record<string, unknown>,
       })),
     [nodes],
@@ -454,6 +455,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
 
         return (
           <div
+            className="canvas-node-drag-surface"
             data-canvas-node-id={doc.id}
             style={{
               background: tokens.color.surface,
@@ -490,6 +492,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
               </span>
               {editingName ? (
                 <input
+                  className="nodrag nopan"
                   type="text"
                   value={nameValue}
                   onChange={(e) => setNameValue(e.target.value)}
@@ -545,7 +548,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
             </div>
 
             {/* Read-only project brief / content preview */}
-            <div className="nodrag" style={{ padding: '10px 12px' }}>
+            <div style={{ padding: '10px 12px' }}>
               {isSource && (
                 <div
                   style={{
@@ -606,6 +609,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
                   {canEdit && (
                     <div style={{ display: 'flex', gap: 7, marginTop: 10 }}>
                       <button
+                        className="nodrag nopan"
                         type="button"
                         onClick={(event) => {
                           event.stopPropagation()
@@ -616,6 +620,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
                         <FileText size={13} aria-hidden="true" /> Open brief
                       </button>
                       <button
+                        className="nodrag nopan"
                         type="button"
                         onClick={(event) => {
                           event.stopPropagation()

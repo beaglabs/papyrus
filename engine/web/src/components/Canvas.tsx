@@ -20,13 +20,11 @@ import {
   ChevronUp,
   CircleX,
   Code2,
-  Edit3,
   LayoutPanelLeft,
   Palette,
   PanelLeftClose,
   PanelLeftOpen,
   ShieldCheck,
-  X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
@@ -111,17 +109,6 @@ const nodeActionStyle: React.CSSProperties = {
   textTransform: 'uppercase',
 }
 
-/** Animate a new node appearing. */
-function animateNodeIn(nodeId: string) {
-  const el = document.querySelector(`[data-id="${nodeId}"]`)
-  if (!el) return
-  gsap.fromTo(
-    el,
-    { opacity: 0, scale: 0.7, y: 20 },
-    { opacity: 1, scale: 1, y: 0, duration: 0.5, ease: 'back.out(1.7)' },
-  )
-}
-
 export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
   const { apiFetch, loadProjectRole, clearProjectRole, projectRole, user, token } = useAuth()
   const peerId = user?.memberKey ?? 'anonymous'
@@ -151,8 +138,6 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
   const fittedProjectRef = useRef<string | null>(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([])
-  const [editingDocumentId, setEditingDocumentId] = useState<string | null>(null)
-  const [documentDraft, setDocumentDraft] = useState('')
 
   useEffect(() => {
     loadProjectRole(projectId)
@@ -163,18 +148,9 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
   const [remoteCursors, setRemoteCursors] = useState<
     Map<string, { x: number; y: number; displayName: string; color: string }>
   >(new Map())
-  const prevNodeCount = useRef(nodes.length)
   const prevEdgeCount = useRef(edges.length)
   const defaultPersona = PERSONA_LIST[0] as CanvasPersona
   const [activePersona, setActivePersona] = useState<CanvasPersona>(defaultPersona)
-
-  useEffect(() => {
-    if (nodes.length > prevNodeCount.current) {
-      const newNode = nodes[nodes.length - 1]
-      if (newNode) requestAnimationFrame(() => animateNodeIn(newNode.id))
-    }
-    prevNodeCount.current = nodes.length
-  }, [nodes])
 
   useEffect(() => {
     if (!rfInstance || nodes.length === 0 || fittedProjectRef.current === projectId) return
@@ -329,11 +305,6 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
           setEditingName(false)
         }
 
-        function openDocumentEditor() {
-          setEditingDocumentId(doc.id)
-          setDocumentDraft(content)
-        }
-
         function setProposalStatus(status: 'approved' | 'rejected') {
           upsertNode({
             ...doc,
@@ -458,54 +429,49 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
                     </div>
                     <div style={{ color: tokens.color.textDim, fontSize: 10, marginTop: 2 }}>
                       {canEdit
-                        ? 'Shared with collaborators and injected into every agent'
+                        ? 'Edit directly below · changes sync to collaborators and agents'
                         : 'Read-only access'}
                     </div>
                   </div>
-                  {canEdit && (
-                    <button
-                      type="button"
-                      onPointerDown={(event) => event.stopPropagation()}
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        openDocumentEditor()
-                      }}
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 5,
-                        padding: '4px 8px',
-                        border: `2px solid ${tokens.color.black}`,
-                        borderRadius: tokens.radius.full,
-                        background: tokens.color.surface,
-                        color: tokens.color.accent,
-                        fontFamily: tokens.font.mono,
-                        fontSize: 9,
-                        fontWeight: 700,
-                        textTransform: 'uppercase',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <Edit3 size={12} aria-hidden="true" /> Edit system prompt
-                    </button>
-                  )}
                 </div>
               )}
 
-              {isEditableSpec ? (
-                <button
-                  className="nodrag"
-                  type="button"
+              {isEditableSpec && canEdit ? (
+                <textarea
+                  className="nodrag nowheel"
+                  aria-label="Project system prompt"
+                  value={content}
                   onPointerDown={(event) => event.stopPropagation()}
-                  onClick={(event) => {
+                  onKeyDown={(event) => event.stopPropagation()}
+                  onChange={(event) => {
                     event.stopPropagation()
-                    if (canEdit) openDocumentEditor()
+                    updateDocumentText(doc.id, content, event.target.value)
                   }}
+                  placeholder="Describe what the agents are building, who it serves, constraints, and desired outcomes…"
                   style={{
+                    display: 'block',
                     width: '100%',
                     minHeight: 150,
                     padding: 12,
                     textAlign: 'left',
+                    resize: 'vertical',
+                    background: tokens.color.bg,
+                    color: tokens.color.text,
+                    border: `2px solid ${tokens.color.black}`,
+                    borderRadius: tokens.radius.md,
+                    fontFamily: tokens.font.mono,
+                    fontSize: 12,
+                    lineHeight: 1.6,
+                    cursor: 'text',
+                    outline: 'none',
+                  }}
+                />
+              ) : isEditableSpec ? (
+                <div
+                  style={{
+                    width: '100%',
+                    minHeight: 150,
+                    padding: 12,
                     whiteSpace: 'pre-wrap',
                     background: tokens.color.bg,
                     color: content ? tokens.color.text : tokens.color.textDim,
@@ -514,12 +480,10 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
                     fontFamily: tokens.font.mono,
                     fontSize: 12,
                     lineHeight: 1.6,
-                    cursor: canEdit ? 'text' : 'default',
                   }}
                 >
-                  {content ||
-                    'Describe what you are building, who it serves, and the problem it solves…'}
-                </button>
+                  {content || 'No project system prompt has been provided.'}
+                </div>
               ) : (
                 <div
                   style={{
@@ -656,24 +620,8 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
         )
       },
     }),
-    [apiFetch, canEdit, activePersona.id, peerId, upsertNode],
+    [apiFetch, canEdit, activePersona.id, peerId, updateDocumentText, upsertNode],
   )
-
-  const editingDocument = editingDocumentId
-    ? nodes.find((node) => node.id === editingDocumentId)
-    : undefined
-
-  function closeDocumentEditor() {
-    setEditingDocumentId(null)
-    setDocumentDraft('')
-  }
-
-  function saveDocumentEditor() {
-    if (!editingDocument) return
-    const current = String(editingDocument.fields.content ?? '')
-    updateDocumentText(editingDocument.id, current, documentDraft)
-    closeDocumentEditor()
-  }
 
   const onConnect = useCallback(
     (connection: { source?: string | null; target?: string | null }) => {
@@ -953,124 +901,6 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
         {/* Task List */}
         <TaskList projectId={projectId} />
       </div>
-
-      {/* Network health popout */}
-      {editingDocument && (
-        <div
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) closeDocumentEditor()
-          }}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 4000,
-            display: 'grid',
-            placeItems: 'center',
-            padding: 24,
-            background: 'rgba(17, 17, 17, 0.38)',
-          }}
-        >
-          <dialog
-            open
-            aria-modal="true"
-            aria-labelledby="source-editor-title"
-            style={{
-              width: 'min(760px, 100%)',
-              maxHeight: 'min(760px, calc(100vh - 48px))',
-              display: 'flex',
-              flexDirection: 'column',
-              background: tokens.color.surface,
-              border: `3px solid ${tokens.color.black}`,
-              borderRadius: tokens.radius.lg,
-              boxShadow: '10px 10px 0 #111',
-              overflow: 'hidden',
-            }}
-          >
-            <header
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 12,
-                padding: '14px 16px',
-                borderBottom: `2px solid ${tokens.color.black}`,
-              }}
-            >
-              <div style={{ flex: 1 }}>
-                <div
-                  id="source-editor-title"
-                  style={{ fontSize: 16, fontWeight: 850, color: tokens.color.text }}
-                >
-                  Edit project system prompt
-                </div>
-                <div style={{ marginTop: 2, fontSize: 11, color: tokens.color.textDim }}>
-                  Saved changes sync to collaborators and become project-level agent instructions.
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={closeDocumentEditor}
-                aria-label="Close source editor"
-                style={{ ...nodeActionStyle, marginTop: 0, background: tokens.color.surface }}
-              >
-                <X size={15} aria-hidden="true" />
-              </button>
-            </header>
-            <textarea
-              value={documentDraft}
-              onChange={(event) => setDocumentDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') saveDocumentEditor()
-                if (event.key === 'Escape') closeDocumentEditor()
-              }}
-              placeholder="Describe what you are building, who it serves, constraints, and desired outcomes…"
-              style={{
-                flex: 1,
-                minHeight: 420,
-                padding: 18,
-                resize: 'vertical',
-                border: 0,
-                outline: 0,
-                background: tokens.color.bg,
-                color: tokens.color.text,
-                fontFamily: tokens.font.mono,
-                fontSize: 14,
-                lineHeight: 1.65,
-              }}
-            />
-            <footer
-              style={{
-                display: 'flex',
-                justifyContent: 'flex-end',
-                gap: 10,
-                padding: 14,
-                borderTop: `2px solid ${tokens.color.black}`,
-              }}
-            >
-              <button
-                type="button"
-                onClick={closeDocumentEditor}
-                style={{ ...nodeActionStyle, marginTop: 0, background: tokens.color.surface }}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={saveDocumentEditor}
-                disabled={documentDraft === String(editingDocument.fields.content ?? '')}
-                style={{
-                  ...nodeActionStyle,
-                  marginTop: 0,
-                  opacity:
-                    documentDraft === String(editingDocument.fields.content ?? '') ? 0.45 : 1,
-                }}
-              >
-                <Check size={14} aria-hidden="true" /> Save shared prompt
-              </button>
-            </footer>
-          </dialog>
-        </div>
-      )}
     </div>
   )
 }

@@ -1,5 +1,15 @@
 import { tokens } from '@papyrus/core/design'
-import { AtSign, Boxes, type LucideIcon, Paperclip, Send, X } from 'lucide-react'
+import {
+  AtSign,
+  Boxes,
+  Check,
+  LocateFixed,
+  type LucideIcon,
+  Paperclip,
+  RefreshCw,
+  Send,
+  X,
+} from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { UswdsWireframePreview } from './UswdsWireframePreview'
@@ -20,6 +30,15 @@ interface ChatMessage {
   nodesCreated?: number
   personaId?: string
   artifacts?: unknown[]
+  nodes?: ChatArtifactNode[]
+}
+
+interface ChatArtifactNode {
+  id: string
+  type: string
+  title: string
+  status: string
+  artifact?: unknown
 }
 
 interface AgentChatProps {
@@ -31,6 +50,9 @@ interface AgentChatProps {
   canvasContext: string
   parentNodeIds: string[]
   composerDraft?: { id: number; text: string }
+  onReviewNode: (nodeId: string, status: 'approved' | 'rejected') => void
+  onRetryNode: (nodeId: string) => Promise<void>
+  onFocusNode: (nodeId: string) => void
 }
 
 const SEED_MESSAGES: Record<string, ChatMessage[]> = {
@@ -194,11 +216,15 @@ export function AgentChat({
   canvasContext,
   parentNodeIds,
   composerDraft,
+  onReviewNode,
+  onRetryNode,
+  onFocusNode,
 }: AgentChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(() => SEED_MESSAGES[persona.id] ?? [])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [attachments, setAttachments] = useState<string[]>([])
+  const [activeArtifactNodeId, setActiveArtifactNodeId] = useState<string>()
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
@@ -226,6 +252,51 @@ export function AgentChat({
     requestAnimationFrame(() => composerRef.current?.focus())
   }, [composerDraft])
 
+  useEffect(() => {
+    let cancelled = false
+    void apiFetch(
+      `/api/chat?projectId=${encodeURIComponent(projectId)}&persona=${encodeURIComponent(persona.id)}`,
+    )
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Unable to load conversation')
+        return response.json() as Promise<{
+          messages: Array<{
+            id: string
+            role: 'user' | 'assistant'
+            content: string
+            nodes: ChatArtifactNode[]
+          }>
+        }>
+      })
+      .then(({ messages: stored }) => {
+        if (cancelled || stored.length === 0) return
+        chatHistoryRef.current = stored.map((message) => ({
+          role: message.role,
+          content: message.content,
+        }))
+        setMessages(
+          stored.map((message) => ({
+            id: message.id,
+            role: message.role === 'assistant' ? 'agent' : 'user',
+            text: message.content,
+            nodesCreated: message.nodes.length,
+            personaId: persona.id,
+            nodes: message.nodes,
+            artifacts: message.nodes.flatMap((node) => (node.artifact ? [node.artifact] : [])),
+          })),
+        )
+        const latestArtifact = [...stored]
+          .reverse()
+          .flatMap((message) => message.nodes)
+          .find((node) => node.type === 'ui-mockup')
+        setActiveArtifactNodeId(latestArtifact?.id)
+      })
+      .catch((error) => console.error('Chat history load failed:', error))
+    return () => {
+      cancelled = true
+    }
+  }, [apiFetch, persona.id, projectId])
+
   function resolveMention(text: string): { prompt: string; target: Persona } {
     const match = text.match(/^@([\w-]+)\s+/)
     if (!match) return { prompt: text, target: persona }
@@ -241,7 +312,7 @@ export function AgentChat({
     return { prompt: text.slice(match[0].length).trim(), target }
   }
 
-  async function sendToAgent(text: string) {
+  async function sendToAgent(text: string, reviseExisting = true) {
     const { prompt, target } = resolveMention(text)
     setLoading(true)
 
@@ -260,6 +331,7 @@ export function AgentChat({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           persona: target.id,
+          prompt,
           messages: chatHistoryRef.current.map((message, index, history) =>
             index === history.length - 1 && message.role === 'user' && canvasContext
               ? {
@@ -271,6 +343,12 @@ export function AgentChat({
           projectId,
           attachments,
           parentNodeIds,
+          targetNodeId:
+            reviseExisting &&
+            target.id === 'designer' &&
+            !/\b(new|another|separate)\b/i.test(prompt)
+              ? activeArtifactNodeId
+              : undefined,
         }),
       })
 
@@ -281,13 +359,7 @@ export function AgentChat({
 
       const data = (await res.json()) as {
         text: string
-        nodes?: Array<{
-          id: string
-          type: string
-          title: string
-          status: string
-          artifact?: unknown
-        }>
+        nodes?: ChatArtifactNode[]
       }
 
       chatHistoryRef.current.push({ role: 'assistant', content: data.text })
@@ -299,8 +371,11 @@ export function AgentChat({
         nodesCreated: data.nodes?.length ?? 0,
         personaId: target.id,
         artifacts: data.nodes?.flatMap((node) => (node.artifact ? [node.artifact] : [])),
+        nodes: data.nodes,
       }
       setMessages((prev) => [...prev, agentMsg])
+      const latestArtifact = data.nodes?.find((node) => node.type === 'ui-mockup')
+      if (latestArtifact) setActiveArtifactNodeId(latestArtifact.id)
       setAttachments([])
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Something went wrong'
@@ -321,12 +396,22 @@ export function AgentChat({
   }
 
   function handleTemplate(template: TemplateBtn) {
-    sendToAgent(template.prompt)
+    sendToAgent(template.prompt, template.id !== 'wireframe')
   }
 
   function insertMention(target: Persona) {
     setInput((current) =>
       current.replace(/(?:^|\s)@[\w-]*$/, `${current.trim() ? ' ' : ''}@${target.id} `),
+    )
+  }
+
+  function reviewFromChat(nodeId: string, status: 'approved' | 'rejected') {
+    onReviewNode(nodeId, status)
+    setMessages((current) =>
+      current.map((message) => ({
+        ...message,
+        nodes: message.nodes?.map((node) => (node.id === nodeId ? { ...node, status } : node)),
+      })),
     )
   }
 
@@ -426,6 +511,36 @@ export function AgentChat({
                   >
                     <Boxes size={13} aria-hidden="true" /> {msg.nodesCreated}{' '}
                     {msg.nodesCreated === 1 ? 'proposal' : 'proposals'} added to canvas for review
+                    {msg.nodes?.map((node) => (
+                      <div
+                        key={node.id}
+                        style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}
+                      >
+                        {node.status === 'proposed' && (
+                          <button
+                            type="button"
+                            className="nodrag"
+                            onClick={() => reviewFromChat(node.id, 'approved')}
+                          >
+                            <Check size={12} aria-hidden="true" /> Confirm
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="nodrag"
+                          onClick={() => void onRetryNode(node.id)}
+                        >
+                          <RefreshCw size={12} aria-hidden="true" /> Retry
+                        </button>
+                        <button
+                          type="button"
+                          className="nodrag"
+                          onClick={() => onFocusNode(node.id)}
+                        >
+                          <LocateFixed size={12} aria-hidden="true" /> View on canvas
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>

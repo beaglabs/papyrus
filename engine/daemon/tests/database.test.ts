@@ -1,9 +1,11 @@
 import { afterAll, describe, expect, it } from 'vitest'
 import {
+  appendChatMessage,
   closeDb,
   commitCanvasOperation,
   createProject,
   deleteProject,
+  getChatMessages,
   getStoredOperations,
   listProjects,
   loadProject,
@@ -156,6 +158,34 @@ describe('Database', () => {
       expect(duplicate).toEqual({ ...accepted, duplicate: true })
       expect(getStoredOperations(project.id)).toHaveLength(1)
       expect(loadProject(project.id)?.revision).toBe(1)
+    })
+  })
+
+  describe('chat persistence', () => {
+    it('stores persona conversations per project and member', () => {
+      const project = createProject('Conversation Project')
+      appendChatMessage({
+        id: `chat-${Date.now()}`,
+        projectId: project.id,
+        memberKey: 'member-1',
+        persona: 'designer',
+        role: 'user',
+        content: 'Make the buttons red',
+      })
+      appendChatMessage({
+        id: `chat-${Date.now()}-reply`,
+        projectId: project.id,
+        memberKey: 'member-1',
+        persona: 'designer',
+        role: 'assistant',
+        content: 'Updated the wireframe.',
+        nodes: [{ id: 'wireframe-1', type: 'ui-mockup' }],
+      })
+
+      const messages = getChatMessages(project.id, 'member-1', 'designer')
+      expect(messages.map((message) => message.role)).toEqual(['user', 'assistant'])
+      expect(messages[1]?.nodes).toEqual([{ id: 'wireframe-1', type: 'ui-mockup' }])
+      expect(getChatMessages(project.id, 'member-2', 'designer')).toEqual([])
     })
   })
 })

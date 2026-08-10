@@ -42,6 +42,7 @@ import { WebSocket, WebSocketServer } from 'ws'
 import * as Y from 'yjs'
 import { type AuditAction, auditLog, getAuditLog, verifyAuditChain } from './audit.js'
 import {
+  appendChatMessage,
   closeDb,
   commitCanvasOperation,
   createInvite,
@@ -49,6 +50,7 @@ import {
   deleteInvite,
   deleteProject,
   deleteWebAuthnCredential,
+  getChatMessages,
   getInvite,
   getStoredOperations,
   getWebAuthnCredential,
@@ -1652,6 +1654,40 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
 
   // ── Agent chat endpoint ────────────────────────────────────────
 
+  if (url.pathname === '/api/chat' && method === 'GET') {
+    const authCtx = requireAuth(req, res)
+    if (!authCtx) return true
+    const projectId = url.searchParams.get('projectId')
+    const persona = url.searchParams.get('persona')
+    if (!projectId || !persona) {
+      json(res, 400, { error: 'projectId and persona required' })
+      return true
+    }
+    if (!hasPermission(projectId, authCtx.memberKey, 'project:read')) {
+      json(res, 403, { error: 'Project access denied' })
+      return true
+    }
+    const state = getOrCreateState(projectId)
+    const messages = getChatMessages(projectId, authCtx.memberKey, persona).map((message) => ({
+      ...message,
+      nodes: message.nodes.map((storedNode) => {
+        if (!storedNode || typeof storedNode !== 'object' || !('id' in storedNode))
+          return storedNode
+        const current = state.nodes.find((node) => node.id === storedNode.id)
+        return current
+          ? {
+              ...storedNode,
+              title: current.fields.title,
+              status: current.status,
+              artifact: current.fields.artifact,
+            }
+          : storedNode
+      }),
+    }))
+    json(res, 200, { messages })
+    return true
+  }
+
   if (url.pathname === '/api/agent' && method === 'POST') {
     const authCtx = requireAuth(req, res)
     if (!authCtx) return true
@@ -1661,6 +1697,8 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
     const messages = body.messages as AgentMessage[] | undefined
     const projectId = body.projectId as string | undefined
     const attachments = body.attachments as string[] | undefined
+    const prompt = body.prompt as string | undefined
+    const targetNodeId = body.targetNodeId as string | undefined
     const parentNodeIds = Array.isArray(body.parentNodeIds)
       ? body.parentNodeIds.filter((id): id is string => typeof id === 'string')
       : []
@@ -1702,7 +1740,7 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       })
 
       // Inject attachment context into the last user message if provided
-      const effectiveMessages =
+      let effectiveMessages =
         attachments && attachments.length > 0
           ? messages.map((m, i) =>
               i === messages.length - 1 && m.role === 'user'
@@ -1714,6 +1752,32 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
             )
           : messages
 
+      const revisionNode =
+        targetNodeId && projectState
+          ? projectState.nodes.find((node) => node.id === targetNodeId)
+          : undefined
+      if (revisionNode?.type === 'ui-mockup' && revisionNode.fields.artifact) {
+        effectiveMessages = effectiveMessages.map((message, index) =>
+          index === effectiveMessages.length - 1 && message.role === 'user'
+            ? {
+                ...message,
+                content: `${message.content}\n\n--- Artifact to revise in place ---\n${JSON.stringify(revisionNode.fields.artifact)}\n\nReturn the complete updated ui-mockup artifact. Preserve unaffected content and apply the requested change to this artifact rather than creating an unrelated wireframe.`,
+              }
+            : message,
+        )
+      }
+
+      if (projectId) {
+        appendChatMessage({
+          id: `chat-${randomUUID()}`,
+          projectId,
+          memberKey: authCtx.memberKey,
+          persona,
+          role: 'user',
+          content: prompt ?? messages[messages.length - 1]?.content ?? '',
+        })
+      }
+
       const response = await agent.chat(effectiveMessages)
 
       // Materialize each agent deliverable as a reviewable canvas proposal.
@@ -1722,11 +1786,20 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
         const state = getOrCreateState(projectId)
         const row = Math.max(0, Math.floor(state.nodes.length / 3))
         for (const [index, proposedNode] of response.nodes.entries()) {
+          const revisionTarget =
+            index === 0 && targetNodeId
+              ? state.nodes.find(
+                  (node) =>
+                    node.id === targetNodeId &&
+                    node.type === 'ui-mockup' &&
+                    proposedNode.type === 'ui-mockup',
+                )
+              : undefined
           const parentNode =
             state.nodes.find((node) => node.id === proposedNode.parentId) ??
             state.nodes.find((node) => parentNodeIds.includes(node.id)) ??
             state.nodes.find((node) => node.flowRole === 'source')
-          const nodeDoc: CanvasNodeDoc = {
+          const nodeDoc: CanvasNodeDoc = revisionTarget ?? {
             id: `node-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 6)}`,
             projectId,
             type: proposedNode.type,
@@ -1746,12 +1819,26 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
             updatedAt: Date.now(),
           }
 
-          state.nodes.push(nodeDoc)
+          if (revisionTarget) {
+            nodeDoc.fields = {
+              ...revisionTarget.fields,
+              title: proposedNode.title,
+              content: proposedNode.content,
+              ...(proposedNode.artifact ? { artifact: proposedNode.artifact } : {}),
+              requestedPersona: persona,
+              revisedAt: new Date().toISOString(),
+            }
+            nodeDoc.status = 'proposed'
+            nodeDoc.flowRole = 'review'
+            nodeDoc.updatedAt = Date.now()
+          }
+
+          if (!revisionTarget) state.nodes.push(nodeDoc)
           commitStateMutation(projectId, state, {
             actorKey: authCtx.memberKey,
             entityType: 'node',
             entityId: nodeDoc.id,
-            operationType: 'create',
+            operationType: revisionTarget ? 'update' : 'create',
             payload: nodeDoc,
           })
 
@@ -1759,7 +1846,7 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
           broadcast(state, { type: 'node:upsert', data: nodeDoc })
           createdNodes.push(nodeDoc)
 
-          if (parentNode) {
+          if (parentNode && !revisionTarget) {
             const edge: EdgeDoc = {
               id: `edge-${parentNode.id}-${nodeDoc.id}`,
               projectId,
@@ -1790,6 +1877,24 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
 
       task.status = 'done'
       task.completedAt = new Date().toISOString()
+
+      if (projectId) {
+        appendChatMessage({
+          id: `chat-${randomUUID()}`,
+          projectId,
+          memberKey: authCtx.memberKey,
+          persona,
+          role: 'assistant',
+          content: response.text,
+          nodes: createdNodes.map((node) => ({
+            id: node.id,
+            type: node.type,
+            title: node.fields.title,
+            status: node.status,
+            artifact: node.fields.artifact,
+          })),
+        })
+      }
 
       json(res, 200, {
         text: response.text,

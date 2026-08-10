@@ -36,4 +36,23 @@ describe('artifact envelope', () => {
     expect(artifact.renderer.type).toBe('markdown')
     expect(artifact.payload).toBe('A useful plan')
   })
+
+  it('does not turn an unlabeled prose fence into a fake text file', () => {
+    const artifact = coerceArtifactEnvelope(
+      'application',
+      'Requirements',
+      '```\nA prose requirements example\n```',
+    )
+    expect(artifact.renderer.type).toBe('markdown')
+    expect(artifact.files).toBeUndefined()
+    expect(artifact.payload).toContain('A prose requirements example')
+  })
+
+  it('keeps code examples inside specifications instead of creating a workspace', () => {
+    const content = 'Implementation example:\n```typescript\nconst enabled = true\n```'
+    const artifact = coerceArtifactEnvelope('specification', 'Plan', content)
+    expect(artifact.renderer.type).toBe('markdown')
+    expect(artifact.files).toBeUndefined()
+    expect(artifact.payload).toBe(content)
+  })
 })

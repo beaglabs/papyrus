@@ -64,24 +64,44 @@ function codeFiles(content: string): ArtifactFile[] {
   const files: ArtifactFile[] = []
   let index = 0
   for (const match of content.matchAll(/```([\w.+-]*)\s*(?:file=([^\s]+))?\n([\s\S]*?)```/g)) {
-    index++
-    const language = match[1] || 'text'
+    const language = (match[1] || '').toLowerCase()
+    const explicitPath = match[2]
     const extension: Record<string, string> = {
       typescript: 'ts',
+      ts: 'ts',
       tsx: 'tsx',
       javascript: 'js',
+      js: 'js',
       jsx: 'jsx',
       css: 'css',
       html: 'html',
       python: 'py',
+      py: 'py',
       json: 'json',
       yaml: 'yaml',
+      yml: 'yml',
       shell: 'sh',
+      bash: 'sh',
+      sh: 'sh',
+      rust: 'rs',
+      go: 'go',
+      java: 'java',
+      sql: 'sql',
+      vue: 'vue',
+      svelte: 'svelte',
     }
+
+    // Markdown commonly uses unlabeled fences for examples, diagrams, or quoted
+    // material. Those are not source files. Only create a code workspace when the
+    // provider supplied a recognized source language or an explicit file path.
+    const inferredExtension = extension[language]
+    if (!explicitPath && !inferredExtension) continue
+
+    index++
     files.push({
-      path: match[2] || `/artifact-${index}.${extension[language] || language || 'txt'}`,
+      path: explicitPath || `/artifact-${index}.${inferredExtension}`,
       content: match[3] ?? '',
-      language,
+      language: language || undefined,
     })
   }
   return files
@@ -113,10 +133,7 @@ export function coerceArtifactEnvelope(
   }
 
   const files = codeFiles(content)
-  if (
-    files.length > 0 ||
-    ['application', 'source-code', 'mcp-server', 'skill-creator'].includes(kind)
-  ) {
+  if (['application', 'source-code', 'mcp-server', 'skill-creator'].includes(kind)) {
     return {
       schema: ARTIFACT_SCHEMA,
       kind,

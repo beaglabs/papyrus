@@ -50,15 +50,23 @@ export interface PersonaAgent {
 export interface PersonaAgentOptions {
   /** Editable project-level instructions supplied by the source specification node. */
   projectSystemPrompt?: string
+  /** Artifact contract selected by the request orchestrator. */
+  expectedArtifact?: string
 }
 
 export function buildPersonaSystemPrompt(
   personaPrompt: string,
   projectSystemPrompt?: string,
+  expectedArtifact?: string,
 ): string {
   const projectPrompt = projectSystemPrompt?.trim()
-  if (!projectPrompt) return personaPrompt
-  return `${personaPrompt}\n\n## Project System Prompt\nThe following project-specific instructions are authoritative for the work product. Follow them while retaining your assigned professional role.\n\n${projectPrompt}`
+  const projectSection = projectPrompt
+    ? `\n\n## Project System Prompt\nThe following project-specific instructions are authoritative for the work product. Follow them while retaining your assigned professional role.\n\n${projectPrompt}`
+    : ''
+  const artifactSection = expectedArtifact
+    ? `\n\n## Required Artifact Contract\nFor this request, the expected artifact type is "${expectedArtifact}". Use that type unless the deliverable is intentionally decomposed into more specific compatible artifacts. Do not substitute an application or source-code workspace for prose, requirements, user stories, metrics, design guidance, architecture, or analysis. Only emit application artifacts when you are returning actual source files in language-tagged code fences with explicit file paths.`
+    : ''
+  return `${personaPrompt}${projectSection}${artifactSection}`
 }
 
 /**
@@ -71,7 +79,11 @@ export function createPersonaAgent(
 ): PersonaAgent {
   const personaPrompt = PERSONA_PROMPTS[personaId]
   if (!personaPrompt) throw new Error(`Unknown persona: ${personaId}`)
-  const systemPrompt = buildPersonaSystemPrompt(personaPrompt, options.projectSystemPrompt)
+  const systemPrompt = buildPersonaSystemPrompt(
+    personaPrompt,
+    options.projectSystemPrompt,
+    options.expectedArtifact,
+  )
 
   const personaNames: Record<string, { name: string; role: string }> = {
     pm: { name: 'Product Manager', role: 'PM' },
@@ -97,7 +109,7 @@ export function createPersonaAgent(
         maxOutputTokens: 4096,
       })
 
-      let result = extractArtifacts(rawText, personaId)
+      let result = extractArtifacts(rawText, personaId, options.expectedArtifact)
       const request = messages.at(-1)?.content ?? ''
       if (
         personaId === 'designer' &&
@@ -120,7 +132,7 @@ export function createPersonaAgent(
           temperature: 0.2,
           maxOutputTokens: 4096,
         })
-        result = extractArtifacts(rawText, personaId)
+        result = extractArtifacts(rawText, personaId, options.expectedArtifact)
 
         if (
           !result.nodes.some(
@@ -159,7 +171,8 @@ export function createPersonaAgent(
         /\b(create|generate|draft|design|analyze|build|review|map|define|plan)\b/i.test(request)
       ) {
         const type =
-          personaId === 'security'
+          options.expectedArtifact ??
+          (personaId === 'security'
             ? 'security-report'
             : personaId === 'engineer'
               ? /\bapi|endpoint|openapi\b/i.test(request)
@@ -167,7 +180,7 @@ export function createPersonaAgent(
                 : 'application'
               : personaId === 'designer'
                 ? 'specification'
-                : 'specification'
+                : 'specification')
         const title =
           type === 'security-report'
             ? 'Security review'
@@ -205,6 +218,7 @@ export function createPersonaAgent(
 export function extractArtifacts(
   rawText: string,
   persona = 'agent',
+  expectedArtifact?: string,
 ): { text: string; nodes: CanvasNode[] } {
   const artifactRegex = /<artifact\s+([^>]+)>([\s\S]*?)<\/artifact>/gi
   const nodes: CanvasNode[] = []
@@ -213,7 +227,8 @@ export function extractArtifacts(
     for (const attribute of (match[1] ?? '').matchAll(/([\w-]+)="([^"]*)"/g)) {
       if (attribute[1]) attributes.set(attribute[1], attribute[2] ?? '')
     }
-    const type = attributes.get('type') || 'specification'
+    const declaredType = attributes.get('type') || 'specification'
+    const type = normalizeArtifactType(declaredType, expectedArtifact)
     const title = attributes.get('title') || type
     const content = (match[2] ?? '').trim()
     const artifact = coerceArtifactEnvelope(type, title, content, persona)
@@ -284,11 +299,16 @@ export function extractArtifacts(
   const looksLikeDeliverable =
     /```|^#{1,3}\s|\b(openapi|paths:|components:|threat model|architecture)\b/im.test(rawText)
   if (looksLikeDeliverable && rawText.trim()) {
-    const kind = /\b(openapi|paths:)\b/i.test(rawText)
+    const containsSourceCode =
+      /```(?:typescript|ts|tsx|javascript|js|jsx|css|html|python|py|shell|bash|sh|rust|go|java|sql|vue|svelte)\b/i.test(
+        rawText,
+      )
+    const inferredKind = /\b(openapi|paths:)\b/i.test(rawText)
       ? 'api'
-      : /```/.test(rawText)
+      : containsSourceCode
         ? 'application'
         : 'specification'
+    const kind = expectedArtifact ?? inferredKind
     const title =
       kind === 'api'
         ? 'API specification'
@@ -311,6 +331,17 @@ export function extractArtifacts(
   }
 
   return { text: rawText, nodes: [] }
+}
+
+function normalizeArtifactType(declaredType: string, expectedArtifact?: string): string {
+  if (!expectedArtifact || declaredType === expectedArtifact) return declaredType
+
+  const compatible: Record<string, string[]> = {
+    specification: ['specification', 'user-story', 'success-metric'],
+    application: ['application', 'source-code', 'mcp-server', 'skill-creator'],
+    'security-report': ['security-report', 'threat-model', 'specification', 'dataset'],
+  }
+  return compatible[expectedArtifact]?.includes(declaredType) ? declaredType : expectedArtifact
 }
 
 /** Backwards-compatible single-artifact helper for existing callers. */

@@ -1,6 +1,6 @@
 import type { CanvasNodeDoc, EdgeDoc } from '@papyrus/core/nodes/types'
-import { applyEdgeChanges, applyNodeChanges, type EdgeChange, type NodeChange } from '@xyflow/react'
-import { useCallback, useEffect, useState } from 'react'
+import { type EdgeChange, type NodeChange, applyEdgeChanges, applyNodeChanges } from '@xyflow/react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>
 
@@ -8,6 +8,11 @@ export interface CanvasState {
   nodes: CanvasNodeDoc[]
   edges: EdgeDoc[]
   loading: boolean
+  saving: boolean
+  /** Reload the authoritative canvas after an agent/server-side mutation. */
+  refresh: () => Promise<void>
+  /** Persist the final position after React Flow completes a drag. */
+  persistNodePosition: (id: string, position: { x: number; y: number }) => void
   /** Optimistic upsert — updates local state immediately, then persists. */
   upsertNode: (doc: CanvasNodeDoc) => void
   deleteNode: (id: string) => void
@@ -16,8 +21,6 @@ export interface CanvasState {
   /** React Flow controlled-flow handler — applies position/select/remove changes locally. */
   onNodesChange: (changes: NodeChange[]) => void
   onEdgesChange: (changes: EdgeChange[]) => void
-  /** Direct setter for cases that need to mutate local state without persistence. */
-  setNodes: React.Dispatch<React.SetStateAction<CanvasNodeDoc[]>>
 }
 
 interface ProjectResponse {
@@ -33,32 +36,56 @@ interface ProjectResponse {
  * presence, no outbox, no CRDTs — just local state + server persistence.
  *
  * Dragging works because position changes are applied locally by
- * `onNodesChange` and only persisted on drag-end (the caller decides when to
- * call `upsertNode`).
+ * `onNodesChange` and only persisted on drag-end.
  */
 export function useCanvas(projectId: string, apiFetch: ApiFetch): CanvasState {
   const [nodes, setNodes] = useState<CanvasNodeDoc[]>([])
   const [edges, setEdges] = useState<EdgeDoc[]>([])
   const [loading, setLoading] = useState(true)
+  const [pendingMutations, setPendingMutations] = useState(0)
+  const nodesRef = useRef(nodes)
+  nodesRef.current = nodes
+
+  const refresh = useCallback(async () => {
+    setLoading(true)
+    try {
+      const response = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}`)
+      if (!response.ok) throw new Error(`Canvas load failed (${response.status})`)
+      const data = (await response.json()) as ProjectResponse
+      setNodes(data.nodes ?? [])
+      setEdges(data.edges ?? [])
+    } finally {
+      setLoading(false)
+    }
+  }, [apiFetch, projectId])
+
+  const persist = useCallback(
+    async (path: string, init: RequestInit) => {
+      setPendingMutations((count) => count + 1)
+      try {
+        const response = await apiFetch(path, init)
+        if (!response.ok) throw new Error(`Canvas mutation failed (${response.status})`)
+      } catch (error) {
+        void refresh().catch((refreshError) =>
+          console.error('Canvas reconciliation failed', refreshError),
+        )
+        throw error
+      } finally {
+        setPendingMutations((count) => Math.max(0, count - 1))
+      }
+    },
+    [apiFetch, refresh],
+  )
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
-    apiFetch(`/api/projects/${encodeURIComponent(projectId)}`)
-      .then((res) => (res.ok ? (res.json() as Promise<ProjectResponse>) : null))
-      .then((data) => {
-        if (cancelled || !data) return
-        setNodes(data.nodes ?? [])
-        setEdges(data.edges ?? [])
-      })
-      .catch((err) => console.error('useCanvas load failed', err))
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
+    void refresh().catch((error) => {
+      if (!cancelled) console.error('useCanvas load failed', error)
+    })
     return () => {
       cancelled = true
     }
-  }, [projectId, apiFetch])
+  }, [refresh])
 
   const upsertNode = useCallback(
     (doc: CanvasNodeDoc) => {
@@ -71,46 +98,67 @@ export function useCanvas(projectId: string, apiFetch: ApiFetch): CanvasState {
         }
         return [...prev, doc]
       })
-      void apiFetch(`/api/projects/${encodeURIComponent(projectId)}/nodes`, {
+      void persist(`/api/projects/${encodeURIComponent(projectId)}/nodes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(doc),
       }).catch((err) => console.error('upsertNode failed', err))
     },
-    [apiFetch, projectId],
+    [persist, projectId],
   )
 
   const deleteNode = useCallback(
     (id: string) => {
       setNodes((prev) => prev.filter((n) => n.id !== id))
       setEdges((prev) => prev.filter((e) => e.from !== id && e.to !== id))
-      void apiFetch(`/api/projects/${encodeURIComponent(projectId)}/nodes/${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-      }).catch((err) => console.error('deleteNode failed', err))
+      void persist(
+        `/api/projects/${encodeURIComponent(projectId)}/nodes/${encodeURIComponent(id)}`,
+        {
+          method: 'DELETE',
+        },
+      ).catch((err) => console.error('deleteNode failed', err))
     },
-    [apiFetch, projectId],
+    [persist, projectId],
+  )
+
+  const persistNodePosition = useCallback(
+    (id: string, position: { x: number; y: number }) => {
+      const current = nodesRef.current.find((node) => node.id === id)
+      if (!current) return
+      const doc = { ...current, position, updatedAt: Date.now() }
+      setNodes((previous) => previous.map((node) => (node.id === id ? doc : node)))
+      void persist(`/api/projects/${encodeURIComponent(projectId)}/nodes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(doc),
+      }).catch((error) => console.error('persistNodePosition failed', error))
+    },
+    [persist, projectId],
   )
 
   const addEdge = useCallback(
     (edge: EdgeDoc) => {
       setEdges((prev) => (prev.some((e) => e.id === edge.id) ? prev : [...prev, edge]))
-      void apiFetch(`/api/projects/${encodeURIComponent(projectId)}/edges`, {
+      void persist(`/api/projects/${encodeURIComponent(projectId)}/edges`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(edge),
       }).catch((err) => console.error('addEdge failed', err))
     },
-    [apiFetch, projectId],
+    [persist, projectId],
   )
 
   const deleteEdge = useCallback(
     (id: string) => {
       setEdges((prev) => prev.filter((e) => e.id !== id))
-      void apiFetch(`/api/projects/${encodeURIComponent(projectId)}/edges/${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-      }).catch((err) => console.error('deleteEdge failed', err))
+      void persist(
+        `/api/projects/${encodeURIComponent(projectId)}/edges/${encodeURIComponent(id)}`,
+        {
+          method: 'DELETE',
+        },
+      ).catch((err) => console.error('deleteEdge failed', err))
     },
-    [apiFetch, projectId],
+    [persist, projectId],
   )
 
   // React Flow change handlers. We round-trip through RF node shape because
@@ -150,12 +198,14 @@ export function useCanvas(projectId: string, apiFetch: ApiFetch): CanvasState {
     nodes,
     edges,
     loading,
+    saving: pendingMutations > 0,
+    refresh,
+    persistNodePosition,
     upsertNode,
     deleteNode,
     addEdge,
     deleteEdge,
     onNodesChange,
     onEdgesChange,
-    setNodes,
   }
 }

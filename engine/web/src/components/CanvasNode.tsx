@@ -17,7 +17,14 @@ import { tokens } from '@papyrus/core/design'
 import type { CanvasNodeDoc } from '@papyrus/core/nodes/types'
 import { Handle, type NodeProps, Position } from '@xyflow/react'
 import { Check, ChevronDown, ChevronUp, CircleX, FileText, Sparkles } from 'lucide-react'
-import { createContext, useContext, useEffect, useState, type Dispatch, type SetStateAction } from 'react'
+import {
+  type Dispatch,
+  type SetStateAction,
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+} from 'react'
 import { ArtifactRenderer } from './ArtifactRenderer'
 
 export interface AgentComposerDraft {
@@ -198,9 +205,7 @@ export function CanvasNode({ data, selected }: NodeProps) {
           touchAction: 'none',
         }}
       >
-        <span style={{ fontSize: 14, flexShrink: 0 }}>
-          {isGenerating ? '\u{23F3}' : icon}
-        </span>
+        <span style={{ fontSize: 14, flexShrink: 0 }}>{isGenerating ? '\u{23F3}' : icon}</span>
         {editingName ? (
           <input
             className="nodrag nopan"
@@ -295,12 +300,8 @@ export function CanvasNode({ data, selected }: NodeProps) {
             status={doc.status}
             onSaveArtifact={saveArtifactRevision}
             onAskAgent={askAgentToModifyArtifact}
-            onApprove={
-              doc.status === 'proposed' ? () => setProposalStatus('approved') : undefined
-            }
-            onReject={
-              doc.status === 'proposed' ? () => setProposalStatus('rejected') : undefined
-            }
+            onApprove={doc.status === 'proposed' ? () => setProposalStatus('approved') : undefined}
+            onReject={doc.status === 'proposed' ? () => setProposalStatus('rejected') : undefined}
           />
         ) : isSource ? (
           <>
@@ -420,8 +421,6 @@ export function CanvasNode({ data, selected }: NodeProps) {
       {isOutput && canEdit && !isSource && (
         <div
           className="nodrag nopan nowheel"
-          onPointerDownCapture={(event) => event.stopPropagation()}
-          onMouseDownCapture={(event) => event.stopPropagation()}
           style={{
             display: 'flex',
             gap: 4,

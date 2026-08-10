@@ -1,12 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
 /**
- * Papyrus daemon — HTTP server (serves SPA + REST API) + WebSocket (canvas sync + presence).
+ * Papyrus daemon — HTTP server serving the SPA and REST API.
  *
- * One daemon per user, managing multiple projects. The WebSocket endpoint
- * `/ws?project=<id>` handles real-time canvas sync and presence for a project.
- * The REST API handles project CRUD. The built SPA is served from the web
- * package's dist/ directory.
+ * One daemon per user, managing multiple projects. Canvas state is loaded and
+ * persisted through REST; the built SPA is served from the web package's
+ * dist/ directory.
  */
 import { type IncomingMessage, type ServerResponse, createServer } from 'node:http'
 import { createServer as createHttpsServer } from 'node:https'
@@ -29,17 +28,8 @@ import {
   createAdapter,
 } from '@papyrus/core'
 import { loadOrGenerateMemberIdentity } from '@papyrus/core/auth/keygen'
-import {
-  type AuthContext,
-  createSessionToken,
-  extractAuth,
-  requireAuth,
-  validateSessionToken,
-} from '@papyrus/core/auth/middleware'
+import { createSessionToken, extractAuth, requireAuth } from '@papyrus/core/auth/middleware'
 import type { CanvasNodeDoc, EdgeDoc } from '@papyrus/core/nodes/types'
-import type { ClientMsg, ServerMsg } from '@papyrus/core/sync/protocol'
-import type { PresenceInfo } from '@papyrus/core/sync/protocol'
-import { WebSocket, WebSocketServer } from 'ws'
 import * as Y from 'yjs'
 import { type AuditAction, auditLog, getAuditLog, verifyAuditChain } from './audit.js'
 import {
@@ -60,7 +50,6 @@ import {
   loadDocumentState,
   loadProject,
   saveCanvas,
-  saveDocumentState,
   saveWebAuthnCredential,
   updateWebAuthnCredentialCounter,
 } from './database.js'
@@ -224,9 +213,6 @@ interface ProjectState {
   edges: EdgeDoc[]
   revision: number
   documents: Map<string, Y.Doc>
-  presence: Map<string, PresenceInfo>
-  clients: Set<WebSocket>
-  wsPeerMap: Map<WebSocket, string>
 }
 
 const projects = new Map<string, ProjectState>()
@@ -240,9 +226,6 @@ function getOrCreateState(id: string): ProjectState {
     edges: data?.edges ?? [],
     revision: data?.revision ?? 0,
     documents: new Map(),
-    presence: new Map(),
-    clients: new Set(),
-    wsPeerMap: new Map(),
   }
   projects.set(id, state)
   return state
@@ -269,15 +252,6 @@ function ensureSourceSpecification(
     payload: source,
   })
   return source
-}
-
-function broadcast(state: ProjectState, msg: ServerMsg, exclude?: WebSocket): void {
-  const payload = JSON.stringify(msg)
-  for (const client of state.clients) {
-    if (client !== exclude && client.readyState === WebSocket.OPEN) {
-      client.send(payload)
-    }
-  }
 }
 
 function persistIfState(id: string): void {
@@ -1062,13 +1036,18 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
   // ── Canvas mutation endpoints (REST, single-user) ─────────────
   // These replace the WebSocket round-trip for canvas state. The client loads
   // initial state via GET /api/projects/:id and pushes mutations here. The
-  // shape mirrors the WS message handler so persistence/audit logic is shared.
+  // Each mutation commits once after local validation so React Flow can remain
+  // responsive without server responses replacing in-progress drag state.
 
   const canvasNodeMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/nodes$/)
   if (canvasNodeMatch && method === 'POST') {
     const authCtx = requireAuth(req, res)
     if (!authCtx) return true
-    const projectId = canvasNodeMatch[1]!
+    const projectId = canvasNodeMatch[1]
+    if (!projectId) {
+      json(res, 400, { error: 'projectId required' })
+      return true
+    }
     const body = (await parseBody(req)) as unknown as CanvasNodeDoc
     if (!body?.id) {
       json(res, 400, { error: 'node id required' })
@@ -1083,7 +1062,9 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
     const incoming: CanvasNodeDoc = {
       ...body,
       projectId,
-      createdBy: exists ? state.nodes.find((n) => n.id === body.id)?.createdBy ?? authCtx.memberKey : authCtx.memberKey,
+      createdBy: exists
+        ? (state.nodes.find((n) => n.id === body.id)?.createdBy ?? authCtx.memberKey)
+        : authCtx.memberKey,
       updatedAt: Date.now(),
     }
     state.nodes = exists
@@ -1096,7 +1077,6 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       operationType: exists ? 'update' : 'create',
       payload: incoming,
     })
-    broadcast(state, { type: 'node:upsert', data: incoming })
     json(res, 200, incoming)
     return true
   }
@@ -1105,8 +1085,8 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
   if (canvasNodeDeleteMatch && method === 'DELETE') {
     const authCtx = requireAuth(req, res)
     if (!authCtx) return true
-    const projectId = canvasNodeDeleteMatch[1]!
-    const nodeId = canvasNodeDeleteMatch[2]!
+    const projectId = canvasNodeDeleteMatch[1]
+    const nodeId = canvasNodeDeleteMatch[2]
     if (!projectId || !nodeId) {
       json(res, 400, { error: 'projectId and nodeId required' })
       return true
@@ -1124,7 +1104,6 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       entityId: nodeId,
       operationType: 'delete',
     })
-    broadcast(state, { type: 'node:delete', data: { id: nodeId } })
     json(res, 200, { ok: true })
     return true
   }
@@ -1133,7 +1112,11 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
   if (canvasEdgeMatch && method === 'POST') {
     const authCtx = requireAuth(req, res)
     if (!authCtx) return true
-    const projectId = canvasEdgeMatch[1]!
+    const projectId = canvasEdgeMatch[1]
+    if (!projectId) {
+      json(res, 400, { error: 'projectId required' })
+      return true
+    }
     const body = (await parseBody(req)) as unknown as EdgeDoc
     if (!body?.id || !body.from || !body.to) {
       json(res, 400, { error: 'edge id, from, and to required' })
@@ -1162,7 +1145,6 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       operationType: 'create',
       payload: incoming,
     })
-    broadcast(state, { type: 'edge:add', data: incoming })
     json(res, 200, incoming)
     return true
   }
@@ -1171,8 +1153,8 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
   if (canvasEdgeDeleteMatch && method === 'DELETE') {
     const authCtx = requireAuth(req, res)
     if (!authCtx) return true
-    const projectId = canvasEdgeDeleteMatch[1]!
-    const edgeId = canvasEdgeDeleteMatch[2]!
+    const projectId = canvasEdgeDeleteMatch[1]
+    const edgeId = canvasEdgeDeleteMatch[2]
     if (!projectId || !edgeId) {
       json(res, 400, { error: 'projectId and edgeId required' })
       return true
@@ -1189,7 +1171,6 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       entityId: edgeId,
       operationType: 'delete',
     })
-    broadcast(state, { type: 'edge:delete', data: { id: edgeId } })
     json(res, 200, { ok: true })
     return true
   }
@@ -1374,17 +1355,6 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       state.revision = result.projectRevision
       if (!result.duplicate) applied++
     }
-
-    // Broadcast to WS clients
-    broadcast(state, {
-      type: 'canvas:state',
-      data: {
-        nodes: state.nodes,
-        edges: state.edges,
-        presence: [...state.presence.values()],
-        revision: state.revision,
-      },
-    })
 
     // Audit
     auditLog({
@@ -1727,7 +1697,6 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
           operationType: 'update',
           payload: skillNode,
         })
-        broadcast(state, { type: 'node:upsert', data: skillNode })
       }
     }
 
@@ -1758,7 +1727,6 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
         operationType: 'create',
         payload: nodeDoc,
       })
-      broadcast(state, { type: 'node:upsert', data: nodeDoc })
     }
 
     // Update skill node status
@@ -1775,7 +1743,6 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
           operationType: 'update',
           payload: skillNode,
         })
-        broadcast(state, { type: 'node:upsert', data: skillNode })
       }
     }
 
@@ -1981,8 +1948,6 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
             payload: nodeDoc,
           })
 
-          // Broadcast to all connected clients
-          broadcast(state, { type: 'node:upsert', data: nodeDoc })
           createdNodes.push(nodeDoc)
 
           if (parentNode && !revisionTarget) {
@@ -2003,7 +1968,6 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
               operationType: 'create',
               payload: edge,
             })
-            broadcast(state, { type: 'edge:add', data: edge })
           }
         }
 
@@ -2153,7 +2117,6 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
           operationType: 'update',
           payload: existingNode,
         })
-        broadcast(state, { type: 'node:upsert', data: existingNode })
 
         task.nodeId = nodeId
         task.nodeTitle = replacement.title
@@ -2407,7 +2370,7 @@ function serveSPA(res: ServerResponse, filePath: string): void {
   createReadStream(filePath).pipe(res)
 }
 
-// ── WebSocket handler ────────────────────────────────────────────
+// ── Legacy collaborative document import ────────────────────────
 
 function getDocument(state: ProjectState, projectId: string, nodeId: string): Y.Doc {
   const existing = state.documents.get(nodeId)
@@ -2417,272 +2380,6 @@ function getDocument(state: ProjectState, projectId: string, nodeId: string): Y.
   if (persisted) Y.applyUpdate(doc, persisted)
   state.documents.set(nodeId, doc)
   return doc
-}
-
-function handleWS(ws: WebSocket, projectId: string, auth: AuthContext): void {
-  const state = getOrCreateState(projectId)
-  // Backfill projects created before source specifications were introduced.
-  // This makes the editable system prompt a project invariant, not a new-project-only feature.
-  ensureSourceSpecification(projectId, state, auth.memberKey)
-  state.clients.add(ws)
-  state.wsPeerMap.set(ws, auth.memberKey)
-
-  // Send current canvas state
-  const initMsg: ServerMsg = {
-    type: 'canvas:state',
-    data: {
-      nodes: state.nodes,
-      edges: state.edges,
-      presence: [...state.presence.values()],
-      revision: state.revision,
-    },
-  }
-  ws.send(JSON.stringify(initMsg))
-  for (const node of state.nodes) {
-    const persisted = loadDocumentState(projectId, node.id)
-    if (!persisted) continue
-    ws.send(
-      JSON.stringify({
-        type: 'document:sync',
-        data: {
-          nodeId: node.id,
-          update: Buffer.from(persisted).toString('base64'),
-          revision: state.revision,
-        },
-      } satisfies ServerMsg),
-    )
-  }
-
-  ws.on('message', (raw) => {
-    try {
-      const msg = JSON.parse(raw.toString()) as ClientMsg
-      handleClientMsg(ws, state, projectId, auth, msg)
-    } catch (error) {
-      ws.send(
-        JSON.stringify({
-          type: 'operation:reject',
-          data: {
-            operationId: 'malformed',
-            code: 'invalid-message',
-            message: error instanceof Error ? error.message : 'Invalid message',
-            projectRevision: state.revision,
-          },
-        } satisfies ServerMsg),
-      )
-    }
-  })
-
-  ws.on('close', () => {
-    state.clients.delete(ws)
-    // Remove presence and cursor mapping for this client
-    const peerId = state.wsPeerMap.get(ws)
-    state.wsPeerMap.delete(ws)
-    if (peerId) {
-      state.presence.delete(peerId)
-      broadcast(state, { type: 'presence:leave', data: { peerId } })
-      broadcast(state, { type: 'cursor:leave', data: { peerId } })
-    }
-  })
-}
-
-function handleClientMsg(
-  ws: WebSocket,
-  state: ProjectState,
-  projectId: string,
-  auth: AuthContext,
-  msg: ClientMsg,
-): void {
-  const actor = auth.memberKey
-
-  if (msg.type === 'presence:heartbeat') {
-    const info: PresenceInfo = {
-      peerId: actor,
-      displayName: auth.displayName,
-      color: msg.data.color,
-      lastSeen: new Date().toISOString(),
-    }
-    state.presence.set(actor, info)
-    broadcast(state, { type: 'presence:update', data: info }, ws)
-    return
-  }
-
-  if (msg.type === 'cursor:move') {
-    const cursorPresence = state.presence.get(actor)
-    broadcast(
-      state,
-      {
-        type: 'cursor:update',
-        data: {
-          peerId: actor,
-          x: msg.data.x,
-          y: msg.data.y,
-          displayName: auth.displayName,
-          color: cursorPresence?.color ?? '',
-        },
-      },
-      ws,
-    )
-    return
-  }
-
-  const operationId = msg.operationId ?? `op-${randomUUID()}`
-  const permission =
-    msg.type === 'node:upsert'
-      ? state.nodes.some((node) => node.id === msg.data.id)
-        ? 'node:update'
-        : 'node:create'
-      : msg.type === 'node:delete'
-        ? 'node:delete'
-        : msg.type === 'edge:add'
-          ? 'edge:create'
-          : msg.type === 'edge:delete'
-            ? 'edge:delete'
-            : 'node:update'
-
-  if (!hasPermission(projectId, actor, permission)) {
-    ws.send(
-      JSON.stringify({
-        type: 'operation:reject',
-        data: {
-          operationId,
-          code: 'permission-denied',
-          message: `Permission required: ${permission}`,
-          projectRevision: state.revision,
-        },
-      } satisfies ServerMsg),
-    )
-    return
-  }
-
-  const previousNodes = state.nodes
-  const previousEdges = state.edges
-  let broadcastMessage: ServerMsg | null = null
-  let entityType: 'node' | 'edge' | 'document' = 'node'
-  let entityId = ''
-  let operationType: 'create' | 'update' | 'delete' = 'update'
-  let payload: unknown
-
-  switch (msg.type) {
-    case 'node:upsert': {
-      const idx = state.nodes.findIndex((n) => n.id === msg.data.id)
-      const incoming: CanvasNodeDoc = {
-        ...msg.data,
-        projectId,
-        createdBy: idx >= 0 ? (state.nodes[idx]?.createdBy ?? actor) : actor,
-        updatedAt: Date.now(),
-      }
-      if (idx >= 0) {
-        state.nodes = state.nodes.map((node, index) => (index === idx ? incoming : node))
-        operationType = 'update'
-      } else {
-        state.nodes = [...state.nodes, incoming]
-        operationType = 'create'
-      }
-      entityId = incoming.id
-      payload = incoming
-      broadcastMessage = { type: 'node:upsert', data: incoming }
-      break
-    }
-    case 'node:delete': {
-      state.nodes = state.nodes.filter((n) => n.id !== msg.data.id)
-      state.edges = state.edges.filter(
-        (edge) => edge.from !== msg.data.id && edge.to !== msg.data.id,
-      )
-      entityId = msg.data.id
-      operationType = 'delete'
-      broadcastMessage = { type: 'node:delete', data: msg.data }
-      break
-    }
-    case 'edge:add': {
-      entityType = 'edge'
-      entityId = msg.data.id
-      operationType = 'create'
-      if (!state.edges.find((e) => e.id === msg.data.id)) {
-        const edge = { ...msg.data, projectId, createdBy: actor, updatedAt: Date.now() }
-        state.edges = [...state.edges, edge]
-        payload = edge
-        broadcastMessage = { type: 'edge:add', data: edge }
-      }
-      break
-    }
-    case 'edge:delete': {
-      entityType = 'edge'
-      entityId = msg.data.id
-      operationType = 'delete'
-      state.edges = state.edges.filter((e) => e.id !== msg.data.id)
-      broadcastMessage = { type: 'edge:delete', data: msg.data }
-      break
-    }
-    case 'document:sync': {
-      entityType = 'document'
-      entityId = msg.data.nodeId
-      operationType = 'update'
-      const update = Buffer.from(msg.data.update, 'base64')
-      const doc = getDocument(state, projectId, msg.data.nodeId)
-      Y.applyUpdate(doc, update)
-      const content = doc.getText('content').toString()
-      state.nodes = state.nodes.map((node) =>
-        node.id === msg.data.nodeId
-          ? { ...node, fields: { ...node.fields, content }, updatedAt: Date.now() }
-          : node,
-      )
-      payload = { update: msg.data.update }
-      broadcastMessage = {
-        type: 'document:sync',
-        data: { nodeId: msg.data.nodeId, update: msg.data.update, revision: state.revision + 1 },
-      }
-      break
-    }
-    default:
-      return
-  }
-
-  try {
-    const result = commitCanvasOperation(
-      {
-        id: operationId,
-        projectId,
-        actorKey: actor,
-        entityType,
-        entityId,
-        operationType,
-        payload,
-        baseRevision: msg.baseRevision,
-      },
-      state.nodes,
-      state.edges,
-    )
-    state.revision = result.projectRevision
-    if (entityType === 'document') {
-      const doc = getDocument(state, projectId, entityId)
-      saveDocumentState(projectId, entityId, Y.encodeStateAsUpdate(doc), state.revision)
-    }
-    if (broadcastMessage && !result.duplicate) broadcast(state, broadcastMessage)
-    ws.send(
-      JSON.stringify({
-        type: 'operation:ack',
-        data: {
-          operationId,
-          projectRevision: result.projectRevision,
-          duplicate: result.duplicate || undefined,
-        },
-      } satisfies ServerMsg),
-    )
-  } catch (error) {
-    state.nodes = previousNodes
-    state.edges = previousEdges
-    ws.send(
-      JSON.stringify({
-        type: 'operation:reject',
-        data: {
-          operationId,
-          code: 'operation-rejected',
-          message: error instanceof Error ? error.message : 'Operation rejected',
-          projectRevision: state.revision,
-        },
-      } satisfies ServerMsg),
-    )
-  }
 }
 
 // ── Start server ─────────────────────────────────────────────────
@@ -2726,36 +2423,6 @@ const httpServer = (() => {
   )
 })()
 
-const wss = new WebSocketServer({ server: httpServer, path: '/ws' })
-
-wss.on('connection', (ws, req) => {
-  if (!licenseService.isLicensed()) {
-    ws.close(1008, 'Papyrus license required')
-    return
-  }
-  const url = new URL(req.url ?? '/', `http://localhost:${PORT}`)
-  const projectId = url.searchParams.get('project')
-  const tokenProtocol = req.headers['sec-websocket-protocol']
-    ?.split(',')
-    .map((value) => value.trim())
-    .find((value) => value.startsWith('papyrus-token.'))
-  const token = tokenProtocol?.slice('papyrus-token.'.length)
-  const session = token ? validateSessionToken(token) : null
-  if (!projectId || !session) {
-    ws.close(1008, 'authenticated project session required')
-    return
-  }
-  if (!hasPermission(projectId, session.memberKey, 'project:read')) {
-    ws.close(1008, 'project access denied')
-    return
-  }
-  handleWS(ws, projectId, {
-    memberKey: session.memberKey,
-    displayName: session.displayName,
-    expired: false,
-  })
-})
-
 httpServer.listen(PORT, HOST, async () => {
   console.log('\n  PAPYRUS daemon')
   console.log('  ─────────────')
@@ -2765,7 +2432,6 @@ httpServer.listen(PORT, HOST, async () => {
       `  mTLS  ${process.env.PAPYRUS_CAC_CA_BUNDLE ? 'CAC/PIV client cert verification active' : 'client certs requested (no CA bundle)'}`,
     )
   }
-  console.log(`  WS    ${useHttps ? 'wss' : 'ws'}://${HOST}:${PORT}/ws`)
   console.log(`  API   ${useHttps ? 'https' : 'http'}://${HOST}:${PORT}/api/health`)
 
   // Auto-generate member identity on first run
@@ -2781,7 +2447,7 @@ httpServer.listen(PORT, HOST, async () => {
   console.log()
 })
 
-// Prevent crashes from WebSocket disconnects or unhandled errors
+// Prevent crashes from unhandled process errors
 process.on('uncaughtException', (err) => {
   console.error('  Uncaught exception:', err.message)
 })
@@ -2801,4 +2467,4 @@ process.on('SIGTERM', () => {
   process.exit(0)
 })
 
-export { httpServer, wss }
+export { httpServer }

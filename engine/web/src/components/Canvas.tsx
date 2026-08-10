@@ -2,9 +2,11 @@ import {
   Background,
   Controls,
   type Edge,
+  Handle,
   MiniMap,
   type Node,
   type NodeTypes,
+  Position,
   ReactFlow,
   type ReactFlowInstance,
 } from '@xyflow/react'
@@ -109,6 +111,9 @@ const nodeActionStyle: React.CSSProperties = {
   fontSize: 10,
   fontWeight: 800,
   cursor: 'pointer',
+  pointerEvents: 'auto',
+  position: 'relative',
+  zIndex: 4,
   fontFamily: tokens.font.mono,
   textTransform: 'uppercase',
 }
@@ -261,13 +266,34 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
         id: doc.id,
         type: 'canvasNode',
         position: doc.position,
-        dragHandle: '.canvas-node-drag-handle',
         draggable: true,
         selectable: true,
         data: doc as unknown as Record<string, unknown>,
       })),
     [nodes],
   )
+
+  const repairedArtifactEdgesRef = useRef(new Set<string>())
+  useEffect(() => {
+    if (!connected) return
+    const source = nodes.find((node) => node.flowRole === 'source')
+    if (!source) return
+    for (const node of nodes) {
+      if (node.id === source.id || node.category !== 'output') continue
+      if (edges.some((edge) => edge.to === node.id)) continue
+      if (repairedArtifactEdgesRef.current.has(node.id)) continue
+      repairedArtifactEdgesRef.current.add(node.id)
+      addEdge({
+        id: `edge-${source.id}-${node.id}`,
+        projectId,
+        from: source.id,
+        to: node.id,
+        kind: 'derives',
+        createdBy: peerId,
+        updatedAt: Date.now(),
+      })
+    }
+  }, [addEdge, connected, edges, nodes, peerId, projectId])
 
   const rfEdges: Edge[] = useMemo(
     () =>
@@ -396,6 +422,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
 
         return (
           <div
+            data-canvas-node-id={doc.id}
             style={{
               background: tokens.color.surface,
               border: `2px solid ${selected ? tokens.color.accent : tokens.color.black}`,
@@ -406,8 +433,12 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
               boxShadow: selected ? tokens.shadow.glow : '5px 5px 0 #111',
               transition: 'border-color 0.15s, box-shadow 0.15s',
               overflow: 'hidden',
+              pointerEvents: 'all',
+              position: 'relative',
             }}
           >
+            {!isSource && <Handle type="target" position={Position.Left} id="target" />}
+            <Handle type="source" position={Position.Right} id="source" />
             {/* Node header */}
             <div
               className="canvas-node-drag-handle"
@@ -418,6 +449,8 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
                 padding: '8px 12px',
                 borderBottom: `1px solid ${tokens.color.border}`,
                 background: isSource ? `${color}15` : 'transparent',
+                cursor: 'grab',
+                touchAction: 'none',
               }}
             >
               <span style={{ fontSize: 14, flexShrink: 0 }}>
@@ -627,8 +660,9 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
             {/* Node footer with actions */}
             {isOutput && canEdit && !isSource && (
               <div
-                className="nodrag"
-                onPointerDown={(event) => event.stopPropagation()}
+                className="nodrag nopan nowheel"
+                onPointerDownCapture={(event) => event.stopPropagation()}
+                onMouseDownCapture={(event) => event.stopPropagation()}
                 style={{
                   display: 'flex',
                   gap: 4,
@@ -640,6 +674,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
                   <>
                     <button
                       type="button"
+                      className="nodrag nopan nowheel"
                       onClick={(event) => {
                         event.stopPropagation()
                         setProposalStatus('approved')
@@ -650,6 +685,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
                     </button>
                     <button
                       type="button"
+                      className="nodrag nopan nowheel"
                       onClick={(event) => {
                         event.stopPropagation()
                         setProposalStatus('rejected')
@@ -668,6 +704,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
                 )}
                 <button
                   type="button"
+                  className="nodrag nopan nowheel"
                   onClick={(e) => {
                     e.stopPropagation()
                     handleRetry()
@@ -923,6 +960,7 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
           onInit={setRfInstance}
           nodeTypes={nodeTypes}
           noDragClassName="nodrag"
+          noPanClassName="nopan"
           fitView
           snapToGrid
           snapGrid={[20, 20]}

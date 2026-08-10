@@ -16,18 +16,42 @@ const RULES: Array<{ persona: PersonaId; pattern: RegExp; artifact: string }> = 
   },
   {
     persona: 'designer',
-    pattern: /\b(wireframe|mockup|design system|user journey|ux|ui|screen|layout|figma)\b/i,
+    pattern: /\b(wireframe|mockup|screen|layout|figma)\b/i,
     artifact: 'ui-mockup',
   },
   {
+    persona: 'designer',
+    pattern: /\b(design system|component library|user journey|ux specification)\b/i,
+    artifact: 'specification',
+  },
+  {
     persona: 'engineer',
-    pattern:
-      /\b(api|openapi|code|source|architecture|database|schema|endpoint|application|sandbox|mcp|server|typescript|react)\b/i,
+    pattern: /\b(api|openapi|endpoint)\b/i,
+    artifact: 'api',
+  },
+  {
+    persona: 'engineer',
+    pattern: /\b(code|source|application|sandbox|mcp|server|typescript|react|scaffold)\b/i,
     artifact: 'application',
   },
   {
+    persona: 'engineer',
+    pattern: /\b(architecture|database|data model|schema)\b/i,
+    artifact: 'specification',
+  },
+  {
     persona: 'pm',
-    pattern: /\b(prd|requirement|user stor|roadmap|success metric|kpi|product brief|priorit)\b/i,
+    pattern: /\b(user stor(?:y|ies))\b/i,
+    artifact: 'user-story',
+  },
+  {
+    persona: 'pm',
+    pattern: /\b(success metrics?|kpis?)\b/i,
+    artifact: 'success-metric',
+  },
+  {
+    persona: 'pm',
+    pattern: /\b(prd|requirement|roadmap|product brief|priorit)\b/i,
     artifact: 'specification',
   },
 ]
@@ -51,11 +75,15 @@ export function routeAgentRequest(text: string, requestedPersona?: string): Orch
       .filter((persona): persona is PersonaId => !!persona) ?? []
   const requested = requestedPersona ? ALIASES[requestedPersona.toLowerCase()] : undefined
   const matched = RULES.filter((rule) => rule.pattern.test(text))
-  const primaryPersona = explicit[0] ?? requested ?? matched[0]?.persona ?? 'pm'
+  // A concrete request intent must outrank the previously active persona. The
+  // unified chat sends the last persona to preserve ambiguous follow-ups, but it
+  // must not make later PM, design, engineering, or security actions sticky.
+  const primaryPersona = explicit[0] ?? matched[0]?.persona ?? requested ?? 'pm'
   const invitedPersonas = [
     ...new Set([primaryPersona, ...explicit, ...matched.map((rule) => rule.persona)]),
   ]
-  const expectedArtifact = matched.find((rule) => rule.persona === primaryPersona)?.artifact
+  const expectedArtifact =
+    matched.find((rule) => rule.persona === primaryPersona)?.artifact ?? matched[0]?.artifact
   const labels = invitedPersonas.map((persona) => `@${persona}`).join(' and ')
   return {
     primaryPersona,

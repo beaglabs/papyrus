@@ -1844,8 +1844,13 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       if (projectId && projectState) {
         ensureSourceSpecification(projectId, projectState, authCtx.memberKey)
       }
+      const revisionNode =
+        targetNodeId && projectState
+          ? projectState.nodes.find((node) => node.id === targetNodeId)
+          : undefined
       const agent = createPersonaAgent(persona, modelProvider, {
         projectSystemPrompt: projectState ? getProjectSystemPrompt(projectState.nodes) : undefined,
+        expectedArtifact: revisionNode?.type ?? route.expectedArtifact,
       })
 
       // Inject attachment context into the last user message if provided
@@ -1861,10 +1866,6 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
             )
           : messages
 
-      const revisionNode =
-        targetNodeId && projectState
-          ? projectState.nodes.find((node) => node.id === targetNodeId)
-          : undefined
       if (revisionNode?.fields.artifact) {
         effectiveMessages = effectiveMessages.map((message, index) =>
           index === effectiveMessages.length - 1 && message.role === 'user'
@@ -2093,6 +2094,7 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       ensureSourceSpecification(projectId, state, authCtx.memberKey)
       const agent = createPersonaAgent(persona, modelProvider, {
         projectSystemPrompt: getProjectSystemPrompt(state.nodes),
+        expectedArtifact: type,
       })
       const response = await agent.chat([
         {

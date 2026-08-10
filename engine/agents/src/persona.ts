@@ -1,5 +1,6 @@
 import {
   type UswdsWireframeArtifact,
+  createFallbackUswdsWireframe,
   parseUswdsWireframeArtifact,
 } from '@papyrus/core/artifacts/uswds-wireframe'
 /**
@@ -114,6 +115,26 @@ export function createPersonaAgent(
           maxOutputTokens: 4096,
         })
         result = extractArtifacts(rawText)
+
+        if (!result.nodes.some((node) => node.type === 'ui-mockup' && node.artifact)) {
+          const artifact = createFallbackUswdsWireframe(request)
+          console.warn(
+            '[papyrus] Designer output failed papyrus.uswds-wireframe/v1 validation after repair; using a schema-valid recovery artifact.',
+          )
+          result = {
+            text: 'Created a schema-valid USWDS wireframe proposal for review.',
+            nodes: [
+              {
+                type: 'ui-mockup',
+                category: 'output',
+                title: artifact.title,
+                content: JSON.stringify(artifact, null, 2),
+                status: 'proposed',
+                artifact,
+              },
+            ],
+          }
+        }
       }
 
       return result

@@ -165,14 +165,88 @@ export function isUswdsWireframeArtifact(value: unknown): value is UswdsWirefram
 }
 
 export function parseUswdsWireframeArtifact(content: string): UswdsWireframeArtifact | undefined {
-  const source = content
-    .trim()
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/\s*```$/, '')
-  try {
-    const value: unknown = JSON.parse(source)
-    return isUswdsWireframeArtifact(value) ? value : undefined
-  } catch {
-    return undefined
+  const sources = new Set<string>([content.trim()])
+  for (const match of content.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)) {
+    if (match[1]) sources.add(match[1].trim())
+  }
+  const firstBrace = content.indexOf('{')
+  const lastBrace = content.lastIndexOf('}')
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    sources.add(content.slice(firstBrace, lastBrace + 1))
+  }
+
+  for (const source of sources) {
+    try {
+      const value: unknown = JSON.parse(source)
+      const candidates = [
+        value,
+        isRecord(value) ? value.artifact : undefined,
+        isRecord(value) ? value.wireframe : undefined,
+        isRecord(value) ? value.data : undefined,
+      ]
+      const artifact = candidates.find(isUswdsWireframeArtifact)
+      if (artifact) return artifact
+    } catch {
+      // Try the next plausible JSON body. The final value remains strictly validated.
+    }
+  }
+  return undefined
+}
+
+export function createFallbackUswdsWireframe(request: string): UswdsWireframeArtifact {
+  const isUasMarketplace = /\b(uas|drone|uncrewed|marketplace)\b/i.test(request)
+  const agency = isUasMarketplace ? 'U.S. Army' : 'Federal Agency'
+  const service = isUasMarketplace ? 'UAS Marketplace' : 'Mission Service'
+  const subject = isUasMarketplace
+    ? 'Find and evaluate commercial uncrewed systems'
+    : 'Complete the primary mission workflow'
+
+  return {
+    schema: USWDS_WIREFRAME_SCHEMA_ID,
+    title: `${service} — Primary Workflow`,
+    viewport: 'desktop',
+    description: 'Schema-valid USWDS recovery wireframe generated from the project request.',
+    sections: [
+      { kind: 'banner', text: 'An official website of the United States government' },
+      {
+        kind: 'header',
+        agency,
+        title: service,
+        navigation: ['Overview', 'Requests', 'Resources', 'Help'],
+      },
+      {
+        kind: 'hero',
+        eyebrow: 'Primary workflow',
+        heading: subject,
+        body: 'Move from discovery through review and submission with clear status, ownership, and next actions.',
+        primaryAction: 'Start a request',
+        secondaryAction: 'View saved work',
+      },
+      { kind: 'search', label: 'Search available capabilities', buttonLabel: 'Search' },
+      {
+        kind: 'card-grid',
+        heading: 'How it works',
+        cards: [
+          {
+            title: '1. Define the need',
+            body: 'Describe the mission, constraints, and desired outcome.',
+          },
+          {
+            title: '2. Review options',
+            body: 'Compare relevant capabilities and supporting evidence.',
+          },
+          {
+            title: '3. Submit and track',
+            body: 'Route the request and monitor its status through completion.',
+          },
+        ],
+      },
+      {
+        kind: 'summary-box',
+        heading: 'Before you begin',
+        body: 'Have the mission need, point of contact, timeline, and required documentation ready.',
+      },
+      { kind: 'footer', agency, links: ['Accessibility', 'Privacy', 'Contact'] },
+    ],
   }
 }

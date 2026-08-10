@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  createFallbackUswdsWireframe,
   isUswdsWireframeArtifact,
   parseUswdsWireframeArtifact,
 } from '../src/artifacts/uswds-wireframe.js'
@@ -28,6 +29,27 @@ describe('USWDS wireframe artifacts', () => {
     expect(
       parseUswdsWireframeArtifact(`\`\`\`json\n${JSON.stringify(validWireframe)}\n\`\`\``),
     ).toEqual(validWireframe)
+  })
+
+  it('recovers a valid artifact surrounded by model prose', () => {
+    expect(
+      parseUswdsWireframeArtifact(
+        `Here is the artifact:\n\n\`\`\`json\n${JSON.stringify(validWireframe)}\n\`\`\`\nDone.`,
+      ),
+    ).toEqual(validWireframe)
+  })
+
+  it('recovers a valid artifact from a common wrapper object', () => {
+    expect(parseUswdsWireframeArtifact(JSON.stringify({ artifact: validWireframe }))).toEqual(
+      validWireframe,
+    )
+  })
+
+  it('creates a schema-valid desktop recovery wireframe', () => {
+    const artifact = createFallbackUswdsWireframe('Create a wireframe for a UAS marketplace')
+    expect(isUswdsWireframeArtifact(artifact)).toBe(true)
+    expect(artifact.viewport).toBe('desktop')
+    expect(artifact.sections.some((section) => section.kind === 'card-grid')).toBe(true)
   })
 
   it('rejects ASCII and malformed component data', () => {

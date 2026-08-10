@@ -3,6 +3,15 @@
 // Design tokens
 export { tokens } from './design/tokens.js'
 export type { DesignTokens } from './design/tokens.js'
+export {
+  ARTIFACT_SCHEMA,
+  coerceArtifactEnvelope,
+  isArtifactEnvelope,
+  unwrapUswdsArtifact,
+  type ArtifactEnvelope,
+  type ArtifactFile,
+  type ArtifactRenderer,
+} from './artifacts/envelope.js'
 
 // Profiles & config (single source of truth for NetworkProfile, AuthMethod, PapyrusConfig, etc.)
 export {
@@ -77,9 +86,19 @@ export {
   canonicalLicenseJson,
 } from './auth/license.js'
 
-export { deploymentFingerprint, loadOrGenerateDeploymentIdentity } from './auth/deployment-identity.js'
+export {
+  deploymentFingerprint,
+  loadOrGenerateDeploymentIdentity,
+} from './auth/deployment-identity.js'
 
-export { createAdapter, adaptersForProfile, WebAuthnAdapter, OIDCAdapter, CACPIVAdapter, SAMLAdapter } from './auth/adapter.js'
+export {
+  createAdapter,
+  adaptersForProfile,
+  WebAuthnAdapter,
+  OIDCAdapter,
+  CACPIVAdapter,
+  SAMLAdapter,
+} from './auth/adapter.js'
 
 // Sync protocol (browser-safe)
 export type { PresenceInfo, ServerMsg, ClientMsg } from './sync/protocol.js'

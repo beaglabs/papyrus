@@ -11,7 +11,7 @@ import {
   type ReactFlowInstance,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { isUswdsWireframeArtifact } from '@papyrus/core/artifacts/uswds-wireframe'
+import { isArtifactEnvelope, unwrapUswdsArtifact } from '@papyrus/core/artifacts/envelope'
 import { tokens } from '@papyrus/core/design'
 import type { CanvasNodeDoc, EdgeDoc } from '@papyrus/core/nodes/types'
 import gsap from 'gsap'
@@ -36,8 +36,8 @@ import { useAuth } from '../contexts/AuthContext'
 import { useCanvasSync } from '../hooks/useCanvasSync'
 import { usePresence } from '../hooks/usePresence'
 import { AgentChat } from './AgentChat'
+import { ArtifactRenderer } from './ArtifactRenderer'
 import { TaskList } from './TaskList'
-import { UswdsWireframePreview } from './UswdsWireframePreview'
 
 const PEER_COLORS = ['#ff5f1f', '#a78bfa', '#60a5fa', '#34d399', '#facc15']
 
@@ -75,8 +75,6 @@ const PERSONA_LIST = [
     description: 'Reviews threats and compliance.',
   },
 ]
-
-type CanvasPersona = (typeof PERSONA_LIST)[number]
 
 const NODE_ICONS: Record<string, string> = {
   specification: '\u{1F4C4}',
@@ -182,8 +180,6 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
 
   const askPmToRefine = useCallback(() => {
     if (briefDirty) saveProjectBrief()
-    const pm = PERSONA_LIST[0] as CanvasPersona
-    setActivePersona(pm)
     setAgentComposerDraft({
       id: Date.now(),
       text: `Review and refine the current project brief. Preserve the intent, remove ambiguity, and propose a clearer version for my approval.\n\nCurrent brief:\n${briefDraft || sourceContent}`,
@@ -193,9 +189,6 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
     Map<string, { x: number; y: number; displayName: string; color: string }>
   >(new Map())
   const prevEdgeCount = useRef(edges.length)
-  const defaultPersona = PERSONA_LIST[0] as CanvasPersona
-  const [activePersona, setActivePersona] = useState<CanvasPersona>(defaultPersona)
-
   useEffect(() => {
     if (!rfInstance || nodes.length === 0 || fittedProjectRef.current === projectId) return
     fittedProjectRef.current = projectId
@@ -347,17 +340,22 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
 
   const retryAgentNode = useCallback(
     async (nodeId: string) => {
+      const doc = nodes.find((node) => node.id === nodeId)
       const response = await apiFetch('/api/retry', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nodeId, projectId, persona: activePersona.id }),
+        body: JSON.stringify({
+          nodeId,
+          projectId,
+          persona: String(doc?.fields.requestedPersona ?? 'pm'),
+        }),
       })
       if (!response.ok) {
         const body = (await response.json()) as { error?: string }
         throw new Error(body.error ?? 'Retry failed')
       }
     },
-    [activePersona.id, apiFetch, projectId],
+    [apiFetch, nodes, projectId],
   )
 
   const focusAgentNode = useCallback(
@@ -385,13 +383,13 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
         const isOutput = doc.category === 'output'
         const isSource = doc.flowRole === 'source'
         const isGenerating = doc.status === 'running'
-        const isWireframe =
-          doc.type === 'ui-mockup' && isUswdsWireframeArtifact(doc.fields.artifact)
+        const isWireframe = !!unwrapUswdsArtifact(doc.fields.artifact)
+        const hasArtifact = isArtifactEnvelope(doc.fields.artifact) || isWireframe
         const [showPreview, setShowPreview] = useState(false)
         const [editingName, setEditingName] = useState(false)
         const [nameValue, setNameValue] = useState(title)
         const isEditableSpec = doc.type === 'specification' || doc.flowRole === 'source'
-        const nodeWidth = isWireframe ? 640 : isSource ? 360 : isEditableSpec ? 520 : 340
+        const nodeWidth = hasArtifact ? 640 : isSource ? 360 : isEditableSpec ? 520 : 340
 
         useEffect(() => {
           if (!editingName) setNameValue(title)
@@ -543,8 +541,8 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
                 </div>
               )}
 
-              {isWireframe ? (
-                <UswdsWireframePreview artifact={doc.fields.artifact} />
+              {hasArtifact ? (
+                <ArtifactRenderer artifact={doc.fields.artifact} />
               ) : isSource ? (
                 <>
                   <div
@@ -915,27 +913,19 @@ export function Canvas({ projectId, projectName, onBack }: CanvasProps) {
       </nav>
 
       {/* Agent chat panel */}
-      {canEdit &&
-        PERSONA_LIST.map((persona) => (
-          <div
-            key={persona.id}
-            style={{ display: persona.id === activePersona.id ? 'contents' : 'none' }}
-          >
-            <AgentChat
-              persona={persona}
-              personas={PERSONA_LIST}
-              onPersonaChange={setActivePersona}
-              projectId={projectId}
-              peerId={peerId}
-              canvasContext={agentCanvasContext}
-              parentNodeIds={agentParentNodeIds}
-              composerDraft={persona.id === 'pm' ? agentComposerDraft : undefined}
-              onReviewNode={reviewAgentNode}
-              onRetryNode={retryAgentNode}
-              onFocusNode={focusAgentNode}
-            />
-          </div>
-        ))}
+      {canEdit && (
+        <AgentChat
+          personas={PERSONA_LIST}
+          projectId={projectId}
+          peerId={peerId}
+          canvasContext={agentCanvasContext}
+          parentNodeIds={agentParentNodeIds}
+          composerDraft={agentComposerDraft}
+          onReviewNode={reviewAgentNode}
+          onRetryNode={retryAgentNode}
+          onFocusNode={focusAgentNode}
+        />
+      )}
 
       {/* Canvas */}
       <div className="canvas-area" onMouseMove={handleMouseMove}>

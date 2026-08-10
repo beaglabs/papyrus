@@ -1,8 +1,9 @@
 import {
-  type UswdsWireframeArtifact,
-  createFallbackUswdsWireframe,
-  parseUswdsWireframeArtifact,
-} from '@papyrus/core/artifacts/uswds-wireframe'
+  type ArtifactEnvelope,
+  coerceArtifactEnvelope,
+  unwrapUswdsArtifact,
+} from '@papyrus/core/artifacts/envelope'
+import { createFallbackUswdsWireframe } from '@papyrus/core/artifacts/uswds-wireframe'
 /**
  * Persona agent — calls the configured model provider with a persona
  * system prompt and returns structured responses.
@@ -26,7 +27,7 @@ export interface CanvasNode {
   content: string
   status: string
   parentId?: string
-  artifact?: UswdsWireframeArtifact
+  artifact?: ArtifactEnvelope
 }
 
 export interface AgentResponse {
@@ -93,12 +94,14 @@ export function createPersonaAgent(
         maxOutputTokens: 4096,
       })
 
-      let result = extractArtifacts(rawText)
+      let result = extractArtifacts(rawText, personaId)
       const request = messages.at(-1)?.content ?? ''
       if (
         personaId === 'designer' &&
         /\b(wireframe|mockup)\b/i.test(request) &&
-        !result.nodes.some((node) => node.type === 'ui-mockup' && node.artifact)
+        !result.nodes.some(
+          (node) => node.type === 'ui-mockup' && unwrapUswdsArtifact(node.artifact),
+        )
       ) {
         rawText = await generateModelText(provider, {
           system: systemPrompt,
@@ -114,10 +117,20 @@ export function createPersonaAgent(
           temperature: 0.2,
           maxOutputTokens: 4096,
         })
-        result = extractArtifacts(rawText)
+        result = extractArtifacts(rawText, personaId)
 
-        if (!result.nodes.some((node) => node.type === 'ui-mockup' && node.artifact)) {
-          const artifact = createFallbackUswdsWireframe(request)
+        if (
+          !result.nodes.some(
+            (node) => node.type === 'ui-mockup' && unwrapUswdsArtifact(node.artifact),
+          )
+        ) {
+          const wireframe = createFallbackUswdsWireframe(request)
+          const artifact = coerceArtifactEnvelope(
+            'ui-mockup',
+            wireframe.title,
+            JSON.stringify(wireframe),
+            personaId,
+          )
           console.warn(
             '[papyrus] Designer output failed papyrus.uswds-wireframe/v1 validation after repair; using a schema-valid recovery artifact.',
           )
@@ -127,13 +140,51 @@ export function createPersonaAgent(
               {
                 type: 'ui-mockup',
                 category: 'output',
-                title: artifact.title,
-                content: JSON.stringify(artifact, null, 2),
+                title: wireframe.title,
+                content: JSON.stringify(wireframe, null, 2),
                 status: 'proposed',
                 artifact,
               },
             ],
           }
+        }
+      }
+
+      if (
+        result.nodes.length === 0 &&
+        rawText.trim() &&
+        /\b(create|generate|draft|design|analyze|build|review|map|define|plan)\b/i.test(request)
+      ) {
+        const type =
+          personaId === 'security'
+            ? 'security-report'
+            : personaId === 'engineer'
+              ? /\bapi|endpoint|openapi\b/i.test(request)
+                ? 'api'
+                : 'application'
+              : personaId === 'designer'
+                ? 'specification'
+                : 'specification'
+        const title =
+          type === 'security-report'
+            ? 'Security review'
+            : type === 'api'
+              ? 'API specification'
+              : type === 'application'
+                ? 'Technical deliverable'
+                : 'Generated specification'
+        result = {
+          text: `Created **${title}** for review.`,
+          nodes: [
+            {
+              type,
+              category: 'output',
+              title,
+              content: rawText,
+              status: 'proposed',
+              artifact: coerceArtifactEnvelope(type, title, rawText, personaId),
+            },
+          ],
         }
       }
 
@@ -148,10 +199,12 @@ export function createPersonaAgent(
  *
  * Also handles legacy JSON format for backwards compatibility.
  */
-export function extractArtifacts(rawText: string): { text: string; nodes: CanvasNode[] } {
+export function extractArtifacts(
+  rawText: string,
+  persona = 'agent',
+): { text: string; nodes: CanvasNode[] } {
   const artifactRegex = /<artifact\s+([^>]+)>([\s\S]*?)<\/artifact>/gi
   const nodes: CanvasNode[] = []
-  let invalidWireframes = 0
   for (const match of rawText.matchAll(artifactRegex)) {
     const attributes = new Map<string, string>()
     for (const attribute of (match[1] ?? '').matchAll(/([\w-]+)="([^"]*)"/g)) {
@@ -160,11 +213,7 @@ export function extractArtifacts(rawText: string): { text: string; nodes: Canvas
     const type = attributes.get('type') || 'specification'
     const title = attributes.get('title') || type
     const content = (match[2] ?? '').trim()
-    const artifact = type === 'ui-mockup' ? parseUswdsWireframeArtifact(content) : undefined
-    if (type === 'ui-mockup' && !artifact) {
-      invalidWireframes++
-      continue
-    }
+    const artifact = coerceArtifactEnvelope(type, title, content, persona)
     nodes.push({
       type,
       category: 'output',
@@ -176,14 +225,12 @@ export function extractArtifacts(rawText: string): { text: string; nodes: Canvas
     })
   }
 
-  if (nodes.length > 0 || invalidWireframes > 0) {
+  if (nodes.length > 0) {
     const cleanedText = rawText.replace(artifactRegex, '').trim()
     return {
       text:
         cleanedText ||
-        (invalidWireframes > 0
-          ? 'The wireframe response did not match the required USWDS artifact schema. Please retry.'
-          : `Created ${nodes.length} canvas ${nodes.length === 1 ? 'proposal' : 'proposals'} for review.`),
+        `Created ${nodes.length} canvas ${nodes.length === 1 ? 'proposal' : 'proposals'} for review.`,
       nodes,
     }
   }
@@ -203,6 +250,37 @@ export function extractArtifacts(rawText: string): { text: string; nodes: Canvas
       }
     } catch {
       // not valid JSON
+    }
+  }
+
+  // Never silently lose a substantive generated deliverable. Code and structured
+  // responses become a reviewable generic artifact even when a provider omitted tags.
+  const looksLikeDeliverable =
+    /```|^#{1,3}\s|\b(openapi|paths:|components:|threat model|architecture)\b/im.test(rawText)
+  if (looksLikeDeliverable && rawText.trim()) {
+    const kind = /\b(openapi|paths:)\b/i.test(rawText)
+      ? 'api'
+      : /```/.test(rawText)
+        ? 'application'
+        : 'specification'
+    const title =
+      kind === 'api'
+        ? 'API specification'
+        : kind === 'application'
+          ? 'Generated application'
+          : 'Generated artifact'
+    return {
+      text: `Created **${title}** for review.`,
+      nodes: [
+        {
+          type: kind,
+          category: 'output',
+          title,
+          content: rawText,
+          status: 'proposed',
+          artifact: coerceArtifactEnvelope(kind, title, rawText, persona),
+        },
+      ],
     }
   }
 

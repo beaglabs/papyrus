@@ -1059,6 +1059,141 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
     return true
   }
 
+  // ── Canvas mutation endpoints (REST, single-user) ─────────────
+  // These replace the WebSocket round-trip for canvas state. The client loads
+  // initial state via GET /api/projects/:id and pushes mutations here. The
+  // shape mirrors the WS message handler so persistence/audit logic is shared.
+
+  const canvasNodeMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/nodes$/)
+  if (canvasNodeMatch && method === 'POST') {
+    const authCtx = requireAuth(req, res)
+    if (!authCtx) return true
+    const projectId = canvasNodeMatch[1]!
+    const body = (await parseBody(req)) as unknown as CanvasNodeDoc
+    if (!body?.id) {
+      json(res, 400, { error: 'node id required' })
+      return true
+    }
+    const state = getOrCreateState(projectId)
+    const exists = state.nodes.some((n) => n.id === body.id)
+    if (!hasPermission(projectId, authCtx.memberKey, exists ? 'node:update' : 'node:create')) {
+      json(res, 403, { error: 'Project mutation access denied' })
+      return true
+    }
+    const incoming: CanvasNodeDoc = {
+      ...body,
+      projectId,
+      createdBy: exists ? state.nodes.find((n) => n.id === body.id)?.createdBy ?? authCtx.memberKey : authCtx.memberKey,
+      updatedAt: Date.now(),
+    }
+    state.nodes = exists
+      ? state.nodes.map((n) => (n.id === incoming.id ? incoming : n))
+      : [...state.nodes, incoming]
+    commitStateMutation(projectId, state, {
+      actorKey: authCtx.memberKey,
+      entityType: 'node',
+      entityId: incoming.id,
+      operationType: exists ? 'update' : 'create',
+      payload: incoming,
+    })
+    broadcast(state, { type: 'node:upsert', data: incoming })
+    json(res, 200, incoming)
+    return true
+  }
+
+  const canvasNodeDeleteMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/nodes\/([^/]+)$/)
+  if (canvasNodeDeleteMatch && method === 'DELETE') {
+    const authCtx = requireAuth(req, res)
+    if (!authCtx) return true
+    const projectId = canvasNodeDeleteMatch[1]!
+    const nodeId = canvasNodeDeleteMatch[2]!
+    if (!projectId || !nodeId) {
+      json(res, 400, { error: 'projectId and nodeId required' })
+      return true
+    }
+    if (!hasPermission(projectId, authCtx.memberKey, 'node:delete')) {
+      json(res, 403, { error: 'Project mutation access denied' })
+      return true
+    }
+    const state = getOrCreateState(projectId)
+    state.nodes = state.nodes.filter((n) => n.id !== nodeId)
+    state.edges = state.edges.filter((e) => e.from !== nodeId && e.to !== nodeId)
+    commitStateMutation(projectId, state, {
+      actorKey: authCtx.memberKey,
+      entityType: 'node',
+      entityId: nodeId,
+      operationType: 'delete',
+    })
+    broadcast(state, { type: 'node:delete', data: { id: nodeId } })
+    json(res, 200, { ok: true })
+    return true
+  }
+
+  const canvasEdgeMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/edges$/)
+  if (canvasEdgeMatch && method === 'POST') {
+    const authCtx = requireAuth(req, res)
+    if (!authCtx) return true
+    const projectId = canvasEdgeMatch[1]!
+    const body = (await parseBody(req)) as unknown as EdgeDoc
+    if (!body?.id || !body.from || !body.to) {
+      json(res, 400, { error: 'edge id, from, and to required' })
+      return true
+    }
+    if (!hasPermission(projectId, authCtx.memberKey, 'edge:create')) {
+      json(res, 403, { error: 'Project mutation access denied' })
+      return true
+    }
+    const state = getOrCreateState(projectId)
+    if (state.edges.some((e) => e.id === body.id)) {
+      json(res, 200, body)
+      return true
+    }
+    const incoming: EdgeDoc = {
+      ...body,
+      projectId,
+      createdBy: authCtx.memberKey,
+      updatedAt: Date.now(),
+    }
+    state.edges = [...state.edges, incoming]
+    commitStateMutation(projectId, state, {
+      actorKey: authCtx.memberKey,
+      entityType: 'edge',
+      entityId: incoming.id,
+      operationType: 'create',
+      payload: incoming,
+    })
+    broadcast(state, { type: 'edge:add', data: incoming })
+    json(res, 200, incoming)
+    return true
+  }
+
+  const canvasEdgeDeleteMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/edges\/([^/]+)$/)
+  if (canvasEdgeDeleteMatch && method === 'DELETE') {
+    const authCtx = requireAuth(req, res)
+    if (!authCtx) return true
+    const projectId = canvasEdgeDeleteMatch[1]!
+    const edgeId = canvasEdgeDeleteMatch[2]!
+    if (!projectId || !edgeId) {
+      json(res, 400, { error: 'projectId and edgeId required' })
+      return true
+    }
+    if (!hasPermission(projectId, authCtx.memberKey, 'edge:delete')) {
+      json(res, 403, { error: 'Project mutation access denied' })
+      return true
+    }
+    const state = getOrCreateState(projectId)
+    state.edges = state.edges.filter((e) => e.id !== edgeId)
+    commitStateMutation(projectId, state, {
+      actorKey: authCtx.memberKey,
+      entityType: 'edge',
+      entityId: edgeId,
+      operationType: 'delete',
+    })
+    broadcast(state, { type: 'edge:delete', data: { id: edgeId } })
+    json(res, 200, { ok: true })
+    return true
+  }
+
   // ── Export endpoints ──────────────────────────────────────────
 
   if (url.pathname === '/api/export' && method === 'POST') {

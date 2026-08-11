@@ -2102,7 +2102,12 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
     const body = await parseBody(req)
     const messages = body.messages as AgentMessage[] | undefined
     const projectId = body.projectId as string | undefined
-    const attachments = body.attachments as string[] | undefined
+    const attachments = body.attachments as
+      | Array<{ name: string; mimeType: string; content: string }>
+      | undefined
+    const skills = body.skills as
+      | Array<{ name: string; description?: string; content?: string }>
+      | undefined
     const prompt = body.prompt as string | undefined
     const targetNodeId = body.targetNodeId as string | undefined
     const parentNodeIds = Array.isArray(body.parentNodeIds)
@@ -2125,9 +2130,7 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       return true
     }
 
-    const route = routeAgentRequest(
-      prompt ?? messages[messages.length - 1]?.content ?? '',
-    )
+    const route = routeAgentRequest(prompt ?? messages[messages.length - 1]?.content ?? '')
     const conversationPersona = 'orchestrator'
     const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
     const task: GenerationTask = {
@@ -2152,20 +2155,11 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       const agent = createPersonaAgent(modelProvider, {
         projectSystemPrompt: projectState ? getProjectSystemPrompt(projectState.nodes) : undefined,
         expectedArtifact: revisionNode?.type ?? route.expectedArtifact,
+        contextFiles: attachments,
+        skills,
       })
 
-      // Inject attachment context into the last user message if provided
-      let effectiveMessages =
-        attachments && attachments.length > 0
-          ? messages.map((m, i) =>
-              i === messages.length - 1 && m.role === 'user'
-                ? {
-                    ...m,
-                    content: `${m.content}\n\n--- Attached Context ---\n${attachments.join('\n\n')}`,
-                  }
-                : m,
-            )
-          : messages
+      let effectiveMessages = messages
 
       if (revisionNode?.fields.artifact) {
         effectiveMessages = effectiveMessages.map((message, index) =>
@@ -2189,7 +2183,10 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
         })
       }
 
-      const response = await agent.chat(effectiveMessages)
+      const response =
+        (revisionNode?.type ?? route.expectedArtifact) === 'application'
+          ? await agent.generateProject(effectiveMessages)
+          : await agent.chat(effectiveMessages)
 
       // Materialize each agent deliverable as a reviewable canvas proposal.
       const createdNodes: CanvasNodeDoc[] = []
@@ -2331,9 +2328,24 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
     const body = await parseBody(req)
     const messages = body.messages as AgentMessage[] | undefined
     const projectId = body.projectId as string | undefined
-    const attachments = body.attachments as string[] | undefined
+    const attachments = body.attachments as
+      | Array<{
+          name: string
+          mimeType: string
+          content: string
+        }>
+      | undefined
+    const skills = body.skills as
+      | Array<{
+          name: string
+          description?: string
+          content?: string
+        }>
+      | undefined
     const prompt = body.prompt as string | undefined
-    const existingFiles = body.existingFiles as Array<{ path: string; content: string; language?: string }> | undefined
+    const existingFiles = body.existingFiles as
+      | Array<{ path: string; content: string; language?: string }>
+      | undefined
     const modelProvider = resolveModelProvider()
 
     if (!messages) {
@@ -2351,9 +2363,7 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       return true
     }
 
-    const route = routeAgentRequest(
-      prompt ?? messages[messages.length - 1]?.content ?? '',
-    )
+    const route = routeAgentRequest(prompt ?? messages[messages.length - 1]?.content ?? '')
     const conversationPersona = 'orchestrator'
     const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
     const task: GenerationTask = {
@@ -2378,19 +2388,11 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
         projectSystemPrompt: projectState ? getProjectSystemPrompt(projectState.nodes) : undefined,
         expectedArtifact: route.expectedArtifact,
         existingFiles,
+        contextFiles: attachments,
+        skills,
       })
 
-      let effectiveMessages =
-        attachments && attachments.length > 0
-          ? messages.map((m, i) =>
-              i === messages.length - 1 && m.role === 'user'
-                ? {
-                    ...m,
-                    content: `${m.content}\n\n--- Attached Context ---\n${attachments.join('\n\n')}`,
-                  }
-                : m,
-            )
-          : messages
+      const effectiveMessages = messages
 
       if (projectId) {
         appendChatMessage({
@@ -2403,11 +2405,18 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
         })
       }
 
-      const response = await agent.chatStream(effectiveMessages, {
-        onToken: (token) => sseSend(res, 'token', { text: token }),
-        onComplete: (fullText) => sseSend(res, 'done', { text: fullText }),
-        onError: (err) => sseSend(res, 'error', { message: err.message }),
-      })
+      let response
+      if (route.expectedArtifact === 'application') {
+        sseSend(res, 'status', { message: 'Generating project files' })
+        response = await agent.generateProject(effectiveMessages)
+        sseSend(res, 'status', { message: 'Loading project into Sandpack' })
+      } else {
+        response = await agent.chatStream(effectiveMessages, {
+          onToken: (token) => sseSend(res, 'token', { text: token }),
+          onComplete: (fullText) => sseSend(res, 'done', { text: fullText }),
+          onError: (err) => sseSend(res, 'error', { message: err.message }),
+        })
+      }
 
       // Materialize canvas nodes
       const createdNodes: CanvasNodeDoc[] = []

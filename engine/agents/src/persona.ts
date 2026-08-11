@@ -10,8 +10,8 @@ import { type ArtifactEnvelope, coerceArtifactEnvelope } from '@papyrus/core/art
 import {
   type ModelProviderConfig,
   type StreamCallbacks,
-  generateModelText,
   generateModelProject,
+  generateModelText,
   generateModelTextStream,
 } from './model-provider.js'
 import { AGENT_PROMPT } from './prompts.js'
@@ -44,7 +44,10 @@ export interface PersonaAgent {
   role: string
   chat: (messages: AgentMessage[]) => Promise<AgentResponse>
   chatStream: (messages: AgentMessage[], callbacks: StreamCallbacks) => Promise<AgentResponse>
-  generateProject: (messages: AgentMessage[]) => Promise<AgentResponse>
+  generateProject: (
+    messages: AgentMessage[],
+    onProgress?: (phase: 'selecting-scaffold' | 'scaffolding' | 'customizing') => void,
+  ) => Promise<AgentResponse>
 }
 
 export interface PersonaAgentOptions {
@@ -76,7 +79,8 @@ export function buildSystemPrompt(
   }
 
   if (existingFiles && existingFiles.length > 0) {
-    prompt += `\n\n## Current Codebase\nThe following files exist in the project. When modifying, preserve files not requested to change and return the complete updated set:\n`
+    prompt +=
+      '\n\n## Current Codebase\nThe following files exist in the project. When modifying, preserve files not requested to change and return the complete updated set:\n'
     for (const file of existingFiles) {
       prompt += `\n### ${file.path}\n\`\`\`\n${file.content}\n\`\`\``
     }
@@ -116,11 +120,16 @@ export function createPersonaAgent(
     id: 'engineer',
     name: 'Engineer',
     role: 'ENG',
-    generateProject: async (messages: AgentMessage[]): Promise<AgentResponse> => {
+    generateProject: async (
+      messages: AgentMessage[],
+      onProgress?: (phase: 'selecting-scaffold' | 'scaffolding' | 'customizing') => void,
+    ): Promise<AgentResponse> => {
       const project = await generateModelProject(provider, {
         system: `${systemPrompt}\n\nReturn the complete runnable project through the structured project schema. Do not put source code in conversational text. Every relative import must resolve to one of the returned files.`,
         messages: messages.map((m) => ({ role: m.role, content: m.content })),
         maxOutputTokens: 16384,
+        existingFiles: options.existingFiles,
+        onProgress,
       })
       return {
         text: `Created **${project.title}** for review.`,
@@ -143,7 +152,7 @@ export function createPersonaAgent(
               })),
               entrypoint: project.entrypoint,
               permissions: { network: 'none' },
-              producer: { persona: 'engineer', tool: 'structured-project-generation' },
+              producer: { persona: 'engineer', tool: 'scaffold-and-customize' },
             },
           },
         ],

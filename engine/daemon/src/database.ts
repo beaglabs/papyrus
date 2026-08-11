@@ -420,6 +420,79 @@ export interface StoredChatMessage {
   createdAt: string
 }
 
+export interface StoredGenerationTask {
+  id: string
+  projectId: string
+  memberKey: string
+  persona: string
+  prompt: string
+  status: 'running' | 'done' | 'error'
+  phase: string
+  progress: number
+  startedAt: string
+  updatedAt: string
+  completedAt?: string
+  nodeId?: string
+  nodeTitle?: string
+  error?: string
+}
+
+export function saveGenerationTask(task: StoredGenerationTask): void {
+  getDb()
+    .prepare(`
+    INSERT INTO generation_tasks
+      (id, project_id, member_key, persona, prompt, status, phase, progress, started_at,
+       updated_at, completed_at, node_id, node_title, error)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      status = excluded.status, phase = excluded.phase, progress = excluded.progress,
+      updated_at = excluded.updated_at, completed_at = excluded.completed_at,
+      node_id = excluded.node_id, node_title = excluded.node_title, error = excluded.error
+  `)
+    .run(
+      task.id,
+      task.projectId,
+      task.memberKey,
+      task.persona,
+      task.prompt,
+      task.status,
+      task.phase,
+      task.progress,
+      task.startedAt,
+      task.updatedAt,
+      task.completedAt ?? null,
+      task.nodeId ?? null,
+      task.nodeTitle ?? null,
+      task.error ?? null,
+    )
+}
+
+export function listGenerationTasks(projectId: string): StoredGenerationTask[] {
+  const rows = getDb()
+    .prepare(`
+    SELECT id, project_id, member_key, persona, prompt, status, phase, progress, started_at,
+           updated_at, completed_at, node_id, node_title, error
+    FROM generation_tasks WHERE project_id = ? ORDER BY started_at DESC LIMIT 50
+  `)
+    .all(projectId) as Array<Record<string, string | number | null>>
+  return rows.map((row) => ({
+    id: String(row.id),
+    projectId: String(row.project_id),
+    memberKey: String(row.member_key),
+    persona: String(row.persona),
+    prompt: String(row.prompt),
+    status: row.status as StoredGenerationTask['status'],
+    phase: String(row.phase),
+    progress: Number(row.progress),
+    startedAt: String(row.started_at),
+    updatedAt: String(row.updated_at),
+    ...(row.completed_at ? { completedAt: String(row.completed_at) } : {}),
+    ...(row.node_id ? { nodeId: String(row.node_id) } : {}),
+    ...(row.node_title ? { nodeTitle: String(row.node_title) } : {}),
+    ...(row.error ? { error: String(row.error) } : {}),
+  }))
+}
+
 export function appendChatMessage(input: {
   id: string
   projectId: string

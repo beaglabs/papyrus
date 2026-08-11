@@ -19,6 +19,8 @@ interface Task {
   persona: string
   prompt: string
   status: 'running' | 'done' | 'error'
+  phase: string
+  progress: number
   startedAt: string
   completedAt?: string
   nodeId?: string
@@ -221,7 +223,25 @@ export function TaskList({ projectId }: { projectId: string }) {
                   marginTop: 2,
                 }}
               >
-                Generating...
+                {task.phase.replaceAll('-', ' ')} · {task.progress}%
+              </div>
+              <div
+                aria-label={`Generation ${task.progress}% complete`}
+                style={{
+                  height: 4,
+                  marginTop: 7,
+                  background: tokens.color.border,
+                  overflow: 'hidden',
+                }}
+              >
+                <div
+                  style={{
+                    width: `${Math.max(2, Math.min(100, task.progress))}%`,
+                    height: '100%',
+                    background: tokens.color.accent,
+                    transition: 'width 240ms ease',
+                  }}
+                />
               </div>
             </div>
           </div>

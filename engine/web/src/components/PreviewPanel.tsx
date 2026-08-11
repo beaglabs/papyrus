@@ -18,8 +18,8 @@ import {
   Sparkles,
   Terminal,
 } from 'lucide-react'
-import { useCallback, useMemo, useState } from 'react'
-import type { Generation, GeneratedFile } from './DevEnvironment'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { BuildValidation, Generation, GeneratedFile } from './DevEnvironment'
 import { ShellTerminal } from './ShellTerminal'
 
 interface PreviewPanelProps {
@@ -28,6 +28,7 @@ interface PreviewPanelProps {
   onApprove: (generationId: string) => void
   onReject: (generationId: string) => void
   onFilesUpdate: (generationId: string, files: GeneratedFile[]) => void
+  onBuildValidation: (validation: BuildValidation) => void
 }
 
 type RightTab = 'preview' | 'code' | 'terminal'
@@ -105,9 +106,7 @@ function MonacoCodeTab({
 
   function handleEditorChange(value: string | undefined) {
     if (!currentFile || value === undefined) return
-    const updated = files.map((f) =>
-      f.path === currentFile.path ? { ...f, content: value } : f,
-    )
+    const updated = files.map((f) => (f.path === currentFile.path ? { ...f, content: value } : f))
     onFilesUpdate(updated)
   }
 
@@ -161,11 +160,13 @@ function SandpackShell({
   onApprove,
   onReject,
   onFilesUpdate,
+  onBuildValidation,
 }: {
   generation: Generation
   onApprove: (id: string) => void
   onReject: (id: string) => void
   onFilesUpdate: (id: string, files: GeneratedFile[]) => void
+  onBuildValidation: (validation: BuildValidation) => void
 }) {
   const { sandpack } = useSandpack()
   const [activeTab, setActiveTab] = useState<RightTab>('preview')
@@ -188,6 +189,24 @@ function SandpackShell({
     : sandpack.status === 'running'
       ? 'Building...'
       : 'Ready'
+  const lastValidation = useRef('')
+
+  useEffect(() => {
+    const validation: BuildValidation = buildFailed
+      ? {
+          generationId: generation.id,
+          status: 'failed',
+          error: sandpack.error?.message ?? 'The preview compiler timed out.',
+        }
+      : sandpack.status === 'idle'
+        ? { generationId: generation.id, status: 'ready' }
+        : { generationId: generation.id, status: 'building' }
+    const snapshot = JSON.stringify(validation)
+    if (snapshot !== lastValidation.current) {
+      lastValidation.current = snapshot
+      onBuildValidation(validation)
+    }
+  }, [buildFailed, generation.id, onBuildValidation, sandpack.error, sandpack.status])
 
   const handleSave = useCallback(() => {
     onFilesUpdate(generation.id, currentFiles)
@@ -220,9 +239,7 @@ function SandpackShell({
           </button>
         </div>
         <div className="preview-shell-actions">
-          <span className={`preview-status ${buildFailed ? 'error' : ''}`}>
-            {statusLabel}
-          </span>
+          <span className={`preview-status ${buildFailed ? 'error' : ''}`}>{statusLabel}</span>
           <span className="preview-file-count">
             <FolderTree size={12} /> {generation.files.length} files
           </span>
@@ -290,9 +307,7 @@ function SandpackShell({
             onFilesUpdate={(updated) => onFilesUpdate(generation.id, updated)}
           />
         )}
-        {activeTab === 'terminal' && (
-          <ShellTerminal />
-        )}
+        {activeTab === 'terminal' && <ShellTerminal />}
       </div>
     </div>
   )
@@ -304,6 +319,7 @@ export function PreviewPanel({
   onApprove,
   onReject,
   onFilesUpdate,
+  onBuildValidation,
 }: PreviewPanelProps) {
   if (!generation && !loading) {
     return (
@@ -327,7 +343,9 @@ export function PreviewPanel({
         </div>
         <div className="preview-skeleton-body">
           <div className="skeleton-browser-bar">
-            <span /><span /><span />
+            <span />
+            <span />
+            <span />
             <div className="skeleton-url" />
           </div>
           <div className="skeleton-content">
@@ -375,6 +393,7 @@ export function PreviewPanel({
         onApprove={onApprove}
         onReject={onReject}
         onFilesUpdate={onFilesUpdate}
+        onBuildValidation={onBuildValidation}
       />
     </SandpackProvider>
   )

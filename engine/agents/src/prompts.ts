@@ -35,6 +35,7 @@ export default function App() { return <main>Complete implementation</main> }
 \`\`\`
 
 Include every required source and configuration file. Never emit placeholder .txt files, prose in place of code, ellipses, TODO-only implementations, or a file list without contents.
+Every relative import must resolve to a file included in the artifact. Before finishing, check the entry point, import graph, package dependencies, and configuration as if you were compiling the project. Never claim the application is complete when required files or dependencies are missing.
 </artifact>
 
 Valid artifact types: application, api, specification

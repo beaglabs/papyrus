@@ -1,11 +1,4 @@
-import {
-  ArrowLeft,
-  FileCode2,
-  MessageSquare,
-  Pencil,
-  Save,
-  Terminal,
-} from 'lucide-react'
+import { ArrowLeft, FileCode2, Pencil, Save } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useCanvas } from '../hooks/useCanvas'
@@ -34,6 +27,12 @@ export interface Generation {
   template?: string
 }
 
+export interface BuildValidation {
+  generationId: string
+  status: 'building' | 'failed' | 'ready'
+  error?: string
+}
+
 export function DevEnvironment({ projectId, projectName, onBack }: DevEnvironmentProps) {
   const { apiFetch, user } = useAuth()
   const peerId = user?.memberKey ?? 'anonymous'
@@ -41,6 +40,7 @@ export function DevEnvironment({ projectId, projectName, onBack }: DevEnvironmen
   const [generations, setGenerations] = useState<Generation[]>([])
   const [activeGeneration, setActiveGeneration] = useState<Generation | null>(null)
   const [loading, setLoading] = useState(false)
+  const [buildValidation, setBuildValidation] = useState<BuildValidation | null>(null)
   const [briefOpen, setBriefOpen] = useState(false)
   const [briefDraft, setBriefDraft] = useState('')
   const briefEditorRef = useRef<HTMLTextAreaElement>(null)
@@ -132,6 +132,7 @@ export function DevEnvironment({ projectId, projectName, onBack }: DevEnvironmen
       }
 
       upsertNode(nodeDoc as any)
+      return genId
     },
     [projectId, upsertNode],
   )
@@ -187,13 +188,18 @@ export function DevEnvironment({ projectId, projectName, onBack }: DevEnvironmen
       setGenerations((prev) =>
         prev.map((gen) => (gen.id === generationId ? { ...gen, files } : gen)),
       )
-      setActiveGeneration((prev) =>
-        prev?.id === generationId ? { ...prev, files } : prev,
-      )
+      setActiveGeneration((prev) => (prev?.id === generationId ? { ...prev, files } : prev))
       // Persist updated files
       const node = nodes.find((n) => n.id === generationId)
       if (node) {
-        const artifact = node.fields.artifact as { files?: unknown[]; renderer?: unknown; kind?: string; title?: string; schema?: string; producer?: unknown }
+        const artifact = node.fields.artifact as {
+          files?: unknown[]
+          renderer?: unknown
+          kind?: string
+          title?: string
+          schema?: string
+          producer?: unknown
+        }
         upsertNode({
           ...node,
           fields: {
@@ -237,21 +243,14 @@ export function DevEnvironment({ projectId, projectName, onBack }: DevEnvironmen
             <span>{projectName}</span>
           </div>
         </div>
-        <div className="dev-topbar-center">
-          <div className="dev-topbar-tabs">
-            <button type="button" className="dev-topbar-tab active">
-              <MessageSquare size={14} /> Chat
-            </button>
-            <button type="button" className="dev-topbar-tab">
-              <FileCode2 size={14} /> Files
-            </button>
-            <button type="button" className="dev-topbar-tab">
-              <Terminal size={14} /> Terminal
-            </button>
-          </div>
-        </div>
+        <div className="dev-topbar-spacer" />
         <div className="dev-topbar-right">
-          <button type="button" className="dev-icon-btn" onClick={() => setBriefOpen(true)} title="Edit project brief">
+          <button
+            type="button"
+            className="dev-icon-btn"
+            onClick={() => setBriefOpen(true)}
+            title="Edit project brief"
+          >
             <Pencil size={14} />
           </button>
           <span className="dev-sync-status">
@@ -274,6 +273,7 @@ export function DevEnvironment({ projectId, projectName, onBack }: DevEnvironmen
             onGenerationComplete={handleGenerationComplete}
             onSelectGeneration={setActiveGeneration}
             onLoadingChange={setLoading}
+            buildValidation={buildValidation}
           />
         </div>
 
@@ -285,6 +285,7 @@ export function DevEnvironment({ projectId, projectName, onBack }: DevEnvironmen
             onApprove={handleApprove}
             onReject={handleReject}
             onFilesUpdate={handleFilesUpdate}
+            onBuildValidation={setBuildValidation}
           />
         </div>
       </div>

@@ -302,3 +302,23 @@ export const scaffoldToolDescriptions: Record<ScaffoldKind, string> = {
     'Rust Axum API with Tokio, structured JSON, tracing, graceful shutdown, and OpenAPI 3.1',
   scaffold_api_zig: 'Zig Zap API with a health route and OpenAPI 3.1 contract',
 }
+
+/**
+ * Route to a local scaffold without requiring model tool-call support.
+ * Explicit framework requests win; ordinary product/application requests use the web scaffold.
+ */
+export function selectScaffoldTool(
+  messages: Array<{ role: string; content: string }>,
+): ScaffoldKind {
+  const request = [...messages].reverse().find((message) => message.role === 'user')?.content ?? ''
+
+  if (/\b(zig|zap)\b/i.test(request)) return 'scaffold_api_zig'
+  if (/\b(rust|axum)\b/i.test(request)) return 'scaffold_api_rust'
+  if (/\b(typer|python\s+(?:command[- ]line|cli)|python\s+cli)\b/i.test(request)) {
+    return 'scaffold_cli_py'
+  }
+  if (/\b(oclif|typescript\s+(?:command[- ]line|cli)|node(?:\.js)?\s+cli)\b/i.test(request)) {
+    return 'scaffold_cli_ts'
+  }
+  return 'scaffold_webapp'
+}

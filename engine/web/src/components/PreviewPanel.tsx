@@ -370,7 +370,9 @@ export function PreviewPanel({
 
   if (!generation) return null
 
-  const template = detectTemplate(generation.files)
+  const template =
+    (generation.template as SandpackPredefinedTemplate | undefined) ??
+    detectTemplate(generation.files)
   const files = normalizedFiles(generation.files)
   const deps = packageDependencies(generation.files)
 

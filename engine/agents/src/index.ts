@@ -32,3 +32,9 @@ export {
   resolveModelProvider,
   type ModelProviderConfig,
 } from './model-provider.js'
+export {
+  scaffoldProject,
+  scaffoldToolDescriptions,
+  type ScaffoldKind,
+  type ScaffoldProject,
+} from './scaffolds.js'

@@ -1,5 +1,6 @@
 import { createOpenAI } from '@ai-sdk/openai'
-import { Output, generateText, jsonSchema, streamText } from 'ai'
+import { Output, generateText, jsonSchema, streamText, tool } from 'ai'
+import { type ScaffoldProject, scaffoldProject, scaffoldToolDescriptions } from './scaffolds.js'
 
 export interface ModelProviderConfig {
   provider: 'cloudflare-messages' | 'openai-compatible' | 'demo'
@@ -21,21 +22,22 @@ export interface GeneratedProject {
   template: 'react-ts' | 'react' | 'vanilla-ts' | 'vanilla' | 'static' | 'vue' | 'svelte'
 }
 
-const projectSchema = jsonSchema<GeneratedProject>({
+interface ProjectChanges {
+  title: string
+  summary: string
+  files: Array<{ path: string; content: string; language?: string }>
+}
+
+const projectChangesSchema = jsonSchema<ProjectChanges>({
   type: 'object',
   additionalProperties: false,
-  required: ['title', 'summary', 'files', 'entrypoint', 'template'],
+  required: ['title', 'summary', 'files'],
   properties: {
     title: { type: 'string' },
     summary: { type: 'string' },
-    entrypoint: { type: 'string' },
-    template: {
-      type: 'string',
-      enum: ['react-ts', 'react', 'vanilla-ts', 'vanilla', 'static', 'vue', 'svelte'],
-    },
     files: {
       type: 'array',
-      minItems: 2,
+      minItems: 1,
       items: {
         type: 'object',
         additionalProperties: false,
@@ -49,6 +51,40 @@ const projectSchema = jsonSchema<GeneratedProject>({
     },
   },
 })
+
+const emptyToolInput = jsonSchema<Record<string, never>>({
+  type: 'object',
+  additionalProperties: false,
+  properties: {},
+})
+
+const scaffoldTools = {
+  scaffold_webapp: tool({
+    description: scaffoldToolDescriptions.scaffold_webapp,
+    inputSchema: emptyToolInput,
+    execute: async () => scaffoldProject('scaffold_webapp'),
+  }),
+  scaffold_cli_ts: tool({
+    description: scaffoldToolDescriptions.scaffold_cli_ts,
+    inputSchema: emptyToolInput,
+    execute: async () => scaffoldProject('scaffold_cli_ts'),
+  }),
+  scaffold_cli_py: tool({
+    description: scaffoldToolDescriptions.scaffold_cli_py,
+    inputSchema: emptyToolInput,
+    execute: async () => scaffoldProject('scaffold_cli_py'),
+  }),
+  scaffold_api_rust: tool({
+    description: scaffoldToolDescriptions.scaffold_api_rust,
+    inputSchema: emptyToolInput,
+    execute: async () => scaffoldProject('scaffold_api_rust'),
+  }),
+  scaffold_api_zig: tool({
+    description: scaffoldToolDescriptions.scaffold_api_zig,
+    inputSchema: emptyToolInput,
+    execute: async () => scaffoldProject('scaffold_api_zig'),
+  }),
+}
 
 function demoProject(): GeneratedProject {
   return {
@@ -94,24 +130,68 @@ function demoProject(): GeneratedProject {
 
 export async function generateModelProject(
   config: ModelProviderConfig,
-  input: { system: string; messages: ModelMessage[]; maxOutputTokens?: number },
+  input: {
+    system: string
+    messages: ModelMessage[]
+    maxOutputTokens?: number
+    existingFiles?: Array<{ path: string; content: string; language?: string }>
+    onProgress?: (phase: 'selecting-scaffold' | 'scaffolding' | 'customizing') => void
+  },
 ): Promise<GeneratedProject> {
   if (config.provider === 'demo') return demoProject()
 
   const provider = createOpenAI({ baseURL: config.baseURL, apiKey: config.apiKey })
+  input.onProgress?.('selecting-scaffold')
+  const selectionResult = await generateText({
+    model: provider(config.model),
+    system: `${input.system}\n\nChoose exactly one deterministic scaffold tool before writing code. Available tools:\n${Object.entries(
+      scaffoldToolDescriptions,
+    )
+      .map(([name, description]) => `- ${name}: ${description}`)
+      .join(
+        '\n',
+      )}\nPrefer scaffold_webapp unless the user explicitly requests a CLI or backend API.`,
+    messages: input.messages,
+    maxOutputTokens: 1024,
+    temperature: 0.2,
+    tools: scaffoldTools,
+    toolChoice: 'required',
+  })
+
+  input.onProgress?.('scaffolding')
+  const scaffold = selectionResult.toolResults[0]?.output as ScaffoldProject | undefined
+  if (!scaffold) throw new Error('The model did not select a scaffold tool')
+  const baseFiles = input.existingFiles?.length ? [...input.existingFiles] : [...scaffold.files]
+  if (!baseFiles.some((file) => file.path === '/openapi.yaml' || file.path === 'openapi.yaml')) {
+    const contract = scaffold.files.find((file) => file.path === '/openapi.yaml')
+    if (contract) baseFiles.push(contract)
+  }
+  input.onProgress?.('customizing')
   const result = await generateText({
     model: provider(config.model),
-    system: input.system,
+    system: `${input.system}\n\nA deterministic ${scaffold.kind} baseline has already been created. Modify it to satisfy the request. Return only files that must be added or replaced; unchanged baseline files are preserved automatically. Keep openapi.yaml synchronized with all HTTP-facing behavior. Use strict types, input validation, explicit error handling, accessible UI, tests where appropriate, pinned major versions, and no unresolved imports.\n\nBaseline files:\n${JSON.stringify(baseFiles)}`,
     messages: input.messages,
     maxOutputTokens: input.maxOutputTokens ?? 16384,
     temperature: 0.2,
     output: Output.object({
-      schema: projectSchema,
-      name: 'generated_project',
-      description: 'A complete runnable project whose files are sent directly to Sandpack.',
+      schema: projectChangesSchema,
+      name: 'project_changes',
+      description: 'Focused file additions and replacements applied to the selected scaffold.',
     }),
   })
-  return result.output
+
+  const merged = new Map(baseFiles.map((file) => [file.path, file]))
+  for (const changed of result.output.files) {
+    const path = changed.path.startsWith('/') ? changed.path : `/${changed.path}`
+    merged.set(path, { ...changed, path })
+  }
+  return {
+    title: result.output.title,
+    summary: result.output.summary,
+    files: [...merged.values()],
+    entrypoint: scaffold.entrypoint,
+    template: scaffold.template,
+  }
 }
 
 export function resolveModelProvider(

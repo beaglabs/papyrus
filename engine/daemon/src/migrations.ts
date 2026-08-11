@@ -203,6 +203,34 @@ const migrations: Migration[] = [
       `)
     },
   },
+  {
+    version: 5,
+    name: 'durable generation tasks',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS generation_tasks (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          member_key TEXT NOT NULL,
+          persona TEXT NOT NULL,
+          prompt TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('running', 'done', 'error')),
+          phase TEXT NOT NULL DEFAULT 'queued',
+          progress INTEGER NOT NULL DEFAULT 0,
+          started_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          completed_at TEXT,
+          node_id TEXT,
+          node_title TEXT,
+          error TEXT,
+          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_generation_tasks_project
+          ON generation_tasks(project_id, started_at DESC);
+      `)
+    },
+  },
 ]
 
 export function runMigrations(db: Database.Database): void {

@@ -1,5 +1,5 @@
-import { randomUUID } from 'node:crypto'
 import { exec } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
 /**
  * Papyrus daemon — HTTP server serving the SPA and REST API.
@@ -11,8 +11,8 @@ import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
 import { type IncomingMessage, type ServerResponse, createServer } from 'node:http'
 import { createServer as createHttpsServer } from 'node:https'
 import { extname, join } from 'node:path'
-import { promisify } from 'node:util'
 import { TLSSocket } from 'node:tls'
+import { promisify } from 'node:util'
 import {
   type AgentMessage,
   createPersonaAgent,
@@ -50,10 +50,12 @@ import {
   getStoredOperations,
   getWebAuthnCredential,
   getWebAuthnCredentialsForMember,
+  listGenerationTasks,
   listProjects,
   loadDocumentState,
   loadProject,
   saveCanvas,
+  saveGenerationTask,
   saveWebAuthnCredential,
   updateWebAuthnCredentialCounter,
 } from './database.js'
@@ -100,8 +102,12 @@ interface GenerationTask {
   projectId: string
   persona: string
   prompt: string
+  memberKey: string
   status: 'running' | 'done' | 'error'
+  phase: string
+  progress: number
   startedAt: string
+  updatedAt: string
   completedAt?: string
   nodeId?: string
   nodeTitle?: string
@@ -109,6 +115,18 @@ interface GenerationTask {
 }
 
 const tasks = new Map<string, GenerationTask>()
+
+function persistTask(task: GenerationTask): void {
+  task.updatedAt = new Date().toISOString()
+  if (task.projectId === 'unknown') return
+  saveGenerationTask(task)
+}
+
+function advanceTask(task: GenerationTask, phase: string, progress: number): void {
+  task.phase = phase
+  task.progress = progress
+  persistTask(task)
+}
 
 // ── Rate Limiting ────────────────────────────────────────────
 
@@ -2138,10 +2156,15 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       projectId: projectId ?? 'unknown',
       persona: 'engineer',
       prompt: messages[messages.length - 1]?.content ?? '',
+      memberKey: authCtx.memberKey,
       status: 'running',
+      phase: 'queued',
+      progress: 0,
       startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     }
     tasks.set(taskId, task)
+    persistTask(task)
 
     try {
       const projectState = projectId ? getOrCreateState(projectId) : undefined
@@ -2185,7 +2208,13 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
 
       const response =
         (revisionNode?.type ?? route.expectedArtifact) === 'application'
-          ? await agent.generateProject(effectiveMessages)
+          ? await agent.generateProject(effectiveMessages, (phase) =>
+              advanceTask(
+                task,
+                phase,
+                phase === 'selecting-scaffold' ? 15 : phase === 'scaffolding' ? 35 : 55,
+              ),
+            )
           : await agent.chat(effectiveMessages)
 
       // Materialize each agent deliverable as a reviewable canvas proposal.
@@ -2278,7 +2307,10 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       }
 
       task.status = 'done'
+      task.phase = 'complete'
+      task.progress = 100
       task.completedAt = new Date().toISOString()
+      persistTask(task)
 
       if (projectId) {
         appendChatMessage({
@@ -2315,6 +2347,7 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       task.status = 'error'
       task.error = message
       task.completedAt = new Date().toISOString()
+      persistTask(task)
       json(res, 500, { error: message, taskId })
     }
     return true
@@ -2371,10 +2404,15 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       projectId: projectId ?? 'unknown',
       persona: 'engineer',
       prompt: messages[messages.length - 1]?.content ?? '',
+      memberKey: authCtx.memberKey,
       status: 'running',
+      phase: 'queued',
+      progress: 0,
       startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     }
     tasks.set(taskId, task)
+    persistTask(task)
 
     sseStart(res)
     sseSend(res, 'start', { taskId, persona: 'engineer' })
@@ -2405,11 +2443,25 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
         })
       }
 
-      let response
+      let response: Awaited<ReturnType<typeof agent.chat>>
       if (route.expectedArtifact === 'application') {
-        sseSend(res, 'status', { message: 'Generating project files' })
-        response = await agent.generateProject(effectiveMessages)
-        sseSend(res, 'status', { message: 'Loading project into Sandpack' })
+        const phaseMessages = {
+          'selecting-scaffold': 'Choosing the correct project scaffold',
+          scaffolding: 'Materializing the runnable baseline and OpenAPI contract',
+          customizing: 'Customizing the scaffold for your request',
+        } as const
+        response = await agent.generateProject(effectiveMessages, (phase) => {
+          const progress = phase === 'selecting-scaffold' ? 15 : phase === 'scaffolding' ? 35 : 55
+          advanceTask(task, phase, progress)
+          sseSend(res, 'status', { taskId, phase, progress, message: phaseMessages[phase] })
+        })
+        advanceTask(task, 'loading-sandbox', 75)
+        sseSend(res, 'status', {
+          taskId,
+          phase: 'loading-sandbox',
+          progress: 75,
+          message: 'Loading project into the workspace',
+        })
       } else {
         response = await agent.chatStream(effectiveMessages, {
           onToken: (token) => sseSend(res, 'token', { text: token }),
@@ -2496,7 +2548,10 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       }
 
       task.status = 'done'
+      task.phase = 'complete'
+      task.progress = 100
       task.completedAt = new Date().toISOString()
+      persistTask(task)
 
       sseSend(res, 'nodes', {
         nodes: createdNodes.map((node) => ({
@@ -2513,6 +2568,7 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       task.status = 'error'
       task.error = message
       task.completedAt = new Date().toISOString()
+      persistTask(task)
       sseSend(res, 'error', { message })
       sseSend(res, 'end', { taskId })
     }
@@ -2529,7 +2585,7 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       json(res, 403, { error: 'Project access denied' })
       return true
     }
-    let all = [...tasks.values()]
+    let all = projectId ? listGenerationTasks(projectId) : [...tasks.values()]
     if (projectId) {
       all = all.filter((t) => t.projectId === projectId)
     } else {
@@ -2582,10 +2638,15 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       projectId,
       persona: 'engineer',
       prompt: `Retry: regenerate ${type} "${title}"`,
+      memberKey: authCtx.memberKey,
       status: 'running',
+      phase: 'queued',
+      progress: 0,
       startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     }
     tasks.set(taskId, task)
+    persistTask(task)
 
     try {
       if (!modelProvider) throw new Error('LLM provider is not fully configured')
@@ -2623,7 +2684,10 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       }
 
       task.status = 'done'
+      task.phase = 'complete'
+      task.progress = 100
       task.completedAt = new Date().toISOString()
+      persistTask(task)
 
       json(res, 200, { text: response.text, node: replacement ?? null, taskId })
     } catch (err) {
@@ -2631,6 +2695,7 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       task.status = 'error'
       task.error = message
       task.completedAt = new Date().toISOString()
+      persistTask(task)
       json(res, 500, { error: message })
     }
     return true

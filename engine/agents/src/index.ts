@@ -35,6 +35,7 @@ export {
 export {
   scaffoldProject,
   scaffoldToolDescriptions,
+  selectScaffoldTool,
   type ScaffoldKind,
   type ScaffoldProject,
 } from './scaffolds.js'

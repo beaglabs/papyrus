@@ -1,6 +1,6 @@
 import { createOpenAI } from '@ai-sdk/openai'
-import { Output, generateText, jsonSchema, streamText, tool } from 'ai'
-import { type ScaffoldProject, scaffoldProject, scaffoldToolDescriptions } from './scaffolds.js'
+import { Output, generateText, jsonSchema, streamText } from 'ai'
+import { scaffoldProject, selectScaffoldTool } from './scaffolds.js'
 
 export interface ModelProviderConfig {
   provider: 'cloudflare-messages' | 'openai-compatible' | 'demo'
@@ -51,40 +51,6 @@ const projectChangesSchema = jsonSchema<ProjectChanges>({
     },
   },
 })
-
-const emptyToolInput = jsonSchema<Record<string, never>>({
-  type: 'object',
-  additionalProperties: false,
-  properties: {},
-})
-
-const scaffoldTools = {
-  scaffold_webapp: tool({
-    description: scaffoldToolDescriptions.scaffold_webapp,
-    inputSchema: emptyToolInput,
-    execute: async () => scaffoldProject('scaffold_webapp'),
-  }),
-  scaffold_cli_ts: tool({
-    description: scaffoldToolDescriptions.scaffold_cli_ts,
-    inputSchema: emptyToolInput,
-    execute: async () => scaffoldProject('scaffold_cli_ts'),
-  }),
-  scaffold_cli_py: tool({
-    description: scaffoldToolDescriptions.scaffold_cli_py,
-    inputSchema: emptyToolInput,
-    execute: async () => scaffoldProject('scaffold_cli_py'),
-  }),
-  scaffold_api_rust: tool({
-    description: scaffoldToolDescriptions.scaffold_api_rust,
-    inputSchema: emptyToolInput,
-    execute: async () => scaffoldProject('scaffold_api_rust'),
-  }),
-  scaffold_api_zig: tool({
-    description: scaffoldToolDescriptions.scaffold_api_zig,
-    inputSchema: emptyToolInput,
-    execute: async () => scaffoldProject('scaffold_api_zig'),
-  }),
-}
 
 function demoProject(): GeneratedProject {
   return {
@@ -142,25 +108,9 @@ export async function generateModelProject(
 
   const provider = createOpenAI({ baseURL: config.baseURL, apiKey: config.apiKey })
   input.onProgress?.('selecting-scaffold')
-  const selectionResult = await generateText({
-    model: provider(config.model),
-    system: `${input.system}\n\nChoose exactly one deterministic scaffold tool before writing code. Available tools:\n${Object.entries(
-      scaffoldToolDescriptions,
-    )
-      .map(([name, description]) => `- ${name}: ${description}`)
-      .join(
-        '\n',
-      )}\nPrefer scaffold_webapp unless the user explicitly requests a CLI or backend API.`,
-    messages: input.messages,
-    maxOutputTokens: 1024,
-    temperature: 0.2,
-    tools: scaffoldTools,
-    toolChoice: 'required',
-  })
-
+  const selectedTool = selectScaffoldTool(input.messages)
   input.onProgress?.('scaffolding')
-  const scaffold = selectionResult.toolResults[0]?.output as ScaffoldProject | undefined
-  if (!scaffold) throw new Error('The model did not select a scaffold tool')
+  const scaffold = scaffoldProject(selectedTool)
   const baseFiles = input.existingFiles?.length ? [...input.existingFiles] : [...scaffold.files]
   if (!baseFiles.some((file) => file.path === '/openapi.yaml' || file.path === 'openapi.yaml')) {
     const contract = scaffold.files.find((file) => file.path === '/openapi.yaml')
@@ -173,6 +123,7 @@ export async function generateModelProject(
     messages: input.messages,
     maxOutputTokens: input.maxOutputTokens ?? 16384,
     temperature: 0.2,
+    abortSignal: AbortSignal.timeout(120_000),
     output: Output.object({
       schema: projectChangesSchema,
       name: 'project_changes',

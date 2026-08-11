@@ -1,7 +1,4 @@
-import {
-  type ArtifactEnvelope,
-  coerceArtifactEnvelope,
-} from '@papyrus/core/artifacts/envelope'
+import { type ArtifactEnvelope, coerceArtifactEnvelope } from '@papyrus/core/artifacts/envelope'
 /**
  * Single agent — calls the configured model provider with one
  * system prompt and returns structured responses.
@@ -14,6 +11,7 @@ import {
   type ModelProviderConfig,
   type StreamCallbacks,
   generateModelText,
+  generateModelProject,
   generateModelTextStream,
 } from './model-provider.js'
 import { AGENT_PROMPT } from './prompts.js'
@@ -45,10 +43,8 @@ export interface PersonaAgent {
   name: string
   role: string
   chat: (messages: AgentMessage[]) => Promise<AgentResponse>
-  chatStream: (
-    messages: AgentMessage[],
-    callbacks: StreamCallbacks,
-  ) => Promise<AgentResponse>
+  chatStream: (messages: AgentMessage[], callbacks: StreamCallbacks) => Promise<AgentResponse>
+  generateProject: (messages: AgentMessage[]) => Promise<AgentResponse>
 }
 
 export interface PersonaAgentOptions {
@@ -58,12 +54,16 @@ export interface PersonaAgentOptions {
   expectedArtifact?: string
   /** Existing files from a prior generation — passed for iteration requests. */
   existingFiles?: Array<{ path: string; content: string; language?: string }>
+  contextFiles?: Array<{ name: string; mimeType: string; content: string }>
+  skills?: Array<{ name: string; description?: string; content?: string }>
 }
 
 export function buildSystemPrompt(
   projectSystemPrompt?: string,
   expectedArtifact?: string,
   existingFiles?: Array<{ path: string; content: string }>,
+  contextFiles?: Array<{ name: string; mimeType: string; content: string }>,
+  skills?: Array<{ name: string; description?: string; content?: string }>,
 ): string {
   let prompt = AGENT_PROMPT
 
@@ -82,6 +82,18 @@ export function buildSystemPrompt(
     }
   }
 
+  if (contextFiles?.length) {
+    prompt +=
+      '\n\n## Uploaded Context\nTreat these as reference inputs, not project source files unless explicitly requested.'
+    for (const file of contextFiles) {
+      prompt += `\n\n### ${file.name} (${file.mimeType})\n${file.content}`
+    }
+  }
+
+  if (skills?.length) {
+    prompt += `\n\n## Uploaded Skills\n${JSON.stringify(skills)}`
+  }
+
   return prompt
 }
 
@@ -96,12 +108,47 @@ export function createPersonaAgent(
     options.projectSystemPrompt,
     options.expectedArtifact,
     options.existingFiles,
+    options.contextFiles,
+    options.skills,
   )
 
   return {
     id: 'engineer',
     name: 'Engineer',
     role: 'ENG',
+    generateProject: async (messages: AgentMessage[]): Promise<AgentResponse> => {
+      const project = await generateModelProject(provider, {
+        system: `${systemPrompt}\n\nReturn the complete runnable project through the structured project schema. Do not put source code in conversational text. Every relative import must resolve to one of the returned files.`,
+        messages: messages.map((m) => ({ role: m.role, content: m.content })),
+        maxOutputTokens: 16384,
+      })
+      return {
+        text: `Created **${project.title}** for review.`,
+        nodes: [
+          {
+            type: 'application',
+            category: 'output',
+            title: project.title,
+            content: project.summary,
+            status: 'proposed',
+            artifact: {
+              schema: 'papyrus.artifact/v1',
+              kind: 'application',
+              title: project.title,
+              summary: project.summary,
+              renderer: { type: 'code', options: { template: project.template } },
+              files: project.files.map((file) => ({
+                ...file,
+                path: file.path.startsWith('/') ? file.path : `/${file.path}`,
+              })),
+              entrypoint: project.entrypoint,
+              permissions: { network: 'none' },
+              producer: { persona: 'engineer', tool: 'structured-project-generation' },
+            },
+          },
+        ],
+      }
+    },
     chat: async (messages: AgentMessage[]): Promise<AgentResponse> => {
       const rawText = await generateModelText(provider, {
         system: systemPrompt,
@@ -185,7 +232,8 @@ export function extractArtifacts(
       if (attribute[1]) attributes.set(attribute[1], attribute[2] ?? '')
     }
     const declaredType = attributes.get('type') || 'application'
-    const type = expectedArtifact && declaredType !== expectedArtifact ? expectedArtifact : declaredType
+    const type =
+      expectedArtifact && declaredType !== expectedArtifact ? expectedArtifact : declaredType
     const title = attributes.get('title') || type
     const content = (match[2] ?? '').trim()
     const artifact = coerceArtifactEnvelope(type, title, content, 'engineer')
@@ -211,8 +259,9 @@ export function extractArtifacts(
   }
 
   // Wrap substantive responses as a generic artifact
-  const looksLikeDeliverable =
-    /```|^#{1,3}\s|\b(openapi|paths:|components:|architecture)\b/im.test(rawText)
+  const looksLikeDeliverable = /```|^#{1,3}\s|\b(openapi|paths:|components:|architecture)\b/im.test(
+    rawText,
+  )
   if (looksLikeDeliverable && rawText.trim()) {
     const containsSourceCode =
       /```(?:typescript|ts|tsx|javascript|js|jsx|css|html|python|py|shell|bash|sh|rust|go|java|sql|vue|svelte)\b/i.test(

@@ -69,7 +69,7 @@ export function DevEnvironment({ projectId, projectName, onBack }: DevEnvironmen
     const loaded: Generation[] = codeNodes.map((node) => {
       const artifact = node.fields.artifact as {
         files?: Array<{ path: string; content: string; language?: string }>
-        renderer?: { type?: string }
+        renderer?: { type?: string; options?: { template?: string } }
       }
       return {
         id: node.id,
@@ -77,6 +77,7 @@ export function DevEnvironment({ projectId, projectName, onBack }: DevEnvironmen
         files: artifact?.files ?? [],
         status: node.status as Generation['status'],
         createdAt: new Date(node.updatedAt).toISOString(),
+        template: artifact?.renderer?.options?.template,
       }
     })
     setGenerations(loaded)
@@ -116,7 +117,7 @@ export function DevEnvironment({ projectId, projectName, onBack }: DevEnvironmen
             schema: 'papyrus.artifact/v1' as const,
             kind: 'application',
             title: prompt.slice(0, 80),
-            renderer: { type: 'code' as const },
+            renderer: { type: 'code' as const, options: template ? { template } : undefined },
             files: files.map((f) => ({
               path: f.path,
               content: f.content,

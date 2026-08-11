@@ -99,7 +99,10 @@ export function ChatPanel({
   ])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [attachments, setAttachments] = useState<string[]>([])
+  const [attachments, setAttachments] = useState<
+    Array<{ name: string; mimeType: string; content: string }>
+  >([])
+  const [skills, setSkills] = useState<Array<{ name: string; content: string }>>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
@@ -203,6 +206,7 @@ export function ChatPanel({
             messages: contextMessages,
             projectId,
             attachments,
+            skills,
             existingFiles: activeGeneration?.files.map((f) => ({
               path: f.path,
               content: f.content,
@@ -243,10 +247,21 @@ export function ChatPanel({
                 setMessages((prev) =>
                   prev.map((msg) => (msg.id === assistantMsgId ? { ...msg, text: fullText } : msg)),
                 )
+              } else if (eventType === 'status') {
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === assistantMsgId
+                      ? { ...msg, text: String(data.message ?? 'Working…') }
+                      : msg,
+                  ),
+                )
               } else if (eventType === 'nodes') {
                 const nodes = data.nodes as Array<{
                   id: string
-                  artifact?: { files?: Array<{ path: string; content: string; language?: string }> }
+                  artifact?: {
+                    files?: Array<{ path: string; content: string; language?: string }>
+                    renderer?: { options?: { template?: string } }
+                  }
                 }>
                 const codeNode = nodes.find((n) => n.artifact?.files && n.artifact.files.length > 0)
                 if (codeNode?.artifact?.files) {
@@ -258,6 +273,7 @@ export function ChatPanel({
                       content: f.content,
                       language: f.language,
                     })),
+                    codeNode.artifact.renderer?.options?.template,
                   )
                 }
               } else if (eventType === 'error') {
@@ -288,6 +304,7 @@ export function ChatPanel({
           chatHistoryRef.current.push({ role: 'assistant', content: fullText })
         }
         setAttachments([])
+        setSkills([])
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : 'Something went wrong'
         setMessages((prev) =>
@@ -314,6 +331,7 @@ export function ChatPanel({
       onLoadingChange,
       projectBrief,
       projectId,
+      skills,
     ],
   )
 
@@ -370,8 +388,15 @@ export function ChatPanel({
     if (!files) return
     for (const file of Array.from(files)) {
       const text = await file.text()
-      const attachment = `### ${file.name}\n\`\`\`\n${text.slice(0, 5000)}\n\`\`\``
-      setAttachments((prev) => [...prev, attachment])
+      const content = text.slice(0, 100_000)
+      if (/^(skill\.md|.+\.skill\.md)$/i.test(file.name)) {
+        setSkills((prev) => [...prev, { name: file.name, content }])
+      } else {
+        setAttachments((prev) => [
+          ...prev,
+          { name: file.name, mimeType: file.type || 'text/plain', content },
+        ])
+      }
     }
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
@@ -441,11 +466,27 @@ export function ChatPanel({
       {attachments.length > 0 && (
         <div className="chat-attachments">
           {attachments.map((attachment, i) => (
-            <span key={attachment} className="chat-attachment-chip">
-              <Paperclip size={11} /> Attachment {i + 1}
+            <span key={`${attachment.name}-${i}`} className="chat-attachment-chip">
+              <Paperclip size={11} /> {attachment.name}
               <button
                 type="button"
                 onClick={() => setAttachments((prev) => prev.filter((_, idx) => idx !== i))}
+              >
+                <X size={11} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {skills.length > 0 && (
+        <div className="chat-attachments">
+          {skills.map((skill, i) => (
+            <span key={`${skill.name}-${i}`} className="chat-attachment-chip">
+              <Sparkles size={11} /> {skill.name}
+              <button
+                type="button"
+                onClick={() => setSkills((prev) => prev.filter((_, idx) => idx !== i))}
               >
                 <X size={11} />
               </button>

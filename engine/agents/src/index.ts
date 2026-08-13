@@ -39,3 +39,4 @@ export {
   type ScaffoldKind,
   type ScaffoldProject,
 } from './scaffolds.js'
+export { createPapyrusRunGraph, eventFor } from './run-graph.js'

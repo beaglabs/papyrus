@@ -231,6 +231,36 @@ const migrations: Migration[] = [
       `)
     },
   },
+  {
+    version: 6,
+    name: 'durable governed agent runs',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_runs (
+          id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, project_id TEXT NOT NULL,
+          thread_id TEXT NOT NULL, requested_by TEXT NOT NULL, title TEXT NOT NULL,
+          request TEXT NOT NULL, status TEXT NOT NULL, classification TEXT NOT NULL,
+          model TEXT, skill_ids TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL, completed_at TEXT,
+          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS run_events (
+          id TEXT PRIMARY KEY, run_id TEXT NOT NULL, sequence INTEGER NOT NULL,
+          kind TEXT NOT NULL, actor TEXT NOT NULL, payload TEXT NOT NULL,
+          occurred_at TEXT NOT NULL, UNIQUE(run_id, sequence),
+          FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS approval_requests (
+          id TEXT PRIMARY KEY, run_id TEXT NOT NULL, action TEXT NOT NULL, reason TEXT NOT NULL,
+          risk TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', requested_by TEXT NOT NULL,
+          requested_at TEXT NOT NULL, decided_by TEXT, decided_at TEXT, rationale TEXT,
+          FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_runs_project ON agent_runs(project_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_run_events_sequence ON run_events(run_id, sequence);
+      `)
+    },
+  },
 ]
 
 export function runMigrations(db: Database.Database): void {

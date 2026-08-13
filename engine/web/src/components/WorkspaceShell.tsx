@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { IntakePanel } from './IntakePanel'
+import { WorkspaceCatalog } from './WorkspaceCatalog'
 import './workspace-shell.css'
 
 interface WorkspaceShellProps {
@@ -66,7 +67,7 @@ export function WorkspaceShell({ projectName, onBack, children }: WorkspaceShell
             <span className="runtime-chip"><Boxes size={14} /> Local runtime</span>
           </div>
         </header>
-        <main className="workspace-content">{section === 'Work' ? children : section === 'Intake' ? <IntakePanel /> : <div className="workspace-section-placeholder"><h1>{section}</h1><p>Configuration for this workspace will appear here as the corresponding phase is enabled.</p></div>}</main>
+        <main className="workspace-content">{section === 'Work' ? children : section === 'Intake' ? <IntakePanel /> : <WorkspaceCatalog section={section}/>}</main>
       </section>
     </div>
   )

@@ -19,6 +19,7 @@
     "./auth/middleware": "./src/auth/middleware.ts",
     "./auth/keygen": "./src/auth/keygen.ts",
     "./sync/protocol": "./src/sync/protocol.ts",
+    "./workflows/cape": "./src/workflows/cape.ts",
     "./auth/license": "./src/auth/license.ts",
     "./auth/deployment-identity": "./src/auth/deployment-identity.ts"
   },

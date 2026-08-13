@@ -126,3 +126,4 @@ export type {
   ToolSession,
 } from './runs/protocol.js'
 export { RUN_EVENT_VERSION, isTerminalRunStatus } from './runs/protocol.js'
+export { CAPE_WORKFLOW_PACK, type WorkflowPack, type WorkflowSkill, type WorkflowConnector } from './workflows/cape.js'

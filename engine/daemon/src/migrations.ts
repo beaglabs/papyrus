@@ -261,6 +261,32 @@ const migrations: Migration[] = [
       `)
     },
   },
+  {
+    version: 7,
+    name: 'controlled intake staging and provenance',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS intake_items (
+          id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, project_id TEXT,
+          filename TEXT NOT NULL, media_type TEXT NOT NULL, size_bytes INTEGER NOT NULL,
+          sha256 TEXT NOT NULL, content_base64 TEXT NOT NULL, state TEXT NOT NULL,
+          suggested_classification TEXT NOT NULL, approved_classification TEXT,
+          tags TEXT NOT NULL DEFAULT '[]', findings TEXT NOT NULL DEFAULT '[]',
+          submitted_by TEXT NOT NULL, submitted_at TEXT NOT NULL, reviewed_by TEXT,
+          reviewed_at TEXT, decision_rationale TEXT,
+          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
+        );
+        CREATE TABLE IF NOT EXISTS artifact_provenance (
+          id TEXT PRIMARY KEY, intake_item_id TEXT NOT NULL, project_id TEXT NOT NULL,
+          artifact_id TEXT NOT NULL, sha256 TEXT NOT NULL, classification TEXT NOT NULL,
+          released_by TEXT NOT NULL, released_at TEXT NOT NULL,
+          FOREIGN KEY (intake_item_id) REFERENCES intake_items(id),
+          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_intake_state ON intake_items(organization_id, state, submitted_at DESC);
+      `)
+    },
+  },
 ]
 
 export function runMigrations(db: Database.Database): void {

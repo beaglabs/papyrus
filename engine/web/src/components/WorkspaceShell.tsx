@@ -9,7 +9,8 @@ import {
   ShieldCheck,
   Sparkles,
 } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
+import { IntakePanel } from './IntakePanel'
 import './workspace-shell.css'
 
 interface WorkspaceShellProps {
@@ -19,7 +20,7 @@ interface WorkspaceShellProps {
 }
 
 const NAV = [
-  { label: 'Work', icon: LayoutDashboard, active: true },
+  { label: 'Work', icon: LayoutDashboard },
   { label: 'Intake', icon: FileSearch },
   { label: 'Agents', icon: Bot },
   { label: 'Skills', icon: Sparkles },
@@ -28,6 +29,7 @@ const NAV = [
 ]
 
 export function WorkspaceShell({ projectName, onBack, children }: WorkspaceShellProps) {
+  const [section, setSection] = useState('Work')
   return (
     <div className="workspace-shell">
       <aside className="workspace-rail" aria-label="Papyrus workspace navigation">
@@ -35,12 +37,13 @@ export function WorkspaceShell({ projectName, onBack, children }: WorkspaceShell
           P
         </button>
         <nav>
-          {NAV.map(({ label, icon: Icon, active }) => (
+          {NAV.map(({ label, icon: Icon }) => (
             <button
               key={label}
               type="button"
-              className={active ? 'active' : ''}
-              aria-current={active ? 'page' : undefined}
+              className={section === label ? 'active' : ''}
+              aria-current={section === label ? 'page' : undefined}
+              onClick={() => setSection(label)}
               title={label}
             >
               <Icon size={19} strokeWidth={2.25} />
@@ -63,7 +66,7 @@ export function WorkspaceShell({ projectName, onBack, children }: WorkspaceShell
             <span className="runtime-chip"><Boxes size={14} /> Local runtime</span>
           </div>
         </header>
-        <main className="workspace-content">{children}</main>
+        <main className="workspace-content">{section === 'Work' ? children : section === 'Intake' ? <IntakePanel /> : <div className="workspace-section-placeholder"><h1>{section}</h1><p>Configuration for this workspace will appear here as the corresponding phase is enabled.</p></div>}</main>
       </section>
     </div>
   )

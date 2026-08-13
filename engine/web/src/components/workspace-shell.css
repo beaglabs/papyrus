@@ -93,6 +93,22 @@
 .tool-session-empty { display: grid; place-items: center; align-content: center; gap: 10px; height: 100%; padding: 40px; text-align: center; background: #fffdf8; }
 .tool-session-empty h2, .tool-session-empty p { margin: 0; }
 .tool-session-empty span { padding: 7px 10px; font-weight: 800; background: #ffd84d; border: 2px solid var(--ink); }
+.workspace-section-placeholder, .intake-panel { height: 100%; padding: 34px; overflow: auto; background: #fffdf8; }
+.workspace-section-placeholder h1, .intake-panel h1 { margin: 0; font-size: 34px; }
+.intake-panel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding: 24px; background: #fff; border: 3px solid var(--ink); box-shadow: 7px 7px 0 var(--ink); }
+.intake-panel > header span { font-size: 11px; font-weight: 900; letter-spacing: .08em; color: #8b2b00; }
+.intake-panel > header p { max-width: 620px; margin-bottom: 0; }
+.intake-panel > header button, .intake-actions button { display: inline-flex; align-items: center; gap: 6px; padding: 10px 13px; font-weight: 900; color: var(--ink); background: var(--orange); border: 2px solid var(--ink); border-radius: 0; box-shadow: 3px 3px 0 var(--ink); }
+.intake-list { display: grid; gap: 13px; margin-top: 28px; }
+.intake-list article { display: grid; grid-template-columns: minmax(220px,1fr) minmax(260px,1.3fr) auto; align-items: center; gap: 18px; padding: 17px; background: #fff; border: 3px solid var(--ink); }
+.intake-file, .intake-file div, .intake-findings { display: flex; gap: 9px; }
+.intake-file div, .intake-findings { flex-direction: column; }
+.intake-file span, .intake-findings span { font-size: 12px; }
+.intake-findings b { align-self: flex-start; padding: 4px 7px; background: #ffd84d; border: 2px solid var(--ink); }
+.intake-findings span { display: flex; align-items: center; gap: 4px; }
+.intake-actions { display: flex; gap: 9px; }.intake-actions .reject { background: #ffd8d8; }
+.intake-empty { display: grid; place-items: center; gap: 8px; padding: 70px; text-align: center; background: #fff; border: 3px dashed var(--ink); }
+.intake-empty h2, .intake-empty p { margin: 0; }
 
 @media (max-width: 900px) {
   .workspace-shell { grid-template-columns: 64px minmax(0, 1fr); }

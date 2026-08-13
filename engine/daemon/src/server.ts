@@ -65,6 +65,7 @@ import {
   verifyDeploymentBundle,
 } from './deployment-transfer.js'
 import { LicenseService } from './license-service.js'
+import { decideIntake, listIntake, stageIntake } from './intake.js'
 import {
   type OrgMembership,
   createOrg,
@@ -2078,6 +2079,25 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
   }
 
   // ── Agent chat endpoint ────────────────────────────────────────
+
+  if (url.pathname === '/api/intake' && method === 'GET') {
+    const authCtx = requireAuth(req, res); if (!authCtx) return true
+    const membership = getOrgForMember(authCtx.memberKey); if (!membership) { json(res, 403, { error: 'Organization membership required' }); return true }
+    json(res, 200, { items: listIntake(membership.org.id) }); return true
+  }
+  if (url.pathname === '/api/intake' && method === 'POST') {
+    const authCtx = requireAuth(req, res); if (!authCtx) return true
+    const membership = getOrgForMember(authCtx.memberKey); if (!membership) { json(res, 403, { error: 'Organization membership required' }); return true }
+    const body = await parseBody(req)
+    try { json(res, 201, stageIntake({ organizationId: membership.org.id, projectId: typeof body.projectId === 'string' ? body.projectId : undefined, filename: String(body.filename ?? ''), mediaType: String(body.mediaType ?? 'application/octet-stream'), contentBase64: String(body.contentBase64 ?? ''), submittedBy: authCtx.memberKey })) } catch (error) { json(res, 400, { error: error instanceof Error ? error.message : 'Intake failed' }) }
+    return true
+  }
+  if (url.pathname === '/api/intake/decision' && method === 'POST') {
+    const authCtx = requireAuth(req, res); if (!authCtx) return true
+    const body = await parseBody(req)
+    try { json(res, 200, decideIntake(String(body.id), { decision: body.decision === 'reject' ? 'reject' : 'release', classification: String(body.classification ?? 'UNCLASSIFIED'), tags: Array.isArray(body.tags) ? body.tags.map(String) : [], rationale: typeof body.rationale === 'string' ? body.rationale : undefined, reviewedBy: authCtx.memberKey })) } catch (error) { json(res, 400, { error: error instanceof Error ? error.message : 'Decision failed' }) }
+    return true
+  }
 
   if (url.pathname === '/api/chat' && method === 'GET') {
     const authCtx = requireAuth(req, res)

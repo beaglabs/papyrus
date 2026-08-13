@@ -84,6 +84,15 @@
 .workspace-content .dev-main { height: 100%; }
 .workspace-content .dev-panel-left { flex: 0 0 34%; min-width: 330px; border-right-width: 3px; }
 .workspace-content .dev-panel-right { flex: 1 1 66%; min-width: 0; }
+.tool-workbench { display: grid; grid-template-rows: 48px minmax(0,1fr); width: 100%; height: 100%; background: #fff; }
+.tool-workbench-tabs { display: flex; gap: 7px; align-items: center; padding: 7px 10px; border-bottom: 3px solid var(--ink); overflow-x: auto; }
+.tool-workbench-tabs button { display: inline-flex; align-items: center; gap: 5px; padding: 7px 9px; font-weight: 800; color: var(--ink); background: #fff; border: 2px solid var(--ink); border-radius: 0; }
+.tool-workbench-tabs button.active { background: var(--orange); box-shadow: 3px 3px 0 var(--ink); }
+.tool-workbench-body { min-height: 0; overflow: hidden; }
+.tool-workbench-body > .preview-empty, .tool-workbench-body > .preview-shell { height: 100%; }
+.tool-session-empty { display: grid; place-items: center; align-content: center; gap: 10px; height: 100%; padding: 40px; text-align: center; background: #fffdf8; }
+.tool-session-empty h2, .tool-session-empty p { margin: 0; }
+.tool-session-empty span { padding: 7px 10px; font-weight: 800; background: #ffd84d; border: 2px solid var(--ink); }
 
 @media (max-width: 900px) {
   .workspace-shell { grid-template-columns: 64px minmax(0, 1fr); }

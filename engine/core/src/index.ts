@@ -112,3 +112,17 @@ export {
   CONFIG_ENV,
   validateConfig,
 } from './config/loader.js'
+
+
+// Governed agent run protocol
+export type {
+  ApprovalDecision,
+  ApprovalRequest,
+  PapyrusRun,
+  RunEvent,
+  RunEventKind,
+  RunStatus,
+  SessionKind,
+  ToolSession,
+} from './runs/protocol.js'
+export { RUN_EVENT_VERSION, isTerminalRunStatus } from './runs/protocol.js'

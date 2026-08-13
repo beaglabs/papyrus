@@ -1,0 +1,94 @@
+.workspace-shell {
+  --paper: #fffdf8;
+  --ink: #101010;
+  --orange: #ff5a1f;
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  color: var(--ink);
+  background: var(--paper);
+}
+
+.workspace-rail {
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 18px;
+  padding: 14px 9px;
+  background: #fff;
+  border-right: 3px solid var(--ink);
+}
+
+.workspace-mark {
+  width: 50px;
+  height: 50px;
+  margin: 0 auto;
+  color: var(--ink);
+  font: 900 24px/1 var(--font-display, system-ui);
+  background: var(--orange);
+  border: 3px solid var(--ink);
+  border-radius: 0;
+  box-shadow: 4px 4px 0 var(--ink);
+}
+
+.workspace-rail nav { display: grid; gap: 10px; }
+.workspace-rail nav button {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  min-height: 56px;
+  padding: 7px 2px;
+  color: var(--ink);
+  font: 800 10px/1 var(--font-display, system-ui);
+  background: #fff;
+  border: 2px solid transparent;
+  border-radius: 0;
+}
+.workspace-rail nav button:hover,
+.workspace-rail nav button.active {
+  background: var(--orange);
+  border-color: var(--ink);
+  box-shadow: 3px 3px 0 var(--ink);
+}
+
+.workspace-frame { display: grid; grid-template-rows: 58px minmax(0, 1fr); min-width: 0; min-height: 0; }
+.workspace-commandbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 18px;
+  background: #fff;
+  border-bottom: 3px solid var(--ink);
+}
+.workspace-breadcrumb, .workspace-controls { display: flex; align-items: center; gap: 12px; }
+.workspace-breadcrumb button, .classification-chip, .runtime-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 10px;
+  color: var(--ink);
+  font-weight: 800;
+  background: #fff;
+  border: 2px solid var(--ink);
+  border-radius: 0;
+}
+.classification-chip { background: #ffd84d; }
+.runtime-chip { background: #d8fbd8; }
+.workspace-content { min-width: 0; min-height: 0; overflow: hidden; }
+.workspace-content > .dev-environment { width: 100%; height: 100%; }
+.workspace-content .dev-topbar { display: none; }
+.workspace-content .dev-main { height: 100%; }
+.workspace-content .dev-panel-left { flex: 0 0 34%; min-width: 330px; border-right-width: 3px; }
+.workspace-content .dev-panel-right { flex: 1 1 66%; min-width: 0; }
+
+@media (max-width: 900px) {
+  .workspace-shell { grid-template-columns: 64px minmax(0, 1fr); }
+  .workspace-rail nav button span { display: none; }
+  .workspace-rail { padding-inline: 5px; }
+  .runtime-chip { display: none; }
+  .workspace-content .dev-panel-left { flex-basis: 42%; min-width: 280px; }
+}

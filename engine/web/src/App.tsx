@@ -5,6 +5,7 @@ import { Landing } from './components/Landing'
 import { Login } from './components/Login'
 import { Onboarding } from './components/Onboarding'
 import { ProfileBadge } from './components/ProfileBadge'
+import { WorkspaceShell } from './components/WorkspaceShell'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { ToastProvider, useToast } from './contexts/ToastContext'
@@ -75,11 +76,13 @@ function AppContent() {
 
   if (activeProject) {
     return (
-      <DevEnvironment
-        projectId={activeProject.id}
-        projectName={activeProject.name}
-        onBack={() => setActiveProject(null)}
-      />
+      <WorkspaceShell projectName={activeProject.name} onBack={() => setActiveProject(null)}>
+        <DevEnvironment
+          projectId={activeProject.id}
+          projectName={activeProject.name}
+          onBack={() => setActiveProject(null)}
+        />
+      </WorkspaceShell>
     )
   }
 

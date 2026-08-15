@@ -1,15 +1,18 @@
 import {
-  Bot,
-  Boxes,
+  Archive,
+  Bell,
+  BriefcaseBusiness,
   Cable,
   ChevronLeft,
   FileSearch,
+  GitBranch,
   LayoutDashboard,
+  ScrollText,
   Settings,
   ShieldCheck,
-  Sparkles,
+  Users,
 } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import { type ReactNode, useState } from 'react'
 import { IntakePanel } from './IntakePanel'
 import { WorkspaceCatalog } from './WorkspaceCatalog'
 import './workspace-shell.css'
@@ -21,16 +24,18 @@ interface WorkspaceShellProps {
 }
 
 const NAV = [
-  { label: 'Work', icon: LayoutDashboard },
-  { label: 'Intake', icon: FileSearch },
-  { label: 'Agents', icon: Bot },
-  { label: 'Skills', icon: Sparkles },
+  { label: 'Workzone', icon: LayoutDashboard },
+  { label: 'Staging', icon: FileSearch },
+  { label: 'Workflows', icon: GitBranch },
+  { label: 'People', icon: Users },
+  { label: 'Budget & Contracts', icon: BriefcaseBusiness },
   { label: 'Connections', icon: Cable },
-  { label: 'Admin', icon: Settings },
+  { label: 'Records', icon: Archive },
+  { label: 'Administration', icon: Settings },
 ]
 
 export function WorkspaceShell({ projectName, onBack, children }: WorkspaceShellProps) {
-  const [section, setSection] = useState('Work')
+  const [section, setSection] = useState('Workzone')
   return (
     <div className="workspace-shell">
       <aside className="workspace-rail" aria-label="Papyrus workspace navigation">
@@ -58,16 +63,33 @@ export function WorkspaceShell({ projectName, onBack, children }: WorkspaceShell
         <header className="workspace-commandbar">
           <div className="workspace-breadcrumb">
             <button type="button" onClick={onBack}>
-              <ChevronLeft size={16} /> Work
+              <ChevronLeft size={16} /> Projects
             </button>
             <strong>{projectName}</strong>
           </div>
           <div className="workspace-controls">
-            <span className="classification-chip"><ShieldCheck size={14} /> CONTROLLED</span>
-            <span className="runtime-chip"><Boxes size={14} /> Local runtime</span>
+            <span className="classification-chip">
+              <ShieldCheck size={14} /> CONTROLLED
+            </span>
+            <span className="runtime-chip">PILOT · NOT AUTHORIZED</span>
+            <button className="command-icon" type="button" aria-label="Audit log">
+              <ScrollText size={16} />
+            </button>
+            <button className="command-icon" type="button" aria-label="Notifications">
+              <Bell size={16} />
+            </button>
+            <span className="user-role">Local User · Operator</span>
           </div>
         </header>
-        <main className="workspace-content">{section === 'Work' ? children : section === 'Intake' ? <IntakePanel /> : <WorkspaceCatalog section={section}/>}</main>
+        <main className="workspace-content">
+          {section === 'Workzone' ? (
+            children
+          ) : section === 'Staging' ? (
+            <IntakePanel />
+          ) : (
+            <WorkspaceCatalog section={section} />
+          )}
+        </main>
       </section>
     </div>
   )

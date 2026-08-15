@@ -1,0 +1,9 @@
+{
+  "name": "@papyrus/browser",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": { "typecheck": "tsc --noEmit" },
+  "dependencies": { "@browserbasehq/stagehand": "^4.0.0", "@papyrus/core": "workspace:*", "zod": "^4.0.0" },
+  "devDependencies": { "@types/node": "^22.10.2", "typescript": "^5.6.3" }
+}

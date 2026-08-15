@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useCanvas } from '../hooks/useCanvas'
 import { ChatPanel } from './ChatPanel'
-import { PreviewPanel } from './PreviewPanel'
+import { ToolWorkbench } from './ToolWorkbench'
 import { ProfileBadge } from './ProfileBadge'
 
 interface DevEnvironmentProps {
@@ -280,7 +280,7 @@ export function DevEnvironment({ projectId, projectName, onBack }: DevEnvironmen
 
         {/* Right panel - Preview / Code / Terminal */}
         <div className="dev-panel-right">
-          <PreviewPanel
+          <ToolWorkbench
             generation={activeGeneration}
             loading={loading}
             onApprove={handleApprove}

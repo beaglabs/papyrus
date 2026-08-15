@@ -16,6 +16,7 @@ const main = defineCommand({
     },
   },
   subCommands: {
+    launch: () => import('./commands/serve.js').then((m) => m.default),
     serve: () => import('./commands/serve.js').then((m) => m.default),
     auth: () => import('./commands/auth.js').then((m) => m.auth),
     license: () => import('./commands/license.js').then((m) => m.default),
@@ -34,6 +35,7 @@ const main = defineCommand({
     console.log(`  active profile: ${profile}\n`)
     console.log('  Usage: papyrus <command> [subcommand] [options]')
     console.log('  Commands:')
+    console.log('    launch      start the local Papyrus work platform')
     console.log('    serve       run the centralized Papyrus server and web application')
     console.log('    auth        login | logout | status | refresh')
     console.log('    license     status | request | activate | validate')

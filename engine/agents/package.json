@@ -7,6 +7,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@langchain/langgraph": "^0.4.9",
     "@ai-sdk/openai": "^4.0.34",
     "@papyrus/core": "workspace:*",
     "ai": "^7.0.56"

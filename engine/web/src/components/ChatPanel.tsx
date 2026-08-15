@@ -148,11 +148,9 @@ export function ChatPanel({
               text: message.content,
             })),
           )
-        } else if (projectBrief.trim()) {
-          // No existing conversation but brief exists — auto-generate
-          const autoPrompt = `Based on this project brief, generate the initial code:\n\n${projectBrief}`
-          void sendToAgent(autoPrompt)
         }
+        // A project brief is context, not an instruction to execute. Runs begin only
+        // after an explicit user action so policy and approval controls can apply.
       })
       .catch((error) => console.error('Chat history load failed:', error))
     return () => {

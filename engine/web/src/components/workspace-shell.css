@@ -178,3 +178,44 @@
   .runtime-chip { display: none; }
   .workspace-content .dev-panel-left { flex-basis: 42%; min-width: 280px; }
 }
+
+/* Responsive workzone presentation */
+.workspace-shell { grid-template-columns:112px minmax(0,1fr); }
+.workspace-rail { gap:12px; padding:12px 7px; }
+.workspace-mark { width:42px; height:42px; font-size:20px; }
+.workspace-rail nav button { min-height:44px; padding:6px 4px; }
+.workspace-frame { grid-template-rows:60px minmax(0,1fr); }
+.workspace-commandbar { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; }
+.workspace-breadcrumb,.workspace-controls { min-width:0; gap:9px; }
+.workspace-breadcrumb { overflow:hidden; }
+.workspace-breadcrumb button { flex:0 0 auto; }
+.workspace-breadcrumb strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+.cape-workzone { position:relative; grid-template-columns:minmax(430px,39%) minmax(0,1fr); overflow:hidden; }
+.agent-thread { grid-column:1; grid-row:1; }
+.workbench-pane { grid-column:2; grid-row:1; }
+.pane-actions { display:flex; align-items:center; gap:6px; }
+.pane-header>div:first-child { min-width:0; }
+.pane-header h1 { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.run-inspector { position:absolute; z-index:30; inset:0 0 0 auto; display:flex; width:320px; border-right:0; border-left:3px solid var(--ink); box-shadow:-8px 0 0 rgb(16 16 16 / 12%); transform:translateX(105%); transition:transform 160ms ease; }
+.run-inspector.open { transform:translateX(0); }
+
+.browser-session>main { grid-template-columns:1fr; }
+.browser-session aside { display:none; }
+.browser-session main>section { padding:20px; }
+.browser-skeleton { width:min(860px,94%); min-height:min(620px,78vh); }
+
+@media (max-width:1250px) {
+  .cape-workzone { grid-template-columns:minmax(360px,42%) minmax(0,1fr); }
+  .workspace-controls .user-role { display:none; }
+}
+@media (max-width:980px) {
+  .workspace-controls .runtime-chip,.workspace-controls .command-icon { display:none; }
+}
+@media (max-width:760px) {
+  .cape-workzone { grid-template-columns:1fr; }
+  .agent-thread { grid-column:1; }
+  .workbench-pane { display:none; }
+  .workspace-shell { grid-template-columns:64px minmax(0,1fr); }
+  .workspace-rail nav button span { display:none; }
+}

@@ -3,6 +3,7 @@ import { Bot, Cable, CheckCircle2, Sparkles } from 'lucide-react'
 import { ConnectionsPanel } from './ConnectionsPanel'
 import { DocumentProcessingAdmin } from './DocumentProcessingAdmin'
 import { IntakeSecurityAdmin } from './IntakeSecurityAdmin'
+import { ModelEvaluationAdmin } from './ModelEvaluationAdmin'
 
 export function WorkspaceCatalog({ section }: { section: string }) {
   if (section === 'Agents')
@@ -59,6 +60,7 @@ export function WorkspaceCatalog({ section }: { section: string }) {
       <div className="administration-stack">
         <DocumentProcessingAdmin />
         <IntakeSecurityAdmin />
+        <ModelEvaluationAdmin />
       </div>
     )
   return (

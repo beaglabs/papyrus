@@ -409,6 +409,27 @@ const migrations: Migration[] = [
       `)
     },
   },
+  {
+    version: 11,
+    name: 'model evaluation registry and deployment gates',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS model_evaluation_runs (
+          id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, model_name TEXT NOT NULL, model_digest TEXT NOT NULL,
+          quantization TEXT NOT NULL, prompt_version TEXT NOT NULL, skill_version TEXT NOT NULL, tool_schema_version TEXT NOT NULL,
+          dataset_version TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('queued','running','passed','failed')),
+          metrics_json TEXT NOT NULL DEFAULT '{}', policy_snapshot_json TEXT NOT NULL DEFAULT '{}', report_sha256 TEXT,
+          created_by TEXT NOT NULL, created_at TEXT NOT NULL, completed_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS model_deployment_policy (
+          organization_id TEXT PRIMARY KEY, minimum_task_accuracy REAL NOT NULL DEFAULT 0.85,
+          maximum_unsafe_action_rate REAL NOT NULL DEFAULT 0.0, maximum_approval_bypass_rate REAL NOT NULL DEFAULT 0.0,
+          require_citations INTEGER NOT NULL DEFAULT 1, eligible_evaluation_id TEXT, updated_by TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_model_eval_org ON model_evaluation_runs(organization_id,created_at);
+      `)
+    },
+  },
 ]
 
 export function runMigrations(db: Database.Database): void {

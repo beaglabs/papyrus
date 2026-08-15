@@ -1,10 +1,11 @@
-import { ArrowUp, Bot, Check, ChevronDown, Circle, FileText, Globe2, LockKeyhole, MousePointer2, Paperclip, Pause, Play, ShieldCheck, SquareTerminal, UserRound, X } from 'lucide-react'
+import { Activity, ArrowUp, Bot, Check, ChevronDown, Circle, FileText, Globe2, LockKeyhole, MousePointer2, Paperclip, Pause, Play, ShieldCheck, SquareTerminal, UserRound, X } from 'lucide-react'
 import { useState } from 'react'
 import { ToolWorkbench } from './ToolWorkbench'
 
 export function CapeWorkzone({ projectName }: { projectId: string; projectName: string }) {
   const [prompt, setPrompt] = useState('')
   const [approval, setApproval] = useState<'pending' | 'approved' | 'rejected'>('pending')
+  const [inspectorOpen, setInspectorOpen] = useState(false)
   const steps = [
     ['Review request package', 'complete'],
     ['Check funding and routing', 'complete'],
@@ -16,7 +17,7 @@ export function CapeWorkzone({ projectName }: { projectId: string; projectName: 
       <section className="agent-thread">
         <header className="pane-header">
           <div><span className="eyebrow">ACTIVE WORKSPACE</span><h1>{projectName}</h1></div>
-          <button className="outline-button" type="button"><ChevronDown size={15} /> Acquisition analyst</button>
+          <div className="pane-actions"><button className="outline-button" type="button"><ChevronDown size={15} /> Acquisition analyst</button><button className="outline-button" type="button" aria-expanded={inspectorOpen} onClick={() => setInspectorOpen((open) => !open)}><Activity size={15} /> Run</button></div>
         </header>
         <div className="thread-scroll">
           <article className="message human-message">
@@ -41,8 +42,8 @@ export function CapeWorkzone({ projectName }: { projectId: string; projectName: 
           <footer><div><button type="button" aria-label="Attach released material"><Paperclip size={17} /></button><span><ShieldCheck size={13} /> Released context only</span></div><button className="send-button" type="submit" aria-label="Send"><ArrowUp size={17} /></button></footer>
         </form>
       </section>
-      <aside className="run-inspector">
-        <header className="pane-header"><div><span className="eyebrow">RUN 24-0187</span><h2>Execution</h2></div><button type="button" className="icon-button" aria-label="Pause run"><Pause size={15} /></button></header>
+      <aside className={`run-inspector ${inspectorOpen ? 'open' : ''}`}>
+        <header className="pane-header"><div><span className="eyebrow">RUN 24-0187</span><h2>Execution</h2></div><div className="pane-actions"><button type="button" className="icon-button" aria-label="Pause run"><Pause size={15} /></button><button type="button" className="icon-button" aria-label="Close execution panel" onClick={() => setInspectorOpen(false)}><X size={15} /></button></div></header>
         <section className="run-status"><span className="live-dot" /> <b>Waiting for approval</b><small>02:14 elapsed</small></section>
         <section className="plan-section"><header><b>Plan</b><span>2 of 4</span></header><ol>{steps.map(([label, state], index) => <li key={label} className={state}><span>{state === 'complete' ? <Check size={13} /> : state === 'active' ? <Play size={11} /> : <Circle size={10} />}</span><div><b>{label}</b><small>{index === 2 ? 'Approval checkpoint' : state}</small></div></li>)}</ol></section>
         <section className="activity-section"><header><b>Activity</b><button type="button">Evidence</button></header><div><Globe2 size={14} /><p><b>Stagehand</b><span>Read coordination status</span></p><time>2:03</time></div><div><FileText size={14} /><p><b>Documents</b><span>Cited funding paragraph 4</span></p><time>1:41</time></div><div><SquareTerminal size={14} /><p><b>Policy</b><span>Write requires approval</span></p><time>1:29</time></div></section>

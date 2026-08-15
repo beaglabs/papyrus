@@ -287,6 +287,62 @@ const migrations: Migration[] = [
       `)
     },
   },
+  {
+    version: 8,
+    name: 'durable document processing and OCR settings',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS document_processing_jobs (
+          id TEXT PRIMARY KEY,
+          organization_id TEXT NOT NULL,
+          intake_item_id TEXT NOT NULL UNIQUE,
+          state TEXT NOT NULL CHECK(state IN ('queued', 'processing', 'needs-input', 'complete', 'failed')),
+          extraction_method TEXT,
+          engine_name TEXT,
+          engine_version TEXT,
+          attempts INTEGER NOT NULL DEFAULT 0,
+          max_attempts INTEGER NOT NULL DEFAULT 3,
+          error_code TEXT,
+          error_message TEXT,
+          created_at TEXT NOT NULL,
+          started_at TEXT,
+          completed_at TEXT,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (intake_item_id) REFERENCES intake_items(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS document_derivatives (
+          id TEXT PRIMARY KEY,
+          organization_id TEXT NOT NULL,
+          intake_item_id TEXT NOT NULL,
+          job_id TEXT NOT NULL,
+          kind TEXT NOT NULL CHECK(kind IN ('text', 'metadata', 'page-map', 'thumbnail')),
+          media_type TEXT NOT NULL,
+          sha256 TEXT NOT NULL,
+          content_base64 TEXT NOT NULL,
+          page_count INTEGER,
+          created_at TEXT NOT NULL,
+          UNIQUE(job_id, kind),
+          FOREIGN KEY (intake_item_id) REFERENCES intake_items(id) ON DELETE CASCADE,
+          FOREIGN KEY (job_id) REFERENCES document_processing_jobs(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS document_processing_settings (
+          organization_id TEXT PRIMARY KEY,
+          max_file_size_bytes INTEGER NOT NULL DEFAULT 26214400,
+          ocr_enabled INTEGER NOT NULL DEFAULT 1,
+          ocr_languages TEXT NOT NULL DEFAULT '["eng"]',
+          native_text_minimum INTEGER NOT NULL DEFAULT 32,
+          job_timeout_seconds INTEGER NOT NULL DEFAULT 120,
+          retain_intermediates INTEGER NOT NULL DEFAULT 1,
+          updated_by TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_document_jobs_queue
+          ON document_processing_jobs(organization_id, state, created_at);
+        CREATE INDEX IF NOT EXISTS idx_document_derivatives_item
+          ON document_derivatives(organization_id, intake_item_id);
+      `)
+    },
+  },
 ]
 
 export function runMigrations(db: Database.Database): void {

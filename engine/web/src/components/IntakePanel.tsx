@@ -13,12 +13,19 @@ interface Item {
   tags: string[]
   processing?: { state: string; extractionMethod?: string; errorMessage?: string }
   security?: { verdict: string; matches: string[]; evidence: string[] }
+  recordsScheduleId?: string
+}
+interface Schedule {
+  id: string
+  code: string
+  title: string
 }
 
 export function IntakePanel({ projectId }: { projectId?: string }) {
   const { apiFetch } = useAuth()
   const [items, setItems] = useState<Item[]>([])
   const [busy, setBusy] = useState(false)
+  const [schedules, setSchedules] = useState<Schedule[]>([])
   const input = useRef<HTMLInputElement>(null)
   const load = useCallback(() => {
     void apiFetch('/api/intake')
@@ -29,6 +36,9 @@ export function IntakePanel({ projectId }: { projectId?: string }) {
     void apiFetch('/api/intake')
       .then((r) => r.json())
       .then((data: { items: Item[] }) => setItems(data.items))
+    void apiFetch('/api/records')
+      .then((r) => r.json())
+      .then((data: { schedules: Schedule[] }) => setSchedules(data.schedules))
   }, [apiFetch])
   async function upload(file: File) {
     setBusy(true)
@@ -47,6 +57,13 @@ export function IntakePanel({ projectId }: { projectId?: string }) {
     load()
   }
   async function decide(item: Item, decision: 'release' | 'reject') {
+    if (decision === 'release' && !item.recordsScheduleId && schedules[0]) {
+      await apiFetch('/api/records/assign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ intakeItemId: item.id, scheduleId: schedules[0].id }),
+      })
+    }
     await apiFetch('/api/intake/decision', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -115,6 +132,9 @@ export function IntakePanel({ projectId }: { projectId?: string }) {
                   </span>
                   <span className={`security-chip ${item.security?.verdict ?? 'checking'}`}>
                     <ShieldAlert size={12} /> Security: {item.security?.verdict ?? 'checking'}
+                  </span>
+                  <span className="records-chip">
+                    Records: {item.recordsScheduleId ? 'assigned' : 'assign on release'}
                   </span>
                   <span className={`processing-chip ${item.processing?.state ?? 'queued'}`}>
                     <Clock3 size={12} />

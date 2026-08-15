@@ -4,6 +4,7 @@ import { ConnectionsPanel } from './ConnectionsPanel'
 import { DocumentProcessingAdmin } from './DocumentProcessingAdmin'
 import { IntakeSecurityAdmin } from './IntakeSecurityAdmin'
 import { ModelEvaluationAdmin } from './ModelEvaluationAdmin'
+import { RecordsPanel } from './RecordsPanel'
 
 export function WorkspaceCatalog({ section }: { section: string }) {
   if (section === 'Agents')
@@ -55,6 +56,7 @@ export function WorkspaceCatalog({ section }: { section: string }) {
       </div>
     )
   if (section === 'Connections') return <ConnectionsPanel />
+  if (section === 'Records') return <RecordsPanel />
   if (section === 'Admin')
     return (
       <div className="administration-stack">

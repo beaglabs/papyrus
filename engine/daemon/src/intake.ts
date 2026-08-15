@@ -26,6 +26,7 @@ export interface IntakeItem {
   reviewedAt?: string
   processing?: DocumentProcessingJob
   security?: IntakeSecurityResult
+  recordsScheduleId?: string
 }
 
 function map(row: Record<string, unknown>): IntakeItem {
@@ -49,6 +50,7 @@ function map(row: Record<string, unknown>): IntakeItem {
     reviewedAt: row.reviewed_at ? String(row.reviewed_at) : undefined,
     processing: getDocumentJob(id) ?? undefined,
     security: getSecurityResult(id) ?? undefined,
+    recordsScheduleId: row.records_schedule_id ? String(row.records_schedule_id) : undefined,
   }
 }
 
@@ -129,6 +131,11 @@ export function decideIntake(
   const security = getSecurityResult(id)
   if (input.decision === 'release' && security?.verdict !== 'passed')
     throw new Error('Intake security checks must pass before release')
+  const record = getDb()
+    .prepare('SELECT records_schedule_id FROM intake_items WHERE id=? AND organization_id=?')
+    .get(id, organizationId) as Record<string, unknown>
+  if (input.decision === 'release' && !record.records_schedule_id)
+    throw new Error('A records schedule must be assigned before release')
   const now = new Date().toISOString()
   const state = input.decision === 'release' ? 'released' : 'rejected'
   getDb()

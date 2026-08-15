@@ -430,6 +430,33 @@ const migrations: Migration[] = [
       `)
     },
   },
+  {
+    version: 12,
+    name: 'records schedules holds and disposition history',
+    up(db) {
+      db.exec(`
+        ALTER TABLE intake_items ADD COLUMN records_schedule_id TEXT;
+        CREATE TABLE IF NOT EXISTS records_schedules (
+          id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, code TEXT NOT NULL, title TEXT NOT NULL,
+          retention_months INTEGER, disposition_action TEXT NOT NULL CHECK(disposition_action IN ('destroy','transfer','review')),
+          permanent INTEGER NOT NULL DEFAULT 0, effective_at TEXT NOT NULL, supersedes_id TEXT, active INTEGER NOT NULL DEFAULT 1,
+          created_by TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(organization_id,code,effective_at)
+        );
+        CREATE TABLE IF NOT EXISTS records_holds (
+          id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, name TEXT NOT NULL, scope_json TEXT NOT NULL,
+          state TEXT NOT NULL CHECK(state IN ('active','released')), rationale TEXT NOT NULL,
+          created_by TEXT NOT NULL, created_at TEXT NOT NULL, released_by TEXT, released_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS records_disposition_history (
+          id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL,
+          schedule_id TEXT, action TEXT NOT NULL, actor TEXT NOT NULL, rationale TEXT, evidence_hash TEXT,
+          occurred_at TEXT NOT NULL, FOREIGN KEY(schedule_id) REFERENCES records_schedules(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_records_schedules_org ON records_schedules(organization_id,active);
+        CREATE INDEX IF NOT EXISTS idx_records_holds_org ON records_holds(organization_id,state);
+      `)
+    },
+  },
 ]
 
 export function runMigrations(db: Database.Database): void {

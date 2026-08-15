@@ -65,7 +65,7 @@ export function WorkspaceShell({ projectName, onBack, children }: WorkspaceShell
             <button type="button" onClick={onBack}>
               <ChevronLeft size={16} /> Projects
             </button>
-            <strong>{projectName}</strong>
+            <strong title={projectName}>{projectName}</strong>
           </div>
           <div className="workspace-controls">
             <span className="classification-chip">

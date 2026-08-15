@@ -108,6 +108,9 @@ importers:
       '@papyrus/agents':
         specifier: workspace:*
         version: link:../agents
+      '@papyrus/browser':
+        specifier: workspace:*
+        version: link:../browser
       '@papyrus/core':
         specifier: workspace:*
         version: link:../core

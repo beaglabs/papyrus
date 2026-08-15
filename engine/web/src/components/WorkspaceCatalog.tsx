@@ -5,6 +5,7 @@ import { DeploymentAuthorizationAdmin } from './DeploymentAuthorizationAdmin'
 import { DocumentProcessingAdmin } from './DocumentProcessingAdmin'
 import { IntakeSecurityAdmin } from './IntakeSecurityAdmin'
 import { ModelEvaluationAdmin } from './ModelEvaluationAdmin'
+import { ModelRuntimeAdmin } from './ModelRuntimeAdmin'
 import { OperationsPanel } from './OperationsPanel'
 import { RecordsPanel } from './RecordsPanel'
 
@@ -66,6 +67,7 @@ export function WorkspaceCatalog({ section }: { section: string }) {
       <div className="administration-stack">
         <DocumentProcessingAdmin />
         <IntakeSecurityAdmin />
+        <ModelRuntimeAdmin />
         <ModelEvaluationAdmin />
         <DeploymentAuthorizationAdmin />
       </div>

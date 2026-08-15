@@ -35,6 +35,12 @@ import type { CanvasNodeDoc, EdgeDoc } from '@papyrus/core/nodes/types'
 import * as Y from 'yjs'
 import { type AuditAction, auditLog, getAuditLog, verifyAuditChain } from './audit.js'
 import {
+  browserAction,
+  getBrowserFrame,
+  setBrowserTakeover,
+  startBrowserSession,
+} from './browser-sessions.js'
+import {
   enqueueConnectionAction,
   listCapeConnections,
   saveCapeConnection,
@@ -86,9 +92,16 @@ import {
   scanIntakeItem,
   updateIntakeSecuritySettings,
 } from './intake-security.js'
-import { decideIntake, listIntake, stageIntake } from './intake.js'
+import {
+  decideIntake,
+  getIntakePreview,
+  listIntake,
+  stageIntake,
+  updateIntakeMetadata,
+} from './intake.js'
 import { LicenseService } from './license-service.js'
 import { listEvaluationRuns, runPinnedEvaluation } from './model-evaluations.js'
+import { getModelRuntimeSettings, updateModelRuntimeSettings } from './model-runtime.js'
 import {
   type OrgMembership,
   createOrg,
@@ -118,6 +131,7 @@ import {
   ensureDefaultSchedules,
   listLegalHolds,
 } from './records-governance.js'
+import { createRun, decideApproval, getRunBundle, listRuns, subscribeRun } from './runs.js'
 import { createSourceSpecificationNode, getProjectSystemPrompt } from './source-specification.js'
 
 const PORT = Number(process.env.PAPYRUS_PORT ?? 3777)
@@ -2109,6 +2123,221 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
 
   // ── Agent chat endpoint ────────────────────────────────────────
 
+  if (url.pathname === '/api/runs' && method === 'GET') {
+    const authCtx = requireAuth(req, res)
+    if (!authCtx) return true
+    const projectId = url.searchParams.get('projectId') ?? ''
+    if (!projectId || !hasPermission(projectId, authCtx.memberKey, 'project:read')) {
+      json(res, 403, { error: 'Project access denied' })
+      return true
+    }
+    json(res, 200, { runs: listRuns(projectId) })
+    return true
+  }
+  if (url.pathname === '/api/runs' && method === 'POST') {
+    const authCtx = requireAuth(req, res)
+    if (!authCtx) return true
+    const membership = getOrgForMember(authCtx.memberKey)
+    const body = await parseBody(req)
+    const projectId = String(body.projectId ?? '')
+    if (!membership || !projectId || !hasPermission(projectId, authCtx.memberKey, 'node:update')) {
+      json(res, 403, { error: 'Project mutation access denied' })
+      return true
+    }
+    try {
+      json(
+        res,
+        201,
+        createRun({
+          organizationId: membership.org.id,
+          projectId,
+          requestedBy: authCtx.memberKey,
+          request: String(body.request ?? ''),
+          classification: typeof body.classification === 'string' ? body.classification : 'CUI',
+          skillIds: Array.isArray(body.skillIds) ? body.skillIds.map(String) : [],
+        }),
+      )
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : 'Run creation failed' })
+    }
+    return true
+  }
+  const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)$/)
+  if (runMatch && method === 'GET') {
+    const authCtx = requireAuth(req, res)
+    if (!authCtx) return true
+    try {
+      const bundle = getRunBundle(decodeURIComponent(runMatch[1] ?? ''))
+      if (!hasPermission(bundle.run.projectId, authCtx.memberKey, 'project:read')) {
+        json(res, 403, { error: 'Project access denied' })
+      } else json(res, 200, bundle)
+    } catch (error) {
+      json(res, 404, { error: error instanceof Error ? error.message : 'Run not found' })
+    }
+    return true
+  }
+  const eventMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/events$/)
+  if (eventMatch && method === 'GET') {
+    const authCtx = requireAuth(req, res)
+    if (!authCtx) return true
+    try {
+      const runId = decodeURIComponent(eventMatch[1] ?? '')
+      const bundle = getRunBundle(runId)
+      if (!hasPermission(bundle.run.projectId, authCtx.memberKey, 'project:read')) {
+        json(res, 403, { error: 'Project access denied' })
+        return true
+      }
+      const after = Number(url.searchParams.get('after') ?? 0)
+      sseStart(res)
+      for (const event of bundle.events.filter((item) => item.sequence > after))
+        sseSend(res, 'run-event', event)
+      const unsubscribe = subscribeRun(runId, (event) => sseSend(res, 'run-event', event))
+      const heartbeat = setInterval(() => res.write(': heartbeat\n\n'), 15_000)
+      res.on('close', () => {
+        clearInterval(heartbeat)
+        unsubscribe()
+      })
+    } catch (error) {
+      json(res, 404, { error: error instanceof Error ? error.message : 'Run not found' })
+    }
+    return true
+  }
+  const approvalMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/approvals\/([^/]+)$/)
+  if (approvalMatch && method === 'POST') {
+    const authCtx = requireAuth(req, res)
+    if (!authCtx) return true
+    const runId = decodeURIComponent(approvalMatch[1] ?? '')
+    try {
+      const bundle = getRunBundle(runId)
+      if (!hasPermission(bundle.run.projectId, authCtx.memberKey, 'node:update')) {
+        json(res, 403, { error: 'Project mutation access denied' })
+        return true
+      }
+      const body = await parseBody(req)
+      if (body.decision !== 'approved' && body.decision !== 'rejected') {
+        json(res, 400, { error: 'Approval decision must be approved or rejected' })
+        return true
+      }
+      json(
+        res,
+        200,
+        decideApproval(runId, decodeURIComponent(approvalMatch[2] ?? ''), authCtx.memberKey, {
+          decision: body.decision,
+          rationale: typeof body.rationale === 'string' ? body.rationale : undefined,
+        }),
+      )
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : 'Approval decision failed' })
+    }
+    return true
+  }
+  const browserMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/browser$/)
+  if (browserMatch && method === 'POST') {
+    const authCtx = requireAuth(req, res)
+    if (!authCtx) return true
+    const runId = decodeURIComponent(browserMatch[1] ?? '')
+    try {
+      const bundle = getRunBundle(runId)
+      if (!hasPermission(bundle.run.projectId, authCtx.memberKey, 'node:update')) {
+        json(res, 403, { error: 'Project mutation access denied' })
+        return true
+      }
+      const body = await parseBody(req)
+      const target = new URL(String(body.url ?? ''))
+      json(
+        res,
+        201,
+        await startBrowserSession({
+          runId,
+          actor: authCtx.memberKey,
+          classification: bundle.run.classification,
+          url: target.toString(),
+          allowedOrigins: [target.origin],
+        }),
+      )
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : 'Browser session failed' })
+    }
+    return true
+  }
+  const takeoverMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/browser\/([^/]+)\/takeover$/)
+  if (takeoverMatch && method === 'POST') {
+    const authCtx = requireAuth(req, res)
+    if (!authCtx) return true
+    const runId = decodeURIComponent(takeoverMatch[1] ?? '')
+    try {
+      const bundle = getRunBundle(runId)
+      if (!hasPermission(bundle.run.projectId, authCtx.memberKey, 'node:update')) {
+        json(res, 403, { error: 'Project mutation access denied' })
+        return true
+      }
+      const body = await parseBody(req)
+      json(
+        res,
+        200,
+        setBrowserTakeover({
+          runId,
+          sessionId: decodeURIComponent(takeoverMatch[2] ?? ''),
+          actor: authCtx.memberKey,
+          takeover: body.takeover !== false,
+        }),
+      )
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : 'Takeover failed' })
+    }
+    return true
+  }
+  const browserActionMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/browser\/([^/]+)\/act$/)
+  if (browserActionMatch && method === 'POST') {
+    const authCtx = requireAuth(req, res)
+    if (!authCtx) return true
+    const runId = decodeURIComponent(browserActionMatch[1] ?? '')
+    try {
+      const bundle = getRunBundle(runId)
+      if (!hasPermission(bundle.run.projectId, authCtx.memberKey, 'node:update')) {
+        json(res, 403, { error: 'Project mutation access denied' })
+        return true
+      }
+      const body = await parseBody(req)
+      if (typeof body.instruction !== 'string' || !body.instruction.trim()) {
+        json(res, 400, { error: 'A browser instruction is required' })
+        return true
+      }
+      json(
+        res,
+        200,
+        await browserAction({
+          runId,
+          sessionId: decodeURIComponent(browserActionMatch[2] ?? ''),
+          actor: authCtx.memberKey,
+          instruction: body.instruction.trim(),
+        }),
+      )
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : 'Browser action failed' })
+    }
+    return true
+  }
+  const browserFrameMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/browser\/([^/]+)\/frame$/)
+  if (browserFrameMatch && method === 'GET') {
+    const authCtx = requireAuth(req, res)
+    if (!authCtx) return true
+    const runId = decodeURIComponent(browserFrameMatch[1] ?? '')
+    try {
+      const bundle = getRunBundle(runId)
+      if (!hasPermission(bundle.run.projectId, authCtx.memberKey, 'project:read')) {
+        json(res, 403, { error: 'Project access denied' })
+        return true
+      }
+      json(res, 200, await getBrowserFrame(runId, decodeURIComponent(browserFrameMatch[2] ?? '')))
+    } catch (error) {
+      json(res, 404, {
+        error: error instanceof Error ? error.message : 'Browser frame unavailable',
+      })
+    }
+    return true
+  }
+
   if (url.pathname === '/api/intake' && method === 'GET') {
     const authCtx = requireAuth(req, res)
     if (!authCtx) return true
@@ -2366,7 +2595,28 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
     }
     return true
   }
-  if (url.pathname === '/api/intake/decision' && method === 'POST') {
+  const intakePreviewMatch = url.pathname.match(/^\/api\/intake\/([^/]+)\/preview$/)
+  if (intakePreviewMatch && method === 'GET') {
+    const authCtx = requireAuth(req, res)
+    if (!authCtx) return true
+    const membership = getOrgForMember(authCtx.memberKey)
+    if (!membership) {
+      json(res, 403, { error: 'Organization membership required' })
+      return true
+    }
+    try {
+      json(
+        res,
+        200,
+        getIntakePreview(membership.org.id, decodeURIComponent(intakePreviewMatch[1] ?? '')),
+      )
+    } catch (error) {
+      json(res, 404, { error: error instanceof Error ? error.message : 'Preview not found' })
+    }
+    return true
+  }
+  const intakeMetadataMatch = url.pathname.match(/^\/api\/intake\/([^/]+)\/metadata$/)
+  if (intakeMetadataMatch && method === 'PUT') {
     const authCtx = requireAuth(req, res)
     if (!authCtx) return true
     const membership = getOrgForMember(authCtx.memberKey)
@@ -2379,8 +2629,35 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       json(
         res,
         200,
+        updateIntakeMetadata(membership.org.id, decodeURIComponent(intakeMetadataMatch[1] ?? ''), {
+          classification: String(body.classification ?? ''),
+          tags: Array.isArray(body.tags) ? body.tags.map(String) : [],
+        }),
+      )
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : 'Metadata update failed' })
+    }
+    return true
+  }
+  if (url.pathname === '/api/intake/decision' && method === 'POST') {
+    const authCtx = requireAuth(req, res)
+    if (!authCtx) return true
+    const membership = getOrgForMember(authCtx.memberKey)
+    if (!membership) {
+      json(res, 403, { error: 'Organization membership required' })
+      return true
+    }
+    const body = await parseBody(req)
+    if (body.decision !== 'release' && body.decision !== 'reject') {
+      json(res, 400, { error: 'Intake decision must be release or reject' })
+      return true
+    }
+    try {
+      json(
+        res,
+        200,
         decideIntake(String(body.id), membership.org.id, {
-          decision: body.decision === 'reject' ? 'reject' : 'release',
+          decision: body.decision,
           classification: String(body.classification ?? 'UNCLASSIFIED'),
           tags: Array.isArray(body.tags) ? body.tags.map(String) : [],
           rationale: typeof body.rationale === 'string' ? body.rationale : undefined,
@@ -2475,6 +2752,40 @@ async function handleAPI(req: IncomingMessage, res: ServerResponse): Promise<boo
       settings: getIntakeSecuritySettings(membership.org.id),
       canManage: membership.role === 'admin',
     })
+    return true
+  }
+  if (url.pathname === '/api/admin/model-runtime' && method === 'GET') {
+    const authCtx = requireAuth(req, res)
+    if (!authCtx) return true
+    const membership = getOrgForMember(authCtx.memberKey)
+    if (!membership) {
+      json(res, 403, { error: 'Organization membership required' })
+      return true
+    }
+    json(res, 200, {
+      settings: getModelRuntimeSettings(membership.org.id),
+      canManage: membership.role === 'admin',
+    })
+    return true
+  }
+  if (url.pathname === '/api/admin/model-runtime' && method === 'PUT') {
+    const authCtx = requireAuth(req, res)
+    if (!authCtx) return true
+    const membership = getOrgForMember(authCtx.memberKey)
+    if (!membership || membership.role !== 'admin') {
+      json(res, 403, { error: 'Organization administrator required' })
+      return true
+    }
+    const body = await parseBody(req)
+    try {
+      json(res, 200, {
+        settings: updateModelRuntimeSettings(membership.org.id, authCtx.memberKey, body),
+      })
+    } catch (error) {
+      json(res, 400, {
+        error: error instanceof Error ? error.message : 'Model runtime settings are invalid',
+      })
+    }
     return true
   }
   if (url.pathname === '/api/admin/intake-security' && method === 'PUT') {

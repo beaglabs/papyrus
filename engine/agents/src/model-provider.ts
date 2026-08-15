@@ -172,16 +172,23 @@ export function resolveModelProvider(
     return { provider: 'demo', baseURL: '', apiKey: '', model: 'demo-model' }
   }
 
-  const apiKey = env.PAPYRUS_LLM_API_KEY ?? env.OPENROUTER_API_KEY ?? env.OPENAI_API_KEY
+  const localBaseUrl = env.PAPYRUS_LLM_BASE_URL
+  const apiKey =
+    env.PAPYRUS_LLM_API_KEY ??
+    env.OPENROUTER_API_KEY ??
+    env.OPENAI_API_KEY ??
+    (localBaseUrl ? 'local' : undefined)
   if (!apiKey) return null
   const usingOpenRouter = Boolean(env.OPENROUTER_API_KEY) && !env.PAPYRUS_LLM_BASE_URL
   return {
     provider: 'openai-compatible',
     baseURL:
-      env.PAPYRUS_LLM_BASE_URL ??
+      localBaseUrl ??
       (usingOpenRouter ? 'https://openrouter.ai/api/v1' : 'https://api.openai.com/v1'),
     apiKey,
-    model: env.PAPYRUS_LLM_MODEL ?? (usingOpenRouter ? 'inclusionai/ling-3.0-tiny:free' : 'gpt-4o'),
+    model:
+      env.PAPYRUS_LLM_MODEL ??
+      (usingOpenRouter ? 'inclusionai/ling-3.0-tiny:free' : localBaseUrl ? 'phi-4-mini' : 'gpt-4o'),
   }
 }
 

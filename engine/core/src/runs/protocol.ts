@@ -22,6 +22,8 @@ export type RunEventKind =
   | 'run.status'
   | 'run.message.delta'
   | 'run.plan.updated'
+  | 'model.requested'
+  | 'model.completed'
   | 'tool.requested'
   | 'tool.started'
   | 'tool.output'

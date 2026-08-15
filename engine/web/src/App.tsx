@@ -76,11 +76,12 @@ function AppContent() {
 
   if (activeProject) {
     return (
-      <WorkspaceShell projectName={activeProject.name} onBack={() => setActiveProject(null)}>
-        <CapeWorkzone
-          projectId={activeProject.id}
-          projectName={activeProject.name}
-        />
+      <WorkspaceShell
+        projectId={activeProject.id}
+        projectName={activeProject.name}
+        onBack={() => setActiveProject(null)}
+      >
+        <CapeWorkzone projectId={activeProject.id} projectName={activeProject.name} />
       </WorkspaceShell>
     )
   }

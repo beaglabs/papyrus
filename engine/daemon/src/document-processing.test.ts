@@ -5,6 +5,7 @@ import {
   getDocumentProcessingSettings,
   updateDocumentProcessingSettings,
 } from './document-processing.js'
+import { updateIntakeSecuritySettings } from './intake-security.js'
 import { decideIntake, stageIntake } from './intake.js'
 import { assignRecordsSchedule, ensureDefaultSchedules } from './records-governance.js'
 
@@ -16,8 +17,14 @@ function encoded(value: string): string {
 
 describe('document processing', () => {
   it('creates a durable completed job and derivative for native text', () => {
+    const organizationId = `org-native-${Date.now()}`
+    updateIntakeSecuritySettings(
+      organizationId,
+      { clamavRequired: false, yaraxRequired: false },
+      'test-admin',
+    )
     const item = stageIntake({
-      organizationId: 'org-default',
+      organizationId,
       filename: `memo-${Date.now()}.txt`,
       mediaType: 'text/plain',
       contentBase64: encoded(
@@ -27,11 +34,11 @@ describe('document processing', () => {
     })
 
     expect(item.processing).toMatchObject({ state: 'complete', extractionMethod: 'native-text' })
-    const [schedule] = ensureDefaultSchedules('org-default', 'records-admin')
+    const [schedule] = ensureDefaultSchedules(organizationId, 'records-admin')
     if (!schedule) throw new Error('Default records schedule was not created')
-    assignRecordsSchedule('org-default', item.id, schedule.id, 'records-admin')
+    assignRecordsSchedule(organizationId, item.id, schedule.id, 'records-admin')
     expect(() =>
-      decideIntake(item.id, 'org-default', {
+      decideIntake(item.id, organizationId, {
         decision: 'release',
         classification: 'UNCLASSIFIED',
         tags: [],

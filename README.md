@@ -113,7 +113,9 @@ pnpm typecheck
 pnpm lint
 ```
 
-Package scripts currently run directly from each workspace. Deployment-specific configuration, certificates, model endpoints, trusted transfer deployment IDs, and secrets should be supplied through the approved environment rather than committed to source.
+Package scripts currently run directly from each workspace. User-managed model, OCR, intake-security, records, connection, and deployment settings are configured in the Administration UI and persisted locally. Certificates, credentials, trusted transfer identities, and other secrets still belong in the deployment's approved secret store rather than source control.
+
+Document intake uses the locally installed `pdftotext`, `pdftoppm`, and `tesseract` commands. The release gate uses locally installed `clamscan` and `yr` (YARA-X) commands with Papyrus's bundled rule pack. If an engine required by organization policy is unavailable, the gate fails closed and shows the evidence in Staging.
 
 ### Model provider configuration
 
@@ -129,15 +131,7 @@ pnpm cli serve --no-open
 
 Papyrus calls Cloudflare's hosted Messages API from the self-hosted daemon. The `env.AI.run(...)` binding is only available when the calling application itself runs as a Cloudflare Worker.
 
-For an OpenAI-compatible service, including a local inference server:
-
-```bash
-export PAPYRUS_LLM_PROVIDER=openai-compatible
-export PAPYRUS_LLM_BASE_URL="http://127.0.0.1:8000/v1"
-export PAPYRUS_LLM_API_KEY="your-provider-api-key"
-export PAPYRUS_LLM_MODEL="your-model-id"
-pnpm cli serve --no-open
-```
+For a local OpenAI-compatible service, open **Administration → Phi model runtime**, enter its local API endpoint and model identifier, and save. Papyrus stores this organization setting locally; no YAML or environment-file edit is required. Environment variables remain a deployment fallback for hosted providers and unattended installations.
 
 Never commit API tokens. Supply them through the deployment environment or its secret manager.
 

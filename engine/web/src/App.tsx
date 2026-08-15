@@ -1,6 +1,6 @@
 import { tokens } from '@papyrus/core/design'
 import { useEffect, useState } from 'react'
-import { DevEnvironment } from './components/DevEnvironment'
+import { CapeWorkzone } from './components/CapeWorkzone'
 import { Landing } from './components/Landing'
 import { Login } from './components/Login'
 import { Onboarding } from './components/Onboarding'
@@ -77,10 +77,9 @@ function AppContent() {
   if (activeProject) {
     return (
       <WorkspaceShell projectName={activeProject.name} onBack={() => setActiveProject(null)}>
-        <DevEnvironment
+        <CapeWorkzone
           projectId={activeProject.id}
           projectName={activeProject.name}
-          onBack={() => setActiveProject(null)}
         />
       </WorkspaceShell>
     )

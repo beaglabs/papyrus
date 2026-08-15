@@ -1,6 +1,7 @@
 import { CAPE_WORKFLOW_PACK } from '@papyrus/core/workflows/cape'
 import { Bot, Cable, CheckCircle2, Sparkles } from 'lucide-react'
 import { ConnectionsPanel } from './ConnectionsPanel'
+import { DeploymentAuthorizationAdmin } from './DeploymentAuthorizationAdmin'
 import { DocumentProcessingAdmin } from './DocumentProcessingAdmin'
 import { IntakeSecurityAdmin } from './IntakeSecurityAdmin'
 import { ModelEvaluationAdmin } from './ModelEvaluationAdmin'
@@ -63,6 +64,7 @@ export function WorkspaceCatalog({ section }: { section: string }) {
         <DocumentProcessingAdmin />
         <IntakeSecurityAdmin />
         <ModelEvaluationAdmin />
+        <DeploymentAuthorizationAdmin />
       </div>
     )
   return (

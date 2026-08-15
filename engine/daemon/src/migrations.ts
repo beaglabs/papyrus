@@ -457,6 +457,27 @@ const migrations: Migration[] = [
       `)
     },
   },
+  {
+    version: 13,
+    name: 'deployment posture and authorization evidence',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS deployment_posture (
+          organization_id TEXT PRIMARY KEY, profile TEXT NOT NULL DEFAULT 'local-development',
+          identity_status TEXT NOT NULL DEFAULT 'unverified', audit_forwarding_status TEXT NOT NULL DEFAULT 'unverified',
+          backup_status TEXT NOT NULL DEFAULT 'unverified', secret_store_status TEXT NOT NULL DEFAULT 'unverified',
+          time_sync_status TEXT NOT NULL DEFAULT 'unverified', authorization_status TEXT NOT NULL DEFAULT 'not-authorized',
+          inherited_controls_json TEXT NOT NULL DEFAULT '[]', customer_controls_json TEXT NOT NULL DEFAULT '[]',
+          updated_by TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS authorization_evidence_bundles (
+          id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, profile TEXT NOT NULL, manifest_json TEXT NOT NULL,
+          sha256 TEXT NOT NULL, signature_status TEXT NOT NULL DEFAULT 'unsigned', created_by TEXT NOT NULL, created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_auth_evidence_org ON authorization_evidence_bundles(organization_id,created_at);
+      `)
+    },
+  },
 ]
 
 export function runMigrations(db: Database.Database): void {

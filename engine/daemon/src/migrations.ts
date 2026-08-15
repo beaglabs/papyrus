@@ -478,6 +478,55 @@ const migrations: Migration[] = [
       `)
     },
   },
+  {
+    version: 14,
+    name: 'complete run workspace persistence',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS run_messages (
+          id TEXT PRIMARY KEY, run_id TEXT NOT NULL, role TEXT NOT NULL,
+          content TEXT NOT NULL, sources_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL,
+          FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS run_plans (
+          run_id TEXT PRIMARY KEY, plan_json TEXT NOT NULL, updated_at TEXT NOT NULL,
+          FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS tool_sessions (
+          id TEXT PRIMARY KEY, run_id TEXT NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL,
+          status TEXT NOT NULL, classification TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}',
+          takeover_by TEXT, started_at TEXT NOT NULL, updated_at TEXT NOT NULL, ended_at TEXT,
+          FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_run_messages_time ON run_messages(run_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_tool_sessions_run ON tool_sessions(run_id, updated_at DESC);
+      `)
+      addColumn(db, 'approval_requests', 'event_id TEXT')
+      addColumn(db, 'approval_requests', 'modification_json TEXT')
+    },
+  },
+  {
+    version: 15,
+    name: 'local model runtime settings',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS model_runtime_settings (
+          organization_id TEXT PRIMARY KEY,
+          base_url TEXT NOT NULL,
+          model TEXT NOT NULL,
+          updated_by TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+      `)
+    },
+  },
+  {
+    version: 16,
+    name: 'pin local inference to LFM2.5-2.6B',
+    up(db) {
+      db.prepare('UPDATE model_runtime_settings SET model = ?').run('LiquidAI/LFM2.5-2.6B')
+    },
+  },
 ]
 
 export function runMigrations(db: Database.Database): void {

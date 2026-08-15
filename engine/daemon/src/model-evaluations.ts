@@ -39,7 +39,7 @@ export function runPinnedEvaluation(
   actor: string,
   input: Record<string, unknown>,
 ): EvaluationRun {
-  const modelName = String(input.modelName ?? 'Phi-4-mini')
+  const modelName = String(input.modelName ?? 'LiquidAI/LFM2.5-2.6B')
   const modelDigest = String(input.modelDigest ?? 'unverified')
   if (modelDigest === 'unverified') throw new Error('A pinned model digest is required')
   const metrics = {

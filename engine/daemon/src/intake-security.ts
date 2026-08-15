@@ -1,4 +1,9 @@
+import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { getDb } from './database.js'
 
 export type SecurityVerdict =
@@ -111,8 +116,16 @@ export function getSecurityResult(intakeItemId: string): IntakeSecurityResult | 
   return row ? map(row) : null
 }
 
-// The adapter boundary is deliberately deterministic. Production deployments replace
-// these built-in fixtures with isolated ClamAV and YARA-X workers through approved IPC.
+function commandVersion(command: string): string | undefined {
+  try {
+    return execFileSync(command, ['--version'], { encoding: 'utf8', timeout: 10_000 })
+      .trim()
+      .split('\n')[0]
+  } catch {
+    return undefined
+  }
+}
+
 export function scanIntakeItem(organizationId: string, intakeItemId: string): IntakeSecurityResult {
   const db = getDb()
   const item = db
@@ -122,14 +135,87 @@ export function scanIntakeItem(organizationId: string, intakeItemId: string): In
     .get(intakeItemId, organizationId) as Record<string, unknown> | undefined
   if (!item) throw new Error('Intake item not found')
   const bytes = Buffer.from(String(item.content_base64), 'base64')
-  const text = bytes.toString('utf8')
   const matches: string[] = []
-  if (text.includes('EICAR-STANDARD-ANTIVIRUS-TEST-FILE')) matches.push('ClamAV:Eicar-Signature')
-  if (/powershell\s+.*-enc|<script[^>]*>.*eval\(/is.test(text))
-    matches.push('YARA-X:suspicious-execution')
-  const verdict: SecurityVerdict = matches.length ? 'blocked' : 'passed'
   const now = new Date().toISOString()
   const settings = getIntakeSecuritySettings(organizationId)
+  const clamavVersion = commandVersion('clamscan')
+  const yaraxVersion = commandVersion('yr')
+  const rulesPath = join(
+    dirname(fileURLToPath(import.meta.url)),
+    '..',
+    'security-rules',
+    'default.yar',
+  )
+  const evidence: string[] = []
+  let unavailable = false
+  const directory = mkdtempSync(join(tmpdir(), 'papyrus-scan-'))
+  const target = join(directory, 'intake.bin')
+  writeFileSync(target, bytes, { mode: 0o600 })
+  try {
+    if (clamavVersion) {
+      try {
+        execFileSync('clamscan', ['--no-summary', '--stdout', target], {
+          encoding: 'utf8',
+          timeout: settings.scanTimeoutSeconds * 1000,
+        })
+      } catch (error) {
+        const result = error as {
+          status?: number
+          stdout?: string | Buffer
+          stderr?: string | Buffer
+        }
+        if (result.status === 1) {
+          const output = String(result.stdout ?? '').trim()
+          matches.push(
+            ...output
+              .split('\n')
+              .filter(Boolean)
+              .map((line) => `ClamAV:${line}`),
+          )
+        } else {
+          unavailable = true
+          evidence.push(
+            `ClamAV error: ${String(result.stderr ?? result.stdout ?? 'scan failed').trim()}`,
+          )
+        }
+      }
+    } else if (settings.clamavRequired) {
+      unavailable = true
+      evidence.push('ClamAV executable is unavailable')
+    }
+    if (yaraxVersion && rulesPath) {
+      try {
+        const output = execFileSync('yr', ['scan', rulesPath, target], {
+          encoding: 'utf8',
+          timeout: settings.scanTimeoutSeconds * 1000,
+        }).trim()
+        if (output)
+          matches.push(
+            ...output
+              .split('\n')
+              .filter(Boolean)
+              .map((line) => `YARA-X:${line}`),
+          )
+      } catch (error) {
+        const result = error as { stdout?: string | Buffer; stderr?: string | Buffer }
+        unavailable = true
+        evidence.push(
+          `YARA-X error: ${String(result.stderr ?? result.stdout ?? 'scan failed').trim()}`,
+        )
+      }
+    } else if (settings.yaraxRequired) {
+      unavailable = true
+      evidence.push('YARA-X executable is unavailable')
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+  evidence.push(...matches.map((match) => `${String(item.filename)}: ${match}`))
+  const verdict: SecurityVerdict = matches.length
+    ? 'blocked'
+    : unavailable
+      ? 'engine-unavailable'
+      : 'passed'
   db.prepare(`INSERT INTO intake_security_scans
     (id,organization_id,intake_item_id,verdict,clamav_version,clamav_definitions_at,yarax_version,rule_pack_version,matches_json,evidence_json,started_at,completed_at,updated_at)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(intake_item_id) DO UPDATE SET verdict=excluded.verdict,
@@ -138,12 +224,12 @@ export function scanIntakeItem(organizationId: string, intakeItemId: string): In
     organizationId,
     intakeItemId,
     verdict,
-    'adapter-boundary',
+    clamavVersion ?? null,
     now,
-    'adapter-boundary',
+    yaraxVersion ?? null,
     settings.activeRulePackVersion,
     JSON.stringify(matches),
-    JSON.stringify(matches.map((match) => `${String(item.filename)}: ${match}`)),
+    JSON.stringify(evidence),
     now,
     now,
     now,

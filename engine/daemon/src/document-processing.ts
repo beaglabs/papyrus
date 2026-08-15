@@ -1,4 +1,8 @@
+import { execFileSync } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { extname, join } from 'node:path'
 import { getDb } from './database.js'
 
 export type DocumentJobState = 'queued' | 'processing' | 'needs-input' | 'complete' | 'failed'
@@ -173,20 +177,94 @@ function deriveText(
   filename: string,
   bytes: Buffer,
   minimum: number,
+  ocrEnabled: boolean,
+  ocrLanguages: string[],
 ): { state: DocumentJobState; method?: string; text?: string; code?: string; message?: string } {
   const lower = filename.toLowerCase()
-  if (/^image\//.test(mediaType) || /\.(png|jpe?g|tiff?|bmp)$/i.test(lower))
-    return {
-      state: 'needs-input',
-      code: 'OCR_ENGINE_REQUIRED',
-      message: 'This image requires an installed OCR engine.',
-    }
   if (/(zip|gzip|rar|7z)/i.test(mediaType) || /\.(zip|gz|rar|7z)$/i.test(lower))
     return {
       state: 'needs-input',
       code: 'ARCHIVE_INSPECTION_REQUIRED',
       message: 'Archive processing is reserved for the hardened intake phase.',
     }
+  const image = /^image\//.test(mediaType) || /\.(png|jpe?g|tiff?|bmp)$/i.test(lower)
+  const pdf = mediaType === 'application/pdf' || lower.endsWith('.pdf')
+  if (image || pdf) {
+    const directory = mkdtempSync(join(tmpdir(), 'papyrus-ocr-'))
+    const target = join(directory, `source${extname(filename) || (pdf ? '.pdf' : '.img')}`)
+    writeFileSync(target, bytes, { mode: 0o600 })
+    try {
+      if (pdf) {
+        try {
+          const native = execFileSync('pdftotext', [target, '-'], {
+            encoding: 'utf8',
+            timeout: 120_000,
+          }).trim()
+          if (native.length >= minimum)
+            return { state: 'complete', method: 'pdf-native-text', text: native }
+        } catch {
+          /* continue to OCR when enabled */
+        }
+        if (!ocrEnabled)
+          return {
+            state: 'needs-input',
+            code: 'OCR_DISABLED',
+            message: 'The PDF has insufficient native text and OCR is disabled.',
+          }
+        try {
+          const prefix = join(directory, 'page')
+          execFileSync('pdftoppm', ['-png', '-r', '200', target, prefix], { timeout: 120_000 })
+          const pages = readdirSync(directory)
+            .filter((name) => name.startsWith('page-') && name.endsWith('.png'))
+            .sort()
+          const text = pages
+            .map((page) =>
+              execFileSync(
+                'tesseract',
+                [join(directory, page), 'stdout', '-l', ocrLanguages.join('+')],
+                { encoding: 'utf8', timeout: 120_000 },
+              ),
+            )
+            .join('\n')
+            .trim()
+          if (text.length >= minimum) return { state: 'complete', method: 'pdf-ocr', text }
+        } catch {
+          return {
+            state: 'needs-input',
+            code: 'OCR_ENGINE_REQUIRED',
+            message: 'PDF OCR requires pdftoppm and Tesseract with the configured language packs.',
+          }
+        }
+      } else {
+        if (!ocrEnabled)
+          return {
+            state: 'needs-input',
+            code: 'OCR_DISABLED',
+            message: 'OCR is disabled for image documents.',
+          }
+        try {
+          const text = execFileSync('tesseract', [target, 'stdout', '-l', ocrLanguages.join('+')], {
+            encoding: 'utf8',
+            timeout: 120_000,
+          }).trim()
+          if (text.length >= minimum) return { state: 'complete', method: 'image-ocr', text }
+        } catch {
+          return {
+            state: 'needs-input',
+            code: 'OCR_ENGINE_REQUIRED',
+            message: 'Image OCR requires Tesseract with the configured language packs.',
+          }
+        }
+      }
+      return {
+        state: 'needs-input',
+        code: 'OCR_EMPTY',
+        message: 'OCR completed but did not produce enough text for release.',
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  }
   const text = printableText(bytes)
   if (text.length < minimum)
     return {
@@ -194,9 +272,7 @@ function deriveText(
       code: 'OCR_ENGINE_REQUIRED',
       message: 'Native extraction produced insufficient text; OCR is required.',
     }
-  const method =
-    mediaType === 'application/pdf' || lower.endsWith('.pdf') ? 'pdf-native-text' : 'native-text'
-  return { state: 'complete', method, text }
+  return { state: 'complete', method: 'native-text', text }
 }
 
 export function processDocumentJob(
@@ -230,6 +306,8 @@ export function processDocumentJob(
       String(row.filename),
       bytes,
       settings.nativeTextMinimum,
+      settings.ocrEnabled,
+      settings.ocrLanguages,
     )
     if (result.state === 'needs-input') {
       db.prepare(`UPDATE document_processing_jobs SET state='needs-input', engine_name='papyrus-native', engine_version='0.1.0',

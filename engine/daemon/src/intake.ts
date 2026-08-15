@@ -110,6 +110,75 @@ export function listIntake(organizationId: string): IntakeItem[] {
   ).map(map)
 }
 
+export function getIntakePreview(organizationId: string, id: string) {
+  const item = getDb()
+    .prepare(
+      'SELECT id,filename,media_type,content_base64 FROM intake_items WHERE id=? AND organization_id=?',
+    )
+    .get(id, organizationId) as Record<string, unknown> | undefined
+  if (!item) throw new Error('Intake item not found')
+  const derivative = getDb()
+    .prepare(
+      "SELECT media_type,content_base64 FROM document_derivatives WHERE intake_item_id=? AND organization_id=? AND kind='text' ORDER BY created_at DESC LIMIT 1",
+    )
+    .get(id, organizationId) as Record<string, unknown> | undefined
+  return {
+    id,
+    filename: String(item.filename),
+    mediaType: String(item.media_type),
+    contentBase64: String(item.content_base64),
+    extractedText: derivative
+      ? Buffer.from(String(derivative.content_base64), 'base64').toString('utf8')
+      : undefined,
+  }
+}
+
+export function updateIntakeMetadata(
+  organizationId: string,
+  id: string,
+  input: { classification: string; tags: string[] },
+) {
+  const classification = input.classification.trim().toUpperCase()
+  if (!['UNCLASSIFIED', 'CUI', 'CUI//SP-PRVCY', 'CUI//SP-PROPIN'].includes(classification))
+    throw new Error('Unsupported classification marking')
+  const tags = [...new Set(input.tags.map((tag) => tag.trim()).filter(Boolean))].slice(0, 30)
+  const changed = getDb()
+    .prepare(
+      "UPDATE intake_items SET approved_classification=?,tags=? WHERE id=? AND organization_id=? AND state='staging'",
+    )
+    .run(classification, JSON.stringify(tags), id, organizationId)
+  if (!changed.changes) throw new Error('Staged intake item not found')
+  return map(
+    getDb().prepare('SELECT * FROM intake_items WHERE id=?').get(id) as Record<string, unknown>,
+  )
+}
+
+export function listReleasedContext(organizationId: string, projectId: string) {
+  const rows = getDb()
+    .prepare(`
+    SELECT i.id, i.filename, i.media_type, i.approved_classification, d.content_base64
+    FROM intake_items i
+    LEFT JOIN document_derivatives d ON d.id = (
+      SELECT latest.id FROM document_derivatives latest
+      WHERE latest.intake_item_id=i.id AND latest.organization_id=i.organization_id AND latest.kind='text'
+      ORDER BY latest.created_at DESC LIMIT 1
+    )
+    WHERE i.organization_id=? AND i.project_id=? AND i.state='released'
+    ORDER BY i.reviewed_at DESC
+  `)
+    .all(organizationId, projectId) as Record<string, unknown>[]
+  return rows.map((row) => ({
+    id: String(row.id),
+    title: String(row.filename),
+    kind: 'document',
+    classification: String(row.approved_classification ?? 'UNCLASSIFIED'),
+    mediaType: String(row.media_type),
+    text: row.content_base64
+      ? Buffer.from(String(row.content_base64), 'base64').toString('utf8').slice(0, 100_000)
+      : '',
+  }))
+}
+
 export function decideIntake(
   id: string,
   organizationId: string,
@@ -121,10 +190,15 @@ export function decideIntake(
     reviewedBy: string
   },
 ): IntakeItem {
+  const classification = input.classification.trim().toUpperCase()
+  if (!['UNCLASSIFIED', 'CUI', 'CUI//SP-PRVCY', 'CUI//SP-PROPIN'].includes(classification))
+    throw new Error('Unsupported classification marking')
+  const tags = [...new Set(input.tags.map((tag) => tag.trim()).filter(Boolean))].slice(0, 30)
   const existing = getDb()
-    .prepare('SELECT id FROM intake_items WHERE id = ? AND organization_id = ?')
-    .get(id, organizationId)
+    .prepare('SELECT id,state FROM intake_items WHERE id = ? AND organization_id = ?')
+    .get(id, organizationId) as { id: string; state: IntakeState } | undefined
   if (!existing) throw new Error('Intake item not found')
+  if (existing.state !== 'staging') throw new Error('Only staged intake items can be reviewed')
   const processing = getDocumentJob(id)
   if (input.decision === 'release' && processing?.state !== 'complete')
     throw new Error('Document processing must complete before release')
@@ -138,23 +212,40 @@ export function decideIntake(
     throw new Error('A records schedule must be assigned before release')
   const now = new Date().toISOString()
   const state = input.decision === 'release' ? 'released' : 'rejected'
-  getDb()
+  const changed = getDb()
     .prepare(
       "UPDATE intake_items SET state = ?, approved_classification = ?, tags = ?, reviewed_by = ?, reviewed_at = ?, decision_rationale = ? WHERE id = ? AND organization_id = ? AND state = 'staging'",
     )
     .run(
       state,
-      input.classification,
-      JSON.stringify(input.tags),
+      classification,
+      JSON.stringify(tags),
       input.reviewedBy,
       now,
       input.rationale ?? null,
       id,
       organizationId,
     )
+  if (!changed.changes) throw new Error('The intake item changed before the decision was applied')
   const row = getDb()
     .prepare('SELECT * FROM intake_items WHERE id = ? AND organization_id = ?')
     .get(id, organizationId) as Record<string, unknown> | undefined
   if (!row) throw new Error('Intake item not found')
+  if (input.decision === 'release' && row.project_id) {
+    getDb()
+      .prepare(`INSERT INTO artifact_provenance
+      (id,intake_item_id,project_id,artifact_id,sha256,classification,released_by,released_at)
+      VALUES (?,?,?,?,?,?,?,?)`)
+      .run(
+        `provenance-${randomUUID()}`,
+        id,
+        String(row.project_id),
+        `released-document-${id}`,
+        String(row.sha256),
+        classification,
+        input.reviewedBy,
+        now,
+      )
+  }
   return map(row)
 }

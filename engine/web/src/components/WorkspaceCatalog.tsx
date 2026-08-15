@@ -1,6 +1,7 @@
 import { CAPE_WORKFLOW_PACK } from '@papyrus/core/workflows/cape'
 import { Bot, Cable, CheckCircle2, Sparkles } from 'lucide-react'
 import { DocumentProcessingAdmin } from './DocumentProcessingAdmin'
+import { IntakeSecurityAdmin } from './IntakeSecurityAdmin'
 
 export function WorkspaceCatalog({ section }: { section: string }) {
   if (section === 'Agents')
@@ -80,7 +81,13 @@ export function WorkspaceCatalog({ section }: { section: string }) {
         </div>
       </div>
     )
-  if (section === 'Admin') return <DocumentProcessingAdmin />
+  if (section === 'Admin')
+    return (
+      <div className="administration-stack">
+        <DocumentProcessingAdmin />
+        <IntakeSecurityAdmin />
+      </div>
+    )
   return (
     <div className="workspace-section-placeholder">
       <h1>{section}</h1>

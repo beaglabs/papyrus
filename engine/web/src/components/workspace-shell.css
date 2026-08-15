@@ -106,6 +106,10 @@
 .intake-file span, .intake-findings span { font-size: 12px; }
 .processing-chip { display: inline-flex; align-items: center; gap: 5px; width: fit-content; padding: 3px 7px; font-weight: 800; text-transform: capitalize; background: #f3f3f3; border: 2px solid var(--ink); }
 .processing-chip.complete { background: #d8fbd8; }.processing-chip.needs-input, .processing-chip.failed { background: #ffd8d8; }.processing-chip.processing { background: #fff0c2; }
+.security-chip { display:inline-flex; align-items:center; gap:5px; width:fit-content; padding:3px 7px; font-size:11px; font-weight:900; border:2px solid var(--ink); }
+.security-chip.passed { color:#126b36; background:#d8fbd8; }.security-chip.blocked,.security-chip.engine-unavailable,.security-chip.definitions-stale { color:var(--danger); background:#ffd8d8; }
+.administration-stack { display:grid; gap:24px; height:100%; padding:28px; overflow:auto; background:#fffdf8; }
+.admin-card { padding:22px; background:#fff; border:3px solid var(--ink); box-shadow:6px 6px 0 var(--ink); }.admin-card > header { display:flex; gap:14px; }.admin-card h2,.admin-card p { margin-top:0; }.admin-card header span { font-size:11px; font-weight:900; letter-spacing:.08em; }.admin-form-grid { display:grid; grid-template-columns:repeat(2,minmax(220px,1fr)); gap:14px; margin-top:18px; }.admin-form-grid label { display:grid; gap:7px; font-weight:800; }.admin-form-grid input[type='number'],.admin-form-grid input[type='text'] { min-height:40px; padding:7px 9px; font:inherit; border:2px solid var(--ink); }.admin-card footer { display:flex; justify-content:space-between; align-items:center; margin-top:18px; padding-top:15px; border-top:2px solid var(--ink); }.admin-card footer button { padding:10px 13px; font-weight:900; background:var(--orange); border:2px solid var(--ink); box-shadow:3px 3px 0 var(--ink); }
 .intake-findings b { align-self: flex-start; padding: 4px 7px; background: #ffd84d; border: 2px solid var(--ink); }
 .intake-findings span { display: flex; align-items: center; gap: 4px; }
 .intake-actions { display: flex; gap: 9px; }.intake-actions .reject { background: #ffd8d8; }

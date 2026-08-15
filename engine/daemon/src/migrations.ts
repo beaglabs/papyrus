@@ -343,6 +343,47 @@ const migrations: Migration[] = [
       `)
     },
   },
+  {
+    version: 9,
+    name: 'hardened intake security',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS intake_security_scans (
+          id TEXT PRIMARY KEY,
+          organization_id TEXT NOT NULL,
+          intake_item_id TEXT NOT NULL UNIQUE,
+          verdict TEXT NOT NULL CHECK(verdict IN ('checking','passed','review-required','blocked','engine-unavailable','definitions-stale')),
+          clamav_version TEXT,
+          clamav_definitions_at TEXT,
+          yarax_version TEXT,
+          rule_pack_version TEXT,
+          matches_json TEXT NOT NULL DEFAULT '[]',
+          evidence_json TEXT NOT NULL DEFAULT '[]',
+          override_by TEXT,
+          override_rationale TEXT,
+          started_at TEXT NOT NULL,
+          completed_at TEXT,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (intake_item_id) REFERENCES intake_items(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS intake_security_settings (
+          organization_id TEXT PRIMARY KEY,
+          clamav_required INTEGER NOT NULL DEFAULT 1,
+          yarax_required INTEGER NOT NULL DEFAULT 1,
+          max_definition_age_hours INTEGER NOT NULL DEFAULT 72,
+          archive_max_depth INTEGER NOT NULL DEFAULT 3,
+          archive_max_members INTEGER NOT NULL DEFAULT 250,
+          archive_max_expanded_bytes INTEGER NOT NULL DEFAULT 104857600,
+          scan_timeout_seconds INTEGER NOT NULL DEFAULT 60,
+          active_rule_pack_version TEXT NOT NULL DEFAULT 'builtin-1',
+          updated_by TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_intake_security_verdict
+          ON intake_security_scans(organization_id, verdict, updated_at);
+      `)
+    },
+  },
 ]
 
 export function runMigrations(db: Database.Database): void {

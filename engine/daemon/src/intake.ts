@@ -6,6 +6,7 @@ import {
   getDocumentJob,
   processDocumentJob,
 } from './document-processing.js'
+import { type IntakeSecurityResult, getSecurityResult, scanIntakeItem } from './intake-security.js'
 
 export type IntakeState = 'quarantine' | 'staging' | 'released' | 'rejected'
 export interface IntakeItem {
@@ -24,6 +25,7 @@ export interface IntakeItem {
   reviewedBy?: string
   reviewedAt?: string
   processing?: DocumentProcessingJob
+  security?: IntakeSecurityResult
 }
 
 function map(row: Record<string, unknown>): IntakeItem {
@@ -46,6 +48,7 @@ function map(row: Record<string, unknown>): IntakeItem {
     reviewedBy: row.reviewed_by ? String(row.reviewed_by) : undefined,
     reviewedAt: row.reviewed_at ? String(row.reviewed_at) : undefined,
     processing: getDocumentJob(id) ?? undefined,
+    security: getSecurityResult(id) ?? undefined,
   }
 }
 
@@ -90,6 +93,7 @@ export function stageIntake(input: {
       now,
     )
   enqueueDocumentProcessing(input.organizationId, id)
+  scanIntakeItem(input.organizationId, id)
   processDocumentJob(id)
   return map(
     getDb().prepare('SELECT * FROM intake_items WHERE id = ?').get(id) as Record<string, unknown>,
@@ -122,6 +126,9 @@ export function decideIntake(
   const processing = getDocumentJob(id)
   if (input.decision === 'release' && processing?.state !== 'complete')
     throw new Error('Document processing must complete before release')
+  const security = getSecurityResult(id)
+  if (input.decision === 'release' && security?.verdict !== 'passed')
+    throw new Error('Intake security checks must pass before release')
   const now = new Date().toISOString()
   const state = input.decision === 'release' ? 'released' : 'rejected'
   getDb()

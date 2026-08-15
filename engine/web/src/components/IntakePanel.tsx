@@ -12,6 +12,7 @@ interface Item {
   findings: string[]
   tags: string[]
   processing?: { state: string; extractionMethod?: string; errorMessage?: string }
+  security?: { verdict: string; matches: string[]; evidence: string[] }
 }
 
 export function IntakePanel({ projectId }: { projectId?: string }) {
@@ -112,6 +113,9 @@ export function IntakePanel({ projectId }: { projectId?: string }) {
                   <span>
                     {Math.ceil(item.sizeBytes / 1024)} KB · {item.state}
                   </span>
+                  <span className={`security-chip ${item.security?.verdict ?? 'checking'}`}>
+                    <ShieldAlert size={12} /> Security: {item.security?.verdict ?? 'checking'}
+                  </span>
                   <span className={`processing-chip ${item.processing?.state ?? 'queued'}`}>
                     <Clock3 size={12} />
                     {item.processing?.state ?? 'queued'}
@@ -137,7 +141,7 @@ export function IntakePanel({ projectId }: { projectId?: string }) {
               </div>
               {item.state === 'staging' && (
                 <div className="intake-actions">
-                  {item.processing?.state === 'complete' ? (
+                  {item.processing?.state === 'complete' && item.security?.verdict === 'passed' ? (
                     <button type="button" onClick={() => void decide(item, 'release')}>
                       <Check size={14} />
                       Release

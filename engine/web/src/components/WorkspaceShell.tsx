@@ -69,9 +69,9 @@ export function WorkspaceShell({ projectName, onBack, children }: WorkspaceShell
           </div>
           <div className="workspace-controls">
             <span className="classification-chip">
-              <ShieldCheck size={14} /> CONTROLLED
+              <ShieldCheck size={14} /> CUI WORKSPACE
             </span>
-            <span className="runtime-chip">PILOT · NOT AUTHORIZED</span>
+            <span className="runtime-chip">IL5 READY · LOCAL :8000</span>
             <button className="command-icon" type="button" aria-label="Audit log">
               <ScrollText size={16} />
             </button>

@@ -384,6 +384,31 @@ const migrations: Migration[] = [
       `)
     },
   },
+  {
+    version: 10,
+    name: 'cape connection lifecycle and transfer queues',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS cape_connections (
+          id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, name TEXT NOT NULL,
+          system_key TEXT NOT NULL, adapter_kind TEXT NOT NULL,
+          lifecycle_state TEXT NOT NULL CHECK(lifecycle_state IN ('draft','validating','active','degraded','disabled','authorization-expired')),
+          mode TEXT NOT NULL DEFAULT 'simulated', credential_ref TEXT, scope_json TEXT NOT NULL DEFAULT '{}',
+          mapping_json TEXT NOT NULL DEFAULT '{}', schedule_json TEXT NOT NULL DEFAULT '{}', approval_policy TEXT NOT NULL DEFAULT 'protected-writes',
+          last_test_at TEXT, last_test_status TEXT, created_by TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS cape_connection_queue (
+          id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, connection_id TEXT NOT NULL,
+          direction TEXT NOT NULL CHECK(direction IN ('inbound','outbound')), idempotency_key TEXT NOT NULL,
+          state TEXT NOT NULL CHECK(state IN ('queued','awaiting-approval','processing','complete','failed','dead-letter')),
+          payload_json TEXT NOT NULL, checkpoint_json TEXT, approval_by TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+          UNIQUE(connection_id,direction,idempotency_key), FOREIGN KEY(connection_id) REFERENCES cape_connections(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_cape_connections_org ON cape_connections(organization_id,lifecycle_state);
+        CREATE INDEX IF NOT EXISTS idx_cape_queue_state ON cape_connection_queue(organization_id,state,created_at);
+      `)
+    },
+  },
 ]
 
 export function runMigrations(db: Database.Database): void {

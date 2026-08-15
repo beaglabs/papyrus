@@ -1,5 +1,6 @@
 import { CAPE_WORKFLOW_PACK } from '@papyrus/core/workflows/cape'
 import { Bot, Cable, CheckCircle2, Sparkles } from 'lucide-react'
+import { ConnectionsPanel } from './ConnectionsPanel'
 import { DocumentProcessingAdmin } from './DocumentProcessingAdmin'
 import { IntakeSecurityAdmin } from './IntakeSecurityAdmin'
 
@@ -52,35 +53,7 @@ export function WorkspaceCatalog({ section }: { section: string }) {
         </div>
       </div>
     )
-  if (section === 'Connections')
-    return (
-      <div className="catalog-page">
-        <header>
-          <Cable size={28} />
-          <div>
-            <span>ENTERPRISE ADAPTERS</span>
-            <h1>Connections</h1>
-            <p>
-              Prototype adapters are simulated until customer access and authorization are provided.
-            </p>
-          </div>
-        </header>
-        <div className="catalog-list">
-          {CAPE_WORKFLOW_PACK.connectors.map((connector) => (
-            <article key={connector.id}>
-              <div>
-                <h2>{connector.name}</h2>
-                <p>{connector.classification}</p>
-              </div>
-              <span>
-                <CheckCircle2 size={14} /> {connector.mode}
-              </span>
-              <b>adapter boundary</b>
-            </article>
-          ))}
-        </div>
-      </div>
-    )
+  if (section === 'Connections') return <ConnectionsPanel />
   if (section === 'Admin')
     return (
       <div className="administration-stack">

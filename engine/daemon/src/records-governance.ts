@@ -73,7 +73,7 @@ export function assignRecordsSchedule(
     .run(scheduleId, intakeItemId, organizationId)
   if (!changed.changes) throw new Error('Intake item not found')
   getDb()
-    .prepare('INSERT INTO records_disposition_history VALUES (?,?,?,?,?,?,?,?,?)')
+    .prepare('INSERT INTO records_disposition_history VALUES (?,?,?,?,?,?,?,?,?,?)')
     .run(
       `record-event-${randomUUID()}`,
       organizationId,

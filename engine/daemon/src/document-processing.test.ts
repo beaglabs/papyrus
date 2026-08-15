@@ -6,6 +6,7 @@ import {
   updateDocumentProcessingSettings,
 } from './document-processing.js'
 import { decideIntake, stageIntake } from './intake.js'
+import { assignRecordsSchedule, ensureDefaultSchedules } from './records-governance.js'
 
 afterAll(() => closeDb())
 
@@ -26,8 +27,11 @@ describe('document processing', () => {
     })
 
     expect(item.processing).toMatchObject({ state: 'complete', extractionMethod: 'native-text' })
+    const [schedule] = ensureDefaultSchedules('org-default', 'records-admin')
+    if (!schedule) throw new Error('Default records schedule was not created')
+    assignRecordsSchedule('org-default', item.id, schedule.id, 'records-admin')
     expect(() =>
-      decideIntake(item.id, 'org-1', {
+      decideIntake(item.id, 'org-default', {
         decision: 'release',
         classification: 'UNCLASSIFIED',
         tags: [],
@@ -50,7 +54,7 @@ describe('document processing', () => {
       errorCode: 'OCR_ENGINE_REQUIRED',
     })
     expect(() =>
-      decideIntake(item.id, 'org-1', {
+      decideIntake(item.id, 'org-default', {
         decision: 'release',
         classification: 'UNCLASSIFIED',
         tags: [],

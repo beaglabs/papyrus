@@ -111,14 +111,23 @@ export function IntakePanel({ projectId }: { projectId?: string }) {
           onChange={(e) => uploadSelected(e.target.files)}
         />
       </header>
+      <section className="staging-flow" aria-label="Staging release workflow">
+        <div className="active"><span>1</span><b>Received</b><small>Files and connectors</small></div>
+        <div><span>2</span><b>Security checks</b><small>ClamAV + YARA-X</small></div>
+        <div><span>3</span><b>Label & tag</b><small>Suggested + human</small></div>
+        <div><span>4</span><b>Human review</b><small>Role authorized</small></div>
+        <div><span>5</span><b>Release</b><small>Enter workzone</small></div>
+      </section>
       <section className="intake-list">
         {items.length === 0 ? (
           <div className="intake-empty">
             <FileSearch size={44} />
-            <h2>No staged material</h2>
+            <h2>Staging is clear</h2>
             <p>
-              PDFs and connector content will appear here for processing, labeling, and release.
+              Add PDFs, office files, or connector content. Nothing enters an agent workzone until
+              security, classification, records, and human review gates pass.
             </p>
+            <div className="empty-capabilities"><span>PDF + OCR</span><span>CUI labeling</span><span>Records schedule</span><span>Human release</span></div>
           </div>
         ) : (
           items.map((item) => (

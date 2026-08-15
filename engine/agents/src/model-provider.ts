@@ -188,7 +188,11 @@ export function resolveModelProvider(
     apiKey,
     model:
       env.PAPYRUS_LLM_MODEL ??
-      (usingOpenRouter ? 'inclusionai/ling-3.0-tiny:free' : localBaseUrl ? 'phi-4-mini' : 'gpt-4o'),
+      (usingOpenRouter
+        ? 'inclusionai/ling-3.0-tiny:free'
+        : localBaseUrl
+          ? 'LiquidAI/LFM2.5-2.6B'
+          : 'gpt-4o'),
   }
 }
 

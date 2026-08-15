@@ -2,7 +2,6 @@ import {
   Archive,
   BriefcaseBusiness,
   Cable,
-  ChevronLeft,
   FileSearch,
   GitBranch,
   LayoutDashboard,
@@ -18,8 +17,8 @@ import './workspace-shell.css'
 
 interface WorkspaceShellProps {
   projectId: string
-  projectName: string
-  onBack: () => void
+  projects: Array<{ id: string; name: string; createdAt: string }>
+  onProjectChange: (project: { id: string; name: string; createdAt: string }) => void
   children: ReactNode
 }
 
@@ -34,7 +33,12 @@ const NAV = [
   { label: 'Administration', icon: Settings },
 ]
 
-export function WorkspaceShell({ projectId, projectName, onBack, children }: WorkspaceShellProps) {
+export function WorkspaceShell({
+  projectId,
+  projects,
+  onProjectChange,
+  children,
+}: WorkspaceShellProps) {
   const [section, setSection] = useState('Workzone')
   const { apiFetch, loadProjectRole, projectRole, user } = useAuth()
   const [posture, setPosture] = useState<{ profile: string; authorizationStatus: string } | null>(
@@ -53,7 +57,12 @@ export function WorkspaceShell({ projectId, projectName, onBack, children }: Wor
   return (
     <div className="workspace-shell">
       <aside className="workspace-rail" aria-label="Papyrus workspace navigation">
-        <button className="workspace-mark" type="button" onClick={onBack} title="All projects">
+        <button
+          className="workspace-mark"
+          type="button"
+          onClick={() => setSection('Workzone')}
+          title="Open Workzone"
+        >
           P
         </button>
         <nav>
@@ -76,10 +85,23 @@ export function WorkspaceShell({ projectId, projectName, onBack, children }: Wor
       <section className="workspace-frame">
         <header className="workspace-commandbar">
           <div className="workspace-breadcrumb">
-            <button type="button" onClick={onBack}>
-              <ChevronLeft size={16} /> Projects
-            </button>
-            <strong title={projectName}>{projectName}</strong>
+            <label className="workspace-project-picker">
+              <span>Workspace</span>
+              <select
+                aria-label="Current workspace"
+                value={projectId}
+                onChange={(event) => {
+                  const project = projects.find((item) => item.id === event.target.value)
+                  if (project) onProjectChange(project)
+                }}
+              >
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
           <div className="workspace-controls">
             <span className="classification-chip">

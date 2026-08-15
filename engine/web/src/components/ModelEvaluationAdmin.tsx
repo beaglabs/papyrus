@@ -14,7 +14,7 @@ interface Run {
 export function ModelEvaluationAdmin() {
   const { apiFetch } = useAuth()
   const [runs, setRuns] = useState<Run[]>([])
-  const [digest, setDigest] = useState('sha256:phi4mini-pilot')
+  const [digest, setDigest] = useState('')
   const load = useCallback(() => {
     void apiFetch('/api/admin/model-evaluations')
       .then((r) => r.json())
@@ -26,9 +26,9 @@ export function ModelEvaluationAdmin() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        modelName: 'Phi-4-mini',
+        modelName: 'LiquidAI/LFM2.5-2.6B',
         modelDigest: digest,
-        quantization: 'int4',
+        quantization: 'Q4_K_M',
         datasetVersion: 'cape-synthetic-1',
       }),
     })
@@ -50,9 +50,13 @@ export function ModelEvaluationAdmin() {
       <div className="evaluation-launch">
         <label>
           <span>Pinned model digest</span>
-          <input value={digest} onChange={(e) => setDigest(e.target.value)} />
+          <input
+            value={digest}
+            placeholder="sha256:<verified model digest>"
+            onChange={(e) => setDigest(e.target.value)}
+          />
         </label>
-        <button type="button" onClick={() => void run()}>
+        <button type="button" disabled={!digest.trim()} onClick={() => void run()}>
           <Play size={14} /> Run offline evaluation
         </button>
       </div>

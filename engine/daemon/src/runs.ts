@@ -203,7 +203,7 @@ async function generateRunOutput(runId: string, request: string) {
   const provider = getModelRuntimeProvider(row.organization_id)
   if (!provider)
     throw new Error(
-      'No model provider is configured. Configure the local Phi endpoint in Administration before starting a run.',
+      'The local LFM2.5-2.6B runtime is unavailable. Verify its endpoint in Administration before starting a run.',
     )
   getDb()
     .prepare('UPDATE agent_runs SET model=?,updated_at=? WHERE id=?')

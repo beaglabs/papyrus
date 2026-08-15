@@ -995,253 +995,6 @@ body {
   font-size: 17px;
 }
 
-/* ── Landing Page ─────────────────────────────────────────────── */
-
-.landing {
-  display: flex;
-  flex-direction: column;
-  min-height: 100vh;
-  width: 100%;
-  overflow-y: auto;
-}
-
-.landing-topbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 16px 32px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-
-.landing-topbar .brand {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.landing-topbar .brand .logo {
-  width: 28px;
-  height: 28px;
-  background: var(--accent);
-  color: var(--bg);
-  display: grid;
-  place-items: center;
-  font-weight: 800;
-  font-size: 14px;
-  border-radius: var(--radius-sm);
-}
-
-.landing-topbar .brand .name {
-  font-weight: 700;
-  font-size: 14px;
-  letter-spacing: 0.08em;
-  color: var(--text);
-}
-
-.landing-topbar .spacer {
-  flex: 1;
-}
-
-.landing-topbar .user-area {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.landing-topbar .user-name {
-  font-size: 13px;
-  color: var(--text-muted);
-}
-
-.landing-body {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 64px 32px 48px;
-  max-width: 960px;
-  margin: 0 auto;
-  width: 100%;
-}
-
-.landing-greeting {
-  font-size: 28px;
-  font-weight: 700;
-  color: var(--text);
-  margin-bottom: 8px;
-  text-align: left;
-  align-self: stretch;
-}
-
-.landing-subtitle {
-  font-size: 14px;
-  color: var(--text-dim);
-  margin-bottom: 32px;
-}
-
-/* Prompt area */
-.prompt-area {
-  width: 100%;
-  margin-bottom: 48px;
-}
-
-.prompt-box {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: 20px 24px;
-  transition: border-color 0.2s;
-}
-
-.prompt-box:focus-within {
-  border-color: var(--accent);
-}
-
-.prompt-input {
-  width: 100%;
-  background: none;
-  border: none;
-  color: var(--text);
-  font-family: var(--font);
-  font-size: 16px;
-  resize: none;
-  outline: none;
-  min-height: 28px;
-  max-height: 200px;
-  line-height: 1.6;
-}
-
-.prompt-input::placeholder {
-  color: var(--text-dim);
-  font-size: 16px;
-}
-
-.prompt-send {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  background: var(--accent);
-  color: var(--bg);
-  border: none;
-  border-radius: 50%;
-  cursor: pointer;
-  font-size: 18px;
-  transition: background 0.15s;
-  flex-shrink: 0;
-}
-
-.prompt-send:hover {
-  background: var(--accent-hover);
-}
-
-.prompt-send:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.prompt-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 12px;
-}
-
-.prompt-row .prompt-input {
-  flex: 1;
-}
-
-/* Project sections */
-.project-sections {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 32px;
-}
-
-.project-section-title {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  margin-bottom: 16px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-/* Project cards */
-.project-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 16px;
-}
-
-.project-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 20px;
-  cursor: pointer;
-  transition: all 0.2s;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  text-align: left;
-}
-
-.project-card:hover {
-  border-color: var(--border-light);
-  background: var(--surface-hover);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-}
-
-.project-card .title {
-  font-weight: 600;
-  font-size: 14px;
-  color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.project-card .meta {
-  font-size: 11px;
-  color: var(--text-dim);
-  font-family: var(--font-mono);
-}
-
-/* Empty state */
-.landing-empty {
-  width: 100%;
-  padding: 40px;
-  text-align: center;
-  border: 1px dashed var(--border);
-  border-radius: var(--radius-lg);
-  color: var(--text-dim);
-}
-
-.landing-empty .icon {
-  font-size: 32px;
-  margin-bottom: 12px;
-  opacity: 0.5;
-}
-
-.landing-empty .title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-muted);
-  margin-bottom: 4px;
-}
-
-.landing-empty .desc {
-  font-size: 13px;
-  color: var(--text-dim);
-}
-
 /* ── Animations ───────────────────────────────────────────────── */
 
 @keyframes spin {
@@ -2966,9 +2719,15 @@ body {
   animation: skeleton-pulse 1.5s ease-in-out infinite;
 }
 
-.skeleton-line.wide { width: 80%; }
-.skeleton-line.medium { width: 60%; }
-.skeleton-line.narrow { width: 40%; }
+.skeleton-line.wide {
+  width: 80%;
+}
+.skeleton-line.medium {
+  width: 60%;
+}
+.skeleton-line.narrow {
+  width: 40%;
+}
 
 .skeleton-cards {
   display: grid;
@@ -2995,8 +2754,13 @@ body {
 }
 
 @keyframes skeleton-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
 }
 
 /* ── Monaco Code Tab ─────────────────────────────────────────── */

@@ -26,7 +26,7 @@ export function WorkspaceCatalog({ section }: { section: string }) {
             <article key={role}>
               <Bot size={22} />
               <h2>{role}</h2>
-              <p>Uses local Phi models and pauses before protected actions.</p>
+              <p>Uses the local LFM2.5-2.6B runtime and pauses before protected actions.</p>
               <b>LOCAL · CONTROLLED</b>
             </article>
           ))}

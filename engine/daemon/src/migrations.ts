@@ -520,6 +520,13 @@ const migrations: Migration[] = [
       `)
     },
   },
+  {
+    version: 16,
+    name: 'pin local inference to LFM2.5-2.6B',
+    up(db) {
+      db.prepare('UPDATE model_runtime_settings SET model = ?').run('LiquidAI/LFM2.5-2.6B')
+    },
+  },
 ]
 
 export function runMigrations(db: Database.Database): void {

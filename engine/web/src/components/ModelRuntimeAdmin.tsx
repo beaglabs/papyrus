@@ -25,11 +25,12 @@ export function ModelRuntimeAdmin() {
   useEffect(() => load(), [load])
   if (!settings) return <div className="workspace-section-placeholder">Loading model runtime…</div>
   async function save() {
+    if (!settings) return
     setMessage('')
     const response = await apiFetch('/api/admin/model-runtime', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(settings),
+      body: JSON.stringify({ baseUrl: settings.baseUrl }),
     })
     const data = (await response.json()) as { settings?: Settings; error?: string }
     if (!response.ok || !data.settings) {
@@ -45,10 +46,10 @@ export function ModelRuntimeAdmin() {
         <Bot size={24} />
         <div>
           <span>LOCAL INFERENCE</span>
-          <h2>Phi model runtime</h2>
+          <h2>LFM2.5-2.6B runtime</h2>
           <p>
-            Connect Papyrus to an OpenAI-compatible Phi endpoint without editing YAML or environment
-            files.
+            Papyrus runs LiquidAI/LFM2.5-2.6B locally through its dedicated inference endpoint.
+            Configure the endpoint here without editing YAML or environment files.
           </p>
         </div>
       </header>
@@ -65,11 +66,7 @@ export function ModelRuntimeAdmin() {
         </label>
         <label>
           <span>Model</span>
-          <input
-            value={settings.model}
-            disabled={!canManage}
-            onChange={(event) => setSettings({ ...settings, model: event.target.value })}
-          />
+          <input value={settings.model} disabled aria-label="Fixed local model" />
         </label>
       </div>
       <footer>
@@ -81,7 +78,7 @@ export function ModelRuntimeAdmin() {
         </span>
         <button
           type="button"
-          disabled={!canManage || !settings.baseUrl.trim() || !settings.model.trim()}
+          disabled={!canManage || !settings.baseUrl.trim()}
           onClick={() => void save()}
         >
           Save model runtime

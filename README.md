@@ -21,7 +21,7 @@
 
 Papyrus is a self-hosted, multiplayer workspace where product artifacts live on a typed directed canvas. Discovery, strategy, specification, design, engineering, validation, and transition artifacts remain connected; human and AI collaborators work against the same project state; and every generated change remains subject to human review.
 
-Papyrus is designed for environments where cloud-only collaboration and public model APIs are not acceptable. Each agency or security boundary runs an authoritative Papyrus service and SQLite database. Authenticated browsers collaborate through server-sequenced WebSocket operations, while model access uses either Cloudflare Workers AI or a configurable OpenAI-compatible endpoint. The selected network profile constrains authentication, agents, and export behavior.
+Papyrus is designed for environments where cloud-only collaboration and public model APIs are not acceptable. Each agency or security boundary runs an authoritative Papyrus service, SQLite database, and LiquidAI/LFM2.5-2.6B inference runtime. Authenticated browsers collaborate through server-sequenced WebSocket operations, while the selected network profile constrains authentication, agents, and export behavior.
 
 > **Development status:** active prototype. The repository demonstrates the architecture and security seams, but it is not currently represented as production-authorized, FedRAMP-authorized, or certified for a particular impact level.
 
@@ -33,7 +33,7 @@ flowchart LR
   WEB[React canvas] -->|REST + WebSocket| D
   D --> DB[(SQLite + operation log)]
   D --> AG[Persona agents + skills]
-  AG --> LLM[Cloudflare or OpenAI-compatible model endpoint]
+  AG --> LLM[Local LiquidAI/LFM2.5-2.6B runtime]
   D --> IDP[CAC/PIV · WebAuthn · OIDC · SAML]
 ```
 
@@ -47,9 +47,9 @@ The service is the deployment policy and coordination boundary. The `papyrus ser
 
 | Profile | Authentication | Model access | Connectivity |
 | --- | --- | --- | --- |
-| `commercial` | WebAuthn, OIDC, SAML | Cloudflare Workers AI or customer-configured OpenAI-compatible endpoint | Customer-hosted HTTPS/WebSocket service |
-| `niprnet-il4` | CAC/PIV, WebAuthn | Approved enclave endpoint | Enclave-local service only |
-| `siprnet-il6` | CAC/PIV | Self-hosted endpoint inside the enclave | Disconnected enclave-local service |
+| `commercial` | WebAuthn, OIDC, SAML | Local LiquidAI/LFM2.5-2.6B runtime | Customer-hosted HTTPS/WebSocket service |
+| `niprnet-il4` | CAC/PIV, WebAuthn | Approved enclave-local LFM2.5-2.6B runtime | Enclave-local service only |
+| `siprnet-il6` | CAC/PIV | LFM2.5-2.6B runtime inside the enclave | Disconnected enclave-local service |
 
 The profile is an enforcement input, not a claim that Papyrus creates an IL4 or IL6 environment. The customer-owned deployment boundary, infrastructure, authorization, and operating procedures remain decisive.
 
@@ -69,7 +69,7 @@ Project state, credential records, audit information, immutable canvas operation
 
 ### Agents, skills, and tools
 
-Persona agents consume canvas context and produce proposed artifacts through explicit skills. The intended trust boundary requires endpoint allowlisting, tool authorization, human approval, input validation, secret redaction, execution limits, and auditable tool calls. Cloudflare Workers AI is supported through its Anthropic-compatible Messages API; customer-hosted OpenAI-compatible inference services remain available for disconnected deployments.
+Persona agents consume released workspace context and produce proposed artifacts through explicit skills. LiquidAI/LFM2.5-2.6B is the product's local agent model. The trust boundary requires endpoint allowlisting, tool authorization, human approval, input validation, secret redaction, execution limits, and auditable tool calls.
 
 ### Audit and transfer
 
@@ -117,23 +117,18 @@ Package scripts currently run directly from each workspace. User-managed model, 
 
 Document intake uses the locally installed `pdftotext`, `pdftoppm`, and `tesseract` commands. The release gate uses locally installed `clamscan` and `yr` (YARA-X) commands with Papyrus's bundled rule pack. If an engine required by organization policy is unavailable, the gate fails closed and shows the evidence in Staging.
 
-### Model provider configuration
+### Local model runtime
 
-To use Cloudflare Workers AI with Inkling 256K, configure the daemon with a scoped API token and account ID:
+Papyrus uses `LiquidAI/LFM2.5-2.6B` as its fixed local agent model. Start the official GGUF with an OpenAI-compatible local server, then open **Administration → LFM2.5-2.6B runtime** and set the endpoint. The default endpoint is `http://127.0.0.1:8080/v1`; the model cannot be changed through Papyrus configuration.
 
 ```bash
-export PAPYRUS_LLM_PROVIDER=cloudflare
-export CLOUDFLARE_ACCOUNT_ID="your-account-id"
-export CLOUDFLARE_API_TOKEN="your-scoped-api-token"
-export PAPYRUS_LLM_MODEL="thinkingmachines/inkling-256k"
+llama-server -hf LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M --host 127.0.0.1 --port 8080
 pnpm cli serve --no-open
 ```
 
-Papyrus calls Cloudflare's hosted Messages API from the self-hosted daemon. The `env.AI.run(...)` binding is only available when the calling application itself runs as a Cloudflare Worker.
+The endpoint setting is stored locally in the organization database. No YAML or environment-file edit is required.
 
-For a local OpenAI-compatible service, open **Administration → Phi model runtime**, enter its local API endpoint and model identifier, and save. Papyrus stores this organization setting locally; no YAML or environment-file edit is required. Environment variables remain a deployment fallback for hosted providers and unattended installations.
-
-Never commit API tokens. Supply them through the deployment environment or its secret manager.
+The model weights are distributed separately by Liquid AI under the [LFM Open License v1.0](https://docs.liquid.ai/lfm/help/model-license); deployment owners are responsible for satisfying its commercial-use and distribution terms.
 
 ## Trust boundaries and customer responsibilities
 

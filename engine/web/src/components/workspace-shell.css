@@ -79,7 +79,7 @@
   align-items: center;
   gap: 12px;
 }
-.workspace-breadcrumb button,
+.workspace-project-picker,
 .classification-chip,
 .runtime-chip,
 .command-icon,
@@ -94,6 +94,24 @@
   background: #fff;
   border: 2px solid var(--ink);
   border-radius: 0;
+}
+.workspace-project-picker {
+  gap: 8px;
+  padding-right: 4px;
+}
+.workspace-project-picker > span {
+  font-size: 10px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.workspace-project-picker select {
+  max-width: 240px;
+  min-height: 26px;
+  padding: 0 24px 0 7px;
+  color: var(--ink);
+  font: 800 13px / 1 var(--font-display, system-ui);
+  background: #fff;
+  border: 0;
 }
 .classification-chip {
   background: #ffd84d;

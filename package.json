@@ -3,28 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "The secure product development canvas for regulated industries and public sector.",
+  "description": "Secure agent gateway for regulated and disconnected environments.",
   "license": "UNLICENSED",
-  "packageManager": "pnpm@9.0.4",
-  "engines": {
-    "node": ">=22"
-  },
+  "packageManager": "pnpm@11.19.0",
+  "engines": { "node": ">=24" },
   "scripts": {
+    "dev": "pnpm --filter @papyrus/server dev",
+    "start": "node apps/server/dist/index.js",
     "build": "pnpm -r run build",
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",
-    "lint": "biome check .",
-    "format": "biome format --write .",
-    "cli": "pnpm --filter @papyrus/cli start",
-    "smoke": "pnpm --filter @papyrus/daemon test"
-  },
-  "devDependencies": {
-    "@biomejs/biome": "^1.9.4",
-    "playwright": "^1.62.1",
-    "typescript": "^5.6.3"
-  },
-  "dependencies": {
-    "@node-saml/node-saml": "^5.1.0",
-    "@simplewebauthn/server": "^13.3.2"
+    "lint": "pnpm -r run lint"
   }
 }

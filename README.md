@@ -1,139 +1,60 @@
-<p align="center">
-  <img src="./docs/assets/papyrus-logo.svg" alt="Papyrus" width="190" />
-</p>
+# Papyrus
 
-<h1 align="center">Papyrus</h1>
+Papyrus is a secure, self-hosted access and control plane for AI agents in regulated and disconnected environments. It provides the branded web experience and security boundary around goose; it does not implement a second agent harness.
 
-<p align="center">
-  <a href="https://app.fossa.com/projects/custom%2B63623%2Fgithub.com%2Fbeaglabs%2Fpapyrus?ref=badge_shield&amp;issueType=security">
-    <img src="https://app.fossa.com/api/projects/custom%2B63623%2Fgithub.com%2Fbeaglabs%2Fpapyrus.svg?type=shield&amp;issueType=security" alt="FOSSA security status" />
-  </a>
-  <a href="https://app.fossa.com/projects/custom%2B63623%2Fgithub.com%2Fbeaglabs%2Fpapyrus?ref=badge_shield&amp;issueType=license">
-    <img src="https://app.fossa.com/api/projects/custom%2B63623%2Fgithub.com%2Fbeaglabs%2Fpapyrus.svg?type=shield&amp;issueType=license" alt="FOSSA license status" />
-  </a>
-</p>
+## What is implemented
 
-<p align="center"><strong>The local-first product-development canvas for regulated and disconnected teams.</strong></p>
+- Papyrus neobrutalist web UI with individual and administrative activity views
+- Commercial OIDC authorization-code flow with PKCE, nonce, issuer, audience, and signature validation
+- Government CAC/PIV identity through direct mutually authenticated TLS
+- fixed Owner, Admin, User, and Auditor roles
+- deny-by-default authorization using the official Cedar 4.12 engine
+- workspace and goose runtime assignments
+- user-owned sessions with administrative and audit visibility
+- workspace-scoped MCP server and tool grants through a session-bound Papyrus proxy
+- SQLite-enforced append-only audit rows with a SHA-256 event chain
+- goose as the only runtime, using the official stable ACP v1 SDK and `goose acp`
+- loopback local mode and durable single-deployment server mode
+- Ed25519-signed, deployment-bound offline licensing with rotatable trust-root IDs
 
-<p align="center">
-  Commercial · NIPRNet / IL4 · SIPRNet / IL6
-</p>
+The initial product boundary and deferred scope are documented in [docs/product-scope.md](docs/product-scope.md).
 
-Papyrus is a self-hosted, multiplayer workspace where product artifacts live on a typed directed canvas. Discovery, strategy, specification, design, engineering, validation, and transition artifacts remain connected; human and AI collaborators work against the same project state; and every generated change remains subject to human review.
+## Requirements
 
-Papyrus is designed for environments where cloud-only collaboration and public model APIs are not acceptable. Each agency or security boundary runs an authoritative Papyrus service, SQLite database, and LiquidAI/LFM2.5-2.6B inference runtime. Authenticated browsers collaborate through server-sequenced WebSocket operations, while the selected network profile constrains authentication, agents, and export behavior.
+- Node.js 24+
+- pnpm 11.19
+- a pinned goose CLI distribution available to the Papyrus server
+- an approved customer model endpoint
 
-> **Development status:** active prototype. The repository demonstrates the architecture and security seams, but it is not currently represented as production-authorized, FedRAMP-authorized, or certified for a particular impact level.
-
-## Architecture
-
-```mermaid
-flowchart LR
-  CLI[Papyrus CLI] --> D[Authoritative Papyrus service]
-  WEB[React canvas] -->|REST + WebSocket| D
-  D --> DB[(SQLite + operation log)]
-  D --> AG[Persona agents + skills]
-  AG --> LLM[Local LiquidAI/LFM2.5-2.6B runtime]
-  D --> IDP[CAC/PIV · WebAuthn · OIDC · SAML]
-```
-
-The service is the deployment policy and coordination boundary. The `papyrus serve` command starts the API, authenticated collaboration hub, agent runtime, database migrations, and built browser application together. It enforces organization and project RBAC, persists authoritative project state and operations, records audit events, and runs human-reviewed agent workflows.
-
-## Security model
-
-### Profile-gated operation
-
-`PAPYRUS_PROFILE` selects one of three deterministic deployment modes:
-
-| Profile | Authentication | Model access | Connectivity |
-| --- | --- | --- | --- |
-| `commercial` | WebAuthn, OIDC, SAML | Local LiquidAI/LFM2.5-2.6B runtime | Customer-hosted HTTPS/WebSocket service |
-| `niprnet-il4` | CAC/PIV, WebAuthn | Approved enclave-local LFM2.5-2.6B runtime | Enclave-local service only |
-| `siprnet-il6` | CAC/PIV | LFM2.5-2.6B runtime inside the enclave | Disconnected enclave-local service |
-
-The profile is an enforcement input, not a claim that Papyrus creates an IL4 or IL6 environment. The customer-owned deployment boundary, infrastructure, authorization, and operating procedures remain decisive.
-
-### Identity and authorization
-
-- CAC/PIV certificate parsing, validity checks, optional CA-bundle verification, and mTLS integration
-- WebAuthn registration and authentication with configurable RP ID, RP name, and origin
-- OIDC authorization-code flow with PKCE and signed-token validation
-- SAML 2.0 request generation and signed response/assertion validation
-- external-identity provenance bound to a Papyrus member public key
-- organization membership and project-scoped role-based access control
-- CSRF challenges, bounded authentication state, rate limiting, and session enforcement
-
-### Authoritative data and synchronization
-
-Project state, credential records, audit information, immutable canvas operations, and configuration are stored in the deployment's SQLite database. WAL mode supports concurrent readers while the service sequences writes. Browsers durably queue unacknowledged changes in IndexedDB, reconnect to the same authoritative service, and remove operations only after acknowledgement. Yjs updates provide collaborative specification editing; cursors and presence remain ephemeral.
-
-### Agents, skills, and tools
-
-Persona agents consume released workspace context and produce proposed artifacts through explicit skills. LiquidAI/LFM2.5-2.6B is the product's local agent model. The trust boundary requires endpoint allowlisting, tool authorization, human approval, input validation, secret redaction, execution limits, and auditable tool calls.
-
-### Audit and transfer
-
-The service records security-relevant activity and supports audit-chain verification. Cross-domain bundles contain versioned operations signed by the source deployment identity and are accepted only from explicitly trusted deployment IDs. A transfer package still requires the customer's approved cross-domain process and does not replace a CDS or release authority.
-
-## Monorepo
-
-| Package | Responsibility |
-| --- | --- |
-| `engine/core` | Profiles, auth adapters, identity, RBAC-facing types, node catalog, sync protocol, transfer verification, and shared design tokens |
-| `engine/daemon` | Authoritative HTTP/HTTPS and WebSocket service, migrations, SQLite operation/state persistence, Yjs documents, project APIs, audit, organizations, roles, auth, signed transfer, and SPA hosting |
-| `engine/agents` | Persona agents, skill discovery/execution, model routing, and generated artifact workflows |
-| `engine/web` | Vite, React, and XYFlow canvas; onboarding, auth, presence, persona history, editable product nodes, and collaboration UI |
-| `engine/cli` | Local administration for licensing, projects, skills, artifacts, assets, organizations, and roles |
-
-## Offline licensing
-
-Papyrus validates licenses locally against the pinned Beag Labs Ed25519 authority key. Each installation generates a deployment identity; Beag Labs binds a 90-day pilot or perpetual organization license to that identity. Validation requires no network connection, and unlicensed deployments remain limited to health, diagnostics, activation request, and offline license installation.
-
-See [Offline licensing and air-gapped activation](./docs/licensing.md).
-
-## OSCAL and customer authorization support
-
-The [`compliance`](./compliance) directory contains an OSCAL Component Definition covering 35 selected NIST SP 800-53 Revision 5 controls and a detailed shared-responsibility guide. It is intended to be imported and tailored within a customer-owned SSP; it is not an authorization or assessment result.
-
-- [Papyrus OSCAL Component Definition](./compliance/papyrus-component-definition.json)
-- [Security and tailoring guide](./compliance/README.md)
-- [Human-readable Papyrus Trust Center](https://www.beaglabs.com/trust/papyrus)
-
-## Development
-
-Requirements: Node.js 22+ and pnpm 9.
+## Local development
 
 ```bash
 pnpm install
-pnpm cli serve --no-open
-pnpm cli --help
-pnpm smoke
-pnpm test
-pnpm typecheck
-pnpm lint
+pnpm build
+
+export PAPYRUS_MODE=local
+export PAPYRUS_DEV_IDENTITY='owner:Local Owner'
+export PAPYRUS_BOOTSTRAP_SECRET='replace-me'
+export PAPYRUS_LICENSE_REQUIRED=false
+
+pnpm start
 ```
 
-Package scripts currently run directly from each workspace. User-managed model, OCR, intake-security, records, connection, and deployment settings are configured in the Administration UI and persisted locally. Certificates, credentials, trusted transfer identities, and other secrets still belong in the deployment's approved secret store rather than source control.
+Open http://127.0.0.1:3210 and enter the one-time bootstrap secret. Development identity is rejected when Papyrus listens on a non-loopback address.
 
-Document intake uses the locally installed `pdftotext`, `pdftoppm`, and `tesseract` commands. The release gate uses locally installed `clamscan` and `yr` (YARA-X) commands with Papyrus's bundled rule pack. If an engine required by organization policy is unavailable, the gate fails closed and shows the evidence in Staging.
+## Production profiles
 
-### Local model runtime
+- `commercial` uses OIDC. TLS may terminate directly in Papyrus or at an approved external boundary.
+- `government-il4` and `government-il6` require direct TLS with a trusted client-certificate chain. OIDC is disabled in these profiles.
 
-Papyrus uses `LiquidAI/LFM2.5-2.6B` as its fixed local agent model. Start the official GGUF with an OpenAI-compatible local server, then open **Administration → LFM2.5-2.6B runtime** and set the endpoint. The default endpoint is `http://127.0.0.1:8080/v1`; the model cannot be changed through Papyrus configuration.
+See [.env.example](.env.example) for configuration and [docs/deployment.md](docs/deployment.md) for deployment behavior.
+
+## Verification
 
 ```bash
-llama-server -hf LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M --host 127.0.0.1 --port 8080
-pnpm cli serve --no-open
+pnpm typecheck
+pnpm test
+pnpm build
 ```
 
-The endpoint setting is stored locally in the organization database. No YAML or environment-file edit is required.
-
-The model weights are distributed separately by Liquid AI under the [LFM Open License v1.0](https://docs.liquid.ai/lfm/help/model-license); deployment owners are responsible for satisfying its commercial-use and distribution terms.
-
-## Trust boundaries and customer responsibilities
-
-Papyrus supplies application mechanisms; the deployment owner supplies and authorizes the system around them. Customer responsibilities include host hardening, storage encryption, certificate and key custody, enterprise identity lifecycle, network segmentation, approved cryptographic modules, monitoring and retention, backup and recovery, vulnerability scanning of the deployed stack, model-server authorization, trusted deployment allowlisting, and any cross-domain transfer process.
-
-## License
-
-Copyright © Beag Labs, Inc. All rights reserved. Papyrus is not open-source software unless a separate written license explicitly states otherwise.
+This repository is not an authorization to operate, a cross-domain solution, or a claim of IL4/IL6 accreditation.

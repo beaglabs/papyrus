@@ -1,7 +1,3 @@
 packages:
-  - "engine/*"
-allowBuilds:
-  '@biomejs/biome': true
-  better-sqlite3: true
-  es5-ext: true
-  esbuild: true
+  - "apps/*"
+  - "packages/*"

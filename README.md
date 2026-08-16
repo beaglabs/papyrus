@@ -1,53 +1,60 @@
 # Papyrus
 
-Papyrus is a secure, self-hosted agent gateway for regulated and disconnected environments.
+Papyrus is a secure, self-hosted access and control plane for AI agents in regulated and disconnected environments. It provides the branded web experience and security boundary around goose; it does not implement a second agent harness.
 
-This branch is a clean-slate pivot. It intentionally contains none of the previous canvas, built-in agent, workflow-pack, transfer, browser, or daemon implementation. Papyrus will provide the branded web experience and the security control plane around Goose, connected through the Agent Client Protocol (ACP).
+## What is implemented
 
-## Product boundary
+- Papyrus neobrutalist web UI with individual and administrative activity views
+- Commercial OIDC authorization-code flow with PKCE, nonce, issuer, audience, and signature validation
+- Government CAC/PIV identity through direct mutually authenticated TLS
+- fixed Owner, Admin, User, and Auditor roles
+- deny-by-default authorization using the official Cedar 4.12 engine
+- workspace and goose runtime assignments
+- user-owned sessions with administrative and audit visibility
+- workspace-scoped MCP server and tool grants through a session-bound Papyrus proxy
+- SQLite-enforced append-only audit rows with a SHA-256 event chain
+- goose as the only runtime, using the official stable ACP v1 SDK and `goose acp`
+- loopback local mode and durable single-deployment server mode
+- Ed25519-signed, deployment-bound offline licensing with rotatable trust-root IDs
 
-Papyrus owns:
+The initial product boundary and deferred scope are documented in [docs/product-scope.md](docs/product-scope.md).
 
-- the Papyrus web UI and branding;
-- identity, authorization, resource assignment, session ownership, audit, and licensing;
-- the policy-enforced boundary for model and MCP/tool access;
-- lifecycle management for a pinned Goose runtime distribution; and
-- local and persistent single-deployment operating modes.
+## Requirements
 
-Goose owns the agent loop. Papyrus does not implement another agent harness, host foundation models, or expose ungoverned MCP connections.
+- Node.js 24+
+- pnpm 11.19
+- a pinned goose CLI distribution available to the Papyrus server
+- an approved customer model endpoint
 
-## Initial release
+## Local development
 
-The first release is limited to:
+```bash
+pnpm install
+pnpm build
 
-1. Papyrus web UI and branding
-2. Commercial OIDC
-3. Government CAC/mTLS
-4. Fixed initial roles
-5. Cedar enforcement
-6. Workspace and runtime assignments
-7. Session ownership
-8. Tool/MCP permissions
-9. Append-only audit events
-10. Goose as the only runtime
-11. Local and persistent server modes
-12. Signed offline licensing
+export PAPYRUS_MODE=local
+export PAPYRUS_DEV_IDENTITY='owner:Local Owner'
+export PAPYRUS_BOOTSTRAP_SECRET='replace-me'
+export PAPYRUS_LICENSE_REQUIRED=false
 
-The exact boundaries and acceptance criteria are in [docs/product-scope.md](docs/product-scope.md).
+pnpm start
+```
 
-## Deferred
+Open http://127.0.0.1:3210 and enter the one-time bootstrap secret. Development identity is rejected when Papyrus listens on a non-loopback address.
 
-The first release will not include customer-authored Cedar policies, additional ACP runtimes, automated cross-domain transfer, complex organization hierarchies, workflow building, an agent marketplace, or multitenant SaaS administration.
+## Production profiles
 
-## Planned repository shape
+- `commercial` uses OIDC. TLS may terminate directly in Papyrus or at an approved external boundary.
+- `government-il4` and `government-il6` require direct TLS with a trusted client-certificate chain. OIDC is disabled in these profiles.
 
-- apps/web — branded browser UI
-- apps/server — API, identity boundary, policy enforcement, persistence, audit, and runtime supervision
-- packages/contracts — versioned API and event contracts shared by the server and UI
-- packages/goose-runtime — the only ACP runtime adapter in the initial release
+See [.env.example](.env.example) for configuration and [docs/deployment.md](docs/deployment.md) for deployment behavior.
 
-Security-sensitive modules stay inside the server instead of being split into many premature packages. Additional boundaries will be extracted only when they have an independent consumer.
+## Verification
 
-## Status
+```bash
+pnpm typecheck
+pnpm test
+pnpm build
+```
 
-Architecture baseline only. This branch is not production-ready, accredited, or authorized for classified information.
+This repository is not an authorization to operate, a cross-domain solution, or a claim of IL4/IL6 accreditation.

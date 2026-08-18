@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Principal } from '@papyrus/contracts'
-import { PolicyEngine, cedarUser, cedarUsers } from '../src/policy.js'
+import { ACTIONS, PolicyEngine, cedarUser, cedarUsers, type PolicyAction } from '../src/policy.js'
 
 const principal = (id: string, roles: Principal['roles']): Principal => ({ id, externalId: id, displayName: id, roles, authMethod: 'development' })
 
@@ -24,4 +24,29 @@ describe('fixed Cedar policy', () => {
     expect(policy.authorize(principal('auditor', ['Auditor']), 'ReadSession', session).allowed).toBe(true)
     expect(policy.authorize(principal('auditor', ['Auditor']), 'PromptSession', session).allowed).toBe(false)
   })
+
+  it('enforces the fixed role/action matrix', () => {
+    const owner = principal('owner', ['Owner'])
+    const admin = principal('admin', ['Admin'])
+    const auditor = principal('auditor', ['Auditor'])
+    const user = principal('user', ['User'])
+    const deployment = { type: 'Deployment' as const, id: 'd' }
+    const session = { type: 'Session' as const, id: 's', attrs: { owner: cedarUser('user') } }
+
+    for (const action of ACTIONS) {
+      expect(policy.authorize(owner, action, deployment).allowed, `Owner ${action}`).toBe(true)
+      expect(policy.authorize(admin, action, deployment).allowed, `Admin ${action}`).toBe(action !== 'ActivateLicense')
+      expect(policy.authorize(auditor, action, deployment).allowed, `Auditor ${action}`).toBe(auditorActions.includes(action))
+      expect(policy.authorize(user, action, deployment).allowed, `User ${action}`).toBe(false)
+    }
+
+    // A User may only prompt/read their own session; an Auditor may read but not execute.
+    expect(policy.authorize(user, 'ReadSession', session).allowed).toBe(true)
+    expect(policy.authorize(user, 'PromptSession', session).allowed).toBe(true)
+    expect(policy.authorize(auditor, 'ReadSession', session).allowed).toBe(true)
+    expect(policy.authorize(auditor, 'PromptSession', session).allowed).toBe(false)
+    expect(policy.authorize(principal('other', ['User']), 'PromptSession', session).allowed).toBe(false)
+  })
 })
+
+const auditorActions: PolicyAction[] = ['ReadAudit', 'ReadActivity', 'ReadSession', 'ReadWorkspace', 'ReadRuntime']

@@ -22,7 +22,7 @@ export class PapyrusDatabase {
       CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY, external_id TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL,
-        email TEXT, auth_method TEXT NOT NULL, created_at TEXT NOT NULL
+        email TEXT, auth_method TEXT NOT NULL, token_version INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS user_roles (
         user_id TEXT NOT NULL REFERENCES users(id), role TEXT NOT NULL,
@@ -37,7 +37,7 @@ export class PapyrusDatabase {
         id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL, created_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS runtimes (
-        id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind = 'goose'),
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL,
         mode TEXT NOT NULL, model_json TEXT NOT NULL, command TEXT, endpoint TEXT, created_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS assignments (
@@ -76,6 +76,11 @@ export class PapyrusDatabase {
       BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END;
       CREATE TABLE IF NOT EXISTS licenses (id INTEGER PRIMARY KEY CHECK(id = 1), document_json TEXT NOT NULL, activated_at TEXT NOT NULL);
     `)
+    // Migration for databases created before token_version existed.
+    const userColumns = this.sqlite.prepare('PRAGMA table_info(users)').all() as Row[]
+    if (!userColumns.some((column) => column.name === 'token_version')) {
+      this.sqlite.exec('ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0')
+    }
   }
 
   transaction<T>(operation: () => T): T {
@@ -130,6 +135,15 @@ export class PapyrusDatabase {
     this.sqlite.prepare('INSERT OR IGNORE INTO user_roles(user_id,role) VALUES(?,?)').run(userId, role)
   }
 
+  getTokenVersion(userId: string): number {
+    const row = this.sqlite.prepare('SELECT token_version token_version FROM users WHERE id=?').get(userId) as Row | undefined
+    return Number(row?.token_version ?? 0)
+  }
+
+  incrementTokenVersion(userId: string): void {
+    this.sqlite.prepare('UPDATE users SET token_version = token_version + 1 WHERE id=?').run(userId)
+  }
+
   createWorkspace(input: Pick<Workspace, 'name' | 'description'>): Workspace {
     const workspace: Workspace = { id: crypto.randomUUID(), ...input, createdAt: new Date().toISOString() }
     this.sqlite.prepare('INSERT INTO workspaces VALUES(?,?,?,?)').run(workspace.id, workspace.name, workspace.description, workspace.createdAt)
@@ -144,8 +158,8 @@ export class PapyrusDatabase {
     return this.sqlite.prepare('SELECT id,name,description,created_at createdAt FROM workspaces ORDER BY name').all() as unknown as Workspace[]
   }
 
-  createRuntime(input: Omit<Runtime, 'id' | 'kind' | 'createdAt'>): Runtime {
-    const runtime: Runtime = { id: crypto.randomUUID(), kind: 'goose', createdAt: new Date().toISOString(), ...input }
+  createRuntime(input: Omit<Runtime, 'id' | 'createdAt'>): Runtime {
+    const runtime: Runtime = { id: crypto.randomUUID(), createdAt: new Date().toISOString(), ...input }
     this.sqlite.prepare('INSERT INTO runtimes VALUES(?,?,?,?,?,?,?,?)').run(
       runtime.id, runtime.name, runtime.kind, runtime.mode, JSON.stringify(runtime.model), runtime.command ?? null, runtime.endpoint ?? null, runtime.createdAt,
     )
@@ -160,7 +174,7 @@ export class PapyrusDatabase {
   listRuntimes(): Runtime[] { return (this.sqlite.prepare('SELECT * FROM runtimes ORDER BY name').all() as Row[]).map((row) => this.runtime(row)) }
 
   private runtime(row: Row): Runtime {
-    return { id: String(row.id), name: String(row.name), kind: 'goose', mode: row.mode as Runtime['mode'], model: JSON.parse(String(row.model_json)),
+    return { id: String(row.id), name: String(row.name), kind: String(row.kind), mode: row.mode as Runtime['mode'], model: JSON.parse(String(row.model_json)),
       ...(row.command ? { command: String(row.command) } : {}), ...(row.endpoint ? { endpoint: String(row.endpoint) } : {}), createdAt: String(row.created_at) }
   }
 

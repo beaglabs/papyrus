@@ -1,5 +1,5 @@
 {
-  "name": "@papyrus/server",
+  "name": "@papyrus/worker",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -8,22 +8,16 @@
     "start": "node dist/index.js",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "smoke": "tsx scripts/smoke-client.ts",
-    "test": "vitest run",
+    "test": "node --test",
     "lint": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.3.0",
-    "@cedar-policy/cedar-wasm": "4.12.0",
-    "@papyrus/contracts": "workspace:*",
-    "@papyrus/goose-runtime": "workspace:*",
-    "jose": "6.2.9",
-    "yaml": "^2.9.0"
+    "@papyrus/goose-runtime": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "24.10.1",
     "tsx": "4.23.12",
-    "typescript": "5.9.3",
-    "vitest": "4.1.10"
+    "typescript": "5.9.3"
   }
 }

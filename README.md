@@ -1,10 +1,11 @@
 # Papyrus
 
-Papyrus is a secure, self-hosted access and control plane for AI agents in regulated and disconnected environments. It provides the branded web experience and security boundary around goose; it does not implement a second agent harness.
+Papyrus is a secure, self-hosted ACP gateway for AI agents in regulated and disconnected environments. It fronts arbitrary ACP agents behind authentication, Cedar authorization, audit, and MCP mediation, lets approved clients (Zed, VS Code, or custom) connect through an ACP gateway, and ships an administrative/ops web UI. It does not implement an agent harness of its own.
 
 ## What is implemented
 
-- Papyrus neobrutalist web UI with individual and administrative activity views
+- Papyrus administrative/ops web UI (roles, assignments, licenses, audit, health)
+- ACP gateway: arbitrary ACP clients (Zed, VS Code, custom) connect to `/acp/<runtimeId>` behind mTLS, Cedar authorization, audit, and MCP mediation
 - Commercial OIDC authorization-code flow with PKCE, nonce, issuer, audience, and signature validation
 - Government CAC/PIV identity through direct mutually authenticated TLS
 - fixed Owner, Admin, User, and Auditor roles
@@ -15,7 +16,7 @@ Papyrus is a secure, self-hosted access and control plane for AI agents in regul
 - SQLite-enforced append-only audit rows with a SHA-256 event chain
 - goose as the only runtime, using the official stable ACP v1 SDK and `goose acp`
 - loopback local mode and durable single-deployment server mode
-- Ed25519-signed, deployment-bound offline licensing with rotatable trust-root IDs
+- P-256 (ECDSA)-signed, deployment-bound offline licensing with rotatable trust-root IDs
 
 The initial product boundary and deferred scope are documented in [docs/product-scope.md](docs/product-scope.md).
 

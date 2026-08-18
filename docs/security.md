@@ -15,9 +15,9 @@
 
 ## Honest limitations
 
-- A database administrator can replace the database. Export to independently controlled immutable storage is still required for tamper evidence outside the host.
+- A database administrator can replace the database. Signed audit checkpoints (`GET /api/audit/checkpoint`) provide exportable tamper evidence, but independently controlled immutable storage is still the operator's responsibility.
 - CAC trust and revocation quality depend on deployment-provided trust bundles and boundary operations.
-- OIDC login sessions are signed and time-limited but do not yet have a server-side revocation list.
+- OIDC login sessions are signed, time-limited, and server-side revocable: role changes and explicit revocation bump a per-user token version, immediately invalidating outstanding sessions.
 - The goose adapter starts a fresh ACP process for a prompt turn. Durable ACP conversation resume depends on goose session lifecycle support and is not represented as complete.
 - The MCP proxy supports stateless HTTP JSON-RPC only.
 - The UI exposes the implemented administration surfaces but does not yet cover every assignment and MCP configuration operation; those operations are available through the API.

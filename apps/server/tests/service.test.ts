@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { AuthorizationDenied } from '../src/service.js'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { GooseRuntimeOptions } from '@papyrus/goose-runtime'
+import { AuthorizationDenied, type RuntimeHandle } from '../src/service.js'
 import { testContext } from './helpers.js'
 
 describe('Papyrus control plane', () => {
@@ -16,20 +17,13 @@ describe('Papyrus control plane', () => {
 
   it('requires both workspace and Goose runtime assignment', () => {
     const context = testContext(); contexts.push(context)
-    const owner = context.db.upsertUser({ externalId: 'dev:owner', displayName: 'Owner', authMethod: 'development' })
-    context.db.setRole(owner.id, 'Owner')
-    const activeOwner = context.db.getPrincipal(owner.id)!
-    const user = context.db.upsertUser({ externalId: 'dev:user', displayName: 'User', authMethod: 'development' })
-    context.db.setRole(user.id, 'User')
-    const activeUser = context.db.getPrincipal(user.id)!
-    const workspace = context.service.createWorkspace(activeOwner, { name: 'Mission', description: 'Segmented mission work' })
-    const runtime = context.service.createRuntime(activeOwner, { name: 'Local Goose', mode: 'child-process', model: { provider: 'openai-compatible', baseUrl: 'http://model.internal/v1', model: 'approved', secretRef: 'primary' } })
-    context.service.assign(activeOwner, activeUser.id, 'workspace', workspace.id)
-    expect(() => context.service.createSession(activeUser, workspace.id, runtime.id, 'Denied')).toThrow(AuthorizationDenied)
-    context.service.assign(activeOwner, activeUser.id, 'runtime', runtime.id)
-    const session = context.service.createSession(activeUser, workspace.id, runtime.id, 'Allowed')
-    expect(session.ownerId).toBe(activeUser.id)
-    expect(context.service.listSessions(activeUser)).toEqual([session])
+    const { owner, user, workspace, runtime } = setup(context)
+    context.service.assign(owner, user.id, 'workspace', workspace.id)
+    expect(() => context.service.createSession(user, workspace.id, runtime.id, 'Denied')).toThrow(AuthorizationDenied)
+    context.service.assign(owner, user.id, 'runtime', runtime.id)
+    const session = context.service.createSession(user, workspace.id, runtime.id, 'Allowed')
+    expect(session.ownerId).toBe(user.id)
+    expect(context.service.listSessions(user)).toEqual([session])
     expect(context.service.audit.verify()).toEqual({ valid: true })
   })
 
@@ -41,4 +35,102 @@ describe('Papyrus control plane', () => {
     expect(() => context.service.assignRole(context.db.getPrincipal(admin.id)!, target.id, 'Owner')).toThrow(AuthorizationDenied)
     expect(context.service.assignRole(context.db.getPrincipal(admin.id)!, target.id, 'User').roles).toContain('User')
   })
+
+  it('isolates sessions between workspaces', () => {
+    const context = testContext(); contexts.push(context)
+    const { owner, user, workspace, runtime } = setup(context)
+    const other = context.service.createWorkspace(owner, { name: 'Other', description: '' })
+    context.service.assign(owner, user.id, 'workspace', workspace.id)
+    context.service.assign(owner, user.id, 'runtime', runtime.id)
+    const session = context.service.createSession(user, workspace.id, runtime.id, 'Mine')
+    expect(() => context.service.createSession(user, other.id, runtime.id, 'Cross')).toThrow(AuthorizationDenied)
+    expect(context.service.listSessions(user)).toEqual([session])
+  })
+
+  it('blocks MCP tool invocation without a workspace grant and across workspaces', async () => {
+    const context = testContext(); contexts.push(context)
+    const { owner, user, workspace, runtime } = setup(context)
+    context.service.assign(owner, user.id, 'workspace', workspace.id)
+    context.service.assign(owner, user.id, 'runtime', runtime.id)
+    const server = context.service.addMcpServer(owner, { name: 'Tools', endpoint: 'http://tools.internal/mcp' })
+    context.service.grantTool(owner, workspace.id, server.id, 'read_file')
+    const session = context.service.createSession(user, workspace.id, runtime.id, 'Tools')
+
+    // Unassigned tool in the same workspace is denied before any network call.
+    await expect(context.service.invokeTool(user, session.id, server.id, 'delete_everything', {})).rejects.toThrow(AuthorizationDenied)
+
+    // A second user in a different workspace cannot use the first workspace's grant.
+    const other = context.service.createWorkspace(owner, { name: 'Other', description: '' })
+    const otherUser = context.db.upsertUser({ externalId: 'dev:other', displayName: 'Other', authMethod: 'development' })
+    context.db.setRole(otherUser.id, 'User')
+    const activeOther = context.db.getPrincipal(otherUser.id)!
+    context.service.assign(owner, activeOther.id, 'workspace', other.id)
+    context.service.assign(owner, activeOther.id, 'runtime', runtime.id)
+    const otherSession = context.service.createSession(activeOther, other.id, runtime.id, 'Other tools')
+    await expect(context.service.invokeTool(activeOther, otherSession.id, server.id, 'read_file', {})).rejects.toThrow(AuthorizationDenied)
+  })
+
+  it('revokes sessions and invalidates them on role change', () => {
+    const context = testContext(); contexts.push(context)
+    const { owner, user } = setup(context)
+    const before = context.db.getTokenVersion(user.id)
+    context.service.revokeSessions(owner, user.id)
+    expect(context.db.getTokenVersion(user.id)).toBe(before + 1)
+    const version = context.db.getTokenVersion(user.id)
+    context.service.assignRole(owner, user.id, 'User')
+    expect(context.db.getTokenVersion(user.id)).toBe(version + 1)
+  })
+
+  it('runs an end-to-end session prompt and preserves audit integrity', async () => {
+    process.env.PAPYRUS_SECRET_PRIMARY = 'test-api-key'
+    const factory = vi.fn((_options: GooseRuntimeOptions): RuntimeHandle => ({
+      runPrompt: async (request) => {
+        await request.onEvent({ kind: 'session', at: new Date().toISOString(), data: { runtimeSessionId: 'rt-1' } })
+        await request.onEvent({ kind: 'update', at: new Date().toISOString(), data: { chunk: 'hello' } })
+        await request.onEvent({ kind: 'complete', at: new Date().toISOString(), data: { ok: true } })
+        return { runtimeSessionId: 'rt-1', stopReason: 'end_turn' }
+      },
+    }))
+    const context = testContext(factory); contexts.push(context)
+    try {
+      const { owner, user, workspace, runtime } = setup(context)
+      context.service.assign(owner, user.id, 'workspace', workspace.id)
+      context.service.assign(owner, user.id, 'runtime', runtime.id)
+      const session = context.service.createSession(user, workspace.id, runtime.id, 'E2E')
+      const result = await context.service.prompt(user, session.id, 'hello')
+      expect(result.stopReason).toBe('end_turn')
+      expect(result.events.map((event) => event.kind)).toEqual(['session', 'update', 'complete'])
+      expect(context.db.getSession(session.id)!.status).toBe('ready')
+      const events = context.db.sqlite.prepare('SELECT count(*) c FROM runtime_events WHERE session_id=?').get(session.id) as { c: number }
+      expect(events.c).toBe(3)
+      expect(context.service.audit.verify()).toEqual({ valid: true })
+      expect(factory).toHaveBeenCalledTimes(1)
+    } finally {
+      delete process.env.PAPYRUS_SECRET_PRIMARY
+    }
+  })
+
+  it('signs and verifies an audit checkpoint', () => {
+    const context = testContext(); contexts.push(context)
+    const { owner } = setup(context)
+    context.service.audit.append({ actorId: null, action: 'Probe', resourceType: 'Test', resourceId: '1', decision: 'info', metadata: {} })
+    const checkpoint = context.service.exportAuditCheckpoint(owner)
+    expect(checkpoint.count).toBeGreaterThan(0)
+    expect(checkpoint.integrity).toBe(true)
+    expect(context.service.verifyAuditCheckpoint(checkpoint)).toBe(true)
+    const tampered = { ...checkpoint, events: [...checkpoint.events.slice(0, -1)] }
+    expect(context.service.verifyAuditCheckpoint(tampered)).toBe(false)
+  })
 })
+
+function setup(context: ReturnType<typeof testContext>) {
+  const owner = context.db.upsertUser({ externalId: 'dev:owner', displayName: 'Owner', authMethod: 'development' })
+  context.db.setRole(owner.id, 'Owner')
+  const activeOwner = context.db.getPrincipal(owner.id)!
+  const user = context.db.upsertUser({ externalId: 'dev:user', displayName: 'User', authMethod: 'development' })
+  context.db.setRole(user.id, 'User')
+  const activeUser = context.db.getPrincipal(user.id)!
+  const workspace = context.service.createWorkspace(activeOwner, { name: 'Mission', description: 'Segmented mission work' })
+  const runtime = context.service.createRuntime(activeOwner, { name: 'Local Goose', mode: 'child-process', model: { provider: 'openai-compatible', baseUrl: 'http://model.internal/v1', model: 'approved', secretRef: 'primary' } })
+  return { owner: activeOwner, user: activeUser, workspace, runtime }
+}

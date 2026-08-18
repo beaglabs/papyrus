@@ -1,6 +1,9 @@
+import { readFileSync } from 'node:fs'
+import { Agent as HttpsAgent } from 'node:https'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import type { ActivitySummary, McpServer, Principal, Role, Runtime, Session, SignedLicense, Workspace } from '@papyrus/contracts'
-import { GooseRuntime, type GoosePromptEvent } from '@papyrus/goose-runtime'
+import { GooseRuntime, type GoosePromptEvent, type GoosePromptRequest, type GoosePromptResult, type GooseRuntimeOptions } from '@papyrus/goose-runtime'
+import { resolveAgentSpec } from './agents.js'
 import { AuditLog } from './audit.js'
 import type { ServerConfig } from './config.js'
 import { PapyrusDatabase } from './db.js'
@@ -11,12 +14,22 @@ export class AuthorizationDenied extends Error {
   constructor(readonly action: string, readonly resourceId: string) { super(`Not authorized to ${action} ${resourceId}`) }
 }
 
+export interface RuntimeHandle {
+  runPrompt: (request: GoosePromptRequest) => Promise<GoosePromptResult>
+}
+
+type RuntimeFactory = (options: GooseRuntimeOptions) => RuntimeHandle
+
 export class PapyrusService {
   readonly audit: AuditLog
   readonly policy = new PolicyEngine()
   readonly license: LicenseService
 
-  constructor(readonly db: PapyrusDatabase, private readonly config: ServerConfig) {
+  constructor(
+    readonly db: PapyrusDatabase,
+    private readonly config: ServerConfig,
+    private readonly runtimeFactory: RuntimeFactory = (options) => new GooseRuntime(options),
+  ) {
     this.audit = new AuditLog(db)
     this.license = new LicenseService(db, config.dataDir, config.profile, config.licenseAuthorities, config.licenseRequired)
   }
@@ -37,10 +50,17 @@ export class PapyrusService {
     this.check(actor, 'ManageUsers', { type: 'Deployment', id: this.license.deploymentId })
     if (['Owner', 'Admin'].includes(role) && !actor.roles.includes('Owner')) throw new AuthorizationDenied('AssignPrivilegedRole', userId)
     this.db.setRole(userId, role)
-    this.audit.append({ actorId: actor.id, action: 'AssignRole', resourceType: 'User', resourceId: userId, decision: 'info', metadata: { role } })
+    this.db.incrementTokenVersion(userId)
+    this.audit.append({ actorId: actor.id, action: 'AssignRole', resourceType: 'User', resourceId: userId, decision: 'info', metadata: { role, revokedSessions: true } })
     const principal = this.db.getPrincipal(userId)
     if (!principal) throw new Error('User not found')
     return principal
+  }
+
+  revokeSessions(actor: Principal, userId: string): void {
+    this.check(actor, 'ManageUsers', { type: 'Deployment', id: this.license.deploymentId })
+    this.db.incrementTokenVersion(userId)
+    this.audit.append({ actorId: actor.id, action: 'RevokeSessions', resourceType: 'User', resourceId: userId, decision: 'info', metadata: {} })
   }
 
   listUsers(actor: Principal): Principal[] {
@@ -61,17 +81,27 @@ export class PapyrusService {
     return this.db.listWorkspaces().filter((workspace) => this.decide(actor, 'ReadWorkspace', this.workspaceResource(workspace.id)).allowed)
   }
 
-  createRuntime(actor: Principal, input: Omit<Runtime, 'id' | 'kind' | 'createdAt'>): Runtime {
+  createRuntime(actor: Principal, input: Omit<Runtime, 'id' | 'createdAt' | 'kind'> & { kind?: string }): Runtime {
     this.license.require('gateway')
     this.check(actor, 'ManageRuntimes', { type: 'Deployment', id: this.license.deploymentId })
-    const runtime = this.db.createRuntime(input)
+    const runtime = this.db.createRuntime({ ...input, kind: input.kind ?? 'goose' })
     this.db.assign('user', actor.id, 'runtime', runtime.id)
-    this.audit.append({ actorId: actor.id, action: 'CreateRuntime', resourceType: 'Runtime', resourceId: runtime.id, decision: 'info', metadata: { name: runtime.name, kind: 'goose', model: runtime.model.model } })
+    this.audit.append({ actorId: actor.id, action: 'CreateRuntime', resourceType: 'Runtime', resourceId: runtime.id, decision: 'info', metadata: { name: runtime.name, kind: runtime.kind, model: runtime.model.model } })
     return runtime
   }
 
   listRuntimes(actor: Principal): Runtime[] {
     return this.db.listRuntimes().filter((runtime) => this.decide(actor, 'ReadRuntime', this.runtimeResource(runtime.id)).allowed)
+  }
+
+  async runtimeHealth(actor: Principal, runtimeId: string) {
+    const runtime = this.db.getRuntime(runtimeId)
+    if (!runtime) throw new Error('Runtime not found')
+    this.check(actor, 'ReadRuntime', this.runtimeResource(runtime.id))
+    const goose = runtime.mode === 'remote' && runtime.endpoint
+      ? new GooseRuntime({ endpoint: runtime.endpoint, headers: this.runtimeHeaders(), fetch: this.runtimeFetch() })
+      : new GooseRuntime(this.runtimeCommand(runtime))
+    return goose.health()
   }
 
   assign(actor: Principal, principalId: string, resourceType: 'workspace' | 'runtime', resourceId: string): void {
@@ -102,7 +132,9 @@ export class PapyrusService {
     const runtimeConfig = this.db.getRuntime(session.runtimeId)
     if (!runtimeConfig) throw new Error('Runtime not found')
     const events: GoosePromptEvent[] = []
-    const runtime = new GooseRuntime(runtimeConfig.command ? { command: runtimeConfig.command } : {})
+    const runtime = runtimeConfig.mode === 'remote' && runtimeConfig.endpoint
+      ? this.runtimeFactory({ endpoint: runtimeConfig.endpoint, headers: this.runtimeHeaders(), fetch: this.runtimeFetch(), promptTimeoutMs: this.config.promptTimeoutMs })
+      : this.runtimeFactory({ ...this.runtimeCommand(runtimeConfig), promptTimeoutMs: this.config.promptTimeoutMs })
     this.db.setSessionStatus(session.id, 'running')
     this.audit.append({ actorId: actor.id, action: 'PromptSession', resourceType: 'Session', resourceId: session.id, decision: 'info', metadata: { promptBytes: Buffer.byteLength(prompt) } })
     try {
@@ -110,11 +142,7 @@ export class PapyrusService {
         cwd: this.config.dataDir,
         prompt,
         environment: this.modelEnvironment(runtimeConfig),
-        mcpServers: this.db.listGrantedMcpServers(session.workspaceId).map((server) => ({
-          name: server.name,
-          url: `${this.config.publicOrigin}/api/runtime/mcp/${session.id}/${server.id}`,
-          headers: [{ name: 'authorization', value: `Bearer ${this.issueRuntimeToken(session.id, server.id)}` }],
-        })),
+        mcpServers: this.runtimeMcpServers(session),
         authorizeTool: async (title) => this.db.isToolGranted(session.workspaceId, ...this.findTool(session.workspaceId, title)),
         onEvent: (event) => {
           events.push(event)
@@ -214,6 +242,27 @@ export class PapyrusService {
     return { integrity: this.audit.verify(), events: this.audit.list() }
   }
 
+  exportAuditCheckpoint(actor: Principal) {
+    this.check(actor, 'ReadAudit', { type: 'Audit', id: 'checkpoint' })
+    const events = this.audit.export()
+    const payload = {
+      deploymentId: this.license.deploymentId,
+      generatedAt: new Date().toISOString(),
+      count: events.length,
+      firstSequence: events[0]?.sequence ?? 0,
+      lastSequence: events[events.length - 1]?.sequence ?? 0,
+      integrity: this.audit.verify().valid,
+      events,
+    }
+    return { ...payload, signature: this.license.signCheckpoint(payload) }
+  }
+
+  verifyAuditCheckpoint(checkpoint: { signature?: string } & Record<string, unknown>): boolean {
+    const { signature, ...payload } = checkpoint
+    if (typeof signature !== 'string') return false
+    return this.license.verifyCheckpoint(payload, signature)
+  }
+
   activateLicense(actor: Principal, document: SignedLicense) {
     this.check(actor, 'ActivateLicense', { type: 'Deployment', id: this.license.deploymentId })
     const status = this.license.activate(document)
@@ -237,14 +286,64 @@ export class PapyrusService {
     return row ? [row.mcp_server_id, row.tool_name] : ['', '']
   }
 
-  private modelEnvironment(runtime: Runtime): Record<string, string> {
+  modelEnvironment(runtime: Runtime): Record<string, string> {
+    const spec = resolveAgentSpec(runtime.kind, this.config.agents)
+    if (!spec) throw new Error(`Unknown runtime kind "${runtime.kind}"`)
     const secretName = `PAPYRUS_SECRET_${runtime.model.secretRef.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`
     const secret = process.env[secretName]
     if (!secret) throw new Error(`Missing server-side model credential ${secretName}`)
-    const common = { GOOSE_MODEL: runtime.model.model }
-    if (runtime.model.provider === 'openai-compatible') return { ...common, GOOSE_PROVIDER: 'openai', OPENAI_HOST: runtime.model.baseUrl, OPENAI_API_KEY: secret }
-    if (runtime.model.provider === 'azure-openai') return { ...common, GOOSE_PROVIDER: 'azure', AZURE_OPENAI_ENDPOINT: runtime.model.baseUrl, AZURE_OPENAI_API_KEY: secret }
-    return { ...common, GOOSE_PROVIDER: 'anthropic', ANTHROPIC_HOST: runtime.model.baseUrl, ANTHROPIC_API_KEY: secret }
+    return spec.environment(runtime.model, secret)
+  }
+
+  /** Launch command and args for a runtime, from the agent spec plus any per-runtime override. */
+  runtimeCommand(runtime: Runtime): { command: string; args: string[] } {
+    const spec = resolveAgentSpec(runtime.kind, this.config.agents)
+    if (!spec) throw new Error(`Unknown runtime kind "${runtime.kind}"`)
+    return { command: runtime.command ?? spec.command, args: spec.args }
+  }
+
+  /** Authorizes and audits a prompt against a Papyrus session (without running it). */
+  authorizeSessionPrompt(actor: Principal, session: Session): void {
+    this.check(actor, 'PromptSession', this.sessionResource(session))
+    this.audit.append({ actorId: actor.id, action: 'PromptSession', resourceType: 'Session', resourceId: session.id, decision: 'info', metadata: {} })
+  }
+
+  /** Authorizes a tool call (goose reports the tool title) against the workspace grant. */
+  isToolCallAllowed(actor: Principal, session: Session, toolTitle: string): boolean {
+    const [mcpServerId, toolName] = this.findTool(session.workspaceId, toolTitle)
+    if (!mcpServerId || !toolName) return false
+    try {
+      this.check(actor, 'PromptSession', this.sessionResource(session))
+      this.check(actor, 'InvokeTool', { type: 'Tool', id: `${mcpServerId}:${toolName}`, attrs: { assignedUsers: cedarUsers(this.db.assignedUserIds('workspace', session.workspaceId)) } })
+      return this.db.isToolGranted(session.workspaceId, mcpServerId, toolName)
+    } catch { return false }
+  }
+
+  /** Session-bound Papyrus MCP proxy endpoints for the runtime to consume. */
+  runtimeMcpServers(session: Session): Array<{ name: string; url: string; headers: Array<{ name: string; value: string }> }> {
+    return this.db.listGrantedMcpServers(session.workspaceId).map((server) => ({
+      name: server.name,
+      url: `${this.config.publicOrigin}/api/runtime/mcp/${session.id}/${server.id}`,
+      headers: [{ name: 'authorization', value: `Bearer ${this.issueRuntimeToken(session.id, server.id)}` }],
+    }))
+  }
+
+  runtimeHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {}
+    if (this.config.runtimeWorkerToken) headers.authorization = `Bearer ${this.config.runtimeWorkerToken}`
+    return headers
+  }
+
+  runtimeFetch(): typeof globalThis.fetch | undefined {
+    const tls = this.config.runtimeWorkerTls
+    if (!tls) return undefined
+    const agent = new HttpsAgent({
+      cert: readFileSync(tls.certPath),
+      key: readFileSync(tls.keyPath),
+      ca: readFileSync(tls.caPath),
+      rejectUnauthorized: true,
+    })
+    return (input, init) => globalThis.fetch(input, { ...init, dispatcher: agent } as Parameters<typeof globalThis.fetch>[1])
   }
 
   private issueRuntimeToken(sessionId: string, serverId: string): string {

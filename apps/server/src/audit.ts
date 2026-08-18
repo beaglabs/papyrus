@@ -37,12 +37,22 @@ export class AuditLog {
 
   list(limit = 200): AuditEvent[] {
     const rows = this.db.sqlite.prepare('SELECT * FROM audit_events ORDER BY sequence DESC LIMIT ?').all(Math.min(Math.max(limit, 1), 1000)) as Array<Record<string, unknown>>
-    return rows.map((row) => ({
+    return rows.map((row) => this.toEvent(row))
+  }
+
+  /** Returns every event in chain order for checkpoint export. */
+  export(): AuditEvent[] {
+    const rows = this.db.sqlite.prepare('SELECT * FROM audit_events ORDER BY sequence ASC').all() as Array<Record<string, unknown>>
+    return rows.map((row) => this.toEvent(row))
+  }
+
+  private toEvent(row: Record<string, unknown>): AuditEvent {
+    return {
       sequence: Number(row.sequence), id: String(row.id), occurredAt: String(row.occurred_at), actorId: row.actor_id ? String(row.actor_id) : null,
       action: String(row.action), resourceType: String(row.resource_type), resourceId: String(row.resource_id),
       decision: row.decision as AuditEvent['decision'], policyVersion: String(row.policy_version), metadata: JSON.parse(String(row.metadata_json)),
       previousHash: String(row.previous_hash), hash: String(row.hash),
-    }))
+    }
   }
 
   verify(): { valid: boolean; brokenAt?: number } {

@@ -1,11 +1,79 @@
+# Dependencies
 node_modules/
+.pnpm-store/
+
+# Build artifacts
 dist/
+build/
+*.tsbuildinfo
+
+# Coverage and testing
 coverage/
+.smoke/
+
+# Environment and secrets
 .env
 .env.*
 !.env.example
+
+# Logs
 *.log
+
+# OS files
 .DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Runtime data
 .papyrus/
-.smoke/
-*.tsbuildinfo
+apps/server/.papyrus/
+
+# Database files
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Cryptographic keys and certificates
+*.pem
+*.key
+*.p12
+*.pfx
+*.cert
+*.crt
+
+# Large binary / model files
+*.gguf
+*.bin
+*.model
+*.onnx
+*.pt
+*.pth
+*.caffemodel
+*.h5
+*.pb
+
+# Archives
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+
+# Cache
+.cache/
+
+# Compliance artifacts (large, generated)
+compliance/*.json
+compliance/*.spdx.json
+
+# OSCAL output (large, generated)
+oscal-output/

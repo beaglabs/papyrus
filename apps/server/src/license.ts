@@ -11,7 +11,7 @@ function canonical(value: unknown): string {
 }
 
 export function signLicense(payload: LicensePayload, keyId: string, privateKeyPem: string): SignedLicense {
-  return { ...payload, keyId, signature: sign(null, Buffer.from(canonical(payload)), privateKeyPem).toString('base64') }
+  return { ...payload, keyId, signature: sign('sha256', Buffer.from(canonical(payload)), privateKeyPem).toString('base64') }
 }
 
 export class LicenseService {
@@ -20,7 +20,7 @@ export class LicenseService {
 
   constructor(
     private readonly db: PapyrusDatabase,
-    dataDir: string,
+    private readonly dataDir: string,
     private readonly profile: DeploymentProfile,
     private readonly authorities: Record<string, string>,
     private readonly required: boolean,
@@ -30,7 +30,7 @@ export class LicenseService {
     const privatePath = join(identityDir, 'deployment-private.pem')
     if (!existsSync(publicPath) || !existsSync(privatePath)) {
       mkdirSync(identityDir, { recursive: true, mode: 0o700 })
-      const pair = generateKeyPairSync('ed25519')
+      const pair = generateKeyPairSync('ec', { namedCurve: 'prime256v1' })
       writeFileSync(publicPath, pair.publicKey.export({ type: 'spki', format: 'pem' }), { mode: 0o644 })
       writeFileSync(privatePath, pair.privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 })
     }
@@ -40,6 +40,17 @@ export class LicenseService {
 
   activationRequest(): { deploymentId: string; profile: DeploymentProfile; publicKeyPem: string } {
     return { deploymentId: this.deploymentId, profile: this.profile, publicKeyPem: this.publicKeyPem }
+  }
+
+  /** Signs a canonical payload with the deployment P-256 identity key. */
+  signCheckpoint(payload: unknown): string {
+    const privateKey = readFileSync(join(this.dataDir, 'identity', 'deployment-private.pem'), 'utf8')
+    return sign('sha256', Buffer.from(canonical(payload)), privateKey).toString('base64')
+  }
+
+  /** Verifies a checkpoint signature against the deployment public key. */
+  verifyCheckpoint(payload: unknown, signature: string): boolean {
+    return verify('sha256', Buffer.from(canonical(payload)), this.publicKeyPem, Buffer.from(signature, 'base64'))
   }
 
   activate(document: SignedLicense): LicenseStatus {
@@ -70,7 +81,7 @@ export class LicenseService {
     if (payload.deploymentId !== this.deploymentId) return { valid: false, deploymentId: this.deploymentId, reason: 'License belongs to another deployment' }
     if (!payload.profiles.includes(this.profile)) return { valid: false, deploymentId: this.deploymentId, reason: `License does not permit ${this.profile}` }
     if (payload.expiresAt && Date.parse(payload.expiresAt) <= Date.now()) return { valid: false, deploymentId: this.deploymentId, reason: `License expired at ${payload.expiresAt}` }
-    if (!verify(null, Buffer.from(canonical(payload)), authority, Buffer.from(signature, 'base64'))) {
+    if (!verify('sha256', Buffer.from(canonical(payload)), authority, Buffer.from(signature, 'base64'))) {
       return { valid: false, deploymentId: this.deploymentId, reason: 'Invalid license signature' }
     }
     return { valid: true, deploymentId: this.deploymentId, license: { ...payload, keyId } }

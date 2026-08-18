@@ -88,6 +88,11 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
         if (!ROLES.includes(role)) throw new HttpError(400, 'INVALID_INPUT', 'Unknown fixed role')
         return json(response, 200, service.assignRole(principal, decodeURIComponent(userRole[1] as string), role))
       }
+      const revokeSessions = url.pathname.match(/^\/api\/users\/([^/]+)\/revoke-sessions$/)
+      if (revokeSessions && request.method === 'POST') {
+        service.revokeSessions(principal, decodeURIComponent(revokeSessions[1] as string))
+        return json(response, 204, null)
+      }
       if (url.pathname === '/api/workspaces' && request.method === 'GET') return json(response, 200, service.listWorkspaces(principal))
       if (url.pathname === '/api/workspaces' && request.method === 'POST') {
         const input = await body(request)
@@ -100,8 +105,9 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
         const model = input.model as Record<string, unknown>
         const provider = text(model.provider, 'model.provider') as Runtime['model']['provider']
         if (!['openai-compatible', 'azure-openai', 'anthropic-compatible'].includes(provider)) throw new HttpError(400, 'INVALID_INPUT', 'Unsupported model provider')
-        const runtime: Omit<Runtime, 'id' | 'kind' | 'createdAt'> = {
+        const runtime: Omit<Runtime, 'id' | 'createdAt'> = {
           name: text(input.name, 'name'), mode: input.mode === 'remote' ? 'remote' : 'child-process',
+          kind: typeof input.kind === 'string' && input.kind.trim() ? input.kind.trim() : 'goose',
           model: {
             provider, baseUrl: text(model.baseUrl, 'model.baseUrl', 2048),
             model: text(model.model, 'model.model'), secretRef: text(model.secretRef, 'model.secretRef'),
@@ -110,6 +116,8 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
         }
         return json(response, 201, service.createRuntime(principal, runtime))
       }
+      const runtimeHealth = url.pathname.match(/^\/api\/runtimes\/([^/]+)\/health$/)
+      if (runtimeHealth && request.method === 'GET') return json(response, 200, await service.runtimeHealth(principal, decodeURIComponent(runtimeHealth[1] as string)))
       if (url.pathname === '/api/assignments' && request.method === 'POST') {
         const input = await body(request)
         const resourceType = text(input.resourceType, 'resourceType') as 'workspace' | 'runtime'
@@ -143,6 +151,7 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
       }
       if (url.pathname === '/api/activity' && request.method === 'GET') return json(response, 200, service.activity(principal))
       if (url.pathname === '/api/audit' && request.method === 'GET') return json(response, 200, service.auditEvents(principal))
+      if (url.pathname === '/api/audit/checkpoint' && request.method === 'GET') return json(response, 200, service.exportAuditCheckpoint(principal))
       if (url.pathname === '/api/license/activate' && request.method === 'POST') return json(response, 200, service.activateLicense(principal, await body(request) as unknown as SignedLicense))
       if (url.pathname.startsWith('/api/')) throw new HttpError(404, 'NOT_FOUND', 'Endpoint not found')
       return serveWeb(url.pathname, response)

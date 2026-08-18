@@ -25,9 +25,14 @@ export class AuthService {
   constructor(private readonly config: ServerConfig, private readonly db: PapyrusDatabase) {}
 
   issueSession(userId: string): string {
-    const body = base64url(JSON.stringify({ userId, exp: Date.now() + 8 * 60 * 60 * 1000 }))
+    const body = base64url(JSON.stringify({ userId, v: this.db.getTokenVersion(userId), exp: Date.now() + 8 * 60 * 60 * 1000 }))
     const signature = createHmac('sha256', this.config.sessionSecret).update(body).digest('base64url')
     return `${body}.${signature}`
+  }
+
+  /** Invalidates every outstanding session for a user by bumping their token version. */
+  revokeSessions(userId: string): void {
+    this.db.incrementTokenVersion(userId)
   }
 
   authenticate(request: IncomingMessage): Principal | undefined {
@@ -44,8 +49,10 @@ export class AuthService {
     const actual = Buffer.from(signature, 'base64url')
     if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return undefined
     try {
-      const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as { userId: string; exp: number }
-      return payload.exp > Date.now() ? this.db.getPrincipal(payload.userId) : undefined
+      const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as { userId: string; v?: number; exp: number }
+      if (payload.exp <= Date.now()) return undefined
+      if ((payload.v ?? 0) !== this.db.getTokenVersion(payload.userId)) return undefined
+      return this.db.getPrincipal(payload.userId)
     } catch { return undefined }
   }
 
@@ -108,7 +115,11 @@ export class AuthService {
   }
 
   private fromClientCertificate(request: IncomingMessage): Principal | undefined {
-    const socket = request.socket as TLSSocket
+    return this.principalFromSocket(request.socket as TLSSocket)
+  }
+
+  /** Resolves a mTLS peer certificate to a local Principal (upserting on first sight). */
+  principalFromSocket(socket: TLSSocket): Principal | undefined {
     if (!socket.authorized || typeof socket.getPeerCertificate !== 'function') return undefined
     const certificate = socket.getPeerCertificate()
     if (!certificate?.fingerprint256 || !certificate.subject) return undefined

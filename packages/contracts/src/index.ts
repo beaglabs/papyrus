@@ -31,7 +31,7 @@ export interface ModelEndpoint {
 export interface Runtime {
   id: string
   name: string
-  kind: 'goose'
+  kind: string
   mode: 'child-process' | 'remote'
   model: ModelEndpoint
   command?: string

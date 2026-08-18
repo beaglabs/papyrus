@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import type { AuditEvent, Runtime, Session, Workspace } from '@papyrus/contracts'
+import { useEffect, useState, type FormEvent } from 'react'
+import type { AuditEvent, Session, Workspace } from '@papyrus/contracts'
 import { api, auditEvents, dashboard, type DashboardData } from './api.js'
 
-type View = 'overview' | 'workspaces' | 'sessions' | 'admin' | 'audit'
+type View = 'overview' | 'workspaces' | 'admin' | 'audit'
 
 function Logo() {
   return <div className="brand"><span className="brand-mark">P</span><span>PAPYRUS</span></div>
@@ -46,7 +46,7 @@ export function App() {
       <Logo />
       <div className="classification">{data.health.profile.toUpperCase()}</div>
       <nav>
-        {(['overview', 'workspaces', 'sessions'] as View[]).map((item) => <button key={item} className={view === item ? 'active' : ''} onClick={() => setView(item)}>{item}</button>)}
+        {(['overview', 'workspaces'] as View[]).map((item) => <button key={item} className={view === item ? 'active' : ''} onClick={() => setView(item)}>{item}</button>)}
         {canAdmin && <button className={view === 'admin' ? 'active' : ''} onClick={() => setView('admin')}>administration</button>}
         {privileged && <button className={view === 'audit' ? 'active' : ''} onClick={() => setView('audit')}>audit</button>}
       </nav>
@@ -60,7 +60,6 @@ export function App() {
       {error && <div className="error">{error}<button onClick={() => setError(undefined)}>×</button></div>}
       {view === 'overview' && <Overview data={data} />}
       {view === 'workspaces' && <Workspaces items={data.workspaces} canManage={privileged} onChanged={refresh} />}
-      {view === 'sessions' && <Sessions sessions={data.sessions} workspaces={data.workspaces} runtimes={data.runtimes} onChanged={refresh} />}
       {view === 'admin' && <Admin data={data} onChanged={refresh} />}
       {view === 'audit' && <Audit data={audit} />}
     </main>
@@ -100,11 +99,6 @@ function Workspaces({ items, canManage, onChanged }: { items: Workspace[]; canMa
   return <section className="grid-two"><article className="panel"><div className="panel-head"><h2>Assigned workspaces</h2><span>{items.length}</span></div>{items.length ? <div className="cards">{items.map((item) => <div className="workspace" key={item.id}><span className="workspace-icon">↗</span><div><strong>{item.name}</strong><p>{item.description || 'No description'}</p></div></div>)}</div> : <Empty>You have no workspace assignments.</Empty>}</article>{canManage && <article className="panel accent"><h2>Create workspace</h2><form className="stack" onSubmit={submit}><label>Name<input required name="name" placeholder="Mission workspace" /></label><label>Description<textarea name="description" placeholder="Purpose and handling context" /></label><button className="primary">Create workspace →</button></form></article>}</section>
 }
 
-function Sessions({ sessions, workspaces, runtimes, onChanged }: { sessions: Session[]; workspaces: Workspace[]; runtimes: Runtime[]; onChanged: () => Promise<void> }) {
-  const submit = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const form = new FormData(event.currentTarget); await api('/api/sessions', { method: 'POST', body: JSON.stringify({ title: form.get('title'), workspaceId: form.get('workspace'), runtimeId: form.get('runtime') }) }); event.currentTarget.reset(); await onChanged() }
-  return <section className="grid-two wide-left"><article className="panel"><div className="panel-head"><h2>My sessions</h2><span>{sessions.length}</span></div><SessionRows sessions={sessions} /></article><article className="panel accent"><h2>New Goose session</h2><form className="stack" onSubmit={submit}><label>Title<input name="title" required placeholder="Analyze change request" /></label><label>Workspace<select name="workspace" required>{workspaces.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label><label>Runtime<select name="runtime" required>{runtimes.map((item) => <option value={item.id} key={item.id}>{item.name} · {item.model.model}</option>)}</select></label><button className="primary" disabled={!workspaces.length || !runtimes.length}>Create session →</button></form></article></section>
-}
-
 function SessionRows({ sessions }: { sessions: Session[] }) { return sessions.length ? <div className="rows">{sessions.map((session) => <div className="row" key={session.id}><div><strong>{session.title}</strong><small>{new Date(session.updatedAt).toLocaleString()}</small></div><span className={`pill ${session.status}`}>{session.status}</span></div>)}</div> : <Empty>No sessions yet.</Empty> }
 
 function Admin({ data, onChanged }: { data: DashboardData; onChanged: () => Promise<void> }) {
@@ -136,6 +130,6 @@ function Audit({ data }: { data: { integrity: { valid: boolean; brokenAt?: numbe
   return <article className="panel"><div className="panel-head"><h2>Append-only event ledger</h2><span className={data.integrity.valid ? 'status-good' : 'status-bad'}>{data.integrity.valid ? 'CHAIN VERIFIED' : `BROKEN AT ${data.integrity.brokenAt}`}</span></div><div className="audit-table"><div className="audit-row heading"><span>Sequence</span><span>Action</span><span>Resource</span><span>Decision</span><span>Time</span></div>{data.events.map((event) => <div className="audit-row" key={event.id}><span>#{event.sequence}</span><strong>{event.action}</strong><span>{event.resourceType}:{short(event.resourceId)}</span><span className={`decision ${event.decision}`}>{event.decision}</span><span>{new Date(event.occurredAt).toLocaleString()}</span></div>)}</div></article>
 }
 
-function title(view: View) { return ({ overview: 'Operational overview', workspaces: 'Workspaces', sessions: 'Agent sessions', admin: 'Administration', audit: 'Audit ledger' })[view] }
+function title(view: View) { return ({ overview: 'Operational overview', workspaces: 'Workspaces', admin: 'Administration', audit: 'Audit ledger' })[view] }
 function initials(name: string) { return name.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') }
 function short(id: string) { return id.length > 16 ? `${id.slice(0, 8)}…` : id }

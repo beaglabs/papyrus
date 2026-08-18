@@ -5,8 +5,10 @@
   "type": "module",
   "description": "Secure agent gateway for regulated and disconnected environments.",
   "license": "UNLICENSED",
-  "packageManager": "pnpm@11.19.0",
-  "engines": { "node": ">=24" },
+  "packageManager": "pnpm@11.22.0+sha1.c824bce7ddda0454998313c86fcb3d613d3f18bc",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "dev": "pnpm --filter @papyrus/server dev",
     "start": "node apps/server/dist/index.js",

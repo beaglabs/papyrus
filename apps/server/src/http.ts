@@ -5,7 +5,7 @@ import { extname, join, normalize } from 'node:path'
 import { ROLES, type Role, type SignedLicense } from '@papyrus/contracts'
 import { AuthService } from './auth.js'
 import type { ServerConfig } from './config.js'
-import { AuthorizationDenied, PapyrusService } from './service.js'
+import { AuthorizationDenied, PapyrusService, SessionLifecycleError } from './service.js'
 
 class HttpError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message) }
@@ -43,6 +43,15 @@ async function body(request: IncomingMessage): Promise<Record<string, unknown>> 
 function text(value: unknown, name: string, maximum = 256): string {
   if (typeof value !== 'string' || !value.trim() || value.length > maximum) throw new HttpError(400, 'INVALID_INPUT', `${name} is required and must not exceed ${maximum} characters`)
   return value.trim()
+}
+
+function naturalNumber(value: string | null, fallback: number, maximum: number, minimum = 0): number {
+  if (value === null) return fallback
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
+    throw new HttpError(400, 'INVALID_INPUT', `Value must be an integer between ${minimum} and ${maximum}`)
+  }
+  return parsed
 }
 
 export function createPapyrusServer(config: ServerConfig, service: PapyrusService, auth: AuthService): Server {
@@ -132,12 +141,47 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
       if (url.pathname === '/api/sessions' && request.method === 'GET') return json(response, 200, service.listSessions(principal))
       if (url.pathname === '/api/sessions' && request.method === 'POST') {
         const input = await body(request)
-        return json(response, 201, service.createSession(principal, text(input.workspaceId, 'workspaceId'), text(input.agent, 'agent'), text(input.title, 'title')))
+        const cwd = typeof input.cwd === 'string' ? text(input.cwd, 'cwd', 4096) : '/'
+        return json(response, 201, service.createSession(principal, text(input.workspaceId, 'workspaceId'), text(input.agent, 'agent'), text(input.title, 'title'), cwd))
+      }
+      const sessionEvents = url.pathname.match(/^\/api\/sessions\/([^/]+)\/events$/)
+      if (sessionEvents && request.method === 'GET') {
+        return json(response, 200, {
+          events: service.sessionEvents(
+            principal,
+            decodeURIComponent(sessionEvents[1] as string),
+            naturalNumber(url.searchParams.get('after'), 0, Number.MAX_SAFE_INTEGER),
+            naturalNumber(url.searchParams.get('limit'), 200, 1_000, 1),
+          ),
+        })
+      }
+      const sessionRuns = url.pathname.match(/^\/api\/sessions\/([^/]+)\/runs$/)
+      if (sessionRuns && request.method === 'GET') {
+        return json(response, 200, { runs: service.sessionRuns(principal, decodeURIComponent(sessionRuns[1] as string)) })
+      }
+      const cancelSession = url.pathname.match(/^\/api\/sessions\/([^/]+)\/cancel$/)
+      if (cancelSession && request.method === 'POST') {
+        return json(response, 200, { cancelled: service.cancelSession(principal, decodeURIComponent(cancelSession[1] as string)) })
+      }
+      const closeSession = url.pathname.match(/^\/api\/sessions\/([^/]+)\/close$/)
+      if (closeSession && request.method === 'POST') {
+        return json(response, 200, service.closeSession(principal, decodeURIComponent(closeSession[1] as string)))
+      }
+      const resumeSession = url.pathname.match(/^\/api\/sessions\/([^/]+)\/resume$/)
+      if (resumeSession && request.method === 'POST') {
+        return json(response, 200, service.resumeSession(principal, decodeURIComponent(resumeSession[1] as string)))
       }
       const prompt = url.pathname.match(/^\/api\/sessions\/([^/]+)\/prompt$/)
       if (prompt && request.method === 'POST') {
         const input = await body(request)
-        return json(response, 200, await service.prompt(principal, decodeURIComponent(prompt[1] as string), text(input.prompt, 'prompt', 100_000)))
+        const controller = new AbortController()
+        request.once('aborted', () => controller.abort(new Error('Client disconnected')))
+        return json(response, 200, await service.prompt(
+          principal,
+          decodeURIComponent(prompt[1] as string),
+          text(input.prompt, 'prompt', 100_000),
+          { signal: controller.signal },
+        ))
       }
       if (url.pathname === '/api/mcp/servers' && request.method === 'POST') {
         const input = await body(request)
@@ -160,8 +204,20 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
       if (url.pathname.startsWith('/api/')) throw new HttpError(404, 'NOT_FOUND', 'Endpoint not found')
       return serveWeb(url.pathname, response)
     } catch (error) {
-      const status = error instanceof HttpError ? error.status : error instanceof AuthorizationDenied ? 403 : 500
-      const code = error instanceof HttpError ? error.code : error instanceof AuthorizationDenied ? 'FORBIDDEN' : 'INTERNAL_ERROR'
+      const status = error instanceof HttpError
+        ? error.status
+        : error instanceof AuthorizationDenied
+          ? 403
+          : error instanceof SessionLifecycleError
+            ? error.code === 'SESSION_NOT_FOUND' ? 404 : 409
+            : 500
+      const code = error instanceof HttpError
+        ? error.code
+        : error instanceof AuthorizationDenied
+          ? 'FORBIDDEN'
+          : error instanceof SessionLifecycleError
+            ? error.code
+            : 'INTERNAL_ERROR'
       const message = status === 500 ? 'Internal server error' : error instanceof Error ? error.message : 'Request failed'
       if (status === 500) console.error(`[${requestId}]`, error)
       return json(response, status, { error: message, code, requestId })

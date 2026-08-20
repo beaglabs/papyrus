@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: papyrus
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: papyrus }
+  template:
+    metadata:
+      labels: { app: papyrus }
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: papyrus
+          image: ghcr.io/beaglabs/papyrus/papyrus@sha256:REPLACE_WITH_RELEASE_DIGEST
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 3210 }
+            - { name: acp, containerPort: 3220 }
+          env:
+            - { name: PAPYRUS_MODE, value: persistent }
+            - { name: PAPYRUS_HOST, value: 0.0.0.0 }
+            - { name: PAPYRUS_GATEWAY_ENABLED, value: "true" }
+            - name: PAPYRUS_SESSION_SECRET
+              valueFrom: { secretKeyRef: { name: papyrus-secrets, key: session-secret } }
+            - name: PAPYRUS_BOOTSTRAP_SECRET
+              valueFrom: { secretKeyRef: { name: papyrus-secrets, key: bootstrap-secret } }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/papyrus }
+            - { name: tmp, mountPath: /tmp }
+          readinessProbe:
+            tcpSocket: { port: http }
+          livenessProbe:
+            tcpSocket: { port: http }
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: papyrus-data }
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }

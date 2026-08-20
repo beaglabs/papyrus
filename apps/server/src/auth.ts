@@ -110,7 +110,10 @@ export class AuthService {
   authenticate(request: IncomingMessage): Principal | undefined {
     if (this.config.devIdentity) {
       const parts = this.config.devIdentity.split(':')
-      return this.db.upsertUser({ externalId: `dev:${parts[0]}`, displayName: parts[1] ?? parts[0] ?? 'Developer', authMethod: 'development' })
+      const principal = this.db.upsertUser({ externalId: `dev:${parts[0]}`, displayName: parts[1] ?? parts[0] ?? 'Developer', authMethod: 'development' })
+      const role = ({ owner: 'Owner', admin: 'Admin', auditor: 'Auditor', user: 'User' } as const)[(parts[0] ?? '').toLowerCase() as 'owner' | 'admin' | 'auditor' | 'user'] ?? 'User'
+      this.db.setRole(principal.id, role)
+      return this.db.getPrincipal(principal.id)
     }
 
     const forwarded = this.principalFromTrustedProxy(request)

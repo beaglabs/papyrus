@@ -1,10 +1,11 @@
 import { readFileSync } from 'node:fs'
 import { Agent as HttpsAgent } from 'node:https'
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
-import type { ActivitySummary, McpServer, Principal, Role, Session, SignedLicense, Workspace } from '@papyrus/contracts'
+import type { ActivitySummary, McpServer, Principal, Role, Session, SessionEvent, SessionRun, SignedLicense, Workspace } from '@papyrus/contracts'
 import type { AgentRuntime, RuntimeEvent, RuntimeLaunchOptions } from '@papyrus/acp-runtime'
 import { gooseRuntimeAdapter } from '@papyrus/goose-runtime'
 import { resolveAgentSpec } from './agents.js'
+import { connectorPolicyAction } from './catalog.js'
 import { AuditLog } from './audit.js'
 import type { ServerConfig } from './config.js'
 import { PapyrusDatabase } from './db.js'
@@ -15,12 +16,33 @@ export class AuthorizationDenied extends Error {
   constructor(readonly action: string, readonly resourceId: string) { super(`Not authorized to ${action} ${resourceId}`) }
 }
 
+export class SessionLifecycleError extends Error {
+  constructor(
+    readonly code: 'SESSION_NOT_FOUND' | 'SESSION_BUSY' | 'SESSION_STOPPED' | 'SESSION_CWD_MISMATCH',
+    message: string,
+  ) { super(message) }
+}
+
 export type RuntimeFactory = (options: RuntimeLaunchOptions) => AgentRuntime
+
+export interface SessionPromptOptions {
+  signal?: AbortSignal
+  onEvent?: (event: RuntimeEvent) => void | Promise<void>
+}
+
+interface ActiveSessionRun {
+  runId: string
+  controller: AbortController
+  settled: Promise<void>
+  resolveSettled: () => void
+  detachSignal?: () => void
+}
 
 export class PapyrusService {
   readonly audit: AuditLog
   readonly policy = new PolicyEngine()
   readonly license: LicenseService
+  private readonly activeSessionRuns = new Map<string, ActiveSessionRun>()
 
   constructor(
     readonly db: PapyrusDatabase,
@@ -29,6 +51,16 @@ export class PapyrusService {
   ) {
     this.audit = new AuditLog(db)
     this.license = new LicenseService(db, config.dataDir, config.profile, config.licenseAuthorities, config.licenseRequired)
+    for (const sessionId of db.recoverInterruptedSessionRuns()) {
+      this.audit.append({
+        actorId: null,
+        action: 'RecoverInterruptedSession',
+        resourceType: 'Session',
+        resourceId: sessionId,
+        decision: 'info',
+        metadata: { reason: 'daemon_restart' },
+      })
+    }
   }
 
   bootstrap(principal: Principal, secret: string): Principal {
@@ -84,14 +116,15 @@ export class PapyrusService {
     this.audit.append({ actorId: actor.id, action: 'AssignResource', resourceType: 'workspace', resourceId, decision: 'info', metadata: { principalId } })
   }
 
-  createSession(actor: Principal, workspaceId: string, agent: string, title: string): Session {
+  createSession(actor: Principal, workspaceId: string, agent: string, title: string, cwd = '/'): Session {
     this.license.require('gateway')
     this.check(actor, 'CreateSession', this.workspaceResource(workspaceId))
     if (!this.db.getWorkspace(workspaceId)) throw new Error('Workspace not found')
     const spec = resolveAgentSpec(agent, this.config.agents)
     if (!spec) throw new Error(`Unknown agent "${agent}"`)
-    const session = this.db.createSession(actor.id, workspaceId, agent, title)
-    this.audit.append({ actorId: actor.id, action: 'CreateSession', resourceType: 'Session', resourceId: session.id, decision: 'info', metadata: { workspaceId, agent } })
+    if (!isAbsoluteClientPath(cwd)) throw new Error('Session cwd must be an absolute path')
+    const session = this.db.createSession(actor.id, workspaceId, agent, title, cwd)
+    this.audit.append({ actorId: actor.id, action: 'CreateSession', resourceType: 'Session', resourceId: session.id, decision: 'info', metadata: { workspaceId, agent, cwd } })
     return session
   }
 
@@ -99,35 +132,131 @@ export class PapyrusService {
     return this.db.listSessions().filter((session) => this.decide(actor, 'ReadSession', this.sessionResource(session)).allowed)
   }
 
-  async prompt(actor: Principal, sessionId: string, prompt: string): Promise<{ stopReason: string; events: RuntimeEvent[] }> {
+  defaultGatewayAgent(): string {
+    const agent = this.config.gateway?.defaultAgent ?? 'goose'
+    if (!resolveAgentSpec(agent, this.config.agents)) throw new Error(`Unknown gateway agent "${agent}"`)
+    return agent
+  }
+
+  async shutdown(timeoutMs = 5_000): Promise<void> {
+    const active = [...this.activeSessionRuns.entries()]
+    for (const [, run] of active) run.controller.abort(new Error('Daemon shutting down'))
+    if (active.length > 0) {
+      await Promise.race([
+        Promise.allSettled(active.map(([, run]) => run.settled)),
+        new Promise((resolve) => setTimeout(resolve, timeoutMs)),
+      ])
+    }
+    for (const [sessionId, run] of active) {
+      if (this.activeSessionRuns.get(sessionId)?.runId !== run.runId) continue
+      this.db.finishSessionRun(run.runId, 'interrupted', 'daemon_shutdown', 'Daemon shut down before the run completed')
+      this.activeSessionRuns.delete(sessionId)
+    }
+  }
+
+  sessionEvents(actor: Principal, sessionId: string, after = 0, limit = 200): SessionEvent[] {
+    const session = this.requireSession(sessionId)
+    this.check(actor, 'ReadSession', this.sessionResource(session))
+    return this.db.listSessionEvents(sessionId, after, limit)
+  }
+
+  sessionRuns(actor: Principal, sessionId: string): SessionRun[] {
+    const session = this.requireSession(sessionId)
+    this.check(actor, 'ReadSession', this.sessionResource(session))
+    return this.db.listSessionRuns(sessionId)
+  }
+
+  cancelSession(actor: Principal, sessionId: string): boolean {
+    const session = this.requireSession(sessionId)
+    this.check(actor, 'CancelSession', this.sessionResource(session))
+    const active = this.activeSessionRuns.get(sessionId)
+    active?.controller.abort(new Error('Session cancelled'))
+    this.audit.append({
+      actorId: actor.id,
+      action: 'CancelSession',
+      resourceType: 'Session',
+      resourceId: sessionId,
+      decision: 'info',
+      metadata: { active: Boolean(active), runId: active?.runId ?? null },
+    })
+    return Boolean(active)
+  }
+
+  closeSession(actor: Principal, sessionId: string): Session {
+    const session = this.requireSession(sessionId)
+    this.check(actor, 'CloseSession', this.sessionResource(session))
+    const active = this.activeSessionRuns.get(sessionId)
+    active?.controller.abort(new Error('Session closed'))
+    this.db.setSessionStatus(sessionId, 'stopped')
+    this.audit.append({
+      actorId: actor.id,
+      action: 'CloseSession',
+      resourceType: 'Session',
+      resourceId: sessionId,
+      decision: 'info',
+      metadata: { cancelledRunId: active?.runId ?? null },
+    })
+    return this.requireSession(sessionId)
+  }
+
+  resumeSession(actor: Principal, sessionId: string, expectedCwd?: string): Session {
+    const session = this.requireSession(sessionId)
+    this.check(actor, 'ResumeSession', this.sessionResource(session))
+    if (session.status === 'running') throw new SessionLifecycleError('SESSION_BUSY', 'Session already has an active prompt')
+    if (expectedCwd && expectedCwd !== session.cwd) {
+      throw new SessionLifecycleError('SESSION_CWD_MISMATCH', 'Session cwd does not match the persisted session')
+    }
+    const resumed = this.db.resumeSession(sessionId)
+    if (!resumed) throw new SessionLifecycleError('SESSION_NOT_FOUND', 'Session not found')
+    this.audit.append({ actorId: actor.id, action: 'ResumeSession', resourceType: 'Session', resourceId: sessionId, decision: 'info', metadata: { previousStatus: session.status } })
+    return resumed
+  }
+
+  async prompt(actor: Principal, sessionId: string, prompt: string, options: SessionPromptOptions = {}): Promise<{ stopReason: string; events: RuntimeEvent[] }> {
     this.license.require('gateway')
-    const session = this.db.getSession(sessionId)
-    if (!session) throw new Error('Session not found')
+    const session = this.requireSession(sessionId)
     this.check(actor, 'PromptSession', this.sessionResource(session))
     const spec = resolveAgentSpec(session.agent, this.config.agents)
     if (!spec) throw new Error(`Unknown agent "${session.agent}"`)
     const events: RuntimeEvent[] = []
-    const runtime = this.runtimeFactory({ ...this.runtimeCommand(session.agent), promptTimeoutMs: this.config.promptTimeoutMs })
-    this.db.setSessionStatus(session.id, 'running')
-    this.audit.append({ actorId: actor.id, action: 'PromptSession', resourceType: 'Session', resourceId: session.id, decision: 'info', metadata: { promptBytes: Buffer.byteLength(prompt) } })
+    const run = this.beginRun(session, actor, options.signal)
     try {
+      const runtime = this.runtimeFactory({ ...this.runtimeCommand(session.agent), promptTimeoutMs: this.config.promptTimeoutMs })
+      this.db.addRuntimeEvent(session.id, run.runId, 'update', new Date().toISOString(), {
+        sessionUpdate: 'user_message_chunk',
+        content: { type: 'text', text: prompt },
+        messageId: `user_${run.runId}`,
+      })
+      this.audit.append({ actorId: actor.id, action: 'PromptSession', resourceType: 'Session', resourceId: session.id, decision: 'info', metadata: { promptBytes: Buffer.byteLength(prompt), runId: run.runId } })
       const result = await runtime.runPrompt({
-        cwd: this.config.dataDir,
+        cwd: session.cwd,
         prompt,
         environment: spec.environment(),
         mcpServers: this.runtimeMcpServers(session),
-        authorizeTool: async (title) => this.db.isToolGranted(session.workspaceId, ...this.findTool(session.workspaceId, title)),
-        onEvent: (event) => {
+        authorizeTool: async (title) => this.isToolCallAllowed(actor, session, title),
+        onEvent: async (event) => {
           events.push(event)
-          this.db.addRuntimeEvent(session.id, event.kind, event.at, event.data)
+          this.db.addRuntimeEvent(session.id, run.runId, event.kind, event.at, event.data)
+          await options.onEvent?.(event)
         },
+        signal: run.controller.signal,
       })
-      this.db.setSessionStatus(session.id, 'ready')
+      const cancelled = run.controller.signal.aborted || result.stopReason === 'cancelled'
+      this.db.finishSessionRun(run.runId, cancelled ? 'cancelled' : 'completed', cancelled ? 'cancelled' : result.stopReason)
       return { stopReason: result.stopReason, events }
     } catch (error) {
-      this.db.setSessionStatus(session.id, 'failed')
-      this.audit.append({ actorId: actor.id, action: 'RuntimeFailure', resourceType: 'Session', resourceId: session.id, decision: 'info', metadata: { message: error instanceof Error ? error.message : 'Unknown runtime failure' } })
+      if (run.controller.signal.aborted) {
+        this.db.finishSessionRun(run.runId, 'cancelled', 'cancelled')
+        return { stopReason: 'cancelled', events }
+      }
+      const message = safeError(error)
+      this.db.finishSessionRun(run.runId, 'failed', 'error', message)
+      this.audit.append({ actorId: actor.id, action: 'RuntimeFailure', resourceType: 'Session', resourceId: session.id, decision: 'info', metadata: { error: message, runId: run.runId } })
       throw error
+    } finally {
+      run.detachSignal?.()
+      if (this.activeSessionRuns.get(sessionId)?.runId === run.runId) this.activeSessionRuns.delete(sessionId)
+      run.resolveSettled()
     }
   }
 
@@ -155,7 +284,10 @@ export class PapyrusService {
     const session = this.db.getSession(sessionId)
     if (!session) throw new Error('Session not found')
     this.check(actor, 'PromptSession', this.sessionResource(session))
-    this.check(actor, 'InvokeTool', { type: 'Tool', id: `${mcpServerId}:${toolName}`, attrs: { assignedUsers: cedarUsers(this.db.assignedUserIds('workspace', session.workspaceId)) } })
+    const resource = { type: 'Tool' as const, id: `${mcpServerId}:${toolName}`, attrs: { assignedUsers: cedarUsers(this.db.assignedUserIds('workspace', session.workspaceId)) } }
+    this.check(actor, 'InvokeTool', resource)
+    const connectorAction = connectorPolicyAction(toolName)
+    if (connectorAction) this.check(actor, connectorAction, resource)
     if (!this.db.isToolGranted(session.workspaceId, mcpServerId, toolName)) {
       this.audit.append({ actorId: actor.id, action: 'InvokeTool', resourceType: 'Tool', resourceId: `${mcpServerId}:${toolName}`, decision: 'deny', metadata: { sessionId, reason: 'No workspace tool grant' } })
       throw new AuthorizationDenied('InvokeTool', `${mcpServerId}:${toolName}`)
@@ -243,6 +375,39 @@ export class PapyrusService {
     return status
   }
 
+  private requireSession(sessionId: string): Session {
+    const session = this.db.getSession(sessionId)
+    if (!session) throw new SessionLifecycleError('SESSION_NOT_FOUND', 'Session not found')
+    return session
+  }
+
+  private beginRun(session: Session, actor: Principal, signal?: AbortSignal): ActiveSessionRun {
+    let persistentRun: SessionRun
+    try {
+      persistentRun = this.db.beginSessionRun(session.id, actor.id)
+    } catch (error) {
+      const code = error instanceof Error ? error.message : ''
+      if (code === 'SESSION_BUSY') throw new SessionLifecycleError('SESSION_BUSY', 'Session already has an active prompt')
+      if (code === 'SESSION_STOPPED') throw new SessionLifecycleError('SESSION_STOPPED', 'Session is stopped; resume it before prompting')
+      if (code === 'SESSION_NOT_FOUND') throw new SessionLifecycleError('SESSION_NOT_FOUND', 'Session not found')
+      throw error
+    }
+    const controller = new AbortController()
+    let resolveSettled!: () => void
+    const settled = new Promise<void>((resolve) => { resolveSettled = resolve })
+    const active: ActiveSessionRun = { runId: persistentRun.id, controller, settled, resolveSettled }
+    if (signal) {
+      const abort = (): void => controller.abort(signal.reason)
+      if (signal.aborted) abort()
+      else {
+        signal.addEventListener('abort', abort, { once: true })
+        active.detachSignal = () => signal.removeEventListener('abort', abort)
+      }
+    }
+    this.activeSessionRuns.set(session.id, active)
+    return active
+  }
+
   private check(actor: Principal, action: PolicyAction, resource: AuthorizationResource): void {
     const decision = this.decide(actor, action, resource)
     this.audit.append({ actorId: actor.id, action, resourceType: resource.type, resourceId: resource.id, decision: decision.allowed ? 'allow' : 'deny', metadata: { reasons: decision.reasons, errors: decision.errors, cedarVersion: decision.cedarVersion } })
@@ -277,7 +442,10 @@ export class PapyrusService {
     if (!mcpServerId || !toolName) return false
     try {
       this.check(actor, 'PromptSession', this.sessionResource(session))
-      this.check(actor, 'InvokeTool', { type: 'Tool', id: `${mcpServerId}:${toolName}`, attrs: { assignedUsers: cedarUsers(this.db.assignedUserIds('workspace', session.workspaceId)) } })
+      const resource = { type: 'Tool' as const, id: `${mcpServerId}:${toolName}`, attrs: { assignedUsers: cedarUsers(this.db.assignedUserIds('workspace', session.workspaceId)) } }
+      this.check(actor, 'InvokeTool', resource)
+      const connectorAction = connectorPolicyAction(toolName)
+      if (connectorAction) this.check(actor, connectorAction, resource)
       return this.db.isToolGranted(session.workspaceId, mcpServerId, toolName)
     } catch { return false }
   }
@@ -324,4 +492,13 @@ function secureEqual(presented: string, expected: string): boolean {
   const presentedDigest = createHash('sha256').update(presented).digest()
   const expectedDigest = createHash('sha256').update(expected).digest()
   return timingSafeEqual(presentedDigest, expectedDigest)
+}
+
+function safeError(error: unknown): string {
+  const value = error instanceof Error ? `${error.name}: ${error.message}` : 'Unknown runtime failure'
+  return value.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 512)
+}
+
+function isAbsoluteClientPath(value: string): boolean {
+  return value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value)
 }

@@ -1,180 +1,148 @@
-/**
- * ACP Server — handles the full ACP protocol directly.
- * Provider config comes from clients via providers/set, not from server config.
- * Sessions are managed in Papyrus's database for policy enforcement.
- */
+// ACP Server — exposes Papyrus's governed session lifecycle over ACP.
+//
+// Every lifecycle operation delegates to PapyrusService. The transport layer
+// does not own sessions, provider secrets, runtime state, or authorization.
 import * as acp from '@agentclientprotocol/sdk'
 import { AcpServer } from '@agentclientprotocol/sdk/experimental/server'
-import type { Principal, Session, Workspace } from '@papyrus/contracts'
+import type { Principal, SessionEvent, Workspace } from '@papyrus/contracts'
+import type { RuntimeEvent } from '@papyrus/acp-runtime'
 import type { PapyrusService } from './service.js'
-import { streamLlm, type ProviderConfig, type LlmMessage } from './llm.js'
 
 export interface AcpAgentContext {
   principal: Principal
   workspace: Workspace
 }
 
-/** Per-connection state: provider config + session tracking. */
-interface ConnectionState {
-  providers: Map<string, ProviderConfig>
-  sessions: Map<string, Session>
-}
-
-/**
- * Build an AgentApp that handles the ACP protocol.
- * The AcpServer wraps this for HTTP/WebSocket transport.
- */
+// Build an AgentApp backed by the daemon's authoritative session governor.
 export function buildAcpAgent(
   service: PapyrusService,
   context: AcpAgentContext,
 ): acp.AgentApp {
   const app = acp.agent({ name: 'papyrus' })
-  const state: ConnectionState = { providers: new Map(), sessions: new Map() }
 
-  // --- initialize ---
-  app.onRequest(acp.methods.agent.initialize, (ctx) => {
-    return {
-      protocolVersion: acp.PROTOCOL_VERSION,
-      agentCapabilities: {
-        providers: {},
-        session: {
-          new: true,
-          list: true,
-          close: true,
-          prompt: true,
-          cancel: true,
-          setMode: false,
-          setConfigOption: false,
-          load: false,
-          fork: false,
-          resume: false,
-          delete: false,
-        },
+  app.onRequest(acp.methods.agent.initialize, () => ({
+    protocolVersion: acp.PROTOCOL_VERSION,
+    agentCapabilities: {
+      loadSession: true,
+      sessionCapabilities: {
+        list: {},
+        resume: {},
+        close: {},
       },
-      agentInfo: { name: 'papyrus', version: '0.1.0' },
-    }
-  })
+    },
+    agentInfo: { name: 'papyrus', version: '0.1.0' },
+  }))
 
-  // --- providers/list ---
-  app.onRequest(acp.methods.agent.providers.list, () => {
-    const providers: Array<{ providerId: string; supported: string[]; required: boolean; current?: { apiType: string; baseUrl: string } | null }> = []
-    for (const [id, cfg] of state.providers) {
-      providers.push({
-        providerId: id,
-        supported: [cfg.apiType],
-        required: false,
-        current: { apiType: cfg.apiType, baseUrl: cfg.baseUrl },
-      })
-    }
-    return { providers }
-  })
-
-  // --- providers/set ---
-  app.onRequest(acp.methods.agent.providers.set, (ctx) => {
-    const { providerId, apiType, baseUrl, headers } = ctx.params
-    const config: ProviderConfig = { providerId, apiType, baseUrl }
-    if (headers) config.headers = headers as Record<string, string>
-    state.providers.set(providerId, config)
-    return {}
-  })
-
-  // --- providers/disable ---
-  app.onRequest(acp.methods.agent.providers.disable, (ctx) => {
-    state.providers.delete(ctx.params.providerId)
-    return {}
-  })
-
-  // --- session/new ---
   app.onRequest(acp.methods.agent.session.new, async (ctx) => {
-    const sessionId = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-    const session = service.db.createSession(context.principal.id, context.workspace.id, 'papyrus', ctx.params.cwd || '/')
-    state.sessions.set(session.id, session)
+    const session = service.createSession(
+      context.principal,
+      context.workspace.id,
+      service.defaultGatewayAgent(),
+      sessionTitle(ctx.params.cwd),
+      ctx.params.cwd,
+    )
     return { sessionId: session.id }
   })
 
-  // --- session/list ---
-  app.onRequest(acp.methods.agent.session.list, async () => {
-    const sessions = service.listSessions(context.principal)
+  app.onRequest(acp.methods.agent.session.list, async (ctx) => {
+    const matching = service.listSessions(context.principal)
+      .filter((session) => !ctx.params.cwd || session.cwd === ctx.params.cwd)
+    const offset = decodeCursor(ctx.params.cursor)
+    const sessions = matching.slice(offset, offset + 100)
+    const next = offset + sessions.length
     return {
-      sessions: sessions.map((s) => ({
-        sessionId: s.id,
-        cwd: '/',
-        title: s.title,
+      sessions: sessions.map((session) => ({
+        sessionId: session.id,
+        cwd: session.cwd,
+        title: session.title,
+        updatedAt: session.updatedAt,
       })),
+      ...(next < matching.length ? { nextCursor: encodeCursor(next) } : {}),
     }
   })
 
-  // --- session/close ---
-  app.onRequest(acp.methods.agent.session.close, async (ctx) => {
-    service.db.setSessionStatus(ctx.params.sessionId, 'stopped')
-    state.sessions.delete(ctx.params.sessionId)
+  app.onRequest(acp.methods.agent.session.load, async (ctx) => {
+    service.resumeSession(context.principal, ctx.params.sessionId, ctx.params.cwd)
+    let after = 0
+    for (;;) {
+      const events = service.sessionEvents(context.principal, ctx.params.sessionId, after, 500)
+      for (const event of events) await replayEvent(ctx.client, event)
+      if (events.length < 500) break
+      after = events[events.length - 1]!.sequence
+    }
     return {}
   })
 
-  // --- session/prompt ---
+  app.onRequest(acp.methods.agent.session.resume, async (ctx) => {
+    service.resumeSession(context.principal, ctx.params.sessionId, ctx.params.cwd)
+    return {}
+  })
+
+  app.onRequest(acp.methods.agent.session.close, async (ctx) => {
+    service.closeSession(context.principal, ctx.params.sessionId)
+    return {}
+  })
+
+  app.onNotification(acp.methods.agent.session.cancel, async (ctx) => {
+    service.cancelSession(context.principal, ctx.params.sessionId)
+  })
+
   app.onRequest(acp.methods.agent.session.prompt, async (ctx) => {
-    const { sessionId, prompt } = ctx.params
+    const prompt = ctx.params.prompt
+      .filter((block): block is Extract<typeof block, { type: 'text' }> => block.type === 'text')
+      .map((block) => block.text)
+      .join('\n')
+    if (!prompt) return { stopReason: 'refusal' as const }
 
-    // Get provider config
-    const provider = [...state.providers.values()][0]
-    if (!provider) {
-      return { stopReason: 'refusal' as const }
-    }
-
-    // Build messages from prompt content blocks
-    const messages: LlmMessage[] = []
-    for (const block of prompt) {
-      if (block.type === 'text') {
-        messages.push({ role: 'user', content: block.text })
-      }
-    }
-
-    // Stream LLM response via session/update notifications
-    const messageId = `msg_${Date.now()}`
-    try {
-      for await (const event of streamLlm(provider, messages, ctx.signal)) {
-        if (event.type === 'text' && event.text) {
-          await ctx.client.notify('session/update', {
-            sessionId,
-            update: {
-              sessionUpdate: 'agent_message_chunk',
-              content: { type: 'text', text: event.text },
-              messageId,
-            },
-          })
-        } else if (event.type === 'done') {
-          return { stopReason: (event.stopReason === 'end_turn' ? 'end_turn' : event.stopReason) as 'end_turn' }
-        } else if (event.type === 'error') {
-          await ctx.client.notify('session/update', {
-            sessionId,
-            update: {
-              sessionUpdate: 'agent_message_chunk',
-              content: { type: 'text', text: `\n\n[Error: ${event.text}]` },
-              messageId,
-            },
-          })
-          return { stopReason: 'refusal' as const }
-        }
-      }
-    } catch (err) {
-      if (ctx.signal.aborted) return { stopReason: 'cancelled' as const }
-      return { stopReason: 'refusal' as const }
-    }
-
-    return { stopReason: 'end_turn' as const }
+    const result = await service.prompt(context.principal, ctx.params.sessionId, prompt, {
+      signal: ctx.signal,
+      onEvent: async (event) => emitRuntimeEvent(ctx.client, ctx.params.sessionId, event),
+    })
+    return { stopReason: normalizeStopReason(result.stopReason) }
   })
 
   return app
 }
 
-/**
- * Build an AcpServer wrapping the agent.
- * Caller uses prepareWebSocketUpgrade() or handleRequest() for transport.
- */
+// Build an AcpServer wrapping the governed agent.
 export function buildAcpServer(
   service: PapyrusService,
   context: AcpAgentContext,
 ): AcpServer {
-  const agent = buildAcpAgent(service, context)
-  return new AcpServer({ agent })
+  return new AcpServer({ agent: buildAcpAgent(service, context) })
+}
+
+async function emitRuntimeEvent(client: acp.AgentContext, sessionId: string, event: RuntimeEvent): Promise<void> {
+  if (event.kind !== 'update' || !isSessionUpdate(event.data)) return
+  await client.notify(acp.methods.client.session.update, { sessionId, update: event.data })
+}
+
+async function replayEvent(client: acp.AgentContext, event: SessionEvent): Promise<void> {
+  if (event.kind !== 'update' || !isSessionUpdate(event.data)) return
+  await client.notify(acp.methods.client.session.update, { sessionId: event.sessionId, update: event.data })
+}
+
+function isSessionUpdate(value: unknown): value is acp.SessionUpdate {
+  return Boolean(value && typeof value === 'object' && typeof (value as { sessionUpdate?: unknown }).sessionUpdate === 'string')
+}
+
+function normalizeStopReason(value: string): acp.StopReason {
+  return ['end_turn', 'max_tokens', 'max_turn_requests', 'refusal', 'cancelled'].includes(value)
+    ? value as acp.StopReason
+    : 'end_turn'
+}
+
+function sessionTitle(cwd: string): string {
+  const normalized = cwd.replace(/[\\/]+$/, '')
+  return normalized.split(/[\\/]/).pop() || 'Papyrus session'
+}
+
+function encodeCursor(offset: number): string {
+  return Buffer.from(String(offset)).toString('base64url')
+}
+
+function decodeCursor(cursor: string | null | undefined): number {
+  if (!cursor) return 0
+  const offset = Number(Buffer.from(cursor, 'base64url').toString('utf8'))
+  return Number.isSafeInteger(offset) && offset >= 0 ? offset : 0
 }

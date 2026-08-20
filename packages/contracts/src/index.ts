@@ -27,9 +27,30 @@ export interface Session {
   workspaceId: string
   agent: string
   title: string
-  status: 'ready' | 'running' | 'stopped' | 'failed'
+  cwd: string
+  status: 'ready' | 'running' | 'stopped' | 'failed' | 'interrupted'
   createdAt: string
   updatedAt: string
+}
+
+export interface SessionRun {
+  id: string
+  sessionId: string
+  actorId: string
+  status: 'running' | 'completed' | 'cancelled' | 'failed' | 'interrupted'
+  stopReason?: string
+  error?: string
+  startedAt: string
+  completedAt?: string
+}
+
+export interface SessionEvent {
+  sequence: number
+  sessionId: string
+  runId?: string
+  kind: string
+  occurredAt: string
+  data: unknown
 }
 
 export interface McpServer {

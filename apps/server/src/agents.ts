@@ -1,33 +1,22 @@
-export interface AgentSpec {
-  kind: string
-  command: string
-  args: string[]
-  environment(): Record<string, string>
-}
+import type { RuntimeLaunchSpec } from '@papyrus/acp-runtime'
+import { RUNTIME_PROFILES, isRuntimeProfileId, type RuntimeProfileId } from './catalog.js'
+
+/** @deprecated Use RuntimeLaunchSpec. Kept while config routes migrate to the adapter catalog. */
+export type AgentSpec = RuntimeLaunchSpec
 
 /** Config-driven agent entry. `env` values may use {model} {baseUrl} {secret} {provider} placeholders. */
 export interface AgentConfigEntry {
-  command?: string
-  args?: string[]
-  env?: Record<string, string>
+  profile: RuntimeProfileId
+  environment?: Record<string, string>
 }
-
-const GOOSE_SPEC: AgentSpec = { kind: 'goose', command: 'goose', args: ['acp'], environment: () => ({}) }
-
-function templateEnvironment(env: Record<string, string>): Record<string, string> {
-  const out: Record<string, string> = {}
-  for (const [name, value] of Object.entries(env)) {
-    out[name] = value.replace(/\{(model|baseUrl|secret|provider)\}/g, (_match, _key: string) => '')
-  }
-  return out
-}
-
-function buildSpec(kind: string, entry: AgentConfigEntry): AgentSpec {
+function buildSpec(kind: string, entry: AgentConfigEntry): AgentSpec | undefined {
+  if (!isRuntimeProfileId(entry.profile)) return undefined
+  const profile = RUNTIME_PROFILES[entry.profile]
   return {
     kind,
-    command: entry.command ?? kind,
-    args: entry.args ?? ['acp'],
-    environment: () => entry.env ? templateEnvironment(entry.env as Record<string, string>) : {},
+    command: profile.command,
+    args: [...profile.args],
+    environment: () => ({ ...(entry.environment ?? {}) }),
   }
 }
 
@@ -35,6 +24,6 @@ function buildSpec(kind: string, entry: AgentConfigEntry): AgentSpec {
 export function resolveAgentSpec(kind: string, configured: Record<string, AgentConfigEntry> = {}): AgentSpec | undefined {
   const entry = configured[kind]
   if (entry) return buildSpec(kind, entry)
-  if (kind === 'goose') return GOOSE_SPEC
+  if (isRuntimeProfileId(kind)) return buildSpec(kind, { profile: kind })
   return undefined
 }

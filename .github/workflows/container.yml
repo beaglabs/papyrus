@@ -1,0 +1,83 @@
+name: hardened-container
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+  security-events: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}/papyrus
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build hardened image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: papyrus:${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+      - name: Verify FIPS and non-root runtime
+        run: |
+          test "$(docker run --rm --entrypoint node papyrus:${GITHUB_SHA} -p 'require("node:crypto").getFips()')" = "1"
+          test "$(docker run --rm --entrypoint node papyrus:${GITHUB_SHA} -p 'process.getuid()')" != "0"
+      - name: Generate CycloneDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: papyrus:${{ github.sha }}
+          format: cyclonedx-json
+          output-file: papyrus.cdx.json
+      - name: Scan image
+        uses: aquasecurity/trivy-action@0.30.0
+        with:
+          image-ref: papyrus:${{ github.sha }}
+          format: sarif
+          output: trivy.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+      - name: Upload scan
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy.sarif
+      - name: Publish image
+        id: digest
+        if: github.event_name == 'push'
+        run: |
+          docker tag papyrus:${GITHUB_SHA} ${IMAGE}:${GITHUB_SHA}
+          docker push ${IMAGE}:${GITHUB_SHA}
+          digest="$(docker buildx imagetools inspect --format '{{json .Manifest.Digest}}' ${IMAGE}:${GITHUB_SHA} | tr -d '"')"
+          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+          echo "${IMAGE}@${digest}" > image-digest.txt
+      - name: Install Cosign
+        if: github.event_name == 'push'
+        uses: sigstore/cosign-installer@v3
+      - name: Sign image
+        if: github.event_name == 'push'
+        run: cosign sign --yes "$(cat image-digest.txt)"
+      - name: Attest build provenance
+        if: github.event_name == 'push'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.digest.outputs.digest }}

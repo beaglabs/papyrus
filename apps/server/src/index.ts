@@ -19,13 +19,28 @@ server.listen(config.port, config.host, () => {
 
 if (gateway && config.gateway) {
   gateway.listen(config.gateway.port, config.gateway.host, () => {
-    console.log(`Papyrus ACP gateway listening on ${config.gateway!.host}:${config.gateway!.port}`)
+    const protocol = config.gateway!.tls ? 'https' : 'http'
+    const host = config.gateway!.host.includes(':') && !config.gateway!.host.startsWith('[') ? `[${config.gateway!.host}]` : config.gateway!.host
+    console.log(`Papyrus ACP Streamable HTTP listening at ${protocol}://${host}:${config.gateway!.port}/acp`)
   })
 }
 
+let stopping = false
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-  process.on(signal, () => {
-    server.close(() => { database.close(); process.exit(0) })
-    gateway?.close(() => process.exit(0))
-  })
+  process.on(signal, () => { void shutdown() })
+}
+
+async function shutdown(): Promise<void> {
+  if (stopping) return
+  stopping = true
+  await service.shutdown()
+  server.closeAllConnections()
+  gateway?.closeAllConnections()
+  await Promise.all([closeServer(server), ...(gateway ? [closeServer(gateway)] : [])])
+  database.close()
+  process.exit(0)
+}
+
+function closeServer(target: typeof server): Promise<void> {
+  return new Promise((resolve) => target.close(() => resolve()))
 }

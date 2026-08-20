@@ -3,7 +3,7 @@ import { Agent as HttpsAgent } from 'node:https'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import type { ActivitySummary, McpServer, Principal, Role, Session, SignedLicense, Workspace } from '@papyrus/contracts'
 import type { AgentRuntime, RuntimeEvent, RuntimeLaunchOptions } from '@papyrus/acp-runtime'
-import { GooseRuntime } from '@papyrus/goose-runtime'
+import { gooseRuntimeAdapter } from '@papyrus/goose-runtime'
 import { resolveAgentSpec } from './agents.js'
 import { AuditLog } from './audit.js'
 import type { ServerConfig } from './config.js'
@@ -25,7 +25,7 @@ export class PapyrusService {
   constructor(
     readonly db: PapyrusDatabase,
     private readonly config: ServerConfig,
-    private readonly runtimeFactory: RuntimeFactory = (options) => new GooseRuntime(options),
+    private readonly runtimeFactory: RuntimeFactory = (options) => gooseRuntimeAdapter.create(options),
   ) {
     this.audit = new AuditLog(db)
     this.license = new LicenseService(db, config.dataDir, config.profile, config.licenseAuthorities, config.licenseRequired)

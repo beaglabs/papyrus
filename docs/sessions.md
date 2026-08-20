@@ -54,3 +54,7 @@ The current local stdio adapter creates an isolated runtime execution for each
 prompt. Papyrus session history is durable and replayable, but runtime-native
 context reuse requires an adapter that advertises and implements persistent
 load/resume support.
+
+Remote clients use the authenticated ACP Streamable HTTP boundary described in
+[`remote-acp.md`](./remote-acp.md). ACP connection identifiers are bound to the
+principal and workspace selected during initialization.

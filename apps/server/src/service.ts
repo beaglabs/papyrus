@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { Agent as HttpsAgent } from 'node:https'
-import { createHmac, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import type { ActivitySummary, McpServer, Principal, Role, Session, SignedLicense, Workspace } from '@papyrus/contracts'
 import type { AgentRuntime, RuntimeEvent, RuntimeLaunchOptions } from '@papyrus/acp-runtime'
 import { gooseRuntimeAdapter } from '@papyrus/goose-runtime'
@@ -33,7 +33,7 @@ export class PapyrusService {
 
   bootstrap(principal: Principal, secret: string): Principal {
     if (this.db.getSetting('bootstrapComplete') === 'true') throw new Error('Owner bootstrap is already complete')
-    if (!this.config.bootstrapSecret || secret !== this.config.bootstrapSecret) throw new Error('Invalid bootstrap secret')
+    if (!this.config.bootstrapSecret || !secureEqual(secret, this.config.bootstrapSecret)) throw new Error('Invalid bootstrap secret')
     this.db.transaction(() => {
       if (this.db.getSetting('bootstrapComplete') === 'true') throw new Error('Owner bootstrap is already complete')
       this.db.setRole(principal.id, 'Owner')
@@ -318,4 +318,10 @@ export class PapyrusService {
 function textValue(value: unknown, name: string): string {
   if (typeof value !== 'string' || !value) throw new Error(`Missing ${name}`)
   return value
+}
+
+function secureEqual(presented: string, expected: string): boolean {
+  const presentedDigest = createHash('sha256').update(presented).digest()
+  const expectedDigest = createHash('sha256').update(expected).digest()
+  return timingSafeEqual(presentedDigest, expectedDigest)
 }

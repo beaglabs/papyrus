@@ -4,7 +4,6 @@ import { readFileSync } from 'node:fs'
 import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { createServer as createHttpsServer } from 'node:https'
 import type { Duplex } from 'node:stream'
-import type { TLSSocket } from 'node:tls'
 import { AcpServer } from '@agentclientprotocol/sdk/experimental/server'
 import { createNodeHttpHandler } from '@agentclientprotocol/sdk/experimental/node'
 import type { Principal, Workspace } from '@papyrus/contracts'
@@ -15,7 +14,7 @@ import type { ServerConfig } from './config.js'
 import { PapyrusService } from './service.js'
 
 function devPrincipal(config: ServerConfig, request: IncomingMessage, service: PapyrusService): Principal | undefined {
-  const secrets = (config.gateway ? [config.gateway.devToken, process.env.GOOSE_SERVER__SECRET_KEY].filter(Boolean) : []) as string[]
+  const secrets = (config.gateway ? [config.gateway.devToken].filter(Boolean) : []) as string[]
   const match = (presented: string): boolean => {
     const a = createHash('sha256').update(presented).digest()
     for (const expected of secrets) {
@@ -32,22 +31,11 @@ function devPrincipal(config: ServerConfig, request: IncomingMessage, service: P
   if (typeof xSecretKey === 'string' && match(xSecretKey)) {
     return service.db.upsertUser({ externalId: 'dev:gateway:token', displayName: 'Gateway Developer', authMethod: 'development' })
   }
-  const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`)
-  const queryToken = url.searchParams.get('token')
-  if (queryToken && match(queryToken)) {
-    return service.db.upsertUser({ externalId: 'dev:gateway:token', displayName: 'Gateway Developer', authMethod: 'development' })
-  }
-  if (config.devIdentity) {
-    const parts = config.devIdentity.split(':')
-    return service.db.upsertUser({ externalId: `dev:${parts[0]}`, displayName: parts[1] ?? parts[0] ?? 'Developer', authMethod: 'development' })
-  }
   return undefined
 }
 
 function authenticate(config: ServerConfig, service: PapyrusService, auth: AuthService, request: IncomingMessage): Principal | undefined {
-  const socket = request.socket as TLSSocket
-  if (typeof socket.authorized === 'boolean' && socket.encrypted) return auth.principalFromSocket(socket)
-  return devPrincipal(config, request, service)
+  return auth.authenticate(request) ?? devPrincipal(config, request, service)
 }
 
 function resolveWorkspace(service: PapyrusService, principal: Principal, headerValue: string | string[] | undefined): Workspace | undefined {
@@ -69,12 +57,14 @@ function resolveRequestWorkspace(service: PapyrusService, config: ServerConfig, 
   return ws
 }
 
-function rejectUpgrade(socket: Duplex, status: number, statusText: string, message: string): void {
-  const body = `${message}\n`
+function rejectUpgrade(socket: Duplex, status: number, statusText: string, value: unknown): void {
+  const body = JSON.stringify(value)
   socket.end([
     `HTTP/1.1 ${status} ${statusText}`,
     'Connection: close',
-    'Content-Type: text/plain; charset=utf-8',
+    'Content-Type: application/json; charset=utf-8',
+    'Cache-Control: no-store',
+    'X-Content-Type-Options: nosniff',
     `Content-Length: ${Buffer.byteLength(body)}`,
     '',
     body,
@@ -121,8 +111,15 @@ export function createGatewayServer(config: ServerConfig, service: PapyrusServic
 
     const principal = authenticateRequest(request)
     if (!principal) {
-      response.writeHead(401, { 'content-type': 'text/plain' })
-      response.end('Unauthorized')
+      const body = JSON.stringify(auth.challenge())
+      response.writeHead(401, {
+        'content-type': 'application/json; charset=utf-8',
+        'content-length': Buffer.byteLength(body),
+        'cache-control': 'no-store',
+        'www-authenticate': 'Bearer realm="Papyrus"',
+        'x-content-type-options': 'nosniff',
+      })
+      response.end(body)
       return
     }
     const workspace = resolveForRequest(request, principal)
@@ -152,18 +149,18 @@ export function createGatewayServer(config: ServerConfig, service: PapyrusServic
   server.on('upgrade', (request, socket, head) => {
     const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`)
     if (url.pathname !== '/acp') {
-      rejectUpgrade(socket, 404, 'Not Found', 'Not Found')
+      rejectUpgrade(socket, 404, 'Not Found', { error: 'not_found', code: 'NOT_FOUND' })
       return
     }
 
     const principal = authenticateRequest(request)
     if (!principal) {
-      rejectUpgrade(socket, 401, 'Unauthorized', 'Unauthorized')
+      rejectUpgrade(socket, 401, 'Unauthorized', auth.challenge())
       return
     }
     const workspace = resolveForRequest(request, principal)
     if (!workspace) {
-      rejectUpgrade(socket, 400, 'Bad Request', 'Workspace is ambiguous; set the X-Papyrus-Workspace-Id header')
+      rejectUpgrade(socket, 400, 'Bad Request', { error: 'workspace_required', code: 'WORKSPACE_REQUIRED', message: 'Workspace is ambiguous; set the X-Papyrus-Workspace-Id header' })
       return
     }
 

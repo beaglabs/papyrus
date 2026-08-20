@@ -8,6 +8,9 @@ describe('license deployment invariant', () => {
       PAPYRUS_PROFILE: 'commercial',
       PAPYRUS_PUBLIC_ORIGIN: 'https://papyrus.example.test',
       PAPYRUS_SESSION_SECRET: 'a'.repeat(32),
+      PAPYRUS_OIDC_ISSUER: 'https://identity.example.test',
+      PAPYRUS_OIDC_CLIENT_ID: 'papyrus',
+      PAPYRUS_OIDC_REDIRECT_URI: 'https://papyrus.example.test/api/auth/oidc/callback',
       PAPYRUS_LICENSE_REQUIRED: 'false',
     })
 
@@ -21,5 +24,67 @@ describe('license deployment invariant', () => {
     })
 
     expect(config.licenseRequired).toBe(false)
+  })
+})
+
+describe('authentication deployment boundaries', () => {
+  it('requires a real authentication method in persistent commercial mode', () => {
+    expect(() => loadConfig({
+      PAPYRUS_MODE: 'persistent',
+      PAPYRUS_PROFILE: 'commercial',
+      PAPYRUS_PUBLIC_ORIGIN: 'https://papyrus.example.test',
+      PAPYRUS_SESSION_SECRET: 'a'.repeat(32),
+    })).toThrow(/requires OIDC or a trusted identity proxy/)
+  })
+
+  it('requires the OIDC callback to return to the configured daemon origin', () => {
+    expect(() => loadConfig({
+      PAPYRUS_MODE: 'local',
+      PAPYRUS_PROFILE: 'commercial',
+      PAPYRUS_PUBLIC_ORIGIN: 'http://127.0.0.1:3210',
+      PAPYRUS_SESSION_SECRET: 'a'.repeat(32),
+      PAPYRUS_OIDC_ISSUER: 'https://identity.example.test',
+      PAPYRUS_OIDC_CLIENT_ID: 'papyrus',
+      PAPYRUS_OIDC_REDIRECT_URI: 'http://127.0.0.1:9999/api/auth/oidc/callback',
+    })).toThrow(/must use PAPYRUS_PUBLIC_ORIGIN/)
+  })
+
+  it('requires an authenticated TLS hop and valid proxy fingerprints', () => {
+    const base = {
+      PAPYRUS_MODE: 'local',
+      PAPYRUS_PROFILE: 'commercial',
+      PAPYRUS_IDENTITY_PROXY_ALLOW_FINGERPRINTS: 'ab'.repeat(32),
+    }
+    expect(() => loadConfig(base)).toThrow(/requires direct Papyrus TLS/)
+    expect(() => loadConfig({
+      ...base,
+      PAPYRUS_TLS_CERT: '/tmp/server.pem',
+      PAPYRUS_TLS_KEY: '/tmp/server-key.pem',
+      PAPYRUS_TLS_CA: '/tmp/proxy-ca.pem',
+    })).not.toThrow()
+    expect(() => loadConfig({
+      ...base,
+      PAPYRUS_IDENTITY_PROXY_ALLOW_FINGERPRINTS: 'not-a-fingerprint',
+      PAPYRUS_TLS_CERT: '/tmp/server.pem',
+      PAPYRUS_TLS_KEY: '/tmp/server-key.pem',
+      PAPYRUS_TLS_CA: '/tmp/proxy-ca.pem',
+    })).toThrow(/SHA-256 certificate fingerprints/)
+  })
+
+  it('restricts development identities and gateway tokens to local loopback use', () => {
+    expect(() => loadConfig({
+      PAPYRUS_MODE: 'persistent',
+      PAPYRUS_PROFILE: 'commercial',
+      PAPYRUS_HOST: '127.0.0.1',
+      PAPYRUS_PUBLIC_ORIGIN: 'https://papyrus.example.test',
+      PAPYRUS_SESSION_SECRET: 'a'.repeat(32),
+      PAPYRUS_DEV_IDENTITY: 'owner:Developer',
+    })).toThrow(/restricted to local mode/)
+    expect(() => loadConfig({
+      PAPYRUS_MODE: 'local',
+      PAPYRUS_PROFILE: 'commercial',
+      PAPYRUS_GATEWAY_ENABLED: 'true',
+      PAPYRUS_GATEWAY_DEV_TOKEN: 'short',
+    })).toThrow(/at least 32 characters/)
   })
 })

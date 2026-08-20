@@ -124,11 +124,12 @@ export class StdioAcpRuntime implements AgentRuntime {
       Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
     )
     const stderr = this.forwardStderr(child, request.onEvent)
-    const exited = new Promise<never>((_resolve, reject) => {
+    const exitResult = new Promise<RuntimeProcessExit>((resolve, reject) => {
       child.once('error', reject)
-      child.once('exit', (code, signal) => {
-        reject(new RuntimeProcessExitError(this.kind, { code, signal }))
-      })
+      child.once('exit', (code, signal) => resolve({ code, signal }))
+    })
+    const exited: Promise<never> = exitResult.then((exit) => {
+      throw new RuntimeProcessExitError(this.kind, exit)
     })
     let stopping: Promise<void> | undefined
     const stop = (): Promise<void> => stopping ??= this.terminate(child)
@@ -148,6 +149,16 @@ export class StdioAcpRuntime implements AgentRuntime {
         const reason = controller.signal.reason
         throw reason instanceof Error ? reason : new Error(`${this.kind} prompt was cancelled`)
       }
+
+      // Stream closure can win the event-loop race with the child exit event.
+      // Briefly correlate the two so callers receive the actionable exit code.
+      const exit = child.exitCode !== null || child.signalCode !== null
+        ? { code: child.exitCode, signal: child.signalCode }
+        : await Promise.race([
+            exitResult,
+            delay(100).then(() => undefined),
+          ])
+      if (exit) throw new RuntimeProcessExitError(this.kind, exit)
       throw error
     } finally {
       if (timeout) clearTimeout(timeout)

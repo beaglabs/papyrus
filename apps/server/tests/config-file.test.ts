@@ -8,12 +8,12 @@ describe('YAML config file', () => {
   it('parses agents and license authorities', () => {
     const dir = mkdtempSync(join(tmpdir(), 'papyrus-yaml-'))
     const path = join(dir, 'papyrus.yaml')
-    writeFileSync(path, `agents:\n  opencode:\n    command: opencode\n    args: [acp]\n    env:\n      MODEL: "{model}"\n      OPENAI_API_KEY: "{secret}"\nlicenseAuthorities:\n  root: |\n    -----BEGIN PUBLIC KEY-----\n    abc\n    -----END PUBLIC KEY-----\n`)
+    writeFileSync(path, `agents:\n  reviewer:\n    profile: opencode\n    environment:\n      OPENAI_API_KEY: PAPYRUS_SECRET_OPENAI\n  rejected:\n    profile: custom-shell\n    command: sh\nconnectors: [chrome-acp, unknown]\nlicenseAuthorities:\n  root: |\n    -----BEGIN PUBLIC KEY-----\n    abc\n    -----END PUBLIC KEY-----\n`)
     try {
-      const config = loadFileConfig(path)
-      expect(config.agents?.opencode?.command).toBe('opencode')
-      expect(config.agents?.opencode?.args).toEqual(['acp'])
-      expect(config.agents?.opencode?.env).toEqual({ MODEL: '{model}', OPENAI_API_KEY: '{secret}' })
+      const config = loadFileConfig(path, { PAPYRUS_SECRET_OPENAI: 'test-key' })
+      expect(config.agents?.reviewer).toEqual({ profile: 'opencode', environment: { OPENAI_API_KEY: 'test-key' } })
+      expect(config.agents?.rejected).toBeUndefined()
+      expect(config.connectors).toEqual(['chrome-acp'])
       expect(config.licenseAuthorities?.root).toContain('abc')
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })

@@ -1,9 +1,7 @@
-export interface AgentSpec {
-  kind: string
-  command: string
-  args: string[]
-  environment(): Record<string, string>
-}
+import type { RuntimeLaunchSpec } from '@papyrus/acp-runtime'
+
+/** @deprecated Use RuntimeLaunchSpec. Kept while config routes migrate to the adapter catalog. */
+export type AgentSpec = RuntimeLaunchSpec
 
 /** Config-driven agent entry. `env` values may use {model} {baseUrl} {secret} {provider} placeholders. */
 export interface AgentConfigEntry {

@@ -5,6 +5,7 @@ import type { ActivitySummary, McpServer, Principal, Role, Session, SessionEvent
 import type { AgentRuntime, RuntimeEvent, RuntimeLaunchOptions } from '@papyrus/acp-runtime'
 import { gooseRuntimeAdapter } from '@papyrus/goose-runtime'
 import { resolveAgentSpec } from './agents.js'
+import { connectorPolicyAction } from './catalog.js'
 import { AuditLog } from './audit.js'
 import type { ServerConfig } from './config.js'
 import { PapyrusDatabase } from './db.js'
@@ -283,7 +284,10 @@ export class PapyrusService {
     const session = this.db.getSession(sessionId)
     if (!session) throw new Error('Session not found')
     this.check(actor, 'PromptSession', this.sessionResource(session))
-    this.check(actor, 'InvokeTool', { type: 'Tool', id: `${mcpServerId}:${toolName}`, attrs: { assignedUsers: cedarUsers(this.db.assignedUserIds('workspace', session.workspaceId)) } })
+    const resource = { type: 'Tool' as const, id: `${mcpServerId}:${toolName}`, attrs: { assignedUsers: cedarUsers(this.db.assignedUserIds('workspace', session.workspaceId)) } }
+    this.check(actor, 'InvokeTool', resource)
+    const connectorAction = connectorPolicyAction(toolName)
+    if (connectorAction) this.check(actor, connectorAction, resource)
     if (!this.db.isToolGranted(session.workspaceId, mcpServerId, toolName)) {
       this.audit.append({ actorId: actor.id, action: 'InvokeTool', resourceType: 'Tool', resourceId: `${mcpServerId}:${toolName}`, decision: 'deny', metadata: { sessionId, reason: 'No workspace tool grant' } })
       throw new AuthorizationDenied('InvokeTool', `${mcpServerId}:${toolName}`)
@@ -438,7 +442,10 @@ export class PapyrusService {
     if (!mcpServerId || !toolName) return false
     try {
       this.check(actor, 'PromptSession', this.sessionResource(session))
-      this.check(actor, 'InvokeTool', { type: 'Tool', id: `${mcpServerId}:${toolName}`, attrs: { assignedUsers: cedarUsers(this.db.assignedUserIds('workspace', session.workspaceId)) } })
+      const resource = { type: 'Tool' as const, id: `${mcpServerId}:${toolName}`, attrs: { assignedUsers: cedarUsers(this.db.assignedUserIds('workspace', session.workspaceId)) } }
+      this.check(actor, 'InvokeTool', resource)
+      const connectorAction = connectorPolicyAction(toolName)
+      if (connectorAction) this.check(actor, connectorAction, resource)
       return this.db.isToolGranted(session.workspaceId, mcpServerId, toolName)
     } catch { return false }
   }

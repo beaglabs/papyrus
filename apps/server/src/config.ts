@@ -2,6 +2,7 @@ import { getFips } from 'node:crypto'
 import { resolve } from 'node:path'
 import type { DeploymentProfile, ServerMode } from '@papyrus/contracts'
 import type { AgentConfigEntry } from './agents.js'
+import { CONNECTOR_PROFILES, type ConnectorProfile } from './catalog.js'
 import { loadFileConfig } from './config-file.js'
 
 export interface ServerConfig {
@@ -38,6 +39,7 @@ export interface ServerConfig {
   runtimeWorkerToken?: string
   runtimeWorkerTls?: { certPath: string; keyPath: string; caPath: string }
   agents?: Record<string, AgentConfigEntry>
+  connectors?: ConnectorProfile[]
   licenseRequired: boolean
   licenseAuthorities: Record<string, string>
 }
@@ -206,16 +208,13 @@ export function loadConfig(env = process.env): ServerConfig {
   if (gateway?.devToken && gateway.devToken.length < 32) throw new Error('PAPYRUS_GATEWAY_DEV_TOKEN must contain at least 32 characters')
   if (gateway && !gateway.tls && !isLoopbackListener(gateway.host)) throw new Error('Gateway requires mTLS on a non-loopback listener')
 
-  const fileConfig = loadFileConfig(env.PAPYRUS_CONFIG_FILE ?? 'papyrus.yaml')
+  const fileConfig = loadFileConfig(env.PAPYRUS_CONFIG_FILE ?? 'papyrus.yaml', env)
 
   const licenseAuthorities: Record<string, string> = { ...(fileConfig.licenseAuthorities ?? {}) }
   if (env.PAPYRUS_LICENSE_AUTHORITIES_JSON) {
     Object.assign(licenseAuthorities, JSON.parse(env.PAPYRUS_LICENSE_AUTHORITIES_JSON) as Record<string, string>)
   }
-  let agents: Record<string, AgentConfigEntry> | undefined = fileConfig.agents ? { ...fileConfig.agents } : undefined
-  if (env.PAPYRUS_AGENTS_JSON) {
-    Object.assign(agents ??= {}, JSON.parse(env.PAPYRUS_AGENTS_JSON) as Record<string, AgentConfigEntry>)
-  }
+  const agents: Record<string, AgentConfigEntry> | undefined = fileConfig.agents ? { ...fileConfig.agents } : undefined
   assertRuntime({ profile, mode })
   return {
     mode,
@@ -236,6 +235,7 @@ export function loadConfig(env = process.env): ServerConfig {
     ...(env.PAPYRUS_RUNTIME_WORKER_TOKEN ? { runtimeWorkerToken: env.PAPYRUS_RUNTIME_WORKER_TOKEN } : {}),
     ...(runtimeWorkerTls ? { runtimeWorkerTls } : {}),
     ...(agents ? { agents } : {}),
+    ...(fileConfig.connectors ? { connectors: fileConfig.connectors.map((id) => CONNECTOR_PROFILES[id] as ConnectorProfile) } : {}),
     // Licensing is a deployment invariant: persistent mode always requires a valid license.
     // Local mode remains usable for development without a production bypass flag.
     licenseRequired: mode === 'persistent',

@@ -9,12 +9,17 @@ describe('agent registry', () => {
     expect(spec?.environment()).toEqual({})
   })
 
-  it('builds a config-driven agent from an env template', () => {
-    const spec = resolveAgentSpec('opencode', {
-      opencode: { command: 'opencode', args: ['acp'], env: { MODEL: 'test-model', OPENAI_BASE_URL: 'http://m/v1', OPENAI_API_KEY: 'test-key' } },
+  it('builds a config-driven agent only from a catalog profile', () => {
+    const spec = resolveAgentSpec('reviewer', {
+      reviewer: { profile: 'opencode', environment: { OPENAI_API_KEY: 'test-key' } },
     })
     expect(spec?.command).toBe('opencode')
-    expect(spec?.environment()).toEqual({ MODEL: 'test-model', OPENAI_BASE_URL: 'http://m/v1', OPENAI_API_KEY: 'test-key' })
+    expect(spec?.args).toEqual(['acp'])
+    expect(spec?.environment()).toEqual({ OPENAI_API_KEY: 'test-key' })
+  })
+
+  it('ships an independent OpenCode ACP profile', () => {
+    expect(resolveAgentSpec('opencode')?.command).toBe('opencode')
   })
 
   it('rejects an unknown kind without a config entry', () => {

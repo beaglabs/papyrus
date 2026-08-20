@@ -1,66 +1,43 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { Readable, Writable } from 'node:stream'
-import * as acp from '@agentclientprotocol/sdk'
 import { createHttpStream } from '@agentclientprotocol/sdk/experimental/http-client'
+import {
+  ACP_PROTOCOL_VERSION,
+  StdioAcpRuntime,
+  runAcpPrompt,
+  type AgentRuntime,
+  type RuntimeAdapter,
+  type RuntimeCapabilities,
+  type RuntimeEvent,
+  type RuntimeHealth,
+  type RuntimeLaunchOptions,
+  type RuntimePromptRequest,
+  type RuntimePromptResult,
+} from '@papyrus/acp-runtime'
 
 export const GOOSE_RUNTIME_KIND = 'goose' as const
-export const ACP_PROTOCOL_VERSION = acp.PROTOCOL_VERSION
+export { ACP_PROTOCOL_VERSION }
 
 /** Header carrying the per-runtime model environment over the authenticated channel. */
 export const RUNTIME_CONFIG_HEADER = 'x-papyrus-runtime-config'
 
-export interface GooseHealth {
-  available: boolean
-  version?: string
-  reason?: string
+export type GooseHealth = RuntimeHealth
+export type GoosePromptEvent = RuntimeEvent
+export type GoosePromptRequest = RuntimePromptRequest
+export type GoosePromptResult = RuntimePromptResult
+export interface GooseRuntimeOptions extends RuntimeLaunchOptions {}
+
+export const GOOSE_RUNTIME_CAPABILITIES: RuntimeCapabilities = {
+  transports: ['stdio', 'streamable-http'],
+  sessions: { cancel: true, load: false, resume: false, fork: false },
 }
 
-export interface GoosePromptEvent {
-  kind: 'session' | 'update' | 'complete' | 'stderr'
-  at: string
-  data: unknown
-}
-
-export interface GoosePromptRequest {
-  cwd: string
-  prompt: string
-  environment?: Record<string, string>
-  mcpServers?: Array<{ name: string; url: string; headers?: Array<{ name: string; value: string }> }>
-  authorizeTool: (title: string) => Promise<boolean>
-  onEvent: (event: GoosePromptEvent) => void | Promise<void>
-  /** Aborts the prompt turn (cancels the runtime and reclaims the process). */
-  signal?: AbortSignal
-}
-
-export interface GoosePromptResult {
-  runtimeSessionId: string
-  stopReason: string
-}
-
-export interface GooseRuntimeOptions {
-  command?: string
-  args?: string[]
-  baseEnvironment?: Record<string, string>
-  startupTimeoutMs?: number
-  /** Maximum duration for a single prompt turn; aborts the runtime when exceeded. */
-  promptTimeoutMs?: number
-  /**
-   * Remote worker endpoint (ACP Streamable HTTP). When set, Papyrus connects
-   * to a supervised worker over the network instead of spawning `goose acp`
-   * as a child process.
-   */
-  endpoint?: string
-  /** Extra headers for remote requests (e.g. bearer token). */
-  headers?: Record<string, string>
-  /** Custom fetch for remote requests (e.g. mutual-TLS client certificate). */
-  fetch?: typeof globalThis.fetch | undefined
-}
-
-export class GooseRuntime {
+export class GooseRuntime implements AgentRuntime {
+  readonly kind = GOOSE_RUNTIME_KIND
+  readonly capabilities = GOOSE_RUNTIME_CAPABILITIES
   readonly command: string
   readonly args: string[]
   readonly endpoint: string | undefined
-  private readonly baseEnvironment: Record<string, string>
+
+  private readonly localRuntime: StdioAcpRuntime
   private readonly startupTimeoutMs: number
   private readonly promptTimeoutMs: number | undefined
   private readonly headers: Record<string, string>
@@ -70,16 +47,22 @@ export class GooseRuntime {
     this.command = options.command ?? 'goose'
     this.args = options.args ?? ['acp']
     this.endpoint = options.endpoint
-    this.baseEnvironment = options.baseEnvironment ?? {}
     this.startupTimeoutMs = options.startupTimeoutMs ?? 10_000
     this.promptTimeoutMs = options.promptTimeoutMs
     this.headers = options.headers ?? {}
     this.fetch = options.fetch
+    this.localRuntime = new StdioAcpRuntime({
+      ...options,
+      kind: GOOSE_RUNTIME_KIND,
+      command: this.command,
+      args: this.args,
+      versionArgs: ['--version'],
+    })
   }
 
-  async health(): Promise<GooseHealth> {
-    if (this.endpoint) return this.remoteHealth()
-    return this.childHealth()
+  health(): Promise<GooseHealth> {
+    if (!this.endpoint) return this.localRuntime.health()
+    return this.remoteHealth()
   }
 
   private async remoteHealth(): Promise<GooseHealth> {
@@ -92,134 +75,71 @@ export class GooseRuntime {
       if (!response.ok) return { available: false, reason: `worker health returned ${response.status}` }
       return { available: true, version: 'remote-worker' }
     } catch (error) {
-      return { available: false, reason: error instanceof Error ? error.message : 'worker health check failed' }
+      return {
+        available: false,
+        reason: error instanceof Error ? error.message : 'worker health check failed',
+      }
     }
   }
 
-  private childHealth(): Promise<GooseHealth> {
-    return new Promise((resolve) => {
-      const process = spawn(this.command, ['--version'], { stdio: ['ignore', 'pipe', 'pipe'] })
-      let stdout = ''
-      let stderr = ''
-      const timer = setTimeout(() => {
-        process.kill('SIGKILL')
-        resolve({ available: false, reason: 'goose version check timed out' })
-      }, this.startupTimeoutMs)
-      process.stdout.on('data', (chunk) => { stdout += String(chunk) })
-      process.stderr.on('data', (chunk) => { stderr += String(chunk) })
-      process.once('error', (error) => {
-        clearTimeout(timer)
-        resolve({ available: false, reason: error.message })
-      })
-      process.once('exit', (code) => {
-        clearTimeout(timer)
-        if (code === 0) resolve({ available: true, version: stdout.trim() || stderr.trim() })
-        else resolve({ available: false, reason: stderr.trim() || `goose exited with ${code}` })
-      })
-    })
-  }
-
   async runPrompt(request: GoosePromptRequest): Promise<GoosePromptResult> {
+    if (!this.endpoint) return await this.localRuntime.runPrompt(request)
+
     const controller = new AbortController()
-    const timeout = this.promptTimeoutMs ? setTimeout(() => controller.abort(new Error('prompt timeout')), this.promptTimeoutMs) : undefined
-    const onRequestAbort = () => controller.abort()
+    const timeout = this.promptTimeoutMs === undefined
+      ? undefined
+      : setTimeout(() => controller.abort(new Error('goose prompt timed out')), this.promptTimeoutMs)
+    const onRequestAbort = (): void => controller.abort(
+      request.signal?.reason instanceof Error
+        ? request.signal.reason
+        : new Error('goose prompt was cancelled'),
+    )
     request.signal?.addEventListener('abort', onRequestAbort, { once: true })
+
     try {
-      if (this.endpoint) return await this.runRemote(request, controller.signal)
-      return await this.runChild(request, controller.signal)
+      return await this.runRemote(request, controller.signal)
+    } catch (error) {
+      if (controller.signal.aborted) {
+        const reason = controller.signal.reason
+        throw reason instanceof Error ? reason : new Error('goose prompt was cancelled')
+      }
+      throw error
     } finally {
       if (timeout) clearTimeout(timeout)
       request.signal?.removeEventListener('abort', onRequestAbort)
     }
   }
 
-  private async runChild(request: GoosePromptRequest, abort: AbortSignal): Promise<GoosePromptResult> {
-    const child = this.spawn(request.environment)
-    const onAbort = () => child.kill('SIGTERM')
-    abort.addEventListener('abort', onAbort, { once: true })
-    const stderr = this.forwardStderr(child, request.onEvent)
-    const stream = acp.ndJsonStream(
-      Writable.toWeb(child.stdin) as WritableStream<Uint8Array>,
-      Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
-    )
-    try {
-      return await this.runSession(stream, request)
-    } finally {
-      abort.removeEventListener('abort', onAbort)
-      child.kill('SIGTERM')
-      await Promise.race([stderr, new Promise<void>((resolve) => setTimeout(resolve, 500))])
-    }
-  }
-
-  private async runRemote(request: GoosePromptRequest, abort: AbortSignal): Promise<GoosePromptResult> {
+  private async runRemote(
+    request: GoosePromptRequest,
+    abort: AbortSignal,
+  ): Promise<GoosePromptResult> {
     const headers: Record<string, string> = { ...this.headers }
     const config = encodeRuntimeConfig(request.environment)
     if (config) headers[RUNTIME_CONFIG_HEADER] = config
+
     const stream = createHttpStream(this.endpoint as string, {
       headers,
       ...(this.fetch ? { fetch: this.fetch } : {}),
     })
-    const onAbort = () => { void stream.readable.cancel().catch(() => {}) }
+    const onAbort = (): void => {
+      void stream.readable.cancel().catch(() => {})
+    }
     abort.addEventListener('abort', onAbort, { once: true })
+
     try {
-      return await this.runSession(stream, request)
+      return await runAcpPrompt(stream, request)
     } finally {
       abort.removeEventListener('abort', onAbort)
     }
   }
+}
 
-  private async runSession(stream: acp.Stream, request: GoosePromptRequest): Promise<GoosePromptResult> {
-    const client = acp.client({ name: 'papyrus' })
-      .onRequest(acp.methods.client.session.requestPermission, async ({ params }) => {
-        const allowed = await request.authorizeTool(params.toolCall.title ?? 'unknown-tool')
-        const desired = allowed ? 'allow_once' : 'reject_once'
-        const option = params.options.find((candidate) => candidate.kind === desired)
-        return option
-          ? { outcome: { outcome: 'selected', optionId: option.optionId } }
-          : { outcome: { outcome: 'cancelled' } }
-      })
-
-    return await client.connectWith(stream, async (context) => {
-      await context.request(acp.methods.agent.initialize, {
-        protocolVersion: acp.PROTOCOL_VERSION,
-        clientCapabilities: {},
-      })
-      const builder = context.buildSession({
-        cwd: request.cwd,
-        mcpServers: (request.mcpServers ?? []).map((server) => ({
-          type: 'http' as const,
-          name: server.name,
-          url: server.url,
-          headers: server.headers ?? [],
-        })),
-      })
-      return builder.withSession(async (session) => {
-        await request.onEvent({ kind: 'session', at: new Date().toISOString(), data: { runtimeSessionId: session.sessionId } })
-        void session.prompt(request.prompt)
-        for (;;) {
-          const message = await session.nextUpdate()
-          if (message.kind === 'stop') {
-            await request.onEvent({ kind: 'complete', at: new Date().toISOString(), data: message.response })
-            return { runtimeSessionId: session.sessionId, stopReason: message.stopReason }
-          }
-          await request.onEvent({ kind: 'update', at: new Date().toISOString(), data: message.update })
-        }
-      })
-    })
-  }
-
-  private spawn(environment: Record<string, string> = {}): ChildProcessWithoutNullStreams {
-    return spawn(this.command, this.args, {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, ...this.baseEnvironment, ...environment },
-    })
-  }
-
-  private async forwardStderr(child: ChildProcessWithoutNullStreams, onEvent: GoosePromptRequest['onEvent']): Promise<void> {
-    for await (const chunk of child.stderr) {
-      await onEvent({ kind: 'stderr', at: new Date().toISOString(), data: String(chunk).slice(0, 4_096) })
-    }
-  }
+export const gooseRuntimeAdapter: RuntimeAdapter = {
+  kind: GOOSE_RUNTIME_KIND,
+  create(options: RuntimeLaunchOptions = {}) {
+    return new GooseRuntime(options)
+  },
 }
 
 export function encodeRuntimeConfig(env: Record<string, string> | undefined): string | undefined {

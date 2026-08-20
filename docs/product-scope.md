@@ -1,285 +1,114 @@
-# Papyrus ACP Gateway: initial product scope
+# Papyrus ACP daemon: product scope
 
-Status: accepted pivot baseline  
-Branch: agent/acp-gateway-pivot  
-Base ancestry: main  
-Code reuse from main: none
+Status: accepted daemon-first baseline
 
 ## Decision
 
-Papyrus will be a government-ready agent access and control plane, not a new agent harness.
+Papyrus is a secure ACP daemon and policy enforcement boundary for regulated and disconnected environments. It is not a new agent harness, chat application, browser session UI, model server, or workflow builder.
 
-The product presents a Papyrus-branded web application, authenticates the user, makes a Cedar authorization decision, provisions an authorized Goose session, and mediates access to models and MCP tools. Goose is the only agent runtime in the initial release and is treated as a pinned, replaceable dependency behind an ACP adapter.
+Approved clients connect to Papyrus. Papyrus authenticates the principal, evaluates Cedar policy, owns the governed session record, supervises or connects to an approved ACP runtime, mediates MCP access, and records security-relevant events.
 
-The new branch intentionally starts with a clean file tree. Previous Papyrus code is reference material only and must not be copied into this implementation without a separate review.
+The implementation uses the official stable `@agentclientprotocol/sdk` as its protocol boundary. Goose remains a supported adapter, not the product architecture.
 
 ## System boundary
 
 ```mermaid
 flowchart TD
-    U["Papyrus user"] --> W["Papyrus web UI"]
-    W --> S["Papyrus server"]
-    S --> P["Cedar authorization"]
-    S --> A["Append-only audit"]
-    S --> G["Goose ACP runtime"]
-    G --> M["Papyrus MCP proxy"]
-    G --> L["Approved model endpoint"]
-    M --> T["Approved tools and MCP servers"]
+    C["Approved ACP client"] --> D["Papyrus daemon"]
+    D --> P["Cedar and audit"]
+    D --> R["Supervised ACP runtime"]
+    R --> M["Papyrus MCP mediation"]
+    M --> T["Approved tools"]
 ```
 
-Papyrus is authoritative for identities, roles, assignments, sessions, tool grants, policy decisions, audit metadata, runtime configuration, and license status. Goose is authoritative only for execution inside an authorized session.
+Papyrus is authoritative for:
 
-A customer may supply a managed or enclave-local model endpoint. Papyrus does not serve models, schedule GPUs, train models, or require a public model provider.
+- identities, fixed roles, groups, workspaces, and assignments;
+- runtime and connector profiles;
+- session ownership and lifecycle metadata;
+- policy decisions and tool grants;
+- license status; and
+- append-only audit events.
 
-## Initial domain model
+The selected ACP runtime is authoritative only for agent execution within the authorized session. A customer supplies an approved managed or enclave-local model endpoint. Papyrus does not serve or train models.
 
-- Deployment — one installed Papyrus security and licensing boundary.
-- User — an authenticated human identity.
-- Group — a flat collection of users used for assignment. Nested organizational structures are deferred.
-- Workspace — the primary collaboration and segmentation boundary.
-- Runtime — a configured Goose instance plus its approved model endpoint.
-- Session — an ACP session owned by one user and attached to one workspace and runtime.
-- MCP server — a configured tool server reachable through the Papyrus mediation boundary.
-- Tool — an action exposed by an MCP server.
-- Assignment — a user or group grant to a workspace, runtime, or MCP resource.
-- Audit event — an immutable record of a security-relevant action or decision.
+## Daemon interfaces
 
-## Fixed initial roles
+Papyrus exposes three distinct boundaries:
 
-The initial policy bundle defines four roles. Customers can assign them but cannot edit their meaning in the first release.
+1. **Administrative API** for identity, assignments, configuration, licensing, health, and audit.
+2. **ACP client gateway** for local or remote approved clients.
+3. **Runtime transport** for supervised local stdio processes or authenticated remote Streamable HTTP runtimes.
 
-| Role | Initial authority |
-| --- | --- |
-| Owner | Controls deployment bootstrap, licensing, owners/admins, security configuration, and all administrative visibility. |
-| Admin | Manages users, groups, workspaces, runtime assignments, tool grants, and operational settings. Cannot replace the Owner or alter license trust roots. |
-| User | Uses assigned workspaces, runtimes, and tools; creates and manages owned sessions. |
-| Auditor | Reads authorized configuration, activity, policy decisions, and audit exports; cannot execute sessions or mutate resources. |
+A small local connector may translate stdio ACP into authenticated remote ACP for clients that can only spawn a local command. The connector contains no agent logic and receives only the credentials and configuration needed for its connection.
 
-The first user does not become Owner merely by winning a login race. Owner bootstrap requires an explicit, single-use bootstrap secret created during installation. Bootstrap closes permanently after the first Owner is established unless an authenticated Owner initiates a documented recovery procedure.
+Web chat, web session UX, first-party browser automation, and a browser extension are outside the current stack.
 
-## Authorization rules
+## Identity
 
-Cedar is the sole application authorization decision point for protected actions.
+Commercial deployments use OIDC authorization code with PKCE. Government deployments use CAC/PIV certificate identity through mutually authenticated TLS. A deployment may federate certificate identity into OIDC when its approved identity provider supports that pattern.
 
-Initial requirements:
+If TLS terminates at a reverse proxy, Papyrus accepts forwarded certificate identity only over an allowlisted mutually authenticated boundary. Client-supplied identity headers are never trusted.
 
-- deny by default;
-- authenticate before authorization;
-- represent users, groups, workspaces, runtimes, sessions, MCP servers, and tools as typed Cedar entities;
-- evaluate authorization in the server for every protected API operation;
-- authorize session creation against both workspace and runtime assignment;
-- authorize session reads against ownership, explicit administrative visibility, or audit authority;
-- authorize tool discovery and invocation separately;
-- never treat deployment profile, UI state, or possession of a resource identifier as authorization;
-- record the policy bundle version, principal, action, resource, decision, and reason in the audit stream; and
-- ship a versioned, tested policy bundle with no customer policy editor in the first release.
+Authentication establishes identity. Cedar determines authority.
 
-The application must not scatter role checks across route handlers. Routes call one authorization service, and tests exercise the Cedar schema and policies directly.
+## Authorization
 
-## Identity and deployment profiles
+Cedar is the sole application authorization decision point for protected actions. The initial policy bundle has fixed Owner, Admin, User, and Auditor roles and is deny-by-default.
 
-### Commercial profile
+Authorization covers administrative APIs, workspace and runtime assignments, session creation and access, runtime connection, MCP discovery, and every tool invocation. Decisions record the policy bundle version, principal, action, resource, outcome, and bounded reason.
 
-- OIDC authorization-code flow with PKCE.
-- Issuer, audience, redirect URI, and claim mapping are installation configuration.
-- Tokens are validated server-side.
-- External groups may be mapped into Papyrus groups, but Papyrus assignments remain authoritative.
+## Sessions
 
-### Government profile
+A governed session has one owner, workspace, runtime assignment, and connector identity. Session state is durable enough to reconnect clients and resume when the selected runtime supports it.
 
-- CAC/PIV authentication through mutually authenticated TLS.
-- Trust anchors, acceptable certificate policies, revocation behavior, and identity mapping are explicit installation configuration.
-- If TLS terminates at an approved reverse proxy, the application accepts certificate identity only from an allowlisted, mutually authenticated proxy channel. Client-supplied forwarding headers are never trusted.
-- The design supports disconnected revocation material and documented update procedures.
-- IL4 and IL6 are deployment configuration baselines, not claims that the software is accredited or automatically suitable for a classified system.
+Papyrus persists normalized lifecycle events, approvals, tool activity, and bounded runtime metadata. This event model is an API and daemon capability; it does not imply a Papyrus chat UI.
 
-OIDC and CAC establish identity. Cedar determines authority.
+## ACP transports
 
-## Runtime and model boundary
+- Local runtimes use ACP over stdio with framed JSON messages, cancellation, process supervision, and cleanup.
+- Remote runtimes use authenticated ACP Streamable HTTP as the primary transport.
+- WebSocket remains a compatibility transport where ACP clients or runtimes require it.
+- Remote transports use connection identifiers, explicit timeouts, bounded messages, and mTLS or approved workload identity.
 
-Goose is the only runtime implementation in the initial release.
+Transport authentication is separate from the ACP session model.
 
-The packages/goose-runtime adapter will:
+## Browser capability
 
-- pin a tested Goose release and record its license and software-bill-of-materials data;
-- translate Papyrus session operations to a pinned ACP version;
-- launch Goose as a loopback child process in local mode;
-- connect to supervised Goose workers in persistent mode;
-- pass only the selected model endpoint and authorized MCP configuration;
-- normalize runtime events into Papyrus contracts;
-- enforce timeouts, cancellation, health checks, and process cleanup; and
-- reject runtime capabilities the pinned adapter does not understand.
+Browser capability is supplied through an approved runtime or MCP server such as Chrome ACP. The external proxy and local connector provide the protocol path; the adapter catalog provides launch and policy profiles.
 
-Papyrus supports customer-controlled model endpoints through a small, explicit provider configuration contract. Runtime assignment includes the allowed model endpoint. Model credentials remain server-side and are never returned to the browser.
+Papyrus does not embed a browser, ship a browser extension, or treat browser actions as implicitly trusted. Navigation, downloads, credential use, filesystem transfer, and external submission remain separately authorizable actions.
 
-## Workspace, session, and activity visibility
+## Licensing invariant
 
-A session has exactly one owning user, one workspace, and one runtime assignment.
+Local mode may run without a commercial license for development and evaluation.
 
-Users can see their own sessions and usage within assigned workspaces. Admins and Owners can see deployment or workspace activity according to Cedar policy. Auditors receive read-only visibility. The UI must make the active user, fixed role, deployment profile, workspace, and runtime visible without exposing secrets.
+Persistent mode always requires a valid signed offline license. There is no environment variable that disables this requirement. License entitlement and Cedar authorization remain separate: a license enables a product capability; Cedar determines whether a principal may use it.
 
-Usage is derived from normalized runtime events and clearly labels values that a model endpoint does not report. Cost estimates are optional and must never be represented as billing truth.
+## Hardened deployment
 
-## MCP and tool enforcement
-
-Goose must not receive unrestricted direct access to customer MCP servers.
-
-Papyrus provides a mediation layer that:
-
-1. exposes only MCP servers assigned to the session;
-2. filters tool discovery using the Cedar decision;
-3. authorizes each invocation with user, workspace, runtime, session, server, and tool context;
-4. applies configured argument and output limits;
-5. records request metadata, decision, outcome, duration, and bounded result metadata; and
-6. prevents secrets and unrestricted tool output from being copied into general audit fields.
-
-If a transport cannot be mediated reliably, that transport is unsupported in the initial release.
-
-## Append-only audit
-
-Security-relevant events include authentication, bootstrap, assignment changes, authorization decisions, session lifecycle, runtime lifecycle, tool discovery and invocation, configuration changes, license changes, and audit export.
-
-Initial guarantees:
-
-- inserts are append-only through the application API;
-- ordinary application roles cannot update or delete audit rows;
-- each deployment event receives a monotonic sequence and previous-event hash;
-- hashes cover a canonical event envelope;
-- sensitive payloads are redacted or stored in a separately governed evidence store;
-- persistent mode can export signed checkpoints for external retention; and
-- audit integrity is testable, but described honestly: a database administrator can still tamper with a database unless events or checkpoints are exported to independently controlled storage.
-
-Audit recording for a denied request must not depend on the denied transaction succeeding.
-
-## Operating modes
-
-### Local mode
-
-A single command launches the Papyrus server, web UI, local database, and pinned Goose child process. Services bind to loopback by default. State persists in an explicit Papyrus data directory unless the user selects an ephemeral development option.
-
-### Persistent server mode
-
-A long-running, single-deployment service supports multiple users, durable relational storage, externally managed TLS, OIDC or CAC/mTLS, supervised Goose workers, backups, audit export, and administrative operations. This is not a multitenant SaaS control plane.
-
-Both modes use the same domain services, Cedar policies, contracts, migrations, and audit semantics.
-
-## Signed offline licensing
-
-The initial license is an offline-verifiable signed document bound to a deployment identity.
-
-It contains a license identifier, licensee, deployment identifier, allowed deployment profile, issued time, optional expiry, and explicit feature entitlements. Verification is fail-closed for gated operations and does not require a network call. Private signing keys never ship with Papyrus.
-
-License enforcement is separate from Cedar:
-
-- the license decides whether a product capability is entitled;
-- Cedar decides whether the authenticated principal may use that capability.
-
-Key rotation, recovery, clock rollback behavior, and air-gapped activation/export procedures require tests and operator documentation before release.
-
-## Repository organization
-
-The initial implementation deliberately uses a small number of packages:
-
-```text
-apps/
-  web/                 Papyrus React UI
-  server/              API and all security-sensitive server modules
-packages/
-  contracts/           Versioned API, ACP-normalized event, and audit contracts
-  goose-runtime/       Goose lifecycle and ACP adapter
-```
-
-Server modules remain cohesive inside apps/server:
-
-```text
-src/
-  auth/
-  policy/
-  workspaces/
-  runtimes/
-  sessions/
-  mcp/
-  audit/
-  licensing/
-  persistence/
-```
-
-Dependency direction is one way: web depends on contracts; server depends on contracts and goose-runtime; goose-runtime depends on contracts. The web UI never imports server implementation. Goose-specific types do not escape the runtime adapter.
-
-## Delivery slices
-
-### Slice 1: executable boundary
-
-- Create the new workspaces and CI.
-- Serve the branded web shell and health/readiness endpoints.
-- Define versioned contracts.
-- Launch and stop a pinned Goose process through the adapter.
-- Complete one local ACP session without authentication.
-- Mark every endpoint as development-only until identity and policy enforcement land.
-
-Exit: a local developer can start Papyrus, create one session through the server, receive normalized events, cancel it, and observe clean process shutdown.
-
-### Slice 2: identity and bootstrap
-
-- Implement commercial OIDC.
-- Implement government mTLS certificate identity extraction.
-- Add explicit Owner bootstrap.
-- Add fixed users, groups, and roles.
-- Remove all unauthenticated session operations.
-
-Exit: authentication tests cover issuer/audience failure, certificate trust failure, header spoofing, bootstrap replay, and profile mismatch.
-
-### Slice 3: Cedar and assignments
-
-- Add the Cedar schema, fixed policies, and authorization service.
-- Add workspace and Goose runtime assignments.
-- Assign approved model endpoints.
-- Enforce session ownership and administrative visibility.
-
-Exit: an authorization matrix test proves default denial and cross-workspace isolation.
-
-### Slice 4: MCP mediation and audit
-
-- Route configured MCP access through Papyrus.
-- Enforce server and tool permissions.
-- Add append-only, hash-chained audit events.
-- Add user activity and administrative activity views.
-
-Exit: a user cannot discover or invoke an unassigned tool, and every allow/deny decision produces a verifiable audit event.
-
-### Slice 5: persistent deployment and licensing
-
-- Add durable server-mode persistence and migrations.
-- Add runtime supervision, backup, recovery, and audit export.
-- Add signed offline activation and enforcement.
-- Produce deployment documentation, SBOMs, and security tests.
-
-Exit: the same conformance suite passes in local and persistent modes, and a disconnected deployment can install and validate a license without network access.
+The production container will derive from a pinned Node 24 Minimus `reg.mini.dev/node-fips` image. The derived image must independently verify FIPS operation, run non-root, minimize writable paths and Linux privileges, contain no build toolchain or secrets, and publish Papyrus-specific SBOM, provenance, signature, vulnerability, and compliance evidence.
 
 ## Deferred scope
 
-The following are intentionally outside the first release:
-
-- arbitrary customer-defined Cedar policies or a policy editor;
-- ACP runtimes other than Goose;
-- automated cross-domain transfer;
-- organization hierarchies more complex than flat groups;
-- generic workflow building;
-- an agent marketplace; and
-- full multitenant SaaS administration.
-
-Automated cross-domain movement must not be implemented as an ordinary network integration. Any future feature requires a customer-approved cross-domain solution, transfer policy, content inspection, release authority, and deployment-specific accreditation.
+- Papyrus chat or web-session UI;
+- first-party browser automation or extension;
+- arbitrary customer-editable Cedar policies;
+- generic workflows or an agent marketplace;
+- serving, scheduling, or training models;
+- horizontal multitenant SaaS;
+- automated cross-domain transfer; and
+- accreditation claims.
 
 ## Release gates
 
-The initial scope is complete only when:
+The daemon-first stack is complete when:
 
-- all twelve initial capabilities have end-to-end acceptance tests;
-- authorization is deny-by-default with matrix coverage;
-- sessions and MCP calls cannot bypass the Papyrus server;
-- local and persistent modes share policy and audit behavior;
-- offline licensing works with no network dependency;
-- dependency versions and third-party notices are reproducible;
-- secrets are absent from browser payloads and ordinary audit events;
-- backup and recovery preserve audit ordering and integrity; and
-- documentation states what has and has not been assessed or authorized.
+- protocol conformance tests pass for local stdio and remote Streamable HTTP;
+- at least one non-Goose adapter runs through the runtime-neutral core;
+- external clients can connect without Goose-specific environment variables;
+- authentication, authorization, session ownership, and tool mediation cannot be bypassed;
+- every security-relevant allow or deny produces a verifiable audit event;
+- persistent mode cannot disable license validation;
+- the browser profile works through the proxy and catalog without a Papyrus browser UI; and
+- the signed, derived Minimus image passes the documented FIPS and hardening checks.

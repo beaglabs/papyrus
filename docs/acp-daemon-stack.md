@@ -14,9 +14,9 @@ Each pull request targets the branch immediately below it. Reviewers therefore s
 | 02 | `stack/acp-02-runtime-core` | `stack/acp-01-baseline` | Runtime-neutral ACP core using `@agentclientprotocol/sdk` |
 | 03 | `stack/acp-03-local-stdio` | `stack/acp-02-runtime-core` | Local process supervision and ACP stdio |
 | 04 | `stack/acp-04-auth-bff` | `stack/acp-03-local-stdio` | OIDC/PKCE, CAC/PIV federation, direct mTLS, and bootstrap hardening |
-| 05 | `stack/acp-05-governed-sessions` | `stack/acp-04-auth-bff` | Durable session ownership, Cedar enforcement, and audit events |
-| 06 | `stack/acp-06-remote-transports` | `stack/acp-05-governed-sessions` | Streamable HTTP primary transport, WebSocket compatibility, HTTP/2, and mTLS |
-| 07 | `stack/acp-07-external-proxy` | `stack/acp-06-remote-transports` | Back-to-back ACP proxy and local stdio-to-remote connector |
+| 05 | `stack/acp-05-governed-session` | `stack/acp-04-auth-bff` | Durable session ownership, Cedar enforcement, and audit events |
+| 06 | `stack/acp-06-remote-http` | `stack/acp-05-governed-session` | Authenticated and bounded Streamable HTTP with mTLS |
+| 07 | `stack/acp-07-external-proxy` | `stack/acp-06-remote-http` | Single-endpoint ACP mediation and a stdio-to-remote connector |
 | 09 | `stack/acp-09-adapter-catalog` | `stack/acp-07-external-proxy` | Runtime and connector profiles, including browser capability through Chrome ACP |
 | 11 | `stack/acp-11-hardened-image` | `stack/acp-09-adapter-catalog` | Minimus Node 24 FIPS image and deployment hardening |
 

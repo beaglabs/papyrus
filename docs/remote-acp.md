@@ -3,6 +3,8 @@
 Papyrus exposes the official ACP Streamable HTTP transport at `POST`, `GET`,
 and `DELETE /acp`. WebSocket upgrades are intentionally rejected. Native and
 service clients should use `createHttpStream` from `@agentclientprotocol/sdk`.
+Clients that can spawn only a local ACP stdio process use `papyrus-connect` as
+the transparent bridge; Papyrus still exposes only the single `/acp` endpoint.
 
 ## Authentication and workspace binding
 
@@ -38,3 +40,7 @@ The body limit is enforced for declared and chunked request bodies. Idle
 connections are deleted from the ACP server, while active SSE subscriptions are
 not expired. Logical connection limits are separate from TCP socket limits so
 Streamable HTTP can use its request and event-stream channels correctly.
+
+See [`external-connector.md`](./external-connector.md) for spawn-only client
+configuration. Runtime selection remains an internal Papyrus policy decision;
+it is not encoded into the ACP URL or an extension field.

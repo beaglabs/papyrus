@@ -112,3 +112,12 @@ export class RuntimeRegistry {
     return runtime
   }
 }
+
+export { runAcpPrompt } from './session.js'
+export {
+  RuntimeProcessExitError,
+  STDIO_RUNTIME_CAPABILITIES,
+  StdioAcpRuntime,
+  type RuntimeProcessExit,
+  type StdioRuntimeOptions,
+} from './stdio.js'

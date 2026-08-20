@@ -1,12 +1,10 @@
-import { describe, expect, it } from 'vitest'
 import * as acp from '@agentclientprotocol/sdk'
+import { describe, expect, it, vi } from 'vitest'
 import { buildAcpAgent, type AcpAgentContext } from '../src/acp-server.js'
 import { testContext } from './helpers.js'
 
-const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
-
-function setup() {
-  const context = testContext()
+function setup(runtimeFactory?: Parameters<typeof testContext>[0]) {
+  const context = testContext(runtimeFactory)
   const owner = context.db.upsertUser({ externalId: 'dev:owner', displayName: 'Owner', authMethod: 'development' })
   context.db.setRole(owner.id, 'Owner')
   const activeOwner = context.db.getPrincipal(owner.id)!
@@ -18,125 +16,98 @@ function setup() {
   return { context, user: activeUser, workspace }
 }
 
+function connect(ctx: ReturnType<typeof setup>, updates: acp.SessionUpdate[] = []) {
+  const agentContext: AcpAgentContext = { principal: ctx.user, workspace: ctx.workspace }
+  const agentApp = buildAcpAgent(ctx.context.service, agentContext)
+  const clientApp = acp.client({ name: 'test-client' })
+    .onNotification(acp.methods.client.session.update, ({ params }) => { updates.push(params.update) })
+  return clientApp.connect(agentApp)
+}
+
 describe('ACP server agent', () => {
-  it('handles initialize with correct capabilities', async () => {
+  it('advertises the durable governed lifecycle without client provider injection', async () => {
     const ctx = setup()
     try {
-      const agentContext: AcpAgentContext = { principal: ctx.user, workspace: ctx.workspace }
-      const agentApp = buildAcpAgent(ctx.context.service, agentContext)
-      const clientApp = acp.client({ name: 'test-client' })
-      const connection = clientApp.connect(agentApp)
-
+      const connection = connect(ctx)
       const result = await connection.agent.request('initialize', {
         protocolVersion: acp.PROTOCOL_VERSION,
         clientInfo: { name: 'test-client', version: '1.0.0' },
       })
 
       expect(result.protocolVersion).toBe(acp.PROTOCOL_VERSION)
-      expect(result.agentCapabilities?.providers).toBeDefined()
-      expect(result.agentCapabilities?.session?.new).toBe(true)
-      expect(result.agentCapabilities?.session?.prompt).toBe(true)
+      expect(result.agentCapabilities?.loadSession).toBe(true)
+      expect(result.agentCapabilities?.sessionCapabilities?.list).toEqual({})
+      expect(result.agentCapabilities?.sessionCapabilities?.resume).toEqual({})
+      expect(result.agentCapabilities?.sessionCapabilities?.close).toEqual({})
+      expect(result.agentCapabilities?.providers).toBeUndefined()
     } finally { ctx.context.dispose() }
   })
 
-  it('handles providers/set and providers/list', async () => {
+  it('persists session cwd, ownership, and list metadata', async () => {
     const ctx = setup()
     try {
-      const agentContext: AcpAgentContext = { principal: ctx.user, workspace: ctx.workspace }
-      const agentApp = buildAcpAgent(ctx.context.service, agentContext)
-      const clientApp = acp.client({ name: 'test-client' })
-      const connection = clientApp.connect(agentApp)
+      const connection = connect(ctx)
+      await connection.agent.request('initialize', { protocolVersion: acp.PROTOCOL_VERSION })
+      const created = await connection.agent.request('session/new', { cwd: '/tmp/mission', mcpServers: [] })
+      const listed = await connection.agent.request('session/list', { cwd: '/tmp/mission' })
 
-      // Initialize first
-      await connection.agent.request('initialize', {
-        protocolVersion: acp.PROTOCOL_VERSION,
-        clientInfo: { name: 'test-client', version: '1.0.0' },
+      expect(listed.sessions).toHaveLength(1)
+      expect(listed.sessions[0]).toMatchObject({
+        sessionId: created.sessionId,
+        cwd: '/tmp/mission',
+        title: 'mission',
       })
-
-      // Set a provider
-      await connection.agent.request('providers/set', {
-        providerId: 'anthropic',
-        apiType: 'anthropic',
-        baseUrl: 'https://api.anthropic.com',
-        headers: { 'x-api-key': 'test-key', 'anthropic-version': '2023-06-01' },
-      })
-
-      // List providers
-      const listResult = await connection.agent.request('providers/list', {})
-      expect(listResult.providers).toHaveLength(1)
-      expect(listResult.providers[0].providerId).toBe('anthropic')
-      expect(listResult.providers[0].current?.baseUrl).toBe('https://api.anthropic.com')
+      expect(ctx.context.db.getSession(created.sessionId)?.ownerId).toBe(ctx.user.id)
+      expect(ctx.context.db.getSession(created.sessionId)?.agent).toBe('goose')
     } finally { ctx.context.dispose() }
   })
 
-  it('handles session/new and session/list', async () => {
-    const ctx = setup()
+  it('routes prompts through the governor and persists streamed updates', async () => {
+    const runtimeFactory = vi.fn(() => ({
+      runPrompt: async (request: { onEvent: (event: unknown) => Promise<void> }) => {
+        await request.onEvent({
+          kind: 'update',
+          at: new Date().toISOString(),
+          data: {
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text: 'governed response' },
+            messageId: 'agent_1',
+          },
+        })
+        return { runtimeSessionId: 'runtime-1', stopReason: 'end_turn' }
+      },
+    }))
+    const ctx = setup(runtimeFactory as Parameters<typeof testContext>[0])
+    const updates: acp.SessionUpdate[] = []
     try {
-      const agentContext: AcpAgentContext = { principal: ctx.user, workspace: ctx.workspace }
-      const agentApp = buildAcpAgent(ctx.context.service, agentContext)
-      const clientApp = acp.client({ name: 'test-client' })
-      const connection = clientApp.connect(agentApp)
-
-      await connection.agent.request('initialize', {
-        protocolVersion: acp.PROTOCOL_VERSION,
-        clientInfo: { name: 'test-client', version: '1.0.0' },
-      })
-
-      // Create session
-      const newResult = await connection.agent.request('session/new', { cwd: '/tmp', mcpServers: [] })
-      expect(newResult.sessionId).toBeTruthy()
-
-      // List sessions
-      const listResult = await connection.agent.request('session/list', {})
-      expect(listResult.sessions.length).toBeGreaterThanOrEqual(1)
-      expect(listResult.sessions[0].sessionId).toBe(newResult.sessionId)
-    } finally { ctx.context.dispose() }
-  })
-
-  it('denies prompt when no provider is configured', async () => {
-    const ctx = setup()
-    try {
-      const agentContext: AcpAgentContext = { principal: ctx.user, workspace: ctx.workspace }
-      const agentApp = buildAcpAgent(ctx.context.service, agentContext)
-      const clientApp = acp.client({ name: 'test-client' })
-      const connection = clientApp.connect(agentApp)
-
-      await connection.agent.request('initialize', {
-        protocolVersion: acp.PROTOCOL_VERSION,
-        clientInfo: { name: 'test-client', version: '1.0.0' },
-      })
-
+      const connection = connect(ctx, updates)
+      await connection.agent.request('initialize', { protocolVersion: acp.PROTOCOL_VERSION })
       const session = await connection.agent.request('session/new', { cwd: '/tmp', mcpServers: [] })
-
-      // Prompt without setting a provider should refuse
-      const promptResult = await connection.agent.request('session/prompt', {
+      const result = await connection.agent.request('session/prompt', {
         sessionId: session.sessionId,
         prompt: [{ type: 'text', text: 'hello' }],
       })
-      expect(promptResult.stopReason).toBe('refusal')
+
+      expect(result.stopReason).toBe('end_turn')
+      expect(updates).toContainEqual(expect.objectContaining({ sessionUpdate: 'agent_message_chunk' }))
+      expect(ctx.context.db.listSessionRuns(session.sessionId)[0]?.status).toBe('completed')
+      expect(ctx.context.db.listSessionEvents(session.sessionId).map((event) => event.kind)).toEqual(['update', 'update'])
+      expect(runtimeFactory).toHaveBeenCalledTimes(1)
     } finally { ctx.context.dispose() }
   })
 
-  it('handles session/close', async () => {
+  it('closes and resumes a persisted session through ACP', async () => {
     const ctx = setup()
     try {
-      const agentContext: AcpAgentContext = { principal: ctx.user, workspace: ctx.workspace }
-      const agentApp = buildAcpAgent(ctx.context.service, agentContext)
-      const clientApp = acp.client({ name: 'test-client' })
-      const connection = clientApp.connect(agentApp)
-
-      await connection.agent.request('initialize', {
-        protocolVersion: acp.PROTOCOL_VERSION,
-        clientInfo: { name: 'test-client', version: '1.0.0' },
-      })
-
+      const connection = connect(ctx)
+      await connection.agent.request('initialize', { protocolVersion: acp.PROTOCOL_VERSION })
       const session = await connection.agent.request('session/new', { cwd: '/tmp', mcpServers: [] })
-      await connection.agent.request('session/close', { sessionId: session.sessionId })
 
-      // Session should be stopped
-      const sessions = ctx.context.db.listSessions()
-      const closed = sessions.find((s) => s.id === session.sessionId)
-      expect(closed?.status).toBe('stopped')
+      await connection.agent.request('session/close', { sessionId: session.sessionId })
+      expect(ctx.context.db.getSession(session.sessionId)?.status).toBe('stopped')
+
+      await connection.agent.request('session/resume', { sessionId: session.sessionId, cwd: '/tmp', mcpServers: [] })
+      expect(ctx.context.db.getSession(session.sessionId)?.status).toBe('ready')
     } finally { ctx.context.dispose() }
   })
 })

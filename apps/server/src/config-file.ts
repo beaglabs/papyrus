@@ -1,9 +1,11 @@
 import { readFileSync } from 'node:fs'
 import { parse } from 'yaml'
 import type { AgentConfigEntry } from './agents.js'
+import { CONNECTOR_PROFILES, isRuntimeProfileId } from './catalog.js'
 
 export interface FileConfig {
   agents?: Record<string, AgentConfigEntry>
+  connectors?: string[]
   licenseAuthorities?: Record<string, string>
 }
 
@@ -12,7 +14,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 /** Loads declarative config from a YAML file; returns {} when absent or malformed. */
-export function loadFileConfig(path: string | undefined): FileConfig {
+export function loadFileConfig(path: string | undefined, environment: NodeJS.ProcessEnv = process.env): FileConfig {
   if (!path) return {}
   let text: string
   try {
@@ -29,17 +31,24 @@ export function loadFileConfig(path: string | undefined): FileConfig {
     const agents: Record<string, AgentConfigEntry> = {}
     for (const [kind, entry] of Object.entries(parsed.agents)) {
       if (!isObject(entry)) continue
-      const spec: AgentConfigEntry = {}
-      if (typeof entry.command === 'string') spec.command = entry.command
-      if (Array.isArray(entry.args) && entry.args.every((item) => typeof item === 'string')) spec.args = entry.args as string[]
-      if (isObject(entry.env)) {
-        const env: Record<string, string> = {}
-        for (const [name, value] of Object.entries(entry.env)) if (typeof value === 'string') env[name] = value
-        if (Object.keys(env).length > 0) spec.env = env
+      if (typeof entry.profile !== 'string' || !isRuntimeProfileId(entry.profile)) continue
+      const spec: AgentConfigEntry = { profile: entry.profile }
+      if (isObject(entry.environment)) {
+        const resolved: Record<string, string> = {}
+        for (const [name, source] of Object.entries(entry.environment)) {
+          if (!/^[A-Z][A-Z0-9_]*$/.test(name) || typeof source !== 'string' || !/^PAPYRUS_SECRET_[A-Z0-9_]+$/.test(source)) continue
+          if (environment[source] !== undefined) resolved[name] = environment[source] as string
+        }
+        if (Object.keys(resolved).length > 0) spec.environment = resolved
       }
       agents[kind] = spec
     }
     if (Object.keys(agents).length > 0) config.agents = agents
+  }
+
+  if (Array.isArray(parsed.connectors)) {
+    const connectors = [...new Set(parsed.connectors.filter((value): value is string => typeof value === 'string' && value in CONNECTOR_PROFILES))]
+    if (connectors.length > 0) config.connectors = connectors
   }
 
   if (isObject(parsed.licenseAuthorities)) {

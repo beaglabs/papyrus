@@ -87,4 +87,46 @@ describe('authentication deployment boundaries', () => {
       PAPYRUS_GATEWAY_DEV_TOKEN: 'short',
     })).toThrow(/at least 32 characters/)
   })
+
+  it('defaults and bounds the Streamable HTTP gateway controls', () => {
+    const config = loadConfig({
+      PAPYRUS_MODE: 'local',
+      PAPYRUS_PROFILE: 'commercial',
+      PAPYRUS_GATEWAY_ENABLED: 'true',
+    })
+    expect(config.gateway).toMatchObject({
+      maxRequestBodyBytes: 1_048_576,
+      maxConnections: 128,
+      connectionIdleMs: 900_000,
+      requestTimeoutMs: 30_000,
+    })
+    expect(() => loadConfig({
+      PAPYRUS_MODE: 'local',
+      PAPYRUS_PROFILE: 'commercial',
+      PAPYRUS_GATEWAY_ENABLED: 'true',
+      PAPYRUS_GATEWAY_MAX_CONNECTIONS: '0',
+    })).toThrow(/PAPYRUS_GATEWAY_MAX_CONNECTIONS/)
+    expect(() => loadConfig({
+      PAPYRUS_MODE: 'local',
+      PAPYRUS_PROFILE: 'commercial',
+      PAPYRUS_GATEWAY_ENABLED: 'true',
+      PAPYRUS_GATEWAY_MAX_REQUEST_BODY_BYTES: '100',
+    })).toThrow(/PAPYRUS_GATEWAY_MAX_REQUEST_BODY_BYTES/)
+  })
+
+  it('requires gateway mTLS whenever the ACP listener leaves loopback', () => {
+    const remote = {
+      PAPYRUS_MODE: 'local',
+      PAPYRUS_PROFILE: 'commercial',
+      PAPYRUS_GATEWAY_ENABLED: 'true',
+      PAPYRUS_GATEWAY_HOST: '0.0.0.0',
+    }
+    expect(() => loadConfig(remote)).toThrow(/Gateway requires mTLS/)
+    expect(() => loadConfig({
+      ...remote,
+      PAPYRUS_GATEWAY_TLS_CERT: '/tmp/server.pem',
+      PAPYRUS_GATEWAY_TLS_KEY: '/tmp/server-key.pem',
+      PAPYRUS_GATEWAY_TLS_CA: '/tmp/client-ca.pem',
+    })).not.toThrow()
+  })
 })

@@ -1,77 +1,51 @@
-import { randomBytes } from 'node:crypto'
+import { once } from 'node:events'
 import { connect } from 'node:net'
 import type { AddressInfo } from 'node:net'
 import * as acp from '@agentclientprotocol/sdk'
 import { createHttpStream } from '@agentclientprotocol/sdk/experimental/http-client'
+import type { AgentRuntime, RuntimeLaunchOptions } from '@papyrus/acp-runtime'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createGatewayServer } from '../src/gateway.js'
 import { testContext } from './helpers.js'
 
-function maskedTextFrame(text: string): Buffer {
-  const payload = Buffer.from(text)
-  const mask = randomBytes(4)
-  const encoded = Buffer.alloc(payload.length)
-  for (let index = 0; index < payload.length; index += 1) {
-    encoded[index] = payload[index] ^ mask[index % 4]
-  }
-  const length = payload.length < 126
-    ? Buffer.from([0x80 | payload.length])
-    : Buffer.from([0x80 | 126, payload.length >> 8, payload.length & 0xff])
-  return Buffer.concat([Buffer.from([0x81]), length, mask, encoded])
-}
+const initializeBody = JSON.stringify({
+  jsonrpc: '2.0',
+  id: 1,
+  method: 'initialize',
+  params: {
+    protocolVersion: acp.PROTOCOL_VERSION,
+    clientCapabilities: {},
+    clientInfo: { name: 'transport-test', version: '1.0.0' },
+  },
+})
 
-async function coalescedInitialize(port: number): Promise<string> {
-  const initialize = JSON.stringify({
-    jsonrpc: '2.0',
-    id: 1,
-    method: 'initialize',
-    params: {
-      protocolVersion: acp.PROTOCOL_VERSION,
-      clientCapabilities: {},
-      clientInfo: { name: 'coalesced-client', version: '1.0.0' },
-    },
-  })
-  const key = randomBytes(16).toString('base64')
-  const request = Buffer.from([
-    'GET /acp HTTP/1.1',
-    `Host: 127.0.0.1:${port}`,
-    'Upgrade: websocket',
-    'Connection: Upgrade',
-    `Sec-WebSocket-Key: ${key}`,
-    'Sec-WebSocket-Version: 13',
-    '',
-    '',
-  ].join('\r\n'))
-
-  return await new Promise((resolve, reject) => {
-    const socket = connect(port, '127.0.0.1')
-    const chunks: Buffer[] = []
-    const timer = setTimeout(() => finish(), 1_000)
-    const finish = (): void => {
-      clearTimeout(timer)
-      socket.destroy()
-      resolve(Buffer.concat(chunks).toString('utf8'))
-    }
-    socket.on('connect', () => socket.write(Buffer.concat([request, maskedTextFrame(initialize)])))
-    socket.on('data', (chunk: Buffer) => {
-      chunks.push(chunk)
-      if (Buffer.concat(chunks).includes(Buffer.from('protocolVersion'))) finish()
-    })
-    socket.on('error', reject)
-  })
-}
-
-describe('ACP gateway transports', () => {
+describe('ACP Streamable HTTP gateway', () => {
   const cleanups: Array<() => Promise<void> | void> = []
 
   afterEach(async () => {
     while (cleanups.length > 0) await cleanups.pop()?.()
   })
 
-  async function startGateway() {
-    const context = testContext()
-    context.config.devIdentity = 'gateway:developer'
-    context.config.gateway = { host: '127.0.0.1', port: 3220 }
+  async function startGateway(
+    gateway: Partial<NonNullable<ReturnType<typeof testContext>['config']['gateway']>> = {},
+    runtimeFactory?: (options: RuntimeLaunchOptions) => AgentRuntime,
+  ) {
+    const context = testContext(runtimeFactory)
+    const owner = context.db.upsertUser({ externalId: 'oidc:owner', displayName: 'Owner', authMethod: 'oidc' })
+    context.db.setRole(owner.id, 'Owner')
+    const activeOwner = context.db.getPrincipal(owner.id)!
+    const first = context.db.upsertUser({ externalId: 'oidc:first', displayName: 'First', authMethod: 'oidc' })
+    context.db.setRole(first.id, 'User')
+    const activeFirst = context.db.getPrincipal(first.id)!
+    const second = context.db.upsertUser({ externalId: 'oidc:second', displayName: 'Second', authMethod: 'oidc' })
+    context.db.setRole(second.id, 'User')
+    const activeSecond = context.db.getPrincipal(second.id)!
+    const firstWorkspace = context.service.createWorkspace(activeOwner, { name: 'First workspace', description: '' })
+    const secondWorkspace = context.service.createWorkspace(activeOwner, { name: 'Second workspace', description: '' })
+    context.service.assign(activeOwner, activeFirst.id, firstWorkspace.id)
+    context.service.assign(activeOwner, activeFirst.id, secondWorkspace.id)
+    context.service.assign(activeOwner, activeSecond.id, secondWorkspace.id)
+    context.config.gateway = { host: '127.0.0.1', port: 3220, ...gateway }
     const server = createGatewayServer(context.config, context.service, context.auth)
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
     cleanups.push(async () => {
@@ -79,21 +53,39 @@ describe('ACP gateway transports', () => {
       await new Promise<void>((resolve) => server.close(() => resolve()))
       context.dispose()
     })
-    return { context, port: (server.address() as AddressInfo).port }
+    return {
+      context,
+      port: (server.address() as AddressInfo).port,
+      first: activeFirst,
+      second: activeSecond,
+      firstWorkspace,
+      secondWorkspace,
+      firstToken: context.auth.issueSession(activeFirst.id),
+      secondToken: context.auth.issueSession(activeSecond.id),
+    }
   }
 
-  it('preserves an initialize frame coalesced with the WebSocket upgrade', async () => {
-    const { port } = await startGateway()
-    const response = await coalescedInitialize(port)
+  function headers(token: string, workspaceId: string): Record<string, string> {
+    return {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+      'x-papyrus-workspace-id': workspaceId,
+    }
+  }
 
-    expect(response).toContain('101 Switching Protocols')
-    expect(response).toMatch(/Acp-Connection-Id:/i)
-    expect(response).toContain('protocolVersion')
-  })
+  async function initialize(port: number, token: string, workspaceId: string): Promise<Response> {
+    return fetch(`http://127.0.0.1:${port}/acp`, {
+      method: 'POST',
+      headers: headers(token, workspaceId),
+      body: initializeBody,
+    })
+  }
 
-  it('keeps authenticated context through Streamable HTTP initialization', async () => {
-    const { context, port } = await startGateway()
-    const stream = createHttpStream(`http://127.0.0.1:${port}/acp`)
+  it('keeps authenticated principal and workspace context through Streamable HTTP', async () => {
+    const { context, port, first, firstToken, firstWorkspace } = await startGateway()
+    const stream = createHttpStream(`http://127.0.0.1:${port}/acp`, {
+      headers: headers(firstToken, firstWorkspace.id),
+    })
     const sessionId = await acp.client({ name: 'http-context-client' }).connectWith(stream, async (connection) => {
       await connection.request(acp.methods.agent.initialize, {
         protocolVersion: acp.PROTOCOL_VERSION,
@@ -103,8 +95,128 @@ describe('ACP gateway transports', () => {
       return session.sessionId
     })
 
-    const session = context.db.listSessions().find((candidate) => candidate.id === sessionId)
-    expect(session?.workspaceId).toBeTruthy()
-    expect(session?.ownerId).toBeTruthy()
+    expect(context.db.getSession(sessionId)).toMatchObject({
+      ownerId: first.id,
+      workspaceId: firstWorkspace.id,
+    })
+  })
+
+  it('binds connection IDs to the authenticated principal and workspace', async () => {
+    const { context, port, first, firstToken, secondToken, firstWorkspace, secondWorkspace } = await startGateway()
+    const initialized = await initialize(port, firstToken, firstWorkspace.id)
+    expect(initialized.status).toBe(200)
+    const connectionId = initialized.headers.get('acp-connection-id')
+    expect(connectionId).toMatch(/^[0-9a-f-]{36}$/)
+
+    const hijack = await fetch(`http://127.0.0.1:${port}/acp`, {
+      headers: { ...headers(secondToken, secondWorkspace.id), 'acp-connection-id': connectionId! },
+    })
+    expect(hijack.status).toBe(404)
+    expect(await hijack.json()).toMatchObject({ code: 'CONNECTION_NOT_FOUND' })
+
+    const workspaceSwap = await fetch(`http://127.0.0.1:${port}/acp`, {
+      headers: { ...headers(firstToken, secondWorkspace.id), 'acp-connection-id': connectionId! },
+    })
+    expect(workspaceSwap.status).toBe(403)
+    expect(await workspaceSwap.json()).toMatchObject({ code: 'WORKSPACE_MISMATCH' })
+
+    context.auth.revokeSessions(first.id)
+    const revoked = await fetch(`http://127.0.0.1:${port}/acp`, {
+      headers: { ...headers(firstToken, firstWorkspace.id), 'acp-connection-id': connectionId! },
+    })
+    expect(revoked.status).toBe(401)
+  })
+
+  it('enforces request-body and logical connection limits', async () => {
+    const limitedBody = await startGateway({ maxRequestBodyBytes: 64 })
+    const oversized = await fetch(`http://127.0.0.1:${limitedBody.port}/acp`, {
+      method: 'POST',
+      headers: headers(limitedBody.firstToken, limitedBody.firstWorkspace.id),
+      body: 'x'.repeat(65),
+    })
+    expect(oversized.status).toBe(413)
+
+    const limitedConnections = await startGateway({ maxConnections: 1 })
+    const first = await initialize(limitedConnections.port, limitedConnections.firstToken, limitedConnections.firstWorkspace.id)
+    const connectionId = first.headers.get('acp-connection-id')
+    expect(first.status).toBe(200)
+    expect(connectionId).toBeTruthy()
+
+    const rejected = await initialize(limitedConnections.port, limitedConnections.firstToken, limitedConnections.firstWorkspace.id)
+    expect(rejected.status).toBe(429)
+    expect(await rejected.json()).toMatchObject({ code: 'CONNECTION_LIMIT_REACHED' })
+
+    const closed = await fetch(`http://127.0.0.1:${limitedConnections.port}/acp`, {
+      method: 'DELETE',
+      headers: { ...headers(limitedConnections.firstToken, limitedConnections.firstWorkspace.id), 'acp-connection-id': connectionId! },
+    })
+    expect(closed.status).toBe(202)
+    expect((await initialize(limitedConnections.port, limitedConnections.firstToken, limitedConnections.firstWorkspace.id)).status).toBe(200)
+  })
+
+  it('propagates ACP cancellation to the governed runtime over HTTP', async () => {
+    let started!: () => void
+    const didStart = new Promise<void>((resolve) => { started = resolve })
+    const runtimeFactory = (): AgentRuntime => ({
+      kind: 'test',
+      capabilities: { transports: ['stdio'], sessions: { cancel: true, load: false, resume: false, fork: false } },
+      health: async () => ({ available: true }),
+      runPrompt: async (request) => {
+        started()
+        await new Promise<void>((_resolve, reject) => {
+          request.signal?.addEventListener('abort', () => reject(request.signal?.reason), { once: true })
+        })
+        return { runtimeSessionId: 'never', stopReason: 'end_turn' }
+      },
+    })
+    const { context, port, firstToken, firstWorkspace } = await startGateway({}, runtimeFactory)
+    const stream = createHttpStream(`http://127.0.0.1:${port}/acp`, {
+      headers: headers(firstToken, firstWorkspace.id),
+    })
+
+    const result = await acp.client({ name: 'cancel-client' }).connectWith(stream, async (connection) => {
+      await connection.request(acp.methods.agent.initialize, {
+        protocolVersion: acp.PROTOCOL_VERSION,
+        clientCapabilities: {},
+      })
+      const session = await connection.buildSession({ cwd: '/tmp', mcpServers: [] }).start()
+      try {
+        const prompt = session.prompt('long-running work')
+        await didStart
+        await connection.notify(acp.methods.agent.session.cancel, { sessionId: session.sessionId })
+        return await prompt
+      } finally {
+        session.dispose()
+      }
+    })
+
+    expect(result.stopReason).toBe('cancelled')
+    expect(context.db.listSessionRuns(context.db.listSessions()[0]!.id)[0]?.status).toBe('cancelled')
+  })
+
+  it('rejects WebSocket upgrades and advertises Streamable HTTP status', async () => {
+    const { port } = await startGateway()
+    const status = await fetch(`http://127.0.0.1:${port}/status`)
+    expect(await status.json()).toEqual({ status: 'ok', transport: 'streamable-http', endpoint: '/acp' })
+
+    const response = await new Promise<string>((resolve, reject) => {
+      const socket = connect(port, '127.0.0.1')
+      const chunks: Buffer[] = []
+      socket.on('connect', () => socket.write([
+        'GET /acp HTTP/1.1',
+        `Host: 127.0.0.1:${port}`,
+        'Upgrade: websocket',
+        'Connection: Upgrade',
+        'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
+        'Sec-WebSocket-Version: 13',
+        '',
+        '',
+      ].join('\r\n')))
+      socket.on('data', (chunk: Buffer) => chunks.push(chunk))
+      socket.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
+      socket.on('error', reject)
+    })
+    expect(response).toContain('400 Bad Request')
+    expect(response).toContain('STREAMABLE_HTTP_REQUIRED')
   })
 })

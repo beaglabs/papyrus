@@ -24,7 +24,17 @@ export interface ServerConfig {
   }
   tls?: { certPath: string; keyPath: string; caPath: string; crlPath?: string }
   identityProxy?: { certificateHeader: string; allowedProxyFingerprints: string[] }
-  gateway?: { host: string; port: number; devToken?: string; defaultAgent?: string; tls?: { certPath: string; keyPath: string; caPath: string } }
+  gateway?: {
+    host: string
+    port: number
+    devToken?: string
+    defaultAgent?: string
+    maxRequestBodyBytes?: number
+    maxConnections?: number
+    connectionIdleMs?: number
+    requestTimeoutMs?: number
+    tls?: { certPath: string; keyPath: string; caPath: string }
+  }
   runtimeWorkerToken?: string
   runtimeWorkerTls?: { certPath: string; keyPath: string; caPath: string }
   agents?: Record<string, AgentConfigEntry>
@@ -37,8 +47,20 @@ function required(name: string, value: string | undefined): string {
   return value
 }
 
+function boundedInteger(name: string, value: string | undefined, fallback: number, minimum: number, maximum: number): number {
+  const parsed = Number(value ?? fallback)
+  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
+    throw new Error(`${name} must be an integer between ${minimum} and ${maximum}`)
+  }
+  return parsed
+}
+
 function isLoopback(hostname: string): boolean {
   return hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]' || hostname === 'localhost'
+}
+
+function isLoopbackListener(hostname: string): boolean {
+  return hostname === '127.0.0.1' || hostname === '::1'
 }
 
 function parseOrigin(name: string, value: string): string {
@@ -163,6 +185,10 @@ export function loadConfig(env = process.env): ServerConfig {
   const gateway = env.PAPYRUS_GATEWAY_ENABLED === 'true' ? {
     host: env.PAPYRUS_GATEWAY_HOST ?? '127.0.0.1',
     port: Number(env.PAPYRUS_GATEWAY_PORT ?? 3220),
+    maxRequestBodyBytes: boundedInteger('PAPYRUS_GATEWAY_MAX_REQUEST_BODY_BYTES', env.PAPYRUS_GATEWAY_MAX_REQUEST_BODY_BYTES, 1_048_576, 1_024, 16_777_216),
+    maxConnections: boundedInteger('PAPYRUS_GATEWAY_MAX_CONNECTIONS', env.PAPYRUS_GATEWAY_MAX_CONNECTIONS, 128, 1, 10_000),
+    connectionIdleMs: boundedInteger('PAPYRUS_GATEWAY_CONNECTION_IDLE_MS', env.PAPYRUS_GATEWAY_CONNECTION_IDLE_MS, 900_000, 1_000, 86_400_000),
+    requestTimeoutMs: boundedInteger('PAPYRUS_GATEWAY_REQUEST_TIMEOUT_MS', env.PAPYRUS_GATEWAY_REQUEST_TIMEOUT_MS, 30_000, 1_000, 600_000),
     ...(env.PAPYRUS_GATEWAY_DEV_TOKEN ? { devToken: env.PAPYRUS_GATEWAY_DEV_TOKEN } : {}),
     ...(env.PAPYRUS_GATEWAY_DEFAULT_AGENT ? { defaultAgent: env.PAPYRUS_GATEWAY_DEFAULT_AGENT } : {}),
     ...(env.PAPYRUS_GATEWAY_TLS_CERT ? {
@@ -174,11 +200,11 @@ export function loadConfig(env = process.env): ServerConfig {
     } : {}),
   } : undefined
   if (gateway && (!Number.isInteger(gateway.port) || gateway.port < 1 || gateway.port > 65_535)) throw new Error('Invalid PAPYRUS_GATEWAY_PORT')
-  if (gateway?.devToken && (mode !== 'local' || !isLoopback(gateway.host))) {
+  if (gateway?.devToken && (mode !== 'local' || !isLoopbackListener(gateway.host))) {
     throw new Error('PAPYRUS_GATEWAY_DEV_TOKEN is restricted to local mode on a loopback listener')
   }
   if (gateway?.devToken && gateway.devToken.length < 32) throw new Error('PAPYRUS_GATEWAY_DEV_TOKEN must contain at least 32 characters')
-  if (gateway && !gateway.tls && !isLoopback(gateway.host)) throw new Error('Gateway requires mTLS on a non-loopback listener')
+  if (gateway && !gateway.tls && !isLoopbackListener(gateway.host)) throw new Error('Gateway requires mTLS on a non-loopback listener')
 
   const fileConfig = loadFileConfig(env.PAPYRUS_CONFIG_FILE ?? 'papyrus.yaml')
 

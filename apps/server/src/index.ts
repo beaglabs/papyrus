@@ -19,7 +19,9 @@ server.listen(config.port, config.host, () => {
 
 if (gateway && config.gateway) {
   gateway.listen(config.gateway.port, config.gateway.host, () => {
-    console.log(`Papyrus ACP gateway listening on ${config.gateway!.host}:${config.gateway!.port}`)
+    const protocol = config.gateway!.tls ? 'https' : 'http'
+    const host = config.gateway!.host.includes(':') && !config.gateway!.host.startsWith('[') ? `[${config.gateway!.host}]` : config.gateway!.host
+    console.log(`Papyrus ACP Streamable HTTP listening at ${protocol}://${host}:${config.gateway!.port}/acp`)
   })
 }
 

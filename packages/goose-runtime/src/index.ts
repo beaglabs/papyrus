@@ -8,6 +8,7 @@ import type {
   RuntimeEvent,
   RuntimeHealth,
   RuntimeLaunchOptions,
+  RuntimeAdapter,
   RuntimePromptRequest,
   RuntimePromptResult,
 } from '@papyrus/acp-runtime'
@@ -195,6 +196,13 @@ export class GooseRuntime implements AgentRuntime {
       await onEvent({ kind: 'stderr', at: new Date().toISOString(), data: String(chunk).slice(0, 4_096) })
     }
   }
+}
+
+export const gooseRuntimeAdapter: RuntimeAdapter = {
+  kind: GOOSE_RUNTIME_KIND,
+  create(options: RuntimeLaunchOptions = {}) {
+    return new GooseRuntime(options)
+  },
 }
 
 export function encodeRuntimeConfig(env: Record<string, string> | undefined): string | undefined {

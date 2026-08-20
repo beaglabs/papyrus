@@ -20,6 +20,8 @@ export async function runAcpPrompt(
     })
 
   return await client.connectWith(stream, async (context) => {
+    // Papyrus does not grant a child direct client-side filesystem or terminal
+    // capabilities. Governed execution is exposed through mediated MCP tools.
     await context.request(acp.methods.agent.initialize, {
       protocolVersion: acp.PROTOCOL_VERSION,
       clientCapabilities: {},

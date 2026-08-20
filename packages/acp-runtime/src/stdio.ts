@@ -116,6 +116,7 @@ export class StdioAcpRuntime implements AgentRuntime {
         : new Error(`${this.kind} prompt was cancelled`),
     )
     request.signal?.addEventListener('abort', onRequestAbort, { once: true })
+    if (request.signal?.aborted) onRequestAbort()
 
     const child = this.spawn(request.environment)
     const stream = acp.ndJsonStream(
@@ -129,10 +130,13 @@ export class StdioAcpRuntime implements AgentRuntime {
         reject(new RuntimeProcessExitError(this.kind, { code, signal }))
       })
     })
+    let stopping: Promise<void> | undefined
+    const stop = (): Promise<void> => stopping ??= this.terminate(child)
     const onAbort = (): void => {
-      void this.terminate(child)
+      void stop()
     }
     controller.signal.addEventListener('abort', onAbort, { once: true })
+    if (controller.signal.aborted) onAbort()
 
     try {
       return await Promise.race([
@@ -149,7 +153,7 @@ export class StdioAcpRuntime implements AgentRuntime {
       if (timeout) clearTimeout(timeout)
       request.signal?.removeEventListener('abort', onRequestAbort)
       controller.signal.removeEventListener('abort', onAbort)
-      await this.terminate(child)
+      await stop()
       await Promise.race([stderr.catch(() => {}), delay(250)])
     }
   }
@@ -168,10 +172,14 @@ export class StdioAcpRuntime implements AgentRuntime {
     let remaining = this.stderrLimitBytes
     for await (const chunk of child.stderr) {
       if (remaining <= 0) continue
-      const text = String(chunk)
-      const data = text.slice(0, remaining)
-      remaining -= Buffer.byteLength(data)
-      await onEvent({ kind: 'stderr', at: new Date().toISOString(), data })
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+      const limited = bytes.subarray(0, remaining)
+      remaining -= limited.byteLength
+      await onEvent({
+        kind: 'stderr',
+        at: new Date().toISOString(),
+        data: limited.toString('utf8'),
+      })
     }
   }
 

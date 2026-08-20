@@ -131,9 +131,6 @@ importers:
       '@papyrus/acp-runtime':
         specifier: workspace:*
         version: link:../acp-runtime
-      '@papyrus/contracts':
-        specifier: workspace:*
-        version: link:../contracts
     devDependencies:
       '@types/node':
         specifier: 24.10.1

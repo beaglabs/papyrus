@@ -150,7 +150,9 @@ export function loadConfig(env = process.env): ServerConfig {
     ...(env.PAPYRUS_RUNTIME_WORKER_TOKEN ? { runtimeWorkerToken: env.PAPYRUS_RUNTIME_WORKER_TOKEN } : {}),
     ...(runtimeWorkerTls ? { runtimeWorkerTls } : {}),
     ...(agents ? { agents } : {}),
-    licenseRequired: env.PAPYRUS_LICENSE_REQUIRED ? env.PAPYRUS_LICENSE_REQUIRED === 'true' : mode === 'persistent',
+    // Licensing is a deployment invariant: persistent mode always requires a valid license.
+    // Local mode remains usable for development without a production bypass flag.
+    licenseRequired: mode === 'persistent',
     licenseAuthorities,
   }
 }

@@ -12,6 +12,14 @@ import type { ServerConfig } from './config.js'
 import { buildAcpAgent, type AcpAgentContext } from './acp-server.js'
 import { PapyrusService } from './service.js'
 
+// --- Diagnostic: catch unhandled errors to see what's actually failing ---
+process.on('uncaughtException', (err) => {
+  console.error('[gateway] UNCAUGHT EXCEPTION:', err)
+})
+process.on('unhandledRejection', (reason) => {
+  console.error('[gateway] UNHANDLED REJECTION:', reason)
+})
+
 function devPrincipal(config: ServerConfig, request: IncomingMessage, service: PapyrusService): Principal | undefined {
   const secrets = (config.gateway ? [config.gateway.devToken, process.env.GOOSE_SERVER__SECRET_KEY].filter(Boolean) : []) as string[]
   const match = (presented: string): boolean => {
@@ -94,7 +102,18 @@ export function createGatewayServer(config: ServerConfig, service: PapyrusServic
   })
 
   // One AcpServer with a dummy agent — real agents passed per-connection via prepareWebSocketUpgrade/handleRequest
-  const acpServer = new AcpServer({ agent: { connect: () => { throw new Error('Use per-request agent override') } } })
+  const acpServer = new AcpServer({
+    createAgent: () => {
+      console.log('[gateway] createAgent called (for HTTP non-upgrade requests)')
+      return {
+        connect: (stream: any, opts: any) => {
+          console.log('[gateway] createAgent.connect called')
+          const agent = buildAcpAgent(service, { principal: undefined as any, workspace: undefined as any })
+          return (agent as any).connect(stream, opts)
+        },
+      }
+    },
+  })
   const httpHandler = createNodeHttpHandler(acpServer)
 
   const handler = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {

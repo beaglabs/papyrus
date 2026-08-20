@@ -2,6 +2,15 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { Readable, Writable } from 'node:stream'
 import * as acp from '@agentclientprotocol/sdk'
 import { createHttpStream } from '@agentclientprotocol/sdk/experimental/http-client'
+import type {
+  AgentRuntime,
+  RuntimeCapabilities,
+  RuntimeEvent,
+  RuntimeHealth,
+  RuntimeLaunchOptions,
+  RuntimePromptRequest,
+  RuntimePromptResult,
+} from '@papyrus/acp-runtime'
 
 export const GOOSE_RUNTIME_KIND = 'goose' as const
 export const ACP_PROTOCOL_VERSION = acp.PROTOCOL_VERSION
@@ -9,54 +18,20 @@ export const ACP_PROTOCOL_VERSION = acp.PROTOCOL_VERSION
 /** Header carrying the per-runtime model environment over the authenticated channel. */
 export const RUNTIME_CONFIG_HEADER = 'x-papyrus-runtime-config'
 
-export interface GooseHealth {
-  available: boolean
-  version?: string
-  reason?: string
+export type GooseHealth = RuntimeHealth
+export type GoosePromptEvent = RuntimeEvent
+export type GoosePromptRequest = RuntimePromptRequest
+export type GoosePromptResult = RuntimePromptResult
+export interface GooseRuntimeOptions extends RuntimeLaunchOptions {}
+
+export const GOOSE_RUNTIME_CAPABILITIES: RuntimeCapabilities = {
+  transports: ['stdio', 'streamable-http'],
+  sessions: { cancel: true, load: false, resume: false, fork: false },
 }
 
-export interface GoosePromptEvent {
-  kind: 'session' | 'update' | 'complete' | 'stderr'
-  at: string
-  data: unknown
-}
-
-export interface GoosePromptRequest {
-  cwd: string
-  prompt: string
-  environment?: Record<string, string>
-  mcpServers?: Array<{ name: string; url: string; headers?: Array<{ name: string; value: string }> }>
-  authorizeTool: (title: string) => Promise<boolean>
-  onEvent: (event: GoosePromptEvent) => void | Promise<void>
-  /** Aborts the prompt turn (cancels the runtime and reclaims the process). */
-  signal?: AbortSignal
-}
-
-export interface GoosePromptResult {
-  runtimeSessionId: string
-  stopReason: string
-}
-
-export interface GooseRuntimeOptions {
-  command?: string
-  args?: string[]
-  baseEnvironment?: Record<string, string>
-  startupTimeoutMs?: number
-  /** Maximum duration for a single prompt turn; aborts the runtime when exceeded. */
-  promptTimeoutMs?: number
-  /**
-   * Remote worker endpoint (ACP Streamable HTTP). When set, Papyrus connects
-   * to a supervised worker over the network instead of spawning `goose acp`
-   * as a child process.
-   */
-  endpoint?: string
-  /** Extra headers for remote requests (e.g. bearer token). */
-  headers?: Record<string, string>
-  /** Custom fetch for remote requests (e.g. mutual-TLS client certificate). */
-  fetch?: typeof globalThis.fetch | undefined
-}
-
-export class GooseRuntime {
+export class GooseRuntime implements AgentRuntime {
+  readonly kind = GOOSE_RUNTIME_KIND
+  readonly capabilities = GOOSE_RUNTIME_CAPABILITIES
   readonly command: string
   readonly args: string[]
   readonly endpoint: string | undefined

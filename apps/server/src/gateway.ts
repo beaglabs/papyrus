@@ -1,24 +1,18 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { createServer as createHttpsServer } from 'node:https'
+import type { Duplex } from 'node:stream'
 import type { TLSSocket } from 'node:tls'
-import type { Principal, Workspace } from '@papyrus/contracts'
 import { AcpServer } from '@agentclientprotocol/sdk/experimental/server'
 import { createNodeHttpHandler } from '@agentclientprotocol/sdk/experimental/node'
+import type { Principal, Workspace } from '@papyrus/contracts'
 import { WebSocketServer } from 'ws'
 import { AuthService } from './auth.js'
-import type { ServerConfig } from './config.js'
 import { buildAcpAgent, type AcpAgentContext } from './acp-server.js'
+import type { ServerConfig } from './config.js'
 import { PapyrusService } from './service.js'
-
-// --- Diagnostic: catch unhandled errors to see what's actually failing ---
-process.on('uncaughtException', (err) => {
-  console.error('[gateway] UNCAUGHT EXCEPTION:', err)
-})
-process.on('unhandledRejection', (reason) => {
-  console.error('[gateway] UNHANDLED REJECTION:', reason)
-})
 
 function devPrincipal(config: ServerConfig, request: IncomingMessage, service: PapyrusService): Principal | undefined {
   const secrets = (config.gateway ? [config.gateway.devToken, process.env.GOOSE_SERVER__SECRET_KEY].filter(Boolean) : []) as string[]
@@ -75,6 +69,18 @@ function resolveRequestWorkspace(service: PapyrusService, config: ServerConfig, 
   return ws
 }
 
+function rejectUpgrade(socket: Duplex, status: number, statusText: string, message: string): void {
+  const body = `${message}\n`
+  socket.end([
+    `HTTP/1.1 ${status} ${statusText}`,
+    'Connection: close',
+    'Content-Type: text/plain; charset=utf-8',
+    `Content-Length: ${Buffer.byteLength(body)}`,
+    '',
+    body,
+  ].join('\r\n'))
+}
+
 export function createGatewayServer(config: ServerConfig, service: PapyrusService, auth: AuthService): ReturnType<typeof createHttpServer> {
   const gatewayConfig = config.gateway
   if (!gatewayConfig) throw new Error('Gateway is not enabled (set PAPYRUS_GATEWAY_ENABLED=true)')
@@ -87,39 +93,21 @@ export function createGatewayServer(config: ServerConfig, service: PapyrusServic
     return resolveRequestWorkspace(service, config, request, principal)
   }
 
-  const wss = new WebSocketServer({ noServer: true })
-
-  // Track pending WS upgrades: request → { connectionId, agentApp }
-  const pendingWsUpgrades = new Map<IncomingMessage, { connectionId: string; agentApp: ReturnType<typeof buildAcpAgent> }>()
-
-  // Inject Acp-Connection-Id into 101 upgrade response
-  wss.on('headers', (headers: string[], request: IncomingMessage) => {
-    const pending = pendingWsUpgrades.get(request)
-    if (pending) {
-      headers.push(`Acp-Connection-Id: ${pending.connectionId}`)
-      console.log(`[gateway] Adding Acp-Connection-Id: ${pending.connectionId} to upgrade response`)
-    }
-  })
-
-  // One AcpServer with a dummy agent — real agents passed per-connection via prepareWebSocketUpgrade/handleRequest
+  const agentContext = new AsyncLocalStorage<AcpAgentContext>()
   const acpServer = new AcpServer({
     createAgent: () => {
-      console.log('[gateway] createAgent called (for HTTP non-upgrade requests)')
-      return {
-        connect: (stream: any, opts: any) => {
-          console.log('[gateway] createAgent.connect called')
-          const agent = buildAcpAgent(service, { principal: undefined as any, workspace: undefined as any })
-          return (agent as any).connect(stream, opts)
-        },
-      }
+      const context = agentContext.getStore()
+      if (!context) throw new Error('ACP initialization requires authenticated request context')
+      return buildAcpAgent(service, context)
     },
   })
   const httpHandler = createNodeHttpHandler(acpServer)
+  const wss = new WebSocketServer({ noServer: true })
 
-  const handler = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
+  const handler = (request: IncomingMessage, response: ServerResponse): void => {
     const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`)
 
-    if (request.url === '/health' || request.url === '/status') {
+    if (url.pathname === '/health' || url.pathname === '/status') {
       response.writeHead(200, { 'content-type': 'text/plain' })
       response.end('ok')
       return
@@ -144,34 +132,9 @@ export function createGatewayServer(config: ServerConfig, service: PapyrusServic
       return
     }
 
-    const context: AcpAgentContext = { principal, workspace }
-    const agentApp = buildAcpAgent(service, context)
-
-    // WebSocket upgrade
-    if (request.headers.upgrade?.toLowerCase() === 'websocket') {
-      console.log(`[gateway] WebSocket upgrade request`)
-      const prepared = acpServer.prepareWebSocketUpgrade({ agent: agentApp })
-      pendingWsUpgrades.set(request, { connectionId: prepared.connectionId, agentApp })
-
-      wss.handleUpgrade(request, request.socket, Buffer.alloc(0), (ws) => {
-        pendingWsUpgrades.delete(request)
-        try {
-          ws.on('message', (data) => console.log(`[gateway] WS msg: ${String(data).slice(0, 300)}`))
-          ws.on('error', (err) => console.error(`[gateway] WS error:`, err.message))
-          ws.on('close', (code, reason) => console.log(`[gateway] WS close: ${code} ${reason}`))
-          prepared.accept(ws)
-          console.log(`[gateway] WebSocket accepted, connectionId=${prepared.connectionId}`)
-        } catch (err) {
-          console.error(`[gateway] WebSocket accept error:`, err)
-          ws.close(1011, 'Internal error')
-        }
-      })
-      return
-    }
-
-    // Streamable HTTP
-    console.log(`[gateway] HTTP ${request.method ?? 'GET'} /acp`)
-    httpHandler(request, response)
+    agentContext.run({ principal, workspace }, () => {
+      httpHandler(request, response)
+    })
   }
 
   let server: ReturnType<typeof createHttpServer>
@@ -179,12 +142,71 @@ export function createGatewayServer(config: ServerConfig, service: PapyrusServic
     server = createHttpsServer({
       cert: readFileSync(gatewayConfig.tls.certPath), key: readFileSync(gatewayConfig.tls.keyPath), ca: readFileSync(gatewayConfig.tls.caPath),
       requestCert: true, rejectUnauthorized: true, minVersion: 'TLSv1.2',
-    }, handler as (req: IncomingMessage, res: ServerResponse) => void)
+    }, handler)
   } else if (gatewayConfig.host !== '127.0.0.1' && gatewayConfig.host !== '::1') {
     throw new Error('Gateway requires mTLS when listening on a non-loopback address')
   } else {
-    server = createHttpServer(handler as (req: IncomingMessage, res: ServerResponse) => void)
+    server = createHttpServer(handler)
   }
+
+  server.on('upgrade', (request, socket, head) => {
+    const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`)
+    if (url.pathname !== '/acp') {
+      rejectUpgrade(socket, 404, 'Not Found', 'Not Found')
+      return
+    }
+
+    const principal = authenticateRequest(request)
+    if (!principal) {
+      rejectUpgrade(socket, 401, 'Unauthorized', 'Unauthorized')
+      return
+    }
+    const workspace = resolveForRequest(request, principal)
+    if (!workspace) {
+      rejectUpgrade(socket, 400, 'Bad Request', 'Workspace is ambiguous; set the X-Papyrus-Workspace-Id header')
+      return
+    }
+
+    const prepared = acpServer.prepareWebSocketUpgrade({
+      agent: buildAcpAgent(service, { principal, workspace }),
+    })
+    let accepted = false
+    const cleanup = (): void => {
+      wss.off('headers', onHeaders)
+      socket.off('close', onUpgradeFailed)
+      socket.off('error', onUpgradeFailed)
+    }
+    const onHeaders = (headers: string[], candidate: IncomingMessage): void => {
+      if (candidate === request) headers.push(`Acp-Connection-Id: ${prepared.connectionId}`)
+    }
+    const onUpgradeFailed = (): void => {
+      if (accepted) return
+      cleanup()
+      prepared.reject()
+    }
+
+    wss.on('headers', onHeaders)
+    socket.once('close', onUpgradeFailed)
+    socket.once('error', onUpgradeFailed)
+    try {
+      wss.handleUpgrade(request, socket, head, (webSocket) => {
+        accepted = true
+        cleanup()
+        try {
+          prepared.accept(webSocket)
+        } catch (error) {
+          webSocket.close(1011, error instanceof Error ? error.message.slice(0, 123) : 'ACP initialization failed')
+        }
+      })
+    } catch (error) {
+      cleanup()
+      prepared.reject()
+      socket.destroy(error instanceof Error ? error : undefined)
+    }
+  })
+  server.on('close', () => {
+    void acpServer.close()
+  })
 
   return server
 }

@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs'
 import { Agent as HttpsAgent } from 'node:https'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import type { ActivitySummary, McpServer, Principal, Role, Session, SignedLicense, Workspace } from '@papyrus/contracts'
-import { GooseRuntime, type GoosePromptEvent, type GoosePromptRequest, type GoosePromptResult, type GooseRuntimeOptions } from '@papyrus/goose-runtime'
+import type { AgentRuntime, RuntimeEvent, RuntimeLaunchOptions } from '@papyrus/acp-runtime'
+import { GooseRuntime } from '@papyrus/goose-runtime'
 import { resolveAgentSpec } from './agents.js'
 import { AuditLog } from './audit.js'
 import type { ServerConfig } from './config.js'
@@ -14,11 +15,7 @@ export class AuthorizationDenied extends Error {
   constructor(readonly action: string, readonly resourceId: string) { super(`Not authorized to ${action} ${resourceId}`) }
 }
 
-export interface RuntimeHandle {
-  runPrompt: (request: GoosePromptRequest) => Promise<GoosePromptResult>
-}
-
-type RuntimeFactory = (options: GooseRuntimeOptions) => RuntimeHandle
+export type RuntimeFactory = (options: RuntimeLaunchOptions) => AgentRuntime
 
 export class PapyrusService {
   readonly audit: AuditLog
@@ -102,14 +99,14 @@ export class PapyrusService {
     return this.db.listSessions().filter((session) => this.decide(actor, 'ReadSession', this.sessionResource(session)).allowed)
   }
 
-  async prompt(actor: Principal, sessionId: string, prompt: string): Promise<{ stopReason: string; events: GoosePromptEvent[] }> {
+  async prompt(actor: Principal, sessionId: string, prompt: string): Promise<{ stopReason: string; events: RuntimeEvent[] }> {
     this.license.require('gateway')
     const session = this.db.getSession(sessionId)
     if (!session) throw new Error('Session not found')
     this.check(actor, 'PromptSession', this.sessionResource(session))
     const spec = resolveAgentSpec(session.agent, this.config.agents)
     if (!spec) throw new Error(`Unknown agent "${session.agent}"`)
-    const events: GoosePromptEvent[] = []
+    const events: RuntimeEvent[] = []
     const runtime = this.runtimeFactory({ ...this.runtimeCommand(session.agent), promptTimeoutMs: this.config.promptTimeoutMs })
     this.db.setSessionStatus(session.id, 'running')
     this.audit.append({ actorId: actor.id, action: 'PromptSession', resourceType: 'Session', resourceId: session.id, decision: 'info', metadata: { promptBytes: Buffer.byteLength(prompt) } })

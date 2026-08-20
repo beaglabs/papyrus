@@ -1,13 +1,14 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { GooseRuntime, type GooseRuntimeOptions } from '@papyrus/goose-runtime'
+import type { AgentRuntime, RuntimeLaunchOptions } from '@papyrus/acp-runtime'
+import { GooseRuntime } from '@papyrus/goose-runtime'
 import type { ServerConfig } from '../src/config.js'
 import { AuthService } from '../src/auth.js'
 import { PapyrusDatabase } from '../src/db.js'
-import { PapyrusService, type RuntimeHandle } from '../src/service.js'
+import { PapyrusService } from '../src/service.js'
 
-type RuntimeFactory = (options: GooseRuntimeOptions) => RuntimeHandle
+type RuntimeFactory = (options: RuntimeLaunchOptions) => AgentRuntime
 
 export function testContext(runtimeFactory?: RuntimeFactory) {
   const dataDir = mkdtempSync(join(tmpdir(), 'papyrus-test-'))

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { GooseRuntimeOptions } from '@papyrus/goose-runtime'
-import { AuthorizationDenied, type RuntimeHandle } from '../src/service.js'
+import type { AgentRuntime, RuntimeLaunchOptions } from '@papyrus/acp-runtime'
+import { AuthorizationDenied } from '../src/service.js'
 import { testContext } from './helpers.js'
 
 describe('Papyrus control plane', () => {
@@ -77,7 +77,10 @@ describe('Papyrus control plane', () => {
   })
 
   it('runs an end-to-end session prompt and preserves audit integrity', async () => {
-    const factory = vi.fn((_options: GooseRuntimeOptions): RuntimeHandle => ({
+    const factory = vi.fn((_options: RuntimeLaunchOptions): AgentRuntime => ({
+      kind: 'test',
+      capabilities: { transports: ['stdio'], sessions: { cancel: true, load: false, resume: false, fork: false } },
+      health: async () => ({ available: true }),
       runPrompt: async (request) => {
         await request.onEvent({ kind: 'session', at: new Date().toISOString(), data: { runtimeSessionId: 'rt-1' } })
         await request.onEvent({ kind: 'update', at: new Date().toISOString(), data: { chunk: 'hello' } })
@@ -95,7 +98,8 @@ describe('Papyrus control plane', () => {
       expect(result.events.map((event) => event.kind)).toEqual(['session', 'update', 'complete'])
       expect(context.db.getSession(session.id)!.status).toBe('ready')
       const events = context.db.sqlite.prepare('SELECT count(*) c FROM runtime_events WHERE session_id=?').get(session.id) as { c: number }
-      expect(events.c).toBe(3)
+      expect(events.c).toBe(4)
+      expect(context.db.listSessionRuns(session.id)[0]).toMatchObject({ status: 'completed', stopReason: 'end_turn' })
       expect(context.service.audit.verify()).toEqual({ valid: true })
       expect(factory).toHaveBeenCalledTimes(1)
     } finally {

@@ -25,11 +25,15 @@ function devPrincipal(config: ServerConfig, request: IncomingMessage, service: P
   }
   const authorization = request.headers.authorization
   if (authorization?.startsWith('Bearer ') && match(authorization.slice(7))) {
-    return service.db.upsertUser({ externalId: 'dev:gateway:token', displayName: 'Gateway Developer', authMethod: 'development' })
+    const principal = service.db.upsertUser({ externalId: 'dev:gateway:token', displayName: 'Gateway Developer', authMethod: 'development' })
+    service.db.setRole(principal.id, 'User')
+    return service.db.getPrincipal(principal.id)
   }
   const xSecretKey = request.headers['x-secret-key']
   if (typeof xSecretKey === 'string' && match(xSecretKey)) {
-    return service.db.upsertUser({ externalId: 'dev:gateway:token', displayName: 'Gateway Developer', authMethod: 'development' })
+    const principal = service.db.upsertUser({ externalId: 'dev:gateway:token', displayName: 'Gateway Developer', authMethod: 'development' })
+    service.db.setRole(principal.id, 'User')
+    return service.db.getPrincipal(principal.id)
   }
   return undefined
 }

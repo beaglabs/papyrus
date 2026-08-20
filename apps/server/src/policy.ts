@@ -4,7 +4,8 @@ import { POLICY_VERSION } from './audit.js'
 
 export const ACTIONS = [
   'ManageUsers', 'ManageWorkspaces', 'ManageTools', 'AssignResources',
-  'CreateSession', 'ReadSession', 'PromptSession', 'ReadAudit', 'ReadActivity',
+  'CreateSession', 'ReadSession', 'PromptSession', 'CancelSession', 'CloseSession', 'ResumeSession',
+  'ReadAudit', 'ReadActivity',
   'ReadWorkspace', 'InvokeTool', 'ActivateLicense',
 ] as const
 export type PolicyAction = (typeof ACTIONS)[number]
@@ -41,7 +42,9 @@ when {
 permit(principal, action, resource)
 when {
   principal.roles.contains("User") &&
-  (action == Action::"ReadSession" || action == Action::"PromptSession") &&
+  (action == Action::"ReadSession" || action == Action::"PromptSession" ||
+   action == Action::"CancelSession" || action == Action::"CloseSession" ||
+   action == Action::"ResumeSession") &&
   resource has owner && resource.owner == principal
 };
 

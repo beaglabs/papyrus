@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import type { McpServer, Principal, Role, Session, Workspace } from '@papyrus/contracts'
+import type { McpServer, Principal, Role, Session, SessionEvent, SessionRun, Workspace } from '@papyrus/contracts'
 
 type Row = Record<string, unknown>
 
@@ -44,11 +44,18 @@ export class PapyrusDatabase {
       CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id),
         workspace_id TEXT NOT NULL REFERENCES workspaces(id), agent TEXT NOT NULL,
-        title TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        title TEXT NOT NULL, cwd TEXT NOT NULL DEFAULT '/', status TEXT NOT NULL,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS session_runs (
+        id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id),
+        actor_id TEXT NOT NULL REFERENCES users(id), status TEXT NOT NULL,
+        stop_reason TEXT, error TEXT, started_at TEXT NOT NULL, completed_at TEXT
       );
       CREATE TABLE IF NOT EXISTS runtime_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL REFERENCES sessions(id),
-        kind TEXT NOT NULL, occurred_at TEXT NOT NULL, data_json TEXT NOT NULL
+        run_id TEXT REFERENCES session_runs(id), kind TEXT NOT NULL,
+        occurred_at TEXT NOT NULL, data_json TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS mcp_servers (
         id TEXT PRIMARY KEY, name TEXT NOT NULL, transport TEXT NOT NULL CHECK(transport = 'http'),
@@ -77,6 +84,19 @@ export class PapyrusDatabase {
     if (!userColumns.some((column) => column.name === 'token_version')) {
       this.sqlite.exec('ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0')
     }
+    const sessionColumns = this.sqlite.prepare('PRAGMA table_info(sessions)').all() as Row[]
+    if (!sessionColumns.some((column) => column.name === 'cwd')) {
+      this.sqlite.exec("ALTER TABLE sessions ADD COLUMN cwd TEXT NOT NULL DEFAULT '/'")
+    }
+    const eventColumns = this.sqlite.prepare('PRAGMA table_info(runtime_events)').all() as Row[]
+    if (!eventColumns.some((column) => column.name === 'run_id')) {
+      this.sqlite.exec('ALTER TABLE runtime_events ADD COLUMN run_id TEXT REFERENCES session_runs(id)')
+    }
+    this.sqlite.exec(`
+      CREATE INDEX IF NOT EXISTS session_runs_session_started ON session_runs(session_id, started_at DESC);
+      CREATE INDEX IF NOT EXISTS runtime_events_session_sequence ON runtime_events(session_id, id);
+      CREATE UNIQUE INDEX IF NOT EXISTS session_runs_one_active ON session_runs(session_id) WHERE status='running';
+    `)
   }
 
   transaction<T>(operation: () => T): T {
@@ -172,20 +192,21 @@ export class PapyrusDatabase {
     return [...new Set([...direct, ...groups].map((row) => String(row.id)))]
   }
 
-  createSession(ownerId: string, workspaceId: string, agent: string, title: string): Session {
+  createSession(ownerId: string, workspaceId: string, agent: string, title: string, cwd = '/'): Session {
     const now = new Date().toISOString()
-    const session: Session = { id: crypto.randomUUID(), ownerId, workspaceId, agent, title, status: 'ready', createdAt: now, updatedAt: now }
-    this.sqlite.prepare('INSERT INTO sessions VALUES(?,?,?,?,?,?,?,?)').run(session.id, ownerId, workspaceId, agent, title, session.status, now, now)
+    const session: Session = { id: crypto.randomUUID(), ownerId, workspaceId, agent, title, cwd, status: 'ready', createdAt: now, updatedAt: now }
+    this.sqlite.prepare(`INSERT INTO sessions(id,owner_id,workspace_id,agent,title,cwd,status,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?)`).run(session.id, ownerId, workspaceId, agent, title, cwd, session.status, now, now)
     return session
   }
 
   getSession(id: string): Session | undefined {
-    return this.sqlite.prepare(`SELECT id,owner_id ownerId,workspace_id workspaceId,agent,title,status,
+    return this.sqlite.prepare(`SELECT id,owner_id ownerId,workspace_id workspaceId,agent,title,cwd,status,
       created_at createdAt,updated_at updatedAt FROM sessions WHERE id=?`).get(id) as unknown as Session | undefined
   }
 
   listSessions(): Session[] {
-    return this.sqlite.prepare(`SELECT id,owner_id ownerId,workspace_id workspaceId,agent,title,status,
+    return this.sqlite.prepare(`SELECT id,owner_id ownerId,workspace_id workspaceId,agent,title,cwd,status,
       created_at createdAt,updated_at updatedAt FROM sessions ORDER BY updated_at DESC`).all() as unknown as Session[]
   }
 
@@ -193,8 +214,103 @@ export class PapyrusDatabase {
     this.sqlite.prepare('UPDATE sessions SET status=?,updated_at=? WHERE id=?').run(status, new Date().toISOString(), id)
   }
 
-  addRuntimeEvent(sessionId: string, kind: string, occurredAt: string, data: unknown): void {
-    this.sqlite.prepare('INSERT INTO runtime_events(session_id,kind,occurred_at,data_json) VALUES(?,?,?,?)').run(sessionId, kind, occurredAt, JSON.stringify(data))
+  beginSessionRun(sessionId: string, actorId: string): SessionRun {
+    return this.transaction(() => {
+      const session = this.getSession(sessionId)
+      if (!session) throw new Error('SESSION_NOT_FOUND')
+      if (session.status === 'running') throw new Error('SESSION_BUSY')
+      if (session.status === 'stopped') throw new Error('SESSION_STOPPED')
+      const run: SessionRun = {
+        id: crypto.randomUUID(),
+        sessionId,
+        actorId,
+        status: 'running',
+        startedAt: new Date().toISOString(),
+      }
+      this.sqlite.prepare(`INSERT INTO session_runs(id,session_id,actor_id,status,started_at)
+        VALUES(?,?,?,?,?)`).run(run.id, run.sessionId, run.actorId, run.status, run.startedAt)
+      this.sqlite.prepare("UPDATE sessions SET status='running',updated_at=? WHERE id=?").run(run.startedAt, sessionId)
+      return run
+    })
+  }
+
+  finishSessionRun(runId: string, status: Exclude<SessionRun['status'], 'running'>, stopReason?: string, error?: string): void {
+    this.transaction(() => {
+      const run = this.getSessionRun(runId)
+      if (!run || run.status !== 'running') return
+      const completedAt = new Date().toISOString()
+      this.sqlite.prepare(`UPDATE session_runs SET status=?,stop_reason=?,error=?,completed_at=?
+        WHERE id=? AND status='running'`).run(status, stopReason ?? null, error ?? null, completedAt, runId)
+      const sessionStatus: Session['status'] = status === 'failed' ? 'failed' : status === 'interrupted' ? 'interrupted' : 'ready'
+      this.sqlite.prepare(`UPDATE sessions SET status=?,updated_at=?
+        WHERE id=? AND status!='stopped'`).run(sessionStatus, completedAt, run.sessionId)
+    })
+  }
+
+  getSessionRun(id: string): SessionRun | undefined {
+    const row = this.sqlite.prepare(`SELECT id,session_id sessionId,actor_id actorId,status,
+      stop_reason stopReason,error,started_at startedAt,completed_at completedAt
+      FROM session_runs WHERE id=?`).get(id) as Row | undefined
+    return row ? this.sessionRun(row) : undefined
+  }
+
+  listSessionRuns(sessionId: string): SessionRun[] {
+    const rows = this.sqlite.prepare(`SELECT id,session_id sessionId,actor_id actorId,status,
+      stop_reason stopReason,error,started_at startedAt,completed_at completedAt
+      FROM session_runs WHERE session_id=? ORDER BY started_at DESC`).all(sessionId) as Row[]
+    return rows.map((row) => this.sessionRun(row))
+  }
+
+  recoverInterruptedSessionRuns(): string[] {
+    return this.transaction(() => {
+      const rows = this.sqlite.prepare("SELECT id sessionId FROM sessions WHERE status='running'").all() as Row[]
+      const sessionIds = rows.map((row) => String(row.sessionId))
+      const completedAt = new Date().toISOString()
+      this.sqlite.prepare(`UPDATE session_runs SET status='interrupted',stop_reason='daemon_restart',
+        error='Daemon restarted before the run completed',completed_at=? WHERE status='running'`).run(completedAt)
+      this.sqlite.prepare("UPDATE sessions SET status='interrupted',updated_at=? WHERE status='running'").run(completedAt)
+      return sessionIds
+    })
+  }
+
+  resumeSession(id: string): Session | undefined {
+    const now = new Date().toISOString()
+    this.sqlite.prepare(`UPDATE sessions SET status='ready',updated_at=?
+      WHERE id=? AND status IN ('stopped','failed','interrupted')`).run(now, id)
+    return this.getSession(id)
+  }
+
+  addRuntimeEvent(sessionId: string, runId: string | undefined, kind: string, occurredAt: string, data: unknown): number {
+    const result = this.sqlite.prepare(`INSERT INTO runtime_events(session_id,run_id,kind,occurred_at,data_json)
+      VALUES(?,?,?,?,?)`).run(sessionId, runId ?? null, kind, occurredAt, JSON.stringify(data))
+    return Number(result.lastInsertRowid)
+  }
+
+  listSessionEvents(sessionId: string, after = 0, limit = 200): SessionEvent[] {
+    const rows = this.sqlite.prepare(`SELECT id sequence,session_id sessionId,run_id runId,kind,
+      occurred_at occurredAt,data_json dataJson FROM runtime_events
+      WHERE session_id=? AND id>? ORDER BY id LIMIT ?`).all(sessionId, after, limit) as Row[]
+    return rows.map((row) => ({
+      sequence: Number(row.sequence),
+      sessionId: String(row.sessionId),
+      ...(row.runId ? { runId: String(row.runId) } : {}),
+      kind: String(row.kind),
+      occurredAt: String(row.occurredAt),
+      data: JSON.parse(String(row.dataJson)) as unknown,
+    }))
+  }
+
+  private sessionRun(row: Row): SessionRun {
+    return {
+      id: String(row.id),
+      sessionId: String(row.sessionId),
+      actorId: String(row.actorId),
+      status: row.status as SessionRun['status'],
+      ...(row.stopReason ? { stopReason: String(row.stopReason) } : {}),
+      ...(row.error ? { error: String(row.error) } : {}),
+      startedAt: String(row.startedAt),
+      ...(row.completedAt ? { completedAt: String(row.completedAt) } : {}),
+    }
   }
 
   addMcpServer(input: Pick<McpServer, 'name' | 'endpoint'>): McpServer {

@@ -23,9 +23,22 @@ if (gateway && config.gateway) {
   })
 }
 
+let stopping = false
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-  process.on(signal, () => {
-    server.close(() => { database.close(); process.exit(0) })
-    gateway?.close(() => process.exit(0))
-  })
+  process.on(signal, () => { void shutdown() })
+}
+
+async function shutdown(): Promise<void> {
+  if (stopping) return
+  stopping = true
+  await service.shutdown()
+  server.closeAllConnections()
+  gateway?.closeAllConnections()
+  await Promise.all([closeServer(server), ...(gateway ? [closeServer(gateway)] : [])])
+  database.close()
+  process.exit(0)
+}
+
+function closeServer(target: typeof server): Promise<void> {
+  return new Promise((resolve) => target.close(() => resolve()))
 }

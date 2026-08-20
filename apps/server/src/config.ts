@@ -23,7 +23,7 @@ export interface ServerConfig {
     redirectUri: string
   }
   tls?: { certPath: string; keyPath: string; caPath: string; crlPath?: string }
-  gateway?: { host: string; port: number; devToken?: string; tls?: { certPath: string; keyPath: string; caPath: string } }
+  gateway?: { host: string; port: number; devToken?: string; defaultAgent?: string; tls?: { certPath: string; keyPath: string; caPath: string } }
   runtimeWorkerToken?: string
   runtimeWorkerTls?: { certPath: string; keyPath: string; caPath: string }
   agents?: Record<string, AgentConfigEntry>
@@ -107,6 +107,7 @@ export function loadConfig(env = process.env): ServerConfig {
     host: env.PAPYRUS_GATEWAY_HOST ?? '127.0.0.1',
     port: Number(env.PAPYRUS_GATEWAY_PORT ?? 3220),
     ...(env.PAPYRUS_GATEWAY_DEV_TOKEN ? { devToken: env.PAPYRUS_GATEWAY_DEV_TOKEN } : {}),
+    ...(env.PAPYRUS_GATEWAY_DEFAULT_AGENT ? { defaultAgent: env.PAPYRUS_GATEWAY_DEFAULT_AGENT } : {}),
     ...(env.PAPYRUS_GATEWAY_TLS_CERT ? {
       tls: {
         certPath: env.PAPYRUS_GATEWAY_TLS_CERT,

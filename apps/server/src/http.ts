@@ -2,8 +2,7 @@ import { createServer as createHttpServer, type IncomingMessage, type Server, ty
 import { createServer as createHttpsServer } from 'node:https'
 import { readFileSync } from 'node:fs'
 import { extname, join, normalize } from 'node:path'
-import { ROLES, type Role, type Runtime, type SignedLicense } from '@papyrus/contracts'
-import { GooseRuntime } from '@papyrus/goose-runtime'
+import { ROLES, type Role, type SignedLicense } from '@papyrus/contracts'
 import { AuthService } from './auth.js'
 import type { ServerConfig } from './config.js'
 import { AuthorizationDenied, PapyrusService } from './service.js'
@@ -48,8 +47,7 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
     try {
       const url = new URL(request.url ?? '/', config.publicOrigin)
       if (url.pathname === '/api/health' && request.method === 'GET') {
-        const goose = await new GooseRuntime().health()
-        return json(response, 200, { status: 'ok', mode: config.mode, profile: config.profile, goose, cedar: service.policy.cedarVersion, bootstrapRequired: service.db.getSetting('bootstrapComplete') !== 'true' })
+        return json(response, 200, { status: 'ok', mode: config.mode, profile: config.profile, cedar: service.policy.cedarVersion, bootstrapRequired: service.db.getSetting('bootstrapComplete') !== 'true' })
       }
       if (url.pathname === '/api/license/request' && request.method === 'GET') return json(response, 200, service.license.activationRequest())
       if (url.pathname === '/api/license/status' && request.method === 'GET') return json(response, 200, service.license.status())
@@ -98,37 +96,15 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
         const input = await body(request)
         return json(response, 201, service.createWorkspace(principal, { name: text(input.name, 'name'), description: typeof input.description === 'string' ? input.description.slice(0, 2000) : '' }))
       }
-      if (url.pathname === '/api/runtimes' && request.method === 'GET') return json(response, 200, service.listRuntimes(principal))
-      if (url.pathname === '/api/runtimes' && request.method === 'POST') {
-        const input = await body(request)
-        if (!input.model || typeof input.model !== 'object') throw new HttpError(400, 'INVALID_INPUT', 'model is required')
-        const model = input.model as Record<string, unknown>
-        const provider = text(model.provider, 'model.provider') as Runtime['model']['provider']
-        if (!['openai-compatible', 'azure-openai', 'anthropic-compatible'].includes(provider)) throw new HttpError(400, 'INVALID_INPUT', 'Unsupported model provider')
-        const runtime: Omit<Runtime, 'id' | 'createdAt'> = {
-          name: text(input.name, 'name'), mode: input.mode === 'remote' ? 'remote' : 'child-process',
-          kind: typeof input.kind === 'string' && input.kind.trim() ? input.kind.trim() : 'goose',
-          model: {
-            provider, baseUrl: text(model.baseUrl, 'model.baseUrl', 2048),
-            model: text(model.model, 'model.model'), secretRef: text(model.secretRef, 'model.secretRef'),
-          },
-          ...(typeof input.command === 'string' ? { command: input.command } : {}), ...(typeof input.endpoint === 'string' ? { endpoint: input.endpoint } : {}),
-        }
-        return json(response, 201, service.createRuntime(principal, runtime))
-      }
-      const runtimeHealth = url.pathname.match(/^\/api\/runtimes\/([^/]+)\/health$/)
-      if (runtimeHealth && request.method === 'GET') return json(response, 200, await service.runtimeHealth(principal, decodeURIComponent(runtimeHealth[1] as string)))
       if (url.pathname === '/api/assignments' && request.method === 'POST') {
         const input = await body(request)
-        const resourceType = text(input.resourceType, 'resourceType') as 'workspace' | 'runtime'
-        if (!['workspace', 'runtime'].includes(resourceType)) throw new HttpError(400, 'INVALID_INPUT', 'resourceType must be workspace or runtime')
-        service.assign(principal, text(input.principalId, 'principalId'), resourceType, text(input.resourceId, 'resourceId'))
+        service.assign(principal, text(input.principalId, 'principalId'), text(input.resourceId, 'resourceId'))
         return json(response, 204, null)
       }
       if (url.pathname === '/api/sessions' && request.method === 'GET') return json(response, 200, service.listSessions(principal))
       if (url.pathname === '/api/sessions' && request.method === 'POST') {
         const input = await body(request)
-        return json(response, 201, service.createSession(principal, text(input.workspaceId, 'workspaceId'), text(input.runtimeId, 'runtimeId'), text(input.title, 'title')))
+        return json(response, 201, service.createSession(principal, text(input.workspaceId, 'workspaceId'), text(input.agent, 'agent'), text(input.title, 'title')))
       }
       const prompt = url.pathname.match(/^\/api\/sessions\/([^/]+)\/prompt$/)
       if (prompt && request.method === 'POST') {

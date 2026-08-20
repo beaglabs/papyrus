@@ -17,7 +17,9 @@
     "@cedar-policy/cedar-wasm": "4.12.0",
     "@papyrus/contracts": "workspace:*",
     "@papyrus/goose-runtime": "workspace:*",
+    "@types/ws": "^8.18.1",
     "jose": "6.2.9",
+    "ws": "^8.21.3",
     "yaml": "^2.9.0"
   },
   "devDependencies": {

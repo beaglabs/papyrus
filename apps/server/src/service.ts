@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { Agent as HttpsAgent } from 'node:https'
 import { createHmac, timingSafeEqual } from 'node:crypto'
-import type { ActivitySummary, McpServer, Principal, Role, Runtime, Session, SignedLicense, Workspace } from '@papyrus/contracts'
+import type { ActivitySummary, McpServer, Principal, Role, Session, SignedLicense, Workspace } from '@papyrus/contracts'
 import { GooseRuntime, type GoosePromptEvent, type GoosePromptRequest, type GoosePromptResult, type GooseRuntimeOptions } from '@papyrus/goose-runtime'
 import { resolveAgentSpec } from './agents.js'
 import { AuditLog } from './audit.js'
@@ -81,42 +81,20 @@ export class PapyrusService {
     return this.db.listWorkspaces().filter((workspace) => this.decide(actor, 'ReadWorkspace', this.workspaceResource(workspace.id)).allowed)
   }
 
-  createRuntime(actor: Principal, input: Omit<Runtime, 'id' | 'createdAt' | 'kind'> & { kind?: string }): Runtime {
-    this.license.require('gateway')
-    this.check(actor, 'ManageRuntimes', { type: 'Deployment', id: this.license.deploymentId })
-    const runtime = this.db.createRuntime({ ...input, kind: input.kind ?? 'goose' })
-    this.db.assign('user', actor.id, 'runtime', runtime.id)
-    this.audit.append({ actorId: actor.id, action: 'CreateRuntime', resourceType: 'Runtime', resourceId: runtime.id, decision: 'info', metadata: { name: runtime.name, kind: runtime.kind, model: runtime.model.model } })
-    return runtime
-  }
-
-  listRuntimes(actor: Principal): Runtime[] {
-    return this.db.listRuntimes().filter((runtime) => this.decide(actor, 'ReadRuntime', this.runtimeResource(runtime.id)).allowed)
-  }
-
-  async runtimeHealth(actor: Principal, runtimeId: string) {
-    const runtime = this.db.getRuntime(runtimeId)
-    if (!runtime) throw new Error('Runtime not found')
-    this.check(actor, 'ReadRuntime', this.runtimeResource(runtime.id))
-    const goose = runtime.mode === 'remote' && runtime.endpoint
-      ? new GooseRuntime({ endpoint: runtime.endpoint, headers: this.runtimeHeaders(), fetch: this.runtimeFetch() })
-      : new GooseRuntime(this.runtimeCommand(runtime))
-    return goose.health()
-  }
-
-  assign(actor: Principal, principalId: string, resourceType: 'workspace' | 'runtime', resourceId: string): void {
+  assign(actor: Principal, principalId: string, resourceId: string): void {
     this.check(actor, 'AssignResources', { type: 'Deployment', id: this.license.deploymentId })
-    this.db.assign('user', principalId, resourceType, resourceId)
-    this.audit.append({ actorId: actor.id, action: 'AssignResource', resourceType, resourceId, decision: 'info', metadata: { principalId } })
+    this.db.assign('user', principalId, 'workspace', resourceId)
+    this.audit.append({ actorId: actor.id, action: 'AssignResource', resourceType: 'workspace', resourceId, decision: 'info', metadata: { principalId } })
   }
 
-  createSession(actor: Principal, workspaceId: string, runtimeId: string, title: string): Session {
+  createSession(actor: Principal, workspaceId: string, agent: string, title: string): Session {
     this.license.require('gateway')
     this.check(actor, 'CreateSession', this.workspaceResource(workspaceId))
-    this.check(actor, 'CreateSession', this.runtimeResource(runtimeId))
-    if (!this.db.getWorkspace(workspaceId) || !this.db.getRuntime(runtimeId)) throw new Error('Workspace or runtime not found')
-    const session = this.db.createSession(actor.id, workspaceId, runtimeId, title)
-    this.audit.append({ actorId: actor.id, action: 'CreateSession', resourceType: 'Session', resourceId: session.id, decision: 'info', metadata: { workspaceId, runtimeId } })
+    if (!this.db.getWorkspace(workspaceId)) throw new Error('Workspace not found')
+    const spec = resolveAgentSpec(agent, this.config.agents)
+    if (!spec) throw new Error(`Unknown agent "${agent}"`)
+    const session = this.db.createSession(actor.id, workspaceId, agent, title)
+    this.audit.append({ actorId: actor.id, action: 'CreateSession', resourceType: 'Session', resourceId: session.id, decision: 'info', metadata: { workspaceId, agent } })
     return session
   }
 
@@ -129,19 +107,17 @@ export class PapyrusService {
     const session = this.db.getSession(sessionId)
     if (!session) throw new Error('Session not found')
     this.check(actor, 'PromptSession', this.sessionResource(session))
-    const runtimeConfig = this.db.getRuntime(session.runtimeId)
-    if (!runtimeConfig) throw new Error('Runtime not found')
+    const spec = resolveAgentSpec(session.agent, this.config.agents)
+    if (!spec) throw new Error(`Unknown agent "${session.agent}"`)
     const events: GoosePromptEvent[] = []
-    const runtime = runtimeConfig.mode === 'remote' && runtimeConfig.endpoint
-      ? this.runtimeFactory({ endpoint: runtimeConfig.endpoint, headers: this.runtimeHeaders(), fetch: this.runtimeFetch(), promptTimeoutMs: this.config.promptTimeoutMs })
-      : this.runtimeFactory({ ...this.runtimeCommand(runtimeConfig), promptTimeoutMs: this.config.promptTimeoutMs })
+    const runtime = this.runtimeFactory({ ...this.runtimeCommand(session.agent), promptTimeoutMs: this.config.promptTimeoutMs })
     this.db.setSessionStatus(session.id, 'running')
     this.audit.append({ actorId: actor.id, action: 'PromptSession', resourceType: 'Session', resourceId: session.id, decision: 'info', metadata: { promptBytes: Buffer.byteLength(prompt) } })
     try {
       const result = await runtime.runPrompt({
         cwd: this.config.dataDir,
         prompt,
-        environment: this.modelEnvironment(runtimeConfig),
+        environment: spec.environment(),
         mcpServers: this.runtimeMcpServers(session),
         authorizeTool: async (title) => this.db.isToolGranted(session.workspaceId, ...this.findTool(session.workspaceId, title)),
         onEvent: (event) => {
@@ -278,7 +254,6 @@ export class PapyrusService {
 
   private decide(actor: Principal, action: PolicyAction, resource: AuthorizationResource) { return this.policy.authorize(actor, action, resource) }
   private workspaceResource(id: string): AuthorizationResource { return { type: 'Workspace', id, attrs: { assignedUsers: cedarUsers(this.db.assignedUserIds('workspace', id)) } } }
-  private runtimeResource(id: string): AuthorizationResource { return { type: 'Runtime', id, attrs: { assignedUsers: cedarUsers(this.db.assignedUserIds('runtime', id)) } } }
   private sessionResource(session: Session): AuthorizationResource { return { type: 'Session', id: session.id, attrs: { owner: cedarUser(session.ownerId) } } }
 
   private findTool(workspaceId: string, title: string): [string, string] {
@@ -286,20 +261,11 @@ export class PapyrusService {
     return row ? [row.mcp_server_id, row.tool_name] : ['', '']
   }
 
-  modelEnvironment(runtime: Runtime): Record<string, string> {
-    const spec = resolveAgentSpec(runtime.kind, this.config.agents)
-    if (!spec) throw new Error(`Unknown runtime kind "${runtime.kind}"`)
-    const secretName = `PAPYRUS_SECRET_${runtime.model.secretRef.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`
-    const secret = process.env[secretName]
-    if (!secret) throw new Error(`Missing server-side model credential ${secretName}`)
-    return spec.environment(runtime.model, secret)
-  }
-
-  /** Launch command and args for a runtime, from the agent spec plus any per-runtime override. */
-  runtimeCommand(runtime: Runtime): { command: string; args: string[] } {
-    const spec = resolveAgentSpec(runtime.kind, this.config.agents)
-    if (!spec) throw new Error(`Unknown runtime kind "${runtime.kind}"`)
-    return { command: runtime.command ?? spec.command, args: spec.args }
+  /** Launch command and args for an agent. */
+  runtimeCommand(agent: string): { command: string; args: string[] } {
+    const spec = resolveAgentSpec(agent, this.config.agents)
+    if (!spec) throw new Error(`Unknown agent "${agent}"`)
+    return { command: spec.command, args: spec.args }
   }
 
   /** Authorizes and audits a prompt against a Papyrus session (without running it). */
@@ -326,24 +292,6 @@ export class PapyrusService {
       url: `${this.config.publicOrigin}/api/runtime/mcp/${session.id}/${server.id}`,
       headers: [{ name: 'authorization', value: `Bearer ${this.issueRuntimeToken(session.id, server.id)}` }],
     }))
-  }
-
-  runtimeHeaders(): Record<string, string> {
-    const headers: Record<string, string> = {}
-    if (this.config.runtimeWorkerToken) headers.authorization = `Bearer ${this.config.runtimeWorkerToken}`
-    return headers
-  }
-
-  runtimeFetch(): typeof globalThis.fetch | undefined {
-    const tls = this.config.runtimeWorkerTls
-    if (!tls) return undefined
-    const agent = new HttpsAgent({
-      cert: readFileSync(tls.certPath),
-      key: readFileSync(tls.keyPath),
-      ca: readFileSync(tls.caPath),
-      rejectUnauthorized: true,
-    })
-    return (input, init) => globalThis.fetch(input, { ...init, dispatcher: agent } as Parameters<typeof globalThis.fetch>[1])
   }
 
   private issueRuntimeToken(sessionId: string, serverId: string): string {

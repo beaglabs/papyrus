@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import type { McpServer, Principal, Role, Runtime, Session, Workspace } from '@papyrus/contracts'
+import type { McpServer, Principal, Role, Session, Workspace } from '@papyrus/contracts'
 
 type Row = Record<string, unknown>
 
@@ -36,10 +36,6 @@ export class PapyrusDatabase {
       CREATE TABLE IF NOT EXISTS workspaces (
         id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL, created_at TEXT NOT NULL
       );
-      CREATE TABLE IF NOT EXISTS runtimes (
-        id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL,
-        mode TEXT NOT NULL, model_json TEXT NOT NULL, command TEXT, endpoint TEXT, created_at TEXT NOT NULL
-      );
       CREATE TABLE IF NOT EXISTS assignments (
         principal_type TEXT NOT NULL, principal_id TEXT NOT NULL,
         resource_type TEXT NOT NULL, resource_id TEXT NOT NULL, created_at TEXT NOT NULL,
@@ -47,7 +43,7 @@ export class PapyrusDatabase {
       );
       CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id),
-        workspace_id TEXT NOT NULL REFERENCES workspaces(id), runtime_id TEXT NOT NULL REFERENCES runtimes(id),
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id), agent TEXT NOT NULL,
         title TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS runtime_events (
@@ -158,58 +154,38 @@ export class PapyrusDatabase {
     return this.sqlite.prepare('SELECT id,name,description,created_at createdAt FROM workspaces ORDER BY name').all() as unknown as Workspace[]
   }
 
-  createRuntime(input: Omit<Runtime, 'id' | 'createdAt'>): Runtime {
-    const runtime: Runtime = { id: crypto.randomUUID(), createdAt: new Date().toISOString(), ...input }
-    this.sqlite.prepare('INSERT INTO runtimes VALUES(?,?,?,?,?,?,?,?)').run(
-      runtime.id, runtime.name, runtime.kind, runtime.mode, JSON.stringify(runtime.model), runtime.command ?? null, runtime.endpoint ?? null, runtime.createdAt,
-    )
-    return runtime
-  }
-
-  getRuntime(id: string): Runtime | undefined {
-    const row = this.sqlite.prepare('SELECT * FROM runtimes WHERE id=?').get(id) as Row | undefined
-    return row ? this.runtime(row) : undefined
-  }
-
-  listRuntimes(): Runtime[] { return (this.sqlite.prepare('SELECT * FROM runtimes ORDER BY name').all() as Row[]).map((row) => this.runtime(row)) }
-
-  private runtime(row: Row): Runtime {
-    return { id: String(row.id), name: String(row.name), kind: String(row.kind), mode: row.mode as Runtime['mode'], model: JSON.parse(String(row.model_json)),
-      ...(row.command ? { command: String(row.command) } : {}), ...(row.endpoint ? { endpoint: String(row.endpoint) } : {}), createdAt: String(row.created_at) }
-  }
-
-  assign(principalType: 'user' | 'group', principalId: string, resourceType: 'workspace' | 'runtime', resourceId: string): void {
+  assign(principalType: 'user' | 'group', principalId: string, resourceType: 'workspace', resourceId: string): void {
     this.sqlite.prepare('INSERT OR IGNORE INTO assignments VALUES(?,?,?,?,?)').run(principalType, principalId, resourceType, resourceId, new Date().toISOString())
   }
 
-  isAssigned(userId: string, resourceType: 'workspace' | 'runtime', resourceId: string): boolean {
+  isAssigned(userId: string, resourceType: 'workspace', resourceId: string): boolean {
     const row = this.sqlite.prepare(`SELECT 1 FROM assignments a WHERE a.resource_type=? AND a.resource_id=? AND
       ((a.principal_type='user' AND a.principal_id=?) OR (a.principal_type='group' AND EXISTS
       (SELECT 1 FROM group_members gm WHERE gm.group_id=a.principal_id AND gm.user_id=?))) LIMIT 1`).get(resourceType, resourceId, userId, userId)
     return Boolean(row)
   }
 
-  assignedUserIds(resourceType: 'workspace' | 'runtime', resourceId: string): string[] {
+  assignedUserIds(resourceType: 'workspace', resourceId: string): string[] {
     const direct = this.sqlite.prepare("SELECT principal_id id FROM assignments WHERE resource_type=? AND resource_id=? AND principal_type='user'").all(resourceType, resourceId) as Row[]
     const groups = this.sqlite.prepare(`SELECT gm.user_id id FROM assignments a JOIN group_members gm ON gm.group_id=a.principal_id
       WHERE a.resource_type=? AND a.resource_id=? AND a.principal_type='group'`).all(resourceType, resourceId) as Row[]
     return [...new Set([...direct, ...groups].map((row) => String(row.id)))]
   }
 
-  createSession(ownerId: string, workspaceId: string, runtimeId: string, title: string): Session {
+  createSession(ownerId: string, workspaceId: string, agent: string, title: string): Session {
     const now = new Date().toISOString()
-    const session: Session = { id: crypto.randomUUID(), ownerId, workspaceId, runtimeId, title, status: 'ready', createdAt: now, updatedAt: now }
-    this.sqlite.prepare('INSERT INTO sessions VALUES(?,?,?,?,?,?,?,?)').run(session.id, ownerId, workspaceId, runtimeId, title, session.status, now, now)
+    const session: Session = { id: crypto.randomUUID(), ownerId, workspaceId, agent, title, status: 'ready', createdAt: now, updatedAt: now }
+    this.sqlite.prepare('INSERT INTO sessions VALUES(?,?,?,?,?,?,?,?)').run(session.id, ownerId, workspaceId, agent, title, session.status, now, now)
     return session
   }
 
   getSession(id: string): Session | undefined {
-    return this.sqlite.prepare(`SELECT id,owner_id ownerId,workspace_id workspaceId,runtime_id runtimeId,title,status,
+    return this.sqlite.prepare(`SELECT id,owner_id ownerId,workspace_id workspaceId,agent,title,status,
       created_at createdAt,updated_at updatedAt FROM sessions WHERE id=?`).get(id) as unknown as Session | undefined
   }
 
   listSessions(): Session[] {
-    return this.sqlite.prepare(`SELECT id,owner_id ownerId,workspace_id workspaceId,runtime_id runtimeId,title,status,
+    return this.sqlite.prepare(`SELECT id,owner_id ownerId,workspace_id workspaceId,agent,title,status,
       created_at createdAt,updated_at updatedAt FROM sessions ORDER BY updated_at DESC`).all() as unknown as Session[]
   }
 

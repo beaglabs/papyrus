@@ -49,4 +49,4 @@ describe('fixed Cedar policy', () => {
   })
 })
 
-const auditorActions: PolicyAction[] = ['ReadAudit', 'ReadActivity', 'ReadSession', 'ReadWorkspace', 'ReadRuntime']
+const auditorActions: PolicyAction[] = ['ReadAudit', 'ReadActivity', 'ReadSession', 'ReadWorkspace']

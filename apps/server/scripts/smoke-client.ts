@@ -3,23 +3,26 @@ import { createHttpStream } from '@agentclientprotocol/sdk/experimental/http-cli
 
 // Drives a minimal ACP client against the Papyrus gateway to smoke-test the
 // full client → gateway → agent path. Configure:
-//   PAPYRUS_SMOKE_URL     gateway ACP endpoint (e.g. http://127.0.0.1:3220/acp/<runtimeId>)
-//   PAPYRUS_SMOKE_TOKEN   optional bearer token (gateway dev token on loopback)
-//   PAPYRUS_SMOKE_PROMPT  optional prompt text
-//   PAPYRUS_SMOKE_CWD     optional working directory for the session
+//   PAPYRUS_SMOKE_URL      gateway ACP endpoint (e.g. http://127.0.0.1:3220/acp)
+//   PAPYRUS_SMOKE_TOKEN    optional bearer token (gateway dev token on loopback)
+//   PAPYRUS_SMOKE_WORKSPACE  workspace ID (required for X-Papyrus-Workspace-Id header)
+//   PAPYRUS_SMOKE_PROMPT   optional prompt text
+//   PAPYRUS_SMOKE_CWD      optional working directory for the session
 
 const url = process.env.PAPYRUS_SMOKE_URL
 const token = process.env.PAPYRUS_SMOKE_TOKEN
+const workspaceId = process.env.PAPYRUS_SMOKE_WORKSPACE
 const prompt = process.env.PAPYRUS_SMOKE_PROMPT ?? 'Reply with the single word: ok'
 const cwd = process.env.PAPYRUS_SMOKE_CWD ?? process.cwd()
 
 if (!url) {
-  console.error('Set PAPYRUS_SMOKE_URL to the gateway ACP endpoint, e.g. http://127.0.0.1:3220/acp/<runtimeId>')
+  console.error('Set PAPYRUS_SMOKE_URL to the gateway ACP endpoint, e.g. http://127.0.0.1:3220/acp')
   process.exit(2)
 }
 
 const headers: Record<string, string> = {}
 if (token) headers.authorization = `Bearer ${token}`
+if (workspaceId) headers['x-papyrus-workspace-id'] = workspaceId
 
 const stream = createHttpStream(url, { headers })
 

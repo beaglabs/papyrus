@@ -2,16 +2,16 @@
 # (PAPYRUS_SESSION_SECRET, PAPYRUS_SECRET_*, TLS keys, etc.).
 # Point PAPYRUS_CONFIG_FILE at this file (or copy it to papyrus.yaml).
 
-# Additional agent runtimes, keyed by kind. `goose` is built in.
-# `env` values may use {model}, {baseUrl}, {secret}, and {provider} placeholders.
+# Additional agent commands, keyed by kind. `goose` is built in.
+# Model configuration is handled by the agent itself via ACP protocol.
 agents:
   opencode:
     command: opencode
     args: [acp]
     env:
-      MODEL: "{model}"
-      OPENAI_BASE_URL: "{baseUrl}"
-      OPENAI_API_KEY: "{secret}"
+      MODEL: "test-model"
+      OPENAI_BASE_URL: "http://localhost:11434/v1"
+      OPENAI_API_KEY: "test-key"
 
 # Offline license trust roots: key ID → PEM public key.
 licenseAuthorities:

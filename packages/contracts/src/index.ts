@@ -21,29 +21,11 @@ export interface Workspace {
   createdAt: string
 }
 
-export interface ModelEndpoint {
-  provider: 'openai-compatible' | 'azure-openai' | 'anthropic-compatible'
-  baseUrl: string
-  model: string
-  secretRef: string
-}
-
-export interface Runtime {
-  id: string
-  name: string
-  kind: string
-  mode: 'child-process' | 'remote'
-  model: ModelEndpoint
-  command?: string
-  endpoint?: string
-  createdAt: string
-}
-
 export interface Session {
   id: string
   ownerId: string
   workspaceId: string
-  runtimeId: string
+  agent: string
   title: string
   status: 'ready' | 'running' | 'stopped' | 'failed'
   createdAt: string

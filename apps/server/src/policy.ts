@@ -3,14 +3,14 @@ import type { Principal } from '@papyrus/contracts'
 import { POLICY_VERSION } from './audit.js'
 
 export const ACTIONS = [
-  'ManageUsers', 'ManageWorkspaces', 'ManageRuntimes', 'ManageTools', 'AssignResources',
+  'ManageUsers', 'ManageWorkspaces', 'ManageTools', 'AssignResources',
   'CreateSession', 'ReadSession', 'PromptSession', 'ReadAudit', 'ReadActivity',
-  'ReadWorkspace', 'ReadRuntime', 'InvokeTool', 'ActivateLicense',
+  'ReadWorkspace', 'InvokeTool', 'ActivateLicense',
 ] as const
 export type PolicyAction = (typeof ACTIONS)[number]
 
 const adminActions = ACTIONS.filter((action) => !['ActivateLicense'].includes(action))
-const auditActions: PolicyAction[] = ['ReadAudit', 'ReadActivity', 'ReadSession', 'ReadWorkspace', 'ReadRuntime']
+const auditActions: PolicyAction[] = ['ReadAudit', 'ReadActivity', 'ReadSession', 'ReadWorkspace']
 
 function actionExpression(actions: readonly PolicyAction[]): string {
   return actions.map((action) => `action == Action::"${action}"`).join(' || ')
@@ -33,7 +33,7 @@ when { principal.roles.contains("Auditor") && (${actionExpression(auditActions)}
 permit(principal, action, resource)
 when {
   principal.roles.contains("User") &&
-  (${actionExpression(['ReadWorkspace', 'ReadRuntime', 'CreateSession', 'InvokeTool'])}) &&
+  (${actionExpression(['ReadWorkspace', 'CreateSession', 'InvokeTool'])}) &&
   resource has assignedUsers && resource.assignedUsers.contains(principal)
 };
 
@@ -53,7 +53,7 @@ when {
 `
 
 export interface AuthorizationResource {
-  type: 'Deployment' | 'Workspace' | 'Runtime' | 'Session' | 'Tool' | 'Audit'
+  type: 'Deployment' | 'Workspace' | 'Session' | 'Tool' | 'Audit'
   id: string
   attrs?: Record<string, CedarValueJson>
 }

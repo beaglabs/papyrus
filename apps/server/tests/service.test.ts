@@ -15,13 +15,11 @@ describe('Papyrus control plane', () => {
     expect(() => context.service.bootstrap(user, 'correct horse battery staple')).toThrow(/already complete/)
   })
 
-  it('requires both workspace and Goose runtime assignment', () => {
+  it('requires workspace assignment for session creation', () => {
     const context = testContext(); contexts.push(context)
-    const { owner, user, workspace, runtime } = setup(context)
-    context.service.assign(owner, user.id, 'workspace', workspace.id)
-    expect(() => context.service.createSession(user, workspace.id, runtime.id, 'Denied')).toThrow(AuthorizationDenied)
-    context.service.assign(owner, user.id, 'runtime', runtime.id)
-    const session = context.service.createSession(user, workspace.id, runtime.id, 'Allowed')
+    const { owner, user, workspace } = setup(context)
+    context.service.assign(owner, user.id, workspace.id)
+    const session = context.service.createSession(user, workspace.id, 'goose', 'Allowed')
     expect(session.ownerId).toBe(user.id)
     expect(context.service.listSessions(user)).toEqual([session])
     expect(context.service.audit.verify()).toEqual({ valid: true })
@@ -38,23 +36,21 @@ describe('Papyrus control plane', () => {
 
   it('isolates sessions between workspaces', () => {
     const context = testContext(); contexts.push(context)
-    const { owner, user, workspace, runtime } = setup(context)
+    const { owner, user, workspace } = setup(context)
     const other = context.service.createWorkspace(owner, { name: 'Other', description: '' })
-    context.service.assign(owner, user.id, 'workspace', workspace.id)
-    context.service.assign(owner, user.id, 'runtime', runtime.id)
-    const session = context.service.createSession(user, workspace.id, runtime.id, 'Mine')
-    expect(() => context.service.createSession(user, other.id, runtime.id, 'Cross')).toThrow(AuthorizationDenied)
+    context.service.assign(owner, user.id, workspace.id)
+    const session = context.service.createSession(user, workspace.id, 'goose', 'Mine')
+    expect(() => context.service.createSession(user, other.id, 'goose', 'Cross')).toThrow(AuthorizationDenied)
     expect(context.service.listSessions(user)).toEqual([session])
   })
 
   it('blocks MCP tool invocation without a workspace grant and across workspaces', async () => {
     const context = testContext(); contexts.push(context)
-    const { owner, user, workspace, runtime } = setup(context)
-    context.service.assign(owner, user.id, 'workspace', workspace.id)
-    context.service.assign(owner, user.id, 'runtime', runtime.id)
+    const { owner, user, workspace } = setup(context)
+    context.service.assign(owner, user.id, workspace.id)
     const server = context.service.addMcpServer(owner, { name: 'Tools', endpoint: 'http://tools.internal/mcp' })
     context.service.grantTool(owner, workspace.id, server.id, 'read_file')
-    const session = context.service.createSession(user, workspace.id, runtime.id, 'Tools')
+    const session = context.service.createSession(user, workspace.id, 'goose', 'Tools')
 
     // Unassigned tool in the same workspace is denied before any network call.
     await expect(context.service.invokeTool(user, session.id, server.id, 'delete_everything', {})).rejects.toThrow(AuthorizationDenied)
@@ -64,9 +60,8 @@ describe('Papyrus control plane', () => {
     const otherUser = context.db.upsertUser({ externalId: 'dev:other', displayName: 'Other', authMethod: 'development' })
     context.db.setRole(otherUser.id, 'User')
     const activeOther = context.db.getPrincipal(otherUser.id)!
-    context.service.assign(owner, activeOther.id, 'workspace', other.id)
-    context.service.assign(owner, activeOther.id, 'runtime', runtime.id)
-    const otherSession = context.service.createSession(activeOther, other.id, runtime.id, 'Other tools')
+    context.service.assign(owner, activeOther.id, other.id)
+    const otherSession = context.service.createSession(activeOther, other.id, 'goose', 'Other tools')
     await expect(context.service.invokeTool(activeOther, otherSession.id, server.id, 'read_file', {})).rejects.toThrow(AuthorizationDenied)
   })
 
@@ -82,7 +77,6 @@ describe('Papyrus control plane', () => {
   })
 
   it('runs an end-to-end session prompt and preserves audit integrity', async () => {
-    process.env.PAPYRUS_SECRET_PRIMARY = 'test-api-key'
     const factory = vi.fn((_options: GooseRuntimeOptions): RuntimeHandle => ({
       runPrompt: async (request) => {
         await request.onEvent({ kind: 'session', at: new Date().toISOString(), data: { runtimeSessionId: 'rt-1' } })
@@ -93,10 +87,9 @@ describe('Papyrus control plane', () => {
     }))
     const context = testContext(factory); contexts.push(context)
     try {
-      const { owner, user, workspace, runtime } = setup(context)
-      context.service.assign(owner, user.id, 'workspace', workspace.id)
-      context.service.assign(owner, user.id, 'runtime', runtime.id)
-      const session = context.service.createSession(user, workspace.id, runtime.id, 'E2E')
+      const { owner, user, workspace } = setup(context)
+      context.service.assign(owner, user.id, workspace.id)
+      const session = context.service.createSession(user, workspace.id, 'goose', 'E2E')
       const result = await context.service.prompt(user, session.id, 'hello')
       expect(result.stopReason).toBe('end_turn')
       expect(result.events.map((event) => event.kind)).toEqual(['session', 'update', 'complete'])
@@ -131,6 +124,5 @@ function setup(context: ReturnType<typeof testContext>) {
   context.db.setRole(user.id, 'User')
   const activeUser = context.db.getPrincipal(user.id)!
   const workspace = context.service.createWorkspace(activeOwner, { name: 'Mission', description: 'Segmented mission work' })
-  const runtime = context.service.createRuntime(activeOwner, { name: 'Local Goose', mode: 'child-process', model: { provider: 'openai-compatible', baseUrl: 'http://model.internal/v1', model: 'approved', secretRef: 'primary' } })
-  return { owner: activeOwner, user: activeUser, workspace, runtime }
+  return { owner: activeOwner, user: activeUser, workspace }
 }

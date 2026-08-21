@@ -3,6 +3,7 @@ import type { Workspace } from '@papyrus/contracts'
 import { api, AuthenticationRequired, loadShell, logout, type AuthenticationChallenge, type Health, type ShellData } from './api.js'
 import { SessionHarness } from './Sessions.js'
 import { SourcesView } from './Sources.js'
+import { AdminView } from './Admin.js'
 
 type View = 'home' | 'sessions' | 'workspaces' | 'sources' | 'administration'
 type AppState =
@@ -109,6 +110,7 @@ function ShellView({ view, data, onNavigate }: { view: View; data: ShellData; on
   if (view === 'sessions') return <SessionHarness workspaces={data.workspaces} />
   if (view === 'workspaces') return <WorkspaceCards items={data.workspaces} />
   if (view === 'sources') return <SourcesView />
+  if (view === 'administration') return <AdminView me={data.me} />
   return <article className="panel placeholder"><span>STACK PREVIEW</span><h2>{viewTitle(view)}</h2><p>{placeholder(view)}</p></article>
 }
 

@@ -19,6 +19,7 @@ function fakeRuntime(): AgentRuntime {
         kind: 'update', at: new Date().toISOString(),
         data: {
           sessionUpdate: 'tool_call', toolCallId: 'tool-1', title: 'Create briefing', kind: 'edit', status: 'completed',
+          locations: [{ path: 'https://example.mil/guidance?token=do-not-retain#evidence' }],
           content: [
             { type: 'diff', path: '/workspace/brief.md', oldText: null, newText: '# Brief\n\nPrepared.' },
             { type: 'content', content: { type: 'resource', resource: { uri: 'file:///workspace/evidence.txt', mimeType: 'text/plain', text: 'Evidence' } } },
@@ -87,6 +88,11 @@ describe('governed session HTTP API', () => {
       const downloaded = await request(artifactBody.artifacts[0]!.downloadUrl)
       expect(downloaded.headers.get('content-disposition')).toContain('brief.md')
       expect(await downloaded.text()).toContain('Prepared.')
+
+      const sources = await request(`/api/sessions/${session.id}/sources`)
+      expect(await sources.json()).toMatchObject({ sources: [{ sessionId: session.id, url: 'https://example.mil/guidance', host: 'example.mil' }] })
+      const allSources = await request('/api/sources')
+      expect((await allSources.json() as { sources: unknown[] }).sources).toHaveLength(1)
 
       expect((await request(`/api/sessions/${session.id}/close`, { method: 'POST' })).status).toBe(200)
       const blocked = await request(`/api/sessions/${session.id}/prompt`, {

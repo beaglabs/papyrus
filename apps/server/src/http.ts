@@ -5,7 +5,7 @@ import { extname, join, normalize } from 'node:path'
 import { ROLES, type Role, type SignedLicense } from '@papyrus/contracts'
 import { AuthService } from './auth.js'
 import type { ServerConfig } from './config.js'
-import { AuthorizationDenied, PapyrusService, SessionLifecycleError } from './service.js'
+import { ApprovalLifecycleError, AuthorizationDenied, PapyrusService, SessionLifecycleError } from './service.js'
 
 class HttpError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message) }
@@ -56,6 +56,11 @@ async function body(request: IncomingMessage): Promise<Record<string, unknown>> 
 function text(value: unknown, name: string, maximum = 256): string {
   if (typeof value !== 'string' || !value.trim() || value.length > maximum) throw new HttpError(400, 'INVALID_INPUT', `${name} is required and must not exceed ${maximum} characters`)
   return value.trim()
+}
+
+function boolean(value: unknown, name: string): boolean {
+  if (typeof value !== 'boolean') throw new HttpError(400, 'INVALID_INPUT', `${name} must be a boolean`)
+  return value
 }
 
 function naturalNumber(value: string | null, fallback: number, maximum: number, minimum = 0): number {
@@ -169,6 +174,7 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
       const principal = auth.authenticate(request)
       if (!principal) return unauthorized(response, auth)
       if (url.pathname === '/api/me' && request.method === 'GET') return json(response, 200, principal)
+      if (url.pathname === '/api/admin/overview' && request.method === 'GET') return json(response, 200, service.adminOverview(principal))
       if (url.pathname === '/api/auth/logout' && request.method === 'POST') {
         auth.revokeSessions(principal.id)
         response.writeHead(204, { 'set-cookie': auth.clearSessionCookie(), 'cache-control': 'no-store' })
@@ -254,6 +260,28 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
         const artifacts = service.sessionArtifacts(principal, decodeURIComponent(sessionArtifacts[1] as string))
         return json(response, 200, { artifacts: artifacts.map(({ content: _content, encoding: _encoding, ...artifact }) => artifact) })
       }
+      const sessionApprovals = url.pathname.match(/^\/api\/sessions\/([^/]+)\/approvals$/)
+      if (sessionApprovals && request.method === 'GET') {
+        return json(response, 200, { approvals: service.sessionApprovals(principal, decodeURIComponent(sessionApprovals[1] as string)) })
+      }
+      const sessionSources = url.pathname.match(/^\/api\/sessions\/([^/]+)\/sources$/)
+      if (sessionSources && request.method === 'GET') {
+        return json(response, 200, { sources: service.sessionSources(principal, decodeURIComponent(sessionSources[1] as string)) })
+      }
+      const approvalDecision = url.pathname.match(/^\/api\/sessions\/([^/]+)\/approvals\/([^/]+)\/decision$/)
+      if (approvalDecision && request.method === 'POST') {
+        const input = await body(request)
+        const decision = text(input.decision, 'decision')
+        if (decision !== 'approved' && decision !== 'denied') throw new HttpError(400, 'INVALID_INPUT', 'decision must be approved or denied')
+        const reason = typeof input.reason === 'string' && input.reason.trim() ? text(input.reason, 'reason', 2_000) : undefined
+        return json(response, 200, service.decideApproval(
+          principal,
+          decodeURIComponent(approvalDecision[1] as string),
+          decodeURIComponent(approvalDecision[2] as string),
+          decision,
+          reason,
+        ))
+      }
       const artifactFile = url.pathname.match(/^\/api\/sessions\/([^/]+)\/artifacts\/([^/]+)\/download$/)
       if (artifactFile && request.method === 'GET') {
         const artifacts = service.sessionArtifacts(principal, decodeURIComponent(artifactFile[1] as string))
@@ -290,9 +318,19 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
         return json(response, 201, service.addMcpServer(principal, { name: text(input.name, 'name'), endpoint: text(input.endpoint, 'endpoint', 2048) }))
       }
       if (url.pathname === '/api/mcp/servers' && request.method === 'GET') return json(response, 200, service.listMcpServers(principal))
+      const mcpServerState = url.pathname.match(/^\/api\/mcp\/servers\/([^/]+)\/state$/)
+      if (mcpServerState && request.method === 'POST') {
+        const input = await body(request)
+        return json(response, 200, service.setMcpServerEnabled(principal, decodeURIComponent(mcpServerState[1] as string), boolean(input.enabled, 'enabled')))
+      }
       if (url.pathname === '/api/mcp/grants' && request.method === 'POST') {
         const input = await body(request)
         service.grantTool(principal, text(input.workspaceId, 'workspaceId'), text(input.mcpServerId, 'mcpServerId'), text(input.toolName, 'toolName'))
+        return json(response, 204, null)
+      }
+      const revokeGrant = url.pathname.match(/^\/api\/mcp\/grants\/([^/]+)$/)
+      if (revokeGrant && request.method === 'DELETE') {
+        service.revokeToolGrant(principal, decodeURIComponent(revokeGrant[1] as string))
         return json(response, 204, null)
       }
       if (url.pathname === '/api/mcp/invoke' && request.method === 'POST') {
@@ -300,6 +338,7 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
         return json(response, 200, await service.invokeTool(principal, text(input.sessionId, 'sessionId'), text(input.mcpServerId, 'mcpServerId'), text(input.toolName, 'toolName'), input.arguments ?? {}))
       }
       if (url.pathname === '/api/activity' && request.method === 'GET') return json(response, 200, service.activity(principal))
+      if (url.pathname === '/api/sources' && request.method === 'GET') return json(response, 200, { sources: service.researchSources(principal) })
       if (url.pathname === '/api/audit' && request.method === 'GET') return json(response, 200, service.auditEvents(principal))
       if (url.pathname === '/api/audit/checkpoint' && request.method === 'GET') return json(response, 200, service.exportAuditCheckpoint(principal))
       if (url.pathname === '/api/license/activate' && request.method === 'POST') return json(response, 200, service.activateLicense(principal, await body(request) as unknown as SignedLicense))
@@ -312,6 +351,8 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
           ? 403
           : error instanceof SessionLifecycleError
             ? error.code === 'SESSION_NOT_FOUND' ? 404 : 409
+            : error instanceof ApprovalLifecycleError
+              ? error.code === 'APPROVAL_NOT_FOUND' ? 404 : 409
             : 500
       const code = error instanceof HttpError
         ? error.code
@@ -319,6 +360,8 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
           ? 'FORBIDDEN'
           : error instanceof SessionLifecycleError
             ? error.code
+            : error instanceof ApprovalLifecycleError
+              ? error.code
             : 'INTERNAL_ERROR'
       const message = status === 500 ? 'Internal server error' : error instanceof Error ? error.message : 'Request failed'
       if (status === 500) console.error(`[${requestId}]`, error)

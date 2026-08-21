@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import type { Artifact, Session, SessionEvent, SessionRun, Workspace } from '@papyrus/contracts'
-import { cancelSession, createSession, promptSession, resumeSession, sessionArtifacts, sessionEvents, sessionPage, sessionRuns } from './api.js'
+import type { Approval, Artifact, ResearchSource, Session, SessionEvent, SessionRun, Workspace } from '@papyrus/contracts'
+import { cancelSession, createSession, decideApproval, promptSession, resumeSession, sessionApprovals, sessionArtifacts, sessionEvents, sessionPage, sessionRuns, sessionSources } from './api.js'
+import { SourceList } from './Sources.js'
 
 interface ConversationMessage { id: string; role: 'user' | 'agent'; text: string; sequence: number }
 interface ToolActivity { id: string; title: string; kind: string; status: string; sequence: number; locations: string[] }
 interface PlanItem { content: string; status: string; priority: string }
-type SessionTab = 'conversation' | 'activity' | 'artifacts'
+type SessionTab = 'conversation' | 'activity' | 'approvals' | 'sources' | 'artifacts'
 
 export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
   const [sessions, setSessions] = useState<Session[]>([])
@@ -14,6 +15,8 @@ export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
   const [events, setEvents] = useState<SessionEvent[]>([])
   const [runs, setRuns] = useState<SessionRun[]>([])
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
+  const [approvals, setApprovals] = useState<Approval[]>([])
+  const [sources, setSources] = useState<ResearchSource[]>([])
   const [tab, setTab] = useState<SessionTab>('conversation')
   const [loading, setLoading] = useState(true)
   const [running, setRunning] = useState(false)
@@ -25,8 +28,8 @@ export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
   const activity = useMemo(() => projectActivity(events), [events])
 
   const loadContext = async (sessionId: string) => {
-    const [nextRuns, nextArtifacts] = await Promise.all([sessionRuns(sessionId), sessionArtifacts(sessionId)])
-    setRuns(nextRuns); setArtifacts(nextArtifacts)
+    const [nextRuns, nextArtifacts, nextApprovals, nextSources] = await Promise.all([sessionRuns(sessionId), sessionArtifacts(sessionId), sessionApprovals(sessionId), sessionSources(sessionId)])
+    setRuns(nextRuns); setArtifacts(nextArtifacts); setApprovals(nextApprovals); setSources(nextSources)
   }
 
   const loadSessions = async (cursor?: string) => {
@@ -39,7 +42,7 @@ export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
   useEffect(() => { void loadSessions().catch(showError).finally(() => setLoading(false)) }, [])
   useEffect(() => {
     streamRef.current?.close()
-    if (!selectedId) { setEvents([]); setRuns([]); setArtifacts([]); return }
+    if (!selectedId) { setEvents([]); setRuns([]); setArtifacts([]); setApprovals([]); setSources([]); return }
     let active = true
     void Promise.all([sessionEvents(selectedId), loadContext(selectedId)]).then(([history]) => {
       if (!active) return
@@ -49,6 +52,10 @@ export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
       stream.addEventListener('session_event', (message) => {
         const event = JSON.parse((message as MessageEvent<string>).data) as SessionEvent
         setEvents((current) => current.some((item) => item.sequence === event.sequence) ? current : [...current, event])
+        if (event.kind === 'approval') {
+          void loadContext(selectedId).catch(showError)
+          if ((event.data as { status?: string } | undefined)?.status === 'pending') setTab('approvals')
+        }
       })
       stream.onerror = () => setError('Live updates were interrupted. Papyrus will retry automatically.')
       streamRef.current = stream
@@ -83,6 +90,12 @@ export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
     try { await cancelSession(selectedId); setRunning(false); await loadSessions() } catch (cause) { showError(cause) }
   }
 
+  const reviewApproval = async (approvalId: string, decision: 'approved' | 'denied', reason?: string) => {
+    if (!selectedId) return
+    try { await decideApproval(selectedId, approvalId, decision, reason); await loadContext(selectedId) }
+    catch (cause) { showError(cause) }
+  }
+
   function showError(cause: unknown) { setError(cause instanceof Error ? cause.message : 'Session request failed') }
 
   return <section className="session-layout">
@@ -95,9 +108,11 @@ export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
       {error && <div className="error">{error}<button onClick={() => setError(undefined)}>×</button></div>}
       {creating && <form className="create-session" onSubmit={create}><div><strong>New governed session</strong><button type="button" className="icon-button" onClick={() => setCreating(false)}>×</button></div><label>Workspace<select name="workspace" required>{workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select></label><label>Session title<input name="title" required maxLength={256} autoFocus placeholder="Research current policy guidance" /></label><button className="primary" disabled={!workspaces.length}>Create session →</button></form>}
       {!selected ? <div className="conversation-empty"><h2>Start a governed session.</h2><p>Choose an authorized workspace, describe the work, and retain the complete history on the server.</p><button className="primary" disabled={!workspaces.length} onClick={() => setCreating(true)}>New session →</button></div> : <>
-        <div className="conversation-head"><div><strong>{selected.title}</strong><span>{selected.status} · {workspaceName(workspaces, selected.workspaceId)}</span></div><div className="session-actions"><div className="session-tabs">{(['conversation', 'activity', 'artifacts'] as SessionTab[]).map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item}{item === 'artifacts' && artifacts.length ? ` ${artifacts.length}` : ''}</button>)}</div>{running && <button className="danger" onClick={() => void cancel()}>Cancel run</button>}</div></div>
+        <div className="conversation-head"><div><strong>{selected.title}</strong><span>{selected.status} · {workspaceName(workspaces, selected.workspaceId)}</span></div><div className="session-actions"><div className="session-tabs">{(['conversation', 'activity', 'approvals', 'sources', 'artifacts'] as SessionTab[]).map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item}{item === 'approvals' && approvals.filter((approval) => approval.status === 'pending').length ? ` ${approvals.filter((approval) => approval.status === 'pending').length}` : item === 'sources' && sources.length ? ` ${sources.length}` : item === 'artifacts' && artifacts.length ? ` ${artifacts.length}` : ''}</button>)}</div>{(running || selected.status === 'running') && <button className="danger" onClick={() => void cancel()}>Cancel run</button>}</div></div>
         {tab === 'conversation' && <div className="messages" aria-live="polite">{messages.length ? messages.map((message) => <article className={`message ${message.role}`} key={message.id}><span>{message.role === 'user' ? 'YOU' : 'PAPYRUS'}</span><p>{message.text}</p></article>) : <div className="conversation-empty compact"><h2>What work should Papyrus begin?</h2><p>The runtime and tools are selected by deployment policy.</p></div>}{running && <div className="working"><span className="dot good" />Working under policy…</div>}</div>}
         {tab === 'activity' && <ActivityView plan={activity.plan} tools={activity.tools} runs={runs} />}
+        {tab === 'approvals' && <ApprovalView approvals={approvals} onDecision={reviewApproval} />}
+        {tab === 'sources' && <SourceList sources={sources} />}
         {tab === 'artifacts' && <ArtifactView artifacts={artifacts} />}
         <form className="composer" onSubmit={send}><textarea name="prompt" required disabled={running} placeholder="Describe the work to perform…" onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} /><div><span>Enter to submit · Shift+Enter for a new line</span><button className="primary" disabled={running}>{running ? 'Running…' : 'Send →'}</button></div></form>
       </>}
@@ -150,4 +165,20 @@ function ActivityView({ plan, tools, runs }: { plan: PlanItem[]; tools: ToolActi
 
 function ArtifactView({ artifacts }: { artifacts: Artifact[] }) {
   return <div className="artifact-view">{artifacts.length ? artifacts.map((artifact) => <article key={artifact.id}><div className={`artifact-icon ${artifact.kind}`}>{artifact.kind === 'diff' ? 'Δ' : '↧'}</div><div><strong>{artifact.name}</strong><span>{artifact.mediaType} · version {artifact.version} · {new Date(artifact.createdAt).toLocaleString()}</span></div><a className="secondary" href={artifact.downloadUrl}>Download</a></article>) : <div className="conversation-empty"><h2>No artifacts yet.</h2><p>Embedded resources and file results emitted by governed tools will appear here with durable versions.</p></div>}</div>
+}
+
+function ApprovalView({ approvals, onDecision }: { approvals: Approval[]; onDecision: (id: string, decision: 'approved' | 'denied', reason?: string) => Promise<void> }) {
+  const pending = approvals.filter((approval) => approval.status === 'pending')
+  const history = approvals.filter((approval) => approval.status !== 'pending')
+  return <div className="approval-view">
+    <section><div className="section-label">REQUIRES HUMAN DECISION</div>{pending.length ? <div className="approval-list">{pending.map((approval) => <ApprovalCard key={approval.id} approval={approval} onDecision={onDecision} />)}</div> : <div className="empty">No tool calls are waiting for approval.</div>}</section>
+    <section><div className="section-label">DECISION HISTORY</div>{history.length ? <div className="approval-list history">{history.map((approval) => <article key={approval.id}><div><strong>{approval.toolTitle}</strong><span>Requested {new Date(approval.requestedAt).toLocaleString()}{approval.decidedAt ? ` · decided ${new Date(approval.decidedAt).toLocaleString()}` : ''}</span>{approval.reason && <p>{approval.reason}</p>}</div><span className={`pill ${approval.status}`}>{approval.status}</span></article>)}</div> : <div className="empty">No approval decisions have been recorded.</div>}</section>
+  </div>
+}
+
+function ApprovalCard({ approval, onDecision }: { approval: Approval; onDecision: (id: string, decision: 'approved' | 'denied', reason?: string) => Promise<void> }) {
+  const [reason, setReason] = useState('')
+  const [saving, setSaving] = useState(false)
+  const decide = async (decision: 'approved' | 'denied') => { setSaving(true); try { await onDecision(approval.id, decision, reason) } finally { setSaving(false) } }
+  return <article className="approval-card"><div><span className="approval-kicker">TOOL PERMISSION</span><strong>{approval.toolTitle}</strong><span>Requested {new Date(approval.requestedAt).toLocaleString()}</span></div><label>Decision rationale (optional)<textarea value={reason} maxLength={2000} onChange={(event) => setReason(event.target.value)} placeholder="Why is this action appropriate or denied?" /></label><div className="approval-actions"><button className="danger" disabled={saving} onClick={() => void decide('denied')}>Deny</button><button className="primary" disabled={saving} onClick={() => void decide('approved')}>{saving ? 'Saving…' : 'Approve'}</button></div></article>
 }

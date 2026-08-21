@@ -41,12 +41,18 @@ describe('fixed Cedar policy', () => {
     }
 
     // A User may only operate their own session; an Auditor may read but not execute.
-    for (const action of ['ReadSession', 'PromptSession', 'CancelSession', 'CloseSession', 'ResumeSession'] as const) {
+    for (const action of ['ReadSession', 'PromptSession', 'CancelSession', 'CloseSession', 'ResumeSession', 'DecideApproval'] as const) {
       expect(policy.authorize(user, action, session).allowed, `User ${action}`).toBe(true)
       expect(policy.authorize(principal('other', ['User']), action, session).allowed, `Other ${action}`).toBe(false)
     }
     expect(policy.authorize(auditor, 'ReadSession', session).allowed).toBe(true)
     expect(policy.authorize(auditor, 'PromptSession', session).allowed).toBe(false)
+    const browser = { type: 'Tool' as const, id: 'chrome:browser', attrs: { assignedUsers: cedarUsers(['user']) } }
+    expect(policy.authorize(user, 'BrowserNavigate', browser).allowed).toBe(true)
+    expect(policy.authorize(user, 'BrowserRead', browser).allowed).toBe(true)
+    for (const action of ['BrowserExecute', 'BrowserDownload', 'BrowserUpload', 'BrowserCredential', 'BrowserSubmit'] as const) {
+      expect(policy.authorize(user, action, browser).allowed, `User ${action}`).toBe(false)
+    }
   })
 })
 

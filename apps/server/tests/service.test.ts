@@ -19,7 +19,7 @@ describe('Papyrus control plane', () => {
     const context = testContext(); contexts.push(context)
     const { owner, user, environment } = setup(context)
     context.service.assign(owner, user.id, environment.id)
-    const session = context.service.createSession(user, environment.id, 'goose', 'Allowed')
+    const session = context.service.createSession(user, environment.id, 'papyrus', 'Allowed')
     expect(session.ownerId).toBe(user.id)
     expect(context.service.listSessions(user)).toEqual([session])
     expect(context.service.audit.verify()).toEqual({ valid: true })
@@ -39,8 +39,8 @@ describe('Papyrus control plane', () => {
     const { owner, user, environment } = setup(context)
     const other = context.service.createEnvironment(owner, { name: 'Other', description: '' })
     context.service.assign(owner, user.id, environment.id)
-    const session = context.service.createSession(user, environment.id, 'goose', 'Mine')
-    expect(() => context.service.createSession(user, other.id, 'goose', 'Cross')).toThrow(AuthorizationDenied)
+    const session = context.service.createSession(user, environment.id, 'papyrus', 'Mine')
+    expect(() => context.service.createSession(user, other.id, 'papyrus', 'Cross')).toThrow(AuthorizationDenied)
     expect(context.service.listSessions(user)).toEqual([session])
   })
 
@@ -49,7 +49,7 @@ describe('Papyrus control plane', () => {
     const { owner, user, environment } = setup(context)
     context.service.assign(owner, user.id, environment.id)
     const server = context.db.addMcpServer({ name: 'Tools', endpoint: 'http://tools.internal/mcp', oauthStatus: 'not_required' })
-    const session = context.service.createSession(user, environment.id, 'goose', 'Tools')
+    const session = context.service.createSession(user, environment.id, 'papyrus', 'Tools')
 
     // A registered server is unavailable until it is explicitly enabled for the environment.
     await expect(context.service.invokeTool(user, session.id, server.id, 'delete_everything', {})).rejects.toThrow(AuthorizationDenied)
@@ -62,7 +62,7 @@ describe('Papyrus control plane', () => {
     context.db.setRole(otherUser.id, 'User')
     const activeOther = context.db.getPrincipal(otherUser.id)!
     context.service.assign(owner, activeOther.id, other.id)
-    const otherSession = context.service.createSession(activeOther, other.id, 'goose', 'Other tools')
+    const otherSession = context.service.createSession(activeOther, other.id, 'papyrus', 'Other tools')
     await expect(context.service.invokeTool(activeOther, otherSession.id, server.id, 'read_file', {})).rejects.toThrow(AuthorizationDenied)
   })
 
@@ -93,7 +93,7 @@ describe('Papyrus control plane', () => {
     try {
       const { owner, user, environment } = setup(context)
       context.service.assign(owner, user.id, environment.id)
-      const session = context.service.createSession(user, environment.id, 'goose', 'E2E')
+      const session = context.service.createSession(user, environment.id, 'papyrus', 'E2E')
       const result = await context.service.prompt(user, session.id, 'hello')
       expect(result.stopReason).toBe('end_turn')
       expect(result.events.map((event) => event.kind)).toEqual(['session', 'update', 'complete'])

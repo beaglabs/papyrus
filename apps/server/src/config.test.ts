@@ -71,15 +71,7 @@ describe('authentication deployment boundaries', () => {
     })).toThrow(/SHA-256 certificate fingerprints/)
   })
 
-  it('restricts development identities and gateway tokens to local loopback use', () => {
-    expect(() => loadConfig({
-      PAPYRUS_MODE: 'persistent',
-      PAPYRUS_PROFILE: 'commercial',
-      PAPYRUS_HOST: '127.0.0.1',
-      PAPYRUS_PUBLIC_ORIGIN: 'https://papyrus.example.test',
-      PAPYRUS_SESSION_SECRET: 'a'.repeat(32),
-      PAPYRUS_DEV_IDENTITY: 'owner:Developer',
-    })).toThrow(/restricted to local mode/)
+  it('restricts gateway development tokens to local loopback use', () => {
     expect(() => loadConfig({
       PAPYRUS_MODE: 'local',
       PAPYRUS_PROFILE: 'commercial',

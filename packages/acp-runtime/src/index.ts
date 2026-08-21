@@ -28,12 +28,6 @@ export interface RuntimeEvent {
   data: unknown
 }
 
-export interface RuntimeMcpServer {
-  name: string
-  url: string
-  headers?: Array<{ name: string; value: string }>
-}
-
 export interface RuntimeTool {
   name: string
   description?: string
@@ -44,7 +38,6 @@ export interface RuntimePromptRequest {
   cwd: string
   prompt: string | acp.ContentBlock[]
   environment?: Record<string, string>
-  mcpServers?: RuntimeMcpServer[]
   tools?: RuntimeTool[]
   invokeTool?: (name: string, args: Record<string, unknown>) => Promise<unknown>
   authorizeTool: (title: string) => Promise<boolean>
@@ -69,64 +62,9 @@ export interface RuntimeLaunchOptions {
   fetch?: typeof globalThis.fetch | undefined
 }
 
-export interface RuntimeLaunchSpec {
-  kind: string
-  command: string
-  args: string[]
-  environment(): Record<string, string>
-}
-
 export interface AgentRuntime {
   readonly kind: string
   readonly capabilities: RuntimeCapabilities
   health(): Promise<RuntimeHealth>
   runPrompt(request: RuntimePromptRequest): Promise<RuntimePromptResult>
 }
-
-export interface RuntimeAdapter {
-  readonly kind: string
-  create(options?: RuntimeLaunchOptions): AgentRuntime
-}
-
-export class RuntimeRegistry {
-  private readonly adapters = new Map<string, RuntimeAdapter>()
-
-  constructor(adapters: Iterable<RuntimeAdapter> = []) {
-    for (const adapter of adapters) this.register(adapter)
-  }
-
-  register(adapter: RuntimeAdapter): this {
-    const kind = adapter.kind.trim()
-    if (!kind) throw new Error('Runtime adapter kind is required')
-    if (this.adapters.has(kind)) throw new Error(`Runtime adapter "${kind}" is already registered`)
-    this.adapters.set(kind, adapter)
-    return this
-  }
-
-  has(kind: string): boolean {
-    return this.adapters.has(kind)
-  }
-
-  kinds(): string[] {
-    return [...this.adapters.keys()].sort()
-  }
-
-  create(kind: string, options: RuntimeLaunchOptions = {}): AgentRuntime {
-    const adapter = this.adapters.get(kind)
-    if (!adapter) throw new Error(`Unknown runtime adapter "${kind}"`)
-    const runtime = adapter.create(options)
-    if (runtime.kind !== kind) {
-      throw new Error(`Runtime adapter "${kind}" created mismatched runtime "${runtime.kind}"`)
-    }
-    return runtime
-  }
-}
-
-export { runAcpPrompt } from './session.js'
-export {
-  RuntimeProcessExitError,
-  STDIO_RUNTIME_CAPABILITIES,
-  StdioAcpRuntime,
-  type RuntimeProcessExit,
-  type StdioRuntimeOptions,
-} from './stdio.js'

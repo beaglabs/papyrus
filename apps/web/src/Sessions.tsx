@@ -22,7 +22,9 @@ export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
   const [running, setRunning] = useState(false)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string>()
+  const [followingLatest, setFollowingLatest] = useState(true)
   const streamRef = useRef<EventSource | null>(null)
+  const messagesRef = useRef<HTMLDivElement | null>(null)
   const selected = sessions.find((session) => session.id === selectedId)
   const messages = useMemo(() => conversation(events), [events])
   const activity = useMemo(() => projectActivity(events), [events])
@@ -41,7 +43,13 @@ export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
 
   useEffect(() => { void loadSessions().catch(showError).finally(() => setLoading(false)) }, [])
   useEffect(() => {
+    if (tab !== 'conversation' || !followingLatest) return
+    const frame = requestAnimationFrame(() => messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' }))
+    return () => cancelAnimationFrame(frame)
+  }, [messages, running, tab, followingLatest])
+  useEffect(() => {
     streamRef.current?.close()
+    setFollowingLatest(true)
     if (!selectedId) { setEvents([]); setRuns([]); setArtifacts([]); setApprovals([]); setSources([]); return }
     let active = true
     void Promise.all([sessionEvents(selectedId), loadContext(selectedId)]).then(([history]) => {
@@ -109,7 +117,13 @@ export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
       {creating && <form className="create-session" onSubmit={create}><div><strong>New governed session</strong><button type="button" className="icon-button" onClick={() => setCreating(false)}>×</button></div><label>Workspace<select name="workspace" required>{workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select></label><label>Session title<input name="title" required maxLength={256} autoFocus placeholder="Research current policy guidance" /></label><button className="primary" disabled={!workspaces.length}>Create session →</button></form>}
       {!selected ? <div className="conversation-empty"><h2>Start a governed session.</h2><p>Choose an authorized workspace, describe the work, and retain the complete history on the server.</p><button className="primary" disabled={!workspaces.length} onClick={() => setCreating(true)}>New session →</button></div> : <>
         <div className="conversation-head"><div><strong>{selected.title}</strong><span>{selected.status} · {workspaceName(workspaces, selected.workspaceId)}</span></div><div className="session-actions"><div className="session-tabs">{(['conversation', 'activity', 'approvals', 'sources', 'artifacts'] as SessionTab[]).map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item}{item === 'approvals' && approvals.filter((approval) => approval.status === 'pending').length ? ` ${approvals.filter((approval) => approval.status === 'pending').length}` : item === 'sources' && sources.length ? ` ${sources.length}` : item === 'artifacts' && artifacts.length ? ` ${artifacts.length}` : ''}</button>)}</div>{(running || selected.status === 'running') && <button className="danger" onClick={() => void cancel()}>Cancel run</button>}</div></div>
-        {tab === 'conversation' && <div className="messages" aria-live="polite">{messages.length ? messages.map((message) => <article className={`message ${message.role}`} key={message.id}><span>{message.role === 'user' ? 'YOU' : 'PAPYRUS'}</span><p>{message.text}</p></article>) : <div className="conversation-empty compact"><h2>What work should Papyrus begin?</h2><p>The runtime and tools are selected by deployment policy.</p></div>}{running && <div className="working"><span className="dot good" />Working under policy…</div>}</div>}
+        {tab === 'conversation' && <div className="message-region">
+          <div className="messages" ref={messagesRef} aria-live="polite" onScroll={(event) => {
+            const element = event.currentTarget
+            setFollowingLatest(element.scrollHeight - element.scrollTop - element.clientHeight < 72)
+          }}>{messages.length ? messages.map((message) => <article className={`message ${message.role}`} key={message.id}><span>{message.role === 'user' ? 'YOU' : 'PAPYRUS'}</span><p>{message.text}</p></article>) : <div className="conversation-empty compact"><h2>What work should Papyrus begin?</h2><p>The runtime and tools are selected by deployment policy.</p></div>}{running && <div className="working"><span className="dot good" />Working under policy…</div>}</div>
+          {!followingLatest && <button className="jump-latest" onClick={() => { setFollowingLatest(true); messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' }) }}>Jump to latest ↓</button>}
+        </div>}
         {tab === 'activity' && <ActivityView plan={activity.plan} tools={activity.tools} runs={runs} />}
         {tab === 'approvals' && <ApprovalView approvals={approvals} onDecision={reviewApproval} />}
         {tab === 'sources' && <SourceList sources={sources} />}

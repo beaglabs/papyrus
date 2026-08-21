@@ -53,6 +53,19 @@ export interface SessionEvent {
   data: unknown
 }
 
+export interface Artifact {
+  id: string
+  sessionId: string
+  runId?: string
+  name: string
+  kind: 'resource' | 'diff'
+  mediaType: string
+  version: number
+  sequence: number
+  createdAt: string
+  downloadUrl: string
+}
+
 export interface McpServer {
   id: string
   name: string

@@ -54,7 +54,7 @@ describe('governed session HTTP API', () => {
     ctx.db.setRole(owner.id, 'Owner')
     const principal = ctx.db.getPrincipal(owner.id)!
     const environment = ctx.service.createEnvironment(principal, { name: 'Files', description: '' })
-    const session = ctx.service.createSession(principal, environment.id, 'goose', 'Attachment test')
+    const session = ctx.service.createSession(principal, environment.id, 'papyrus', 'Attachment test')
     const authorization = `Bearer ${ctx.auth.issueSession(principal.id)}`
     const server = createPapyrusServer(ctx.config, ctx.service, ctx.auth)
     server.listen(0, '127.0.0.1'); await once(server, 'listening')
@@ -93,7 +93,7 @@ describe('governed session HTTP API', () => {
     const activeUser = ctx.db.getPrincipal(user.id)!
     const environment = ctx.service.createEnvironment(activeOwner, { name: 'Mission', description: '' })
     ctx.service.assign(activeOwner, activeUser.id, environment.id)
-    const session = ctx.service.createSession(activeUser, environment.id, 'goose', 'HTTP')
+    const session = ctx.service.createSession(activeUser, environment.id, 'papyrus', 'HTTP')
     const authorization = `Bearer ${ctx.auth.issueSession(activeUser.id)}`
     const server = createPapyrusServer(ctx.config, ctx.service, ctx.auth)
     server.listen(0, '127.0.0.1')
@@ -159,8 +159,8 @@ describe('governed session HTTP API', () => {
     const activeUser = ctx.db.getPrincipal(user.id)!
     const environment = ctx.service.createEnvironment(activeOwner, { name: 'Web', description: '' })
     ctx.service.assign(activeOwner, activeUser.id, environment.id)
-    const first = ctx.service.createSession(activeUser, environment.id, 'goose', 'First')
-    ctx.service.createSession(activeUser, environment.id, 'goose', 'Second')
+    const first = ctx.service.createSession(activeUser, environment.id, 'papyrus', 'First')
+    ctx.service.createSession(activeUser, environment.id, 'papyrus', 'Second')
     await ctx.service.prompt(activeUser, first.id, 'hello')
 
     const authorization = `Bearer ${ctx.auth.issueSession(activeUser.id)}`
@@ -176,7 +176,7 @@ describe('governed session HTTP API', () => {
         body: JSON.stringify({ environmentId: environment.id, title: 'Browser session' }),
       })
       expect(created.status).toBe(201)
-      expect(await created.json()).toMatchObject({ title: 'Browser session', agent: 'goose' })
+      expect(await created.json()).toMatchObject({ title: 'Browser session', agent: 'papyrus' })
 
       const page = await fetch(`${origin}/api/sessions?limit=1`, { headers })
       const pageBody = await page.json() as { sessions: unknown[]; nextCursor?: string }

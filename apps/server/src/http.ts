@@ -178,6 +178,13 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
         return json(response, 200, await service.proxyMcp(token, decodeURIComponent(runtimeMcp[1] as string), decodeURIComponent(runtimeMcp[2] as string), await body(request)))
       }
 
+      // The web shell must load before authentication so it can render the
+      // appropriate login experience. Only API routes use structured 401s.
+      if (!url.pathname.startsWith('/api/')) {
+        if (request.method !== 'GET' && request.method !== 'HEAD') throw new HttpError(404, 'NOT_FOUND', 'Endpoint not found')
+        return serveWeb(url.pathname, response, request.method === 'HEAD')
+      }
+
       const principal = auth.authenticate(request)
       if (!principal) return unauthorized(response, auth)
       if (url.pathname === '/api/me' && request.method === 'GET') return json(response, 200, principal)
@@ -349,8 +356,7 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
       if (url.pathname === '/api/audit' && request.method === 'GET') return json(response, 200, service.auditEvents(principal))
       if (url.pathname === '/api/audit/checkpoint' && request.method === 'GET') return json(response, 200, service.exportAuditCheckpoint(principal))
       if (url.pathname === '/api/license/activate' && request.method === 'POST') return json(response, 200, service.activateLicense(principal, await body(request) as unknown as SignedLicense))
-      if (url.pathname.startsWith('/api/')) throw new HttpError(404, 'NOT_FOUND', 'Endpoint not found')
-      return serveWeb(url.pathname, response)
+      throw new HttpError(404, 'NOT_FOUND', 'Endpoint not found')
     } catch (error) {
       const status = error instanceof HttpError
         ? error.status
@@ -388,7 +394,7 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
   return createHttpServer((request, response) => { void handler(request, response) })
 }
 
-function serveWeb(pathname: string, response: ServerResponse): void {
+function serveWeb(pathname: string, response: ServerResponse, head = false): void {
   const webRoot = join(import.meta.dirname, '../../web/dist')
   const requested = pathname === '/' ? 'index.html' : normalize(pathname).replace(/^(\.\.[/\\])+/, '').replace(/^[/\\]/, '')
   const file = join(webRoot, requested)
@@ -396,11 +402,11 @@ function serveWeb(pathname: string, response: ServerResponse): void {
     const content = readFileSync(file)
     const types: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' }
     response.writeHead(200, { 'content-type': types[extname(file)] ?? 'application/octet-stream', 'x-content-type-options': 'nosniff' })
-    response.end(content)
+    response.end(head ? undefined : content)
   } catch {
     try {
       const content = readFileSync(join(webRoot, 'index.html'))
-      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'x-content-type-options': 'nosniff' }); response.end(content)
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'x-content-type-options': 'nosniff' }); response.end(head ? undefined : content)
     } catch { throw new HttpError(404, 'NOT_FOUND', 'Web UI has not been built') }
   }
 }

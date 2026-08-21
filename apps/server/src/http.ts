@@ -258,6 +258,10 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
       if (sessionApprovals && request.method === 'GET') {
         return json(response, 200, { approvals: service.sessionApprovals(principal, decodeURIComponent(sessionApprovals[1] as string)) })
       }
+      const sessionSources = url.pathname.match(/^\/api\/sessions\/([^/]+)\/sources$/)
+      if (sessionSources && request.method === 'GET') {
+        return json(response, 200, { sources: service.sessionSources(principal, decodeURIComponent(sessionSources[1] as string)) })
+      }
       const approvalDecision = url.pathname.match(/^\/api\/sessions\/([^/]+)\/approvals\/([^/]+)\/decision$/)
       if (approvalDecision && request.method === 'POST') {
         const input = await body(request)
@@ -318,6 +322,7 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
         return json(response, 200, await service.invokeTool(principal, text(input.sessionId, 'sessionId'), text(input.mcpServerId, 'mcpServerId'), text(input.toolName, 'toolName'), input.arguments ?? {}))
       }
       if (url.pathname === '/api/activity' && request.method === 'GET') return json(response, 200, service.activity(principal))
+      if (url.pathname === '/api/sources' && request.method === 'GET') return json(response, 200, { sources: service.researchSources(principal) })
       if (url.pathname === '/api/audit' && request.method === 'GET') return json(response, 200, service.auditEvents(principal))
       if (url.pathname === '/api/audit/checkpoint' && request.method === 'GET') return json(response, 200, service.exportAuditCheckpoint(principal))
       if (url.pathname === '/api/license/activate' && request.method === 'POST') return json(response, 200, service.activateLicense(principal, await body(request) as unknown as SignedLicense))

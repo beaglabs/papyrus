@@ -43,7 +43,7 @@ describe('durable human approval HTTP API', () => {
     const activeUser = ctx.db.getPrincipal(user.id)!
     const environment = ctx.service.createEnvironment(activeOwner, { name: 'Approvals', description: '' })
     ctx.service.assign(activeOwner, activeUser.id, environment.id)
-    const mcp = ctx.service.addMcpServer(activeOwner, { name: 'Records', endpoint: 'http://127.0.0.1:9999' })
+    const mcp = ctx.db.addMcpServer({ name: 'Records', endpoint: 'http://127.0.0.1:9999', oauthStatus: 'not_required' })
     ctx.service.grantMcpServer(activeOwner, environment.id, mcp.id)
     const session = ctx.service.createSession(activeUser, environment.id, 'goose', 'Approval review')
     const authorization = `Bearer ${ctx.auth.issueSession(activeUser.id)}`

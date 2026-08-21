@@ -66,6 +66,19 @@ export interface Artifact {
   downloadUrl: string
 }
 
+export interface Approval {
+  id: string
+  sessionId: string
+  runId: string
+  requesterId: string
+  toolTitle: string
+  status: 'pending' | 'approved' | 'denied' | 'cancelled'
+  requestedAt: string
+  decidedAt?: string
+  decidedBy?: string
+  reason?: string
+}
+
 export interface McpServer {
   id: string
   name: string

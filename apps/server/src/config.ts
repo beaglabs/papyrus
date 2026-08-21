@@ -70,6 +70,15 @@ function parseOrigin(name: string, value: string): string {
   return url.origin
 }
 
+function parseHttpBaseUrl(name: string, value: string): string {
+  const url = new URL(value)
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+    throw new Error(`${name} must be an HTTP(S) base URL without a query, fragment, or credentials`)
+  }
+  const path = url.pathname.replace(/\/+$/, '')
+  return `${url.origin}${path === '/' ? '' : path}`
+}
+
 function validateOidcUrl(name: string, value: string, mode: ServerMode): URL {
   const url = new URL(value)
   if (url.username || url.password || url.search || url.hash) throw new Error(`${name} must not include credentials, a query, or a fragment`)
@@ -210,7 +219,7 @@ export function loadConfig(env = process.env): ServerConfig {
     Object.assign(licenseAuthorities, JSON.parse(env.PAPYRUS_LICENSE_AUTHORITIES_JSON) as Record<string, string>)
   }
   const model = env.PAPYRUS_MODEL_ENDPOINT ? {
-    endpoint: parseOrigin('PAPYRUS_MODEL_ENDPOINT', env.PAPYRUS_MODEL_ENDPOINT),
+    endpoint: parseHttpBaseUrl('PAPYRUS_MODEL_ENDPOINT', env.PAPYRUS_MODEL_ENDPOINT),
     model: required('PAPYRUS_MODEL', env.PAPYRUS_MODEL),
     ...(env.PAPYRUS_MODEL_API_KEY ? { apiKey: env.PAPYRUS_MODEL_API_KEY } : {}),
   } : undefined

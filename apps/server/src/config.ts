@@ -172,6 +172,9 @@ export function loadConfig(env = process.env): ServerConfig {
   if (mode === 'persistent' && profile === 'commercial' && !oidc && !identityProxy) {
     throw new Error('Persistent commercial mode requires OIDC or a trusted identity proxy')
   }
+  if (profile === 'commercial' && !oidc && !identityProxy && !isLoopback(new URL(publicOrigin).hostname)) {
+    throw new Error('Remote commercial access requires OIDC or a trusted identity proxy; development authentication is loopback-only')
+  }
 
   const runtimeWorkerTls = env.PAPYRUS_RUNTIME_MTLS_CERT ? {
     certPath: env.PAPYRUS_RUNTIME_MTLS_CERT,

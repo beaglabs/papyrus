@@ -90,6 +90,17 @@ export interface Approval {
   reason?: string
 }
 
+export interface Elicitation {
+  id: string
+  sessionId: string
+  runId: string
+  status: 'pending' | 'accepted' | 'declined' | 'cancelled'
+  request: Record<string, unknown>
+  response?: Record<string, unknown>
+  requestedAt: string
+  respondedAt?: string
+}
+
 export interface ResearchSource {
   id: string
   sessionId: string

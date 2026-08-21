@@ -1,11 +1,11 @@
 import { readFileSync } from 'node:fs'
 import { Agent as HttpsAgent } from 'node:https'
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
-import type { ActivitySummary, Approval, McpServer, Principal, ResearchSource, Role, Session, SessionEvent, SessionRun, SignedLicense, Workspace } from '@papyrus/contracts'
+import type { ActivitySummary, AdminOverview, Approval, McpServer, Principal, ResearchSource, Role, Session, SessionEvent, SessionRun, SignedLicense, Workspace } from '@papyrus/contracts'
 import type { AgentRuntime, RuntimeEvent, RuntimeLaunchOptions } from '@papyrus/acp-runtime'
 import { gooseRuntimeAdapter } from '@papyrus/goose-runtime'
 import { resolveAgentSpec } from './agents.js'
-import { connectorPolicyAction } from './catalog.js'
+import { RUNTIME_PROFILES, connectorPolicyAction } from './catalog.js'
 import { AuditLog } from './audit.js'
 import { projectArtifacts, type ProjectedArtifact } from './artifacts.js'
 import { projectResearchSources } from './sources.js'
@@ -330,10 +330,46 @@ export class PapyrusService {
     return this.db.listMcpServers()
   }
 
+  setMcpServerEnabled(actor: Principal, serverId: string, enabled: boolean): McpServer {
+    this.check(actor, 'ManageTools', { type: 'Deployment', id: this.license.deploymentId })
+    const server = this.db.setMcpServerEnabled(serverId, enabled)
+    if (!server) throw new Error('MCP server not found')
+    this.audit.append({ actorId: actor.id, action: 'SetMcpServerEnabled', resourceType: 'McpServer', resourceId: serverId, decision: 'info', metadata: { enabled } })
+    return server
+  }
+
   grantTool(actor: Principal, workspaceId: string, mcpServerId: string, toolName: string): void {
     this.check(actor, 'ManageTools', { type: 'Deployment', id: this.license.deploymentId })
     this.db.grantTool(workspaceId, mcpServerId, toolName)
     this.audit.append({ actorId: actor.id, action: 'GrantTool', resourceType: 'Tool', resourceId: `${mcpServerId}:${toolName}`, decision: 'info', metadata: { workspaceId } })
+  }
+
+  revokeToolGrant(actor: Principal, grantId: string): void {
+    this.check(actor, 'ManageTools', { type: 'Deployment', id: this.license.deploymentId })
+    if (!this.db.revokeToolGrant(grantId)) throw new Error('Tool grant not found')
+    this.audit.append({ actorId: actor.id, action: 'RevokeTool', resourceType: 'ToolGrant', resourceId: grantId, decision: 'info', metadata: {} })
+  }
+
+  adminOverview(actor: Principal): AdminOverview {
+    this.check(actor, 'ManageUsers', { type: 'Deployment', id: this.license.deploymentId })
+    const configuredAgents = this.config.agents ?? {}
+    const agentIds = [...new Set(['goose', 'opencode', ...Object.keys(configuredAgents)])]
+    const defaultAgent = this.defaultGatewayAgent()
+    return {
+      deployment: {
+        mode: this.config.mode, profile: this.config.profile, publicOrigin: this.config.publicOrigin,
+        oidcConfigured: Boolean(this.config.oidc), mtlsConfigured: Boolean(this.config.tls),
+        identityProxyConfigured: Boolean(this.config.identityProxy), gatewayConfigured: Boolean(this.config.gateway),
+        licenseRequired: this.config.licenseRequired,
+      },
+      users: this.db.listPrincipals(),
+      workspaces: this.db.listWorkspaces().map((workspace) => ({ ...workspace, assignedUserIds: this.db.assignedUserIds('workspace', workspace.id) })),
+      mcpServers: this.db.listMcpServers(), toolGrants: this.db.listToolGrants(),
+      runtimeProfiles: Object.entries(RUNTIME_PROFILES).map(([id, profile]) => ({ id, label: profile.label, command: profile.command, args: [...profile.args], source: profile.source })),
+      agents: agentIds.map((id) => ({ id, profile: configuredAgents[id]?.profile ?? id, isDefault: id === defaultAgent })),
+      connectors: (this.config.connectors ?? []).map((connector) => ({ id: connector.id, label: connector.label, package: connector.package, source: connector.source, operations: { ...connector.operations } })),
+      license: this.license.status(),
+    }
   }
 
   async invokeTool(actor: Principal, sessionId: string, mcpServerId: string, toolName: string, args: unknown): Promise<unknown> {

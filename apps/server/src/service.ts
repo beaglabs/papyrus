@@ -57,7 +57,7 @@ export class PapyrusService {
   constructor(
     readonly db: PapyrusDatabase,
     private readonly config: ServerConfig,
-    private readonly runtimeFactory: RuntimeFactory = (options) => new PapyrusWorker({ ...config.model, promptTimeoutMs: options.promptTimeoutMs }),
+    private readonly runtimeFactory: RuntimeFactory = (options) => new PapyrusWorker({ ...config.model, ...(options.promptTimeoutMs === undefined ? {} : { promptTimeoutMs: options.promptTimeoutMs }) }),
   ) {
     this.audit = new AuditLog(db)
     this.license = new LicenseService(db, config.dataDir, config.profile, config.licenseAuthorities, config.licenseRequired)

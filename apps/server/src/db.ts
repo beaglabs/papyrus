@@ -79,7 +79,14 @@ export class PapyrusDatabase {
       );
       CREATE TABLE IF NOT EXISTS mcp_servers (
         id TEXT PRIMARY KEY, name TEXT NOT NULL, transport TEXT NOT NULL CHECK(transport = 'http'),
-        endpoint TEXT NOT NULL, enabled INTEGER NOT NULL, created_at TEXT NOT NULL
+        endpoint TEXT NOT NULL, enabled INTEGER NOT NULL, created_at TEXT NOT NULL,
+        oauth_status TEXT NOT NULL DEFAULT 'not_required', oauth_issuer TEXT, oauth_error TEXT,
+        oauth_access_token TEXT, oauth_refresh_token TEXT, oauth_expires_at TEXT
+      );
+      CREATE TABLE IF NOT EXISTS mcp_oauth_pending (
+        state TEXT PRIMARY KEY, server_id TEXT NOT NULL REFERENCES mcp_servers(id), actor_id TEXT NOT NULL REFERENCES users(id),
+        issuer TEXT NOT NULL, token_endpoint TEXT NOT NULL, client_id TEXT NOT NULL, client_secret TEXT,
+        verifier TEXT NOT NULL, redirect_uri TEXT NOT NULL, resource TEXT NOT NULL, created_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS tool_grants (
         id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
@@ -111,6 +118,10 @@ export class PapyrusDatabase {
     const eventColumns = this.sqlite.prepare('PRAGMA table_info(runtime_events)').all() as Row[]
     if (!eventColumns.some((column) => column.name === 'run_id')) {
       this.sqlite.exec('ALTER TABLE runtime_events ADD COLUMN run_id TEXT REFERENCES session_runs(id)')
+    }
+    const mcpColumns = this.sqlite.prepare('PRAGMA table_info(mcp_servers)').all() as Row[]
+    for (const [name, definition] of Object.entries({ oauth_status: "TEXT NOT NULL DEFAULT 'not_required'", oauth_issuer: 'TEXT', oauth_error: 'TEXT', oauth_access_token: 'TEXT', oauth_refresh_token: 'TEXT', oauth_expires_at: 'TEXT' })) {
+      if (!mcpColumns.some((column) => column.name === name)) this.sqlite.exec(`ALTER TABLE mcp_servers ADD COLUMN ${name} ${definition}`)
     }
     this.sqlite.prepare("UPDATE assignments SET resource_type='environment' WHERE resource_type='workspace'").run()
     this.sqlite.exec(`
@@ -440,20 +451,20 @@ export class PapyrusDatabase {
     }
   }
 
-  addMcpServer(input: Pick<McpServer, 'name' | 'endpoint'>): McpServer {
-    const server: McpServer = { id: crypto.randomUUID(), name: input.name, endpoint: input.endpoint, transport: 'http', enabled: true, createdAt: new Date().toISOString() }
-    this.sqlite.prepare('INSERT INTO mcp_servers VALUES(?,?,?,?,?,?)').run(server.id, server.name, server.transport, server.endpoint, 1, server.createdAt)
+  addMcpServer(input: Pick<McpServer, 'name' | 'endpoint'> & Pick<McpServer, 'oauthStatus' | 'oauthIssuer' | 'oauthError'>): McpServer {
+    const server: McpServer = { id: crypto.randomUUID(), name: input.name, endpoint: input.endpoint, transport: 'http', enabled: input.oauthStatus === 'not_required', oauthStatus: input.oauthStatus, ...(input.oauthIssuer ? { oauthIssuer: input.oauthIssuer } : {}), ...(input.oauthError ? { oauthError: input.oauthError } : {}), createdAt: new Date().toISOString() }
+    this.sqlite.prepare('INSERT INTO mcp_servers(id,name,transport,endpoint,enabled,created_at,oauth_status,oauth_issuer,oauth_error) VALUES(?,?,?,?,?,?,?,?,?)').run(server.id, server.name, server.transport, server.endpoint, server.enabled ? 1 : 0, server.createdAt, server.oauthStatus, server.oauthIssuer ?? null, server.oauthError ?? null)
     return server
   }
 
   getMcpServer(id: string): McpServer | undefined {
     const row = this.sqlite.prepare('SELECT * FROM mcp_servers WHERE id=?').get(id) as Row | undefined
-    return row ? { id: String(row.id), name: String(row.name), transport: 'http', endpoint: String(row.endpoint), enabled: Boolean(row.enabled), createdAt: String(row.created_at) } : undefined
+    return row ? this.mcpServer(row) : undefined
   }
 
   listMcpServers(): McpServer[] {
     const rows = this.sqlite.prepare('SELECT * FROM mcp_servers ORDER BY name').all() as Row[]
-    return rows.map((row) => ({ id: String(row.id), name: String(row.name), transport: 'http', endpoint: String(row.endpoint), enabled: Boolean(row.enabled), createdAt: String(row.created_at) }))
+    return rows.map((row) => this.mcpServer(row))
   }
 
   setMcpServerEnabled(id: string, enabled: boolean): McpServer | undefined {
@@ -484,6 +495,29 @@ export class PapyrusDatabase {
   listGrantedMcpServers(environmentId: string): McpServer[] {
     const rows = this.sqlite.prepare(`SELECT DISTINCT s.* FROM mcp_servers s JOIN tool_grants g ON g.mcp_server_id=s.id
       WHERE g.workspace_id=? AND s.enabled=1`).all(environmentId) as Row[]
-    return rows.map((row) => ({ id: String(row.id), name: String(row.name), transport: 'http', endpoint: String(row.endpoint), enabled: true, createdAt: String(row.created_at) }))
+    return rows.map((row) => this.mcpServer(row))
+  }
+
+  createMcpOauthPending(input: { state: string; serverId: string; actorId: string; issuer: string; tokenEndpoint: string; clientId: string; clientSecret?: string; verifier: string; redirectUri: string; resource: string }): void {
+    this.sqlite.prepare('INSERT INTO mcp_oauth_pending VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(input.state, input.serverId, input.actorId, input.issuer, input.tokenEndpoint, input.clientId, input.clientSecret ?? null, input.verifier, input.redirectUri, input.resource, new Date().toISOString())
+  }
+
+  getMcpOauthPending(state: string): Row | undefined { return this.sqlite.prepare('SELECT * FROM mcp_oauth_pending WHERE state=?').get(state) as Row | undefined }
+  finishMcpOauth(state: string, accessToken: string, refreshToken: string | undefined, expiresAt: string | undefined): McpServer | undefined {
+    const pending = this.getMcpOauthPending(state); if (!pending) return undefined
+    this.transaction(() => {
+      this.sqlite.prepare("UPDATE mcp_servers SET enabled=1,oauth_status='connected',oauth_error=NULL,oauth_access_token=?,oauth_refresh_token=?,oauth_expires_at=? WHERE id=?").run(accessToken, refreshToken ?? null, expiresAt ?? null, String(pending.server_id))
+      this.sqlite.prepare('DELETE FROM mcp_oauth_pending WHERE state=?').run(state)
+    })
+    return this.getMcpServer(String(pending.server_id))
+  }
+
+  mcpAccessToken(serverId: string): string | undefined {
+    const row = this.sqlite.prepare("SELECT oauth_access_token token FROM mcp_servers WHERE id=? AND oauth_status='connected'").get(serverId) as Row | undefined
+    return row?.token ? String(row.token) : undefined
+  }
+
+  private mcpServer(row: Row): McpServer {
+    return { id: String(row.id), name: String(row.name), transport: 'http', endpoint: String(row.endpoint), enabled: Boolean(row.enabled), oauthStatus: String(row.oauth_status ?? 'not_required') as McpServer['oauthStatus'], ...(row.oauth_issuer ? { oauthIssuer: String(row.oauth_issuer) } : {}), ...(row.oauth_error ? { oauthError: String(row.oauth_error) } : {}), createdAt: String(row.created_at) }
   }
 }

@@ -12,6 +12,25 @@ function fakeRuntime(): AgentRuntime {
     health: async () => ({ available: true }),
     runPrompt: async (request) => {
       await request.onEvent({
+        kind: 'update', at: new Date().toISOString(),
+        data: { sessionUpdate: 'plan', entries: [{ content: 'Prepare briefing', status: 'in_progress', priority: 'high' }] },
+      })
+      await request.onEvent({
+        kind: 'update', at: new Date().toISOString(),
+        data: {
+          sessionUpdate: 'tool_call', toolCallId: 'tool-1', title: 'Create briefing', kind: 'edit', status: 'completed',
+          locations: [{ path: 'https://example.mil/guidance?token=do-not-retain#evidence' }],
+          content: [
+            { type: 'diff', path: '/workspace/brief.md', oldText: null, newText: '# Brief\n\nPrepared.' },
+            { type: 'content', content: { type: 'resource', resource: { uri: 'file:///workspace/evidence.txt', mimeType: 'text/plain', text: 'Evidence' } } },
+          ],
+        },
+      })
+      await request.onEvent({
+        kind: 'update', at: new Date().toISOString(),
+        data: { sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', status: 'completed', content: [{ type: 'diff', path: '/workspace/brief.md', oldText: '# Brief\n\nPrepared.', newText: '# Brief\n\nPrepared and reviewed.' }] },
+      })
+      await request.onEvent({
         kind: 'update',
         at: new Date().toISOString(),
         data: {
@@ -62,6 +81,19 @@ describe('governed session HTTP API', () => {
       const runs = await request(`/api/sessions/${session.id}/runs`)
       expect((await runs.json() as { runs: Array<{ status: string }> }).runs[0]?.status).toBe('completed')
 
+      const artifacts = await request(`/api/sessions/${session.id}/artifacts`)
+      const artifactBody = await artifacts.json() as { artifacts: Array<{ id: string; name: string; version: number; downloadUrl: string }> }
+      expect(artifactBody.artifacts.map((artifact) => artifact.name)).toEqual(['brief.md', 'evidence.txt', 'brief.md'])
+      expect(artifactBody.artifacts.filter((artifact) => artifact.name === 'brief.md').map((artifact) => artifact.version)).toEqual([1, 2])
+      const downloaded = await request(artifactBody.artifacts[0]!.downloadUrl)
+      expect(downloaded.headers.get('content-disposition')).toContain('brief.md')
+      expect(await downloaded.text()).toContain('Prepared.')
+
+      const sources = await request(`/api/sessions/${session.id}/sources`)
+      expect(await sources.json()).toMatchObject({ sources: [{ sessionId: session.id, url: 'https://example.mil/guidance', host: 'example.mil' }] })
+      const allSources = await request('/api/sources')
+      expect((await allSources.json() as { sources: unknown[] }).sources).toHaveLength(1)
+
       expect((await request(`/api/sessions/${session.id}/close`, { method: 'POST' })).status).toBe(200)
       const blocked = await request(`/api/sessions/${session.id}/prompt`, {
         method: 'POST',
@@ -72,6 +104,60 @@ describe('governed session HTTP API', () => {
 
       expect((await request(`/api/sessions/${session.id}/resume`, { method: 'POST' })).status).toBe(200)
       expect(ctx.db.getSession(session.id)?.status).toBe('ready')
+    } finally {
+      server.close()
+      await once(server, 'close')
+      ctx.dispose()
+    }
+  })
+
+  it('provides paginated session detail and a resumable event stream', async () => {
+    const ctx = testContext(() => fakeRuntime())
+    const owner = ctx.db.upsertUser({ externalId: 'oidc:owner-web', displayName: 'Owner', authMethod: 'oidc' })
+    ctx.db.setRole(owner.id, 'Owner')
+    const activeOwner = ctx.db.getPrincipal(owner.id)!
+    const user = ctx.db.upsertUser({ externalId: 'oidc:user-web', displayName: 'User', authMethod: 'oidc' })
+    ctx.db.setRole(user.id, 'User')
+    const activeUser = ctx.db.getPrincipal(user.id)!
+    const workspace = ctx.service.createWorkspace(activeOwner, { name: 'Web', description: '' })
+    ctx.service.assign(activeOwner, activeUser.id, workspace.id)
+    const first = ctx.service.createSession(activeUser, workspace.id, 'goose', 'First')
+    ctx.service.createSession(activeUser, workspace.id, 'goose', 'Second')
+    await ctx.service.prompt(activeUser, first.id, 'hello')
+
+    const authorization = `Bearer ${ctx.auth.issueSession(activeUser.id)}`
+    const server = createPapyrusServer(ctx.config, ctx.service, ctx.auth)
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+    const headers = { authorization }
+
+    try {
+      const created = await fetch(`${origin}/api/sessions`, {
+        method: 'POST', headers: { ...headers, 'content-type': 'application/json' },
+        body: JSON.stringify({ workspaceId: workspace.id, title: 'Browser session' }),
+      })
+      expect(created.status).toBe(201)
+      expect(await created.json()).toMatchObject({ title: 'Browser session', agent: 'goose' })
+
+      const page = await fetch(`${origin}/api/sessions?limit=1`, { headers })
+      const pageBody = await page.json() as { sessions: unknown[]; nextCursor?: string }
+      expect(pageBody.sessions).toHaveLength(1)
+      expect(pageBody.nextCursor).toBeTruthy()
+
+      const detail = await fetch(`${origin}/api/sessions/${first.id}`, { headers })
+      expect(await detail.json()).toMatchObject({ id: first.id, title: 'First' })
+
+      const controller = new AbortController()
+      const stream = await fetch(`${origin}/api/sessions/${first.id}/events/stream`, {
+        headers,
+        signal: controller.signal,
+      })
+      expect(stream.status).toBe(200)
+      expect(stream.headers.get('content-type')).toContain('text/event-stream')
+      const chunk = await stream.body!.getReader().read()
+      expect(new TextDecoder().decode(chunk.value)).toContain('event: session_event')
+      controller.abort()
     } finally {
       server.close()
       await once(server, 'close')

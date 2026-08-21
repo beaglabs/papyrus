@@ -67,7 +67,7 @@ h2 { font-size: 19px; margin-bottom: 20px; }
 .placeholder h2 { font-size: 40px; margin: 10px 0; }
 .with-handling-banner > main { overflow: hidden; }
 .with-handling-banner > main > header { flex: 0 0 auto; }
-.session-layout { flex: 1 1 0; height: 0; min-height: 0; display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); overflow: hidden; border: 2px solid #111; box-shadow: 5px 5px 0 #111; background: #fff; }
+.session-layout { flex: 1 1 0; height: 0; min-height: 0; display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); overflow: hidden; border: 2px solid #111; box-shadow: 5px 5px 0 #111; background: #fff; }
 .session-sidebar { position: static; height: auto; padding: 0; background: #f0ece2; color: #111; border: 0; border-right: 2px solid #111; overflow: hidden; display: flex; flex-direction: column; }
 .session-sidebar-head, .conversation-head { min-height: 64px; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 2px solid #111; }
 .icon-button { border: 1px solid #111; background: #ff5f1f; width: 32px; height: 32px; cursor: pointer; font-weight: 800; }

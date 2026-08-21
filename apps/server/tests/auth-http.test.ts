@@ -33,7 +33,7 @@ describe('daemon authentication HTTP contract', () => {
       expect(await response.json()).toEqual({
         error: 'authentication_required',
         code: 'UNAUTHENTICATED',
-        methods: ['oidc'],
+        methods: ['oidc', 'development'],
         login_url: 'http://127.0.0.1:3210/api/auth/oidc/start',
         native_start_url: 'http://127.0.0.1:3210/api/auth/oidc/native/start',
       })
@@ -58,21 +58,26 @@ describe('daemon authentication HTTP contract', () => {
     })
   })
 
-  it('allows a local development identity to sign out and explicitly return', async () => {
+  it('issues a normal revocable session for an explicit local development login', async () => {
     await withServer(async (origin, ctx) => {
-      ctx.config.devIdentity = 'owner:Local Owner'
-      expect((await fetch(`${origin}/api/me`)).status).toBe(200)
+      expect((await fetch(`${origin}/api/me`)).status).toBe(401)
+      const login = await fetch(`${origin}/api/auth/development`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Local Owner' }),
+      })
+      expect(login.status).toBe(200)
+      expect(await login.json()).toMatchObject({ displayName: 'Local Owner', roles: [], authMethod: 'development' })
+      const cookie = login.headers.get('set-cookie')!.split(';')[0]!
+      expect((await fetch(`${origin}/api/me`, { headers: { cookie } })).status).toBe(200)
 
-      const logout = await fetch(`${origin}/api/auth/logout`, { method: 'POST' })
+      const logout = await fetch(`${origin}/api/auth/logout`, { method: 'POST', headers: { cookie } })
       expect(logout.status).toBe(204)
-      expect(logout.headers.getSetCookie().join(';')).toContain('papyrus_dev_signed_out=1')
-      const signedOutCookie = 'papyrus_dev_signed_out=1'
-      expect((await fetch(`${origin}/api/me`, { headers: { cookie: signedOutCookie } })).status).toBe(401)
+      expect((await fetch(`${origin}/api/me`, { headers: { cookie } })).status).toBe(401)
 
-      const login = await fetch(`${origin}/api/auth/development`, { method: 'POST', headers: { cookie: signedOutCookie } })
-      expect(login.status).toBe(204)
-      expect(login.headers.get('set-cookie')).toContain('papyrus_dev_signed_out=;')
-      expect((await fetch(`${origin}/api/me`)).status).toBe(200)
+      const returned = await fetch(`${origin}/api/auth/development`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Local Owner' }),
+      })
+      expect(returned.status).toBe(200)
+      expect((await returned.json() as { id: string }).id).toBe((ctx.db.listPrincipals()[0]!).id)
     })
   })
 })

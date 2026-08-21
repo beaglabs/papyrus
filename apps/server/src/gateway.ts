@@ -53,7 +53,7 @@ function resolveWorkspace(service: PapyrusService, principal: Principal, headerV
 function resolveRequestWorkspace(service: PapyrusService, config: ServerConfig, request: IncomingMessage, principal: Principal): Workspace | undefined {
   const workspace = resolveWorkspace(service, principal, request.headers['x-papyrus-workspace-id'])
   if (workspace) return workspace
-  if (!config.devIdentity || singleHeader(request.headers['x-papyrus-workspace-id'])) return undefined
+  if (!config.gateway?.devToken || singleHeader(request.headers['x-papyrus-workspace-id'])) return undefined
   const existing = service.listWorkspaces(principal)
   if (existing.length >= 1) return existing[0]
   const created = service.db.createWorkspace({ name: 'default', description: 'Auto-created dev workspace' })
@@ -156,7 +156,7 @@ export function createGatewayServer(config: ServerConfig, service: PapyrusServic
 
     const principal = authenticate(config, service, auth, request)
     if (!principal) {
-      json(response, 401, auth.challenge(), { 'www-authenticate': 'Bearer realm="Papyrus"' })
+      json(response, 401, auth.challenge(false), { 'www-authenticate': 'Bearer realm="Papyrus"' })
       return
     }
 
@@ -205,7 +205,6 @@ export function createGatewayServer(config: ServerConfig, service: PapyrusServic
       })
       return
     }
-
     pendingInitializations += 1
     let settled = false
     const settleInitialization = (completed: boolean): void => {

@@ -85,20 +85,27 @@ export class AuthService {
     return `${name}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0; Priority=High${secure ? '; Secure' : ''}`
   }
 
-  developmentSignedOutCookie(): string {
-    return 'papyrus_dev_signed_out=1; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800; Priority=High'
+  developmentEnabled(): boolean {
+    return this.config.mode === 'local' && ['127.0.0.1', '::1'].includes(this.config.host)
   }
 
-  clearDevelopmentSignedOutCookie(): string {
-    return 'papyrus_dev_signed_out=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0; Priority=High'
+  developmentPrincipal(name: string): Principal {
+    if (!this.developmentEnabled()) throw new Error('Development authentication is not available')
+    const normalized = name.trim().replace(/\s+/g, ' ')
+    if (!normalized || normalized.length > 128) throw new Error('Development identity name is invalid')
+    return this.db.upsertUser({
+      externalId: `dev:${normalized.toLowerCase()}`,
+      displayName: normalized,
+      authMethod: 'development',
+    })
   }
 
-  challenge(): AuthenticationChallenge {
+  challenge(includeDevelopment = true): AuthenticationChallenge {
     const methods: AuthenticationMethod[] = []
     if (this.config.oidc) methods.push('oidc')
     if (this.config.profile.startsWith('government')) methods.push('mtls')
     if (this.config.identityProxy) methods.push('mtls-proxy')
-    if (this.config.devIdentity) methods.push('development')
+    if (includeDevelopment && this.developmentEnabled()) methods.push('development')
     return {
       error: 'authentication_required',
       code: 'UNAUTHENTICATED',
@@ -116,15 +123,6 @@ export class AuthService {
   }
 
   authenticate(request: IncomingMessage): Principal | undefined {
-    if (this.config.devIdentity) {
-      if (this.cookie(request, 'papyrus_dev_signed_out') === '1') return undefined
-      const parts = this.config.devIdentity.split(':')
-      const principal = this.db.upsertUser({ externalId: `dev:${parts[0]}`, displayName: parts[1] ?? parts[0] ?? 'Developer', authMethod: 'development' })
-      const role = ({ owner: 'Owner', admin: 'Admin', auditor: 'Auditor', user: 'User' } as const)[(parts[0] ?? '').toLowerCase() as 'owner' | 'admin' | 'auditor' | 'user'] ?? 'User'
-      this.db.setRole(principal.id, role)
-      return this.db.getPrincipal(principal.id)
-    }
-
     const forwarded = this.principalFromTrustedProxy(request)
     if (forwarded) return forwarded
     if (this.config.profile.startsWith('government')) return this.principalFromSocket(request.socket as TLSSocket)

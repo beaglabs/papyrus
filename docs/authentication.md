@@ -57,7 +57,10 @@ forwarding it. Papyrus does not accept forwarded subject or email headers.
 
 ## Development credentials
 
-`PAPYRUS_DEV_IDENTITY` and `PAPYRUS_GATEWAY_DEV_TOKEN` are local-mode,
-loopback-only features. Gateway tokens must contain at least 32 characters and
+The web UI exposes an explicit development sign-in form only in local mode on
+a loopback listener. It issues the same revocable session cookie as other web
+authentication flows; identities and roles are never taken from environment
+variables. `PAPYRUS_GATEWAY_DEV_TOKEN` remains a local-mode, loopback-only
+daemon-client feature. Gateway tokens must contain at least 32 characters and
 are accepted only through `Authorization: Bearer` or `X-Secret-Key`.
 `GOOSE_SERVER__SECRET_KEY` and URL query tokens are not authentication inputs.

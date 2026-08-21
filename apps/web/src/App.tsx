@@ -85,11 +85,21 @@ function SignedOut({ health, challenge }: { health: Health; challenge: Authentic
   const oidc = challenge.methods.includes('oidc') && challenge.login_url
   return <><HandlingBanner profile={health.profile} /><main className="center login auth-entry"><Logo /><p className="eyebrow">GOVERNED AGENT WORKSPACE</p><h1>Identity before<br />authority.</h1><p>Papyrus binds every session, tool request, and policy decision to an authenticated organizational identity.</p><div className="auth-grid">
     {oidc && <a className="primary" href={challenge.login_url}>Continue with organizational login →</a>}
-    {challenge.methods.includes('development') && <button className="primary" onClick={() => void developmentLogin().then(() => window.location.reload())}>Continue with development identity →</button>}
+    {challenge.methods.includes('development') && <DevelopmentLogin />}
     {government && <article className="profile-card"><strong>CAC/PIV authentication</strong><p>Insert your card, select its authentication certificate when prompted, then reload this page.</p><button className="secondary" onClick={() => window.location.reload()}>Retry certificate authentication</button></article>}
     {challenge.methods.includes('mtls-proxy') && <article className="profile-card"><strong>Trusted identity gateway</strong><p>Open Papyrus through your organization’s authorized access gateway.</p></article>}
     {challenge.methods.length === 0 && <div className="error">This deployment has no configured authentication method.</div>}
   </div></main></>
+}
+
+function DevelopmentLogin() {
+  const [error, setError] = useState<string>()
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); const form = new FormData(event.currentTarget)
+    try { await developmentLogin(String(form.get('name'))); window.location.reload() }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Development sign-in failed') }
+  }
+  return <article className="profile-card"><strong>Local development sign-in</strong><p>Create or return to a loopback-only test identity. Roles are assigned through bootstrap and Administration—not environment variables.</p><form className="stack" onSubmit={submit}><input name="name" required maxLength={128} autoComplete="username" placeholder="Your name" /><button className="primary">Continue locally →</button></form>{error && <div className="error">{error}</div>}</article>
 }
 
 function Bootstrap({ me, onDone }: { me: string; onDone: () => Promise<void> }) {

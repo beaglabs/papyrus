@@ -5,7 +5,7 @@ import { extname, join, normalize } from 'node:path'
 import { ROLES, type Role, type SignedLicense } from '@papyrus/contracts'
 import { AuthService } from './auth.js'
 import type { ServerConfig } from './config.js'
-import { AuthorizationDenied, PapyrusService, SessionLifecycleError } from './service.js'
+import { ApprovalLifecycleError, AuthorizationDenied, PapyrusService, SessionLifecycleError } from './service.js'
 
 class HttpError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message) }
@@ -254,6 +254,24 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
         const artifacts = service.sessionArtifacts(principal, decodeURIComponent(sessionArtifacts[1] as string))
         return json(response, 200, { artifacts: artifacts.map(({ content: _content, encoding: _encoding, ...artifact }) => artifact) })
       }
+      const sessionApprovals = url.pathname.match(/^\/api\/sessions\/([^/]+)\/approvals$/)
+      if (sessionApprovals && request.method === 'GET') {
+        return json(response, 200, { approvals: service.sessionApprovals(principal, decodeURIComponent(sessionApprovals[1] as string)) })
+      }
+      const approvalDecision = url.pathname.match(/^\/api\/sessions\/([^/]+)\/approvals\/([^/]+)\/decision$/)
+      if (approvalDecision && request.method === 'POST') {
+        const input = await body(request)
+        const decision = text(input.decision, 'decision')
+        if (decision !== 'approved' && decision !== 'denied') throw new HttpError(400, 'INVALID_INPUT', 'decision must be approved or denied')
+        const reason = typeof input.reason === 'string' && input.reason.trim() ? text(input.reason, 'reason', 2_000) : undefined
+        return json(response, 200, service.decideApproval(
+          principal,
+          decodeURIComponent(approvalDecision[1] as string),
+          decodeURIComponent(approvalDecision[2] as string),
+          decision,
+          reason,
+        ))
+      }
       const artifactFile = url.pathname.match(/^\/api\/sessions\/([^/]+)\/artifacts\/([^/]+)\/download$/)
       if (artifactFile && request.method === 'GET') {
         const artifacts = service.sessionArtifacts(principal, decodeURIComponent(artifactFile[1] as string))
@@ -312,6 +330,8 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
           ? 403
           : error instanceof SessionLifecycleError
             ? error.code === 'SESSION_NOT_FOUND' ? 404 : 409
+            : error instanceof ApprovalLifecycleError
+              ? error.code === 'APPROVAL_NOT_FOUND' ? 404 : 409
             : 500
       const code = error instanceof HttpError
         ? error.code
@@ -319,6 +339,8 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
           ? 'FORBIDDEN'
           : error instanceof SessionLifecycleError
             ? error.code
+            : error instanceof ApprovalLifecycleError
+              ? error.code
             : 'INTERNAL_ERROR'
       const message = status === 500 ? 'Internal server error' : error instanceof Error ? error.message : 'Request failed'
       if (status === 500) console.error(`[${requestId}]`, error)

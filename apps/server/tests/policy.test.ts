@@ -12,9 +12,9 @@ describe('fixed Cedar policy', () => {
   })
 
   it('allows an assigned User and denies an unassigned User', () => {
-    const workspace = { type: 'Workspace' as const, id: 'w', attrs: { assignedUsers: cedarUsers(['alice']) } }
-    expect(policy.authorize(principal('alice', ['User']), 'CreateSession', workspace).allowed).toBe(true)
-    expect(policy.authorize(principal('mallory', ['User']), 'CreateSession', workspace).allowed).toBe(false)
+    const environment = { type: 'Environment' as const, id: 'w', attrs: { assignedUsers: cedarUsers(['alice']) } }
+    expect(policy.authorize(principal('alice', ['User']), 'CreateSession', environment).allowed).toBe(true)
+    expect(policy.authorize(principal('mallory', ['User']), 'CreateSession', environment).allowed).toBe(false)
   })
 
   it('enforces session ownership', () => {
@@ -56,4 +56,4 @@ describe('fixed Cedar policy', () => {
   })
 })
 
-const auditorActions: PolicyAction[] = ['ReadAudit', 'ReadActivity', 'ReadSession', 'ReadWorkspace']
+const auditorActions: PolicyAction[] = ['ReadAudit', 'ReadActivity', 'ReadSession', 'ReadEnvironment']

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { Agent as HttpsAgent } from 'node:https'
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
-import type { ActivitySummary, AdminOverview, Approval, Attachment, McpServer, Principal, ResearchSource, Role, Session, SessionEvent, SessionRun, SignedLicense, Workspace } from '@papyrus/contracts'
+import type { ActivitySummary, AdminOverview, Approval, Attachment, Environment, McpServer, Principal, ResearchSource, Role, Session, SessionEvent, SessionRun, SignedLicense } from '@papyrus/contracts'
 import type { ContentBlock } from '@agentclientprotocol/sdk'
 import type { AgentRuntime, RuntimeEvent, RuntimeLaunchOptions } from '@papyrus/acp-runtime'
 import { gooseRuntimeAdapter } from '@papyrus/goose-runtime'
@@ -109,34 +109,34 @@ export class PapyrusService {
     return this.db.listPrincipals()
   }
 
-  createWorkspace(actor: Principal, input: Pick<Workspace, 'name' | 'description'>): Workspace {
+  createEnvironment(actor: Principal, input: Pick<Environment, 'name' | 'description'>): Environment {
     this.license.require('gateway')
-    this.check(actor, 'ManageWorkspaces', { type: 'Deployment', id: this.license.deploymentId })
-    const workspace = this.db.createWorkspace(input)
-    this.db.assign('user', actor.id, 'workspace', workspace.id)
-    this.audit.append({ actorId: actor.id, action: 'CreateWorkspace', resourceType: 'Workspace', resourceId: workspace.id, decision: 'info', metadata: { name: workspace.name } })
-    return workspace
+    this.check(actor, 'ManageEnvironments', { type: 'Deployment', id: this.license.deploymentId })
+    const environment = this.db.createEnvironment(input)
+    this.db.assign('user', actor.id, 'environment', environment.id)
+    this.audit.append({ actorId: actor.id, action: 'CreateEnvironment', resourceType: 'Environment', resourceId: environment.id, decision: 'info', metadata: { name: environment.name } })
+    return environment
   }
 
-  listWorkspaces(actor: Principal): Workspace[] {
-    return this.db.listWorkspaces().filter((workspace) => this.decide(actor, 'ReadWorkspace', this.workspaceResource(workspace.id)).allowed)
+  listEnvironments(actor: Principal): Environment[] {
+    return this.db.listEnvironments().filter((environment) => this.decide(actor, 'ReadEnvironment', this.environmentResource(environment.id)).allowed)
   }
 
   assign(actor: Principal, principalId: string, resourceId: string): void {
     this.check(actor, 'AssignResources', { type: 'Deployment', id: this.license.deploymentId })
-    this.db.assign('user', principalId, 'workspace', resourceId)
-    this.audit.append({ actorId: actor.id, action: 'AssignResource', resourceType: 'workspace', resourceId, decision: 'info', metadata: { principalId } })
+    this.db.assign('user', principalId, 'environment', resourceId)
+    this.audit.append({ actorId: actor.id, action: 'AssignResource', resourceType: 'Environment', resourceId, decision: 'info', metadata: { principalId } })
   }
 
-  createSession(actor: Principal, workspaceId: string, agent: string, title: string, cwd = '/'): Session {
+  createSession(actor: Principal, environmentId: string, agent: string, title: string, cwd = '/'): Session {
     this.license.require('gateway')
-    this.check(actor, 'CreateSession', this.workspaceResource(workspaceId))
-    if (!this.db.getWorkspace(workspaceId)) throw new Error('Workspace not found')
+    this.check(actor, 'CreateSession', this.environmentResource(environmentId))
+    if (!this.db.getEnvironment(environmentId)) throw new Error('Environment not found')
     const spec = resolveAgentSpec(agent, this.config.agents)
     if (!spec) throw new Error(`Unknown agent "${agent}"`)
     if (!isAbsoluteClientPath(cwd)) throw new Error('Session cwd must be an absolute path')
-    const session = this.db.createSession(actor.id, workspaceId, agent, title, cwd)
-    this.audit.append({ actorId: actor.id, action: 'CreateSession', resourceType: 'Session', resourceId: session.id, decision: 'info', metadata: { workspaceId, agent, cwd } })
+    const session = this.db.createSession(actor.id, environmentId, agent, title, cwd)
+    this.audit.append({ actorId: actor.id, action: 'CreateSession', resourceType: 'Session', resourceId: session.id, decision: 'info', metadata: { environmentId, agent, cwd } })
     return session
   }
 
@@ -385,10 +385,12 @@ export class PapyrusService {
     return server
   }
 
-  grantTool(actor: Principal, workspaceId: string, mcpServerId: string, toolName: string): void {
+  grantMcpServer(actor: Principal, environmentId: string, mcpServerId: string): void {
     this.check(actor, 'ManageTools', { type: 'Deployment', id: this.license.deploymentId })
-    this.db.grantTool(workspaceId, mcpServerId, toolName)
-    this.audit.append({ actorId: actor.id, action: 'GrantTool', resourceType: 'Tool', resourceId: `${mcpServerId}:${toolName}`, decision: 'info', metadata: { workspaceId } })
+    if (!this.db.getEnvironment(environmentId)) throw new Error('Environment not found')
+    if (!this.db.getMcpServer(mcpServerId)) throw new Error('MCP server not found')
+    this.db.grantMcpServer(environmentId, mcpServerId)
+    this.audit.append({ actorId: actor.id, action: 'GrantMcpServer', resourceType: 'McpServer', resourceId: mcpServerId, decision: 'info', metadata: { environmentId } })
   }
 
   revokeToolGrant(actor: Principal, grantId: string): void {
@@ -404,13 +406,14 @@ export class PapyrusService {
     const agentIds = [...new Set([defaultAgent, ...Object.keys(configuredAgents)])]
     return {
       deployment: {
-        mode: this.config.mode, profile: this.config.profile, publicOrigin: this.config.publicOrigin,
-        oidcConfigured: Boolean(this.config.oidc), mtlsConfigured: Boolean(this.config.tls),
+        topology: 'on-premises', profile: this.config.profile, publicOrigin: this.config.publicOrigin,
+        authentication: this.config.profile.startsWith('government') ? 'mtls' : this.config.oidc ? 'oidc' : this.config.identityProxy ? 'trusted-proxy' : 'loopback-development',
+        mtlsConfigured: Boolean(this.config.tls),
         identityProxyConfigured: Boolean(this.config.identityProxy), gatewayConfigured: Boolean(this.config.gateway),
         licenseRequired: this.config.licenseRequired,
       },
       users: this.db.listPrincipals(),
-      workspaces: this.db.listWorkspaces().map((workspace) => ({ ...workspace, assignedUserIds: this.db.assignedUserIds('workspace', workspace.id) })),
+      environments: this.db.listEnvironments().map((environment) => ({ ...environment, assignedUserIds: this.db.assignedUserIds('environment', environment.id) })),
       mcpServers: this.db.listMcpServers(), toolGrants: this.db.listToolGrants(),
       runtimeProfiles: Object.entries(RUNTIME_PROFILES).map(([id, profile]) => ({ id, label: profile.label, command: profile.command, args: [...profile.args], source: profile.source })),
       agents: agentIds.map((id) => ({ id, profile: configuredAgents[id]?.profile ?? id, isDefault: id === defaultAgent })),
@@ -423,12 +426,12 @@ export class PapyrusService {
     const session = this.db.getSession(sessionId)
     if (!session) throw new Error('Session not found')
     this.check(actor, 'PromptSession', this.sessionResource(session))
-    const resource = { type: 'Tool' as const, id: `${mcpServerId}:${toolName}`, attrs: { assignedUsers: cedarUsers(this.db.assignedUserIds('workspace', session.workspaceId)) } }
+    const resource = { type: 'Tool' as const, id: `${mcpServerId}:${toolName}`, attrs: { assignedUsers: cedarUsers(this.db.assignedUserIds('environment', session.environmentId)) } }
     this.check(actor, 'InvokeTool', resource)
     const connectorAction = connectorPolicyAction(toolName)
     if (connectorAction) this.check(actor, connectorAction, resource)
-    if (!this.db.isToolGranted(session.workspaceId, mcpServerId, toolName)) {
-      this.audit.append({ actorId: actor.id, action: 'InvokeTool', resourceType: 'Tool', resourceId: `${mcpServerId}:${toolName}`, decision: 'deny', metadata: { sessionId, reason: 'No workspace tool grant' } })
+    if (!this.db.isToolGranted(session.environmentId, mcpServerId, toolName)) {
+      this.audit.append({ actorId: actor.id, action: 'InvokeTool', resourceType: 'Tool', resourceId: `${mcpServerId}:${toolName}`, decision: 'deny', metadata: { sessionId, reason: 'MCP server is not enabled for environment' } })
       throw new AuthorizationDenied('InvokeTool', `${mcpServerId}:${toolName}`)
     }
     const server = this.db.getMcpServer(mcpServerId)
@@ -462,7 +465,7 @@ export class PapyrusService {
       const result = await this.forwardMcp(server.endpoint, message)
       if (result && typeof result === 'object') {
         const envelope = result as { result?: { tools?: Array<{ name?: string }> } }
-        if (Array.isArray(envelope.result?.tools)) envelope.result.tools = envelope.result.tools.filter((tool) => typeof tool.name === 'string' && this.db.isToolGranted(session.workspaceId, mcpServerId, tool.name))
+        if (Array.isArray(envelope.result?.tools)) envelope.result.tools = envelope.result.tools.filter((tool) => typeof tool.name === 'string' && this.db.isToolGranted(session.environmentId, mcpServerId, tool.name))
       }
       this.audit.append({ actorId: actor.id, action: 'DiscoverTools', resourceType: 'McpServer', resourceId: mcpServerId, decision: 'allow', metadata: { sessionId } })
       return result
@@ -554,12 +557,12 @@ export class PapyrusService {
   }
 
   private decide(actor: Principal, action: PolicyAction, resource: AuthorizationResource) { return this.policy.authorize(actor, action, resource) }
-  private workspaceResource(id: string): AuthorizationResource { return { type: 'Workspace', id, attrs: { assignedUsers: cedarUsers(this.db.assignedUserIds('workspace', id)) } } }
+  private environmentResource(id: string): AuthorizationResource { return { type: 'Environment', id, attrs: { assignedUsers: cedarUsers(this.db.assignedUserIds('environment', id)) } } }
   private sessionResource(session: Session): AuthorizationResource { return { type: 'Session', id: session.id, attrs: { owner: cedarUser(session.ownerId) } } }
 
-  private findTool(workspaceId: string, title: string): [string, string] {
-    const row = this.db.sqlite.prepare('SELECT mcp_server_id,tool_name FROM tool_grants WHERE workspace_id=? AND tool_name=? LIMIT 1').get(workspaceId, title) as { mcp_server_id: string; tool_name: string } | undefined
-    return row ? [row.mcp_server_id, row.tool_name] : ['', '']
+  private findTool(environmentId: string, title: string): [string, string] {
+    const row = this.db.sqlite.prepare("SELECT mcp_server_id FROM tool_grants WHERE workspace_id=? AND tool_name IN ('*',?) LIMIT 1").get(environmentId, title) as { mcp_server_id: string } | undefined
+    return row ? [row.mcp_server_id, title] : ['', '']
   }
 
   /** Launch command and args for an agent. */
@@ -575,17 +578,17 @@ export class PapyrusService {
     this.audit.append({ actorId: actor.id, action: 'PromptSession', resourceType: 'Session', resourceId: session.id, decision: 'info', metadata: {} })
   }
 
-  /** Authorizes a tool call (goose reports the tool title) against the workspace grant. */
+  /** Authorizes a tool call against the environment's registered MCP sources. */
   isToolCallAllowed(actor: Principal, session: Session, toolTitle: string): boolean {
-    const [mcpServerId, toolName] = this.findTool(session.workspaceId, toolTitle)
+    const [mcpServerId, toolName] = this.findTool(session.environmentId, toolTitle)
     if (!mcpServerId || !toolName) return false
     try {
       this.check(actor, 'PromptSession', this.sessionResource(session))
-      const resource = { type: 'Tool' as const, id: `${mcpServerId}:${toolName}`, attrs: { assignedUsers: cedarUsers(this.db.assignedUserIds('workspace', session.workspaceId)) } }
+      const resource = { type: 'Tool' as const, id: `${mcpServerId}:${toolName}`, attrs: { assignedUsers: cedarUsers(this.db.assignedUserIds('environment', session.environmentId)) } }
       this.check(actor, 'InvokeTool', resource)
       const connectorAction = connectorPolicyAction(toolName)
       if (connectorAction) this.check(actor, connectorAction, resource)
-      return this.db.isToolGranted(session.workspaceId, mcpServerId, toolName)
+      return this.db.isToolGranted(session.environmentId, mcpServerId, toolName)
     } catch { return false }
   }
 
@@ -623,7 +626,7 @@ export class PapyrusService {
 
   /** Session-bound Papyrus MCP proxy endpoints for the runtime to consume. */
   runtimeMcpServers(session: Session): Array<{ name: string; url: string; headers: Array<{ name: string; value: string }> }> {
-    return this.db.listGrantedMcpServers(session.workspaceId).map((server) => ({
+    return this.db.listGrantedMcpServers(session.environmentId).map((server) => ({
       name: server.name,
       url: `${this.config.publicOrigin}/api/runtime/mcp/${session.id}/${server.id}`,
       headers: [{ name: 'authorization', value: `Bearer ${this.issueRuntimeToken(session.id, server.id)}` }],

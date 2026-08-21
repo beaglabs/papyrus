@@ -1,4 +1,4 @@
-import type { AdminOverview, Approval, Artifact, Attachment, Environment, McpServer, Principal, ResearchSource, Role, Session, SessionEvent, SessionRun } from '@papyrus/contracts'
+import type { AdminOverview, Approval, Artifact, Attachment, Elicitation, Environment, McpServer, Principal, ResearchSource, Role, Session, SessionEvent, SessionRun } from '@papyrus/contracts'
 
 export interface Health {
   topology: 'on-premises'
@@ -120,6 +120,14 @@ export async function resumeSession(sessionId: string): Promise<Session> {
   return api(`/api/sessions/${encodeURIComponent(sessionId)}/resume`, { method: 'POST' })
 }
 
+export async function deleteSession(sessionId: string): Promise<void> {
+  await api(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE' })
+}
+
+export async function setSessionMode(sessionId: string, modeId: 'ask' | 'governed'): Promise<void> {
+  await api(`/api/sessions/${encodeURIComponent(sessionId)}/mode`, { method: 'POST', body: JSON.stringify({ modeId }) })
+}
+
 export async function sessionRuns(sessionId: string): Promise<SessionRun[]> {
   return (await api<{ runs: SessionRun[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/runs`)).runs
 }
@@ -136,6 +144,14 @@ export async function decideApproval(sessionId: string, approvalId: string, deci
   return api(`/api/sessions/${encodeURIComponent(sessionId)}/approvals/${encodeURIComponent(approvalId)}/decision`, {
     method: 'POST', body: JSON.stringify({ decision, ...(reason?.trim() ? { reason: reason.trim() } : {}) }),
   })
+}
+
+export async function sessionElicitations(sessionId: string): Promise<Elicitation[]> {
+  return (await api<{ elicitations: Elicitation[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/elicitations`)).elicitations
+}
+
+export async function respondElicitation(sessionId: string, elicitationId: string, response: Record<string, unknown>): Promise<Elicitation> {
+  return api(`/api/sessions/${encodeURIComponent(sessionId)}/elicitations/${encodeURIComponent(elicitationId)}/response`, { method: 'POST', body: JSON.stringify(response) })
 }
 
 export async function sessionSources(sessionId: string): Promise<ResearchSource[]> {

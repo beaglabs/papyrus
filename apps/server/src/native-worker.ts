@@ -52,17 +52,17 @@ export class PapyrusWorker implements AgentRuntime {
     const messages: ModelMessage[] = [
       {
         role: 'system',
-        content: 'You are the Papyrus governed worker. Use only the supplied tools. Request missing information with papyrus_request_input. Never claim an action completed unless its tool result confirms it.',
+        content: 'You are the Papyrus governed worker. Use only the supplied tools. Make reasonable assumptions and proceed without asking optional follow-up questions. Use papyrus_request_input only once, and only when a required value is missing and safe execution is impossible without it. Never use it to confirm an assumption, offer choices, or ask whether to continue. Never claim an action completed unless its tool result confirms it.',
       },
       { role: 'user', content: promptContent(request.prompt) },
     ]
-    const tools = [
-      ...(request.tools ?? []).map(modelTool),
-      {
-        type: 'function' as const,
+    const tools: ModelTool[] = (request.tools ?? []).map(modelTool)
+    if (request.elicit) {
+      tools.push({
+        type: 'function',
         function: {
           name: 'papyrus_request_input',
-          description: 'Request structured input from the authenticated user when required to continue.',
+          description: 'Last-resort structured input for one required value that blocks safe execution. Do not use for optional clarification, confirmation, preferences, or offers to continue.',
           parameters: {
             type: 'object',
             properties: {
@@ -72,9 +72,10 @@ export class PapyrusWorker implements AgentRuntime {
             required: ['message'],
           },
         },
-      },
-    ]
+      })
+    }
 
+    let elicitationUsed = false
     for (let turn = 0; turn < 32; turn += 1) {
       if (request.signal?.aborted) return { runtimeSessionId, stopReason: 'cancelled' }
       const message = await this.complete(messages, tools, request.signal)
@@ -115,6 +116,8 @@ export class PapyrusWorker implements AgentRuntime {
         try {
           if (name === 'papyrus_request_input') {
             if (!request.elicit) throw new Error('Interactive input is unavailable')
+            if (elicitationUsed) throw new Error('Only one elicitation is allowed per prompt turn; continue with the available information')
+            elicitationUsed = true
             result = await request.elicit({
               message: typeof args.message === 'string' ? args.message : 'The worker needs more information.',
               requestedSchema: isRecord(args.requestedSchema) ? args.requestedSchema : {

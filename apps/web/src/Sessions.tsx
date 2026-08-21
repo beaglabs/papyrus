@@ -163,6 +163,7 @@ export function SessionHarness({ environments }: { environments: Environment[] }
         {tab === 'sources' && <SourceList sources={sources} />}
         {tab === 'artifacts' && <ArtifactView artifacts={artifacts} />}
         </div>
+        <div className="session-footer">
         {elicitations.find((item) => item.status === 'pending') && <ElicitationCard item={elicitations.find((item) => item.status === 'pending')!} onRespond={async (id, response) => { await respondElicitation(selected.id, id, response); await loadContext(selected.id) }} />}
         <form className="composer" onSubmit={send}>
           {draftAttachmentIds.length > 0 && <div className="attachment-chips">{draftAttachmentIds.map((id) => { const attachment = attachments.find((item) => item.id === id); return attachment && <span key={id}><span>↧ {attachment.name} · {formatBytes(attachment.size)}</span><button type="button" onClick={() => setDraftAttachmentIds((current) => current.filter((item) => item !== id))} aria-label={`Remove ${attachment.name}`}>×</button></span> })}</div>}
@@ -170,6 +171,7 @@ export function SessionHarness({ environments }: { environments: Environment[] }
           <input ref={fileInputRef} className="visually-hidden" type="file" multiple accept="text/*,image/*,.pdf,.json,.xml,.zip,.docx,.xlsx,.pptx" onChange={(event) => void addFiles(event.currentTarget.files)} />
           <div><span>Enter to submit · Shift+Enter for a new line · 10 MB per file</span><div className="composer-actions"><button type="button" className="attach-button" disabled={running || uploading} onClick={() => fileInputRef.current?.click()}>{uploading ? 'Uploading…' : 'Attach files'}</button><button className="primary" disabled={running || uploading}>{running ? 'Running…' : 'Send →'}</button></div></div>
         </form>
+        </div>
       </>}
     </div>
   </section>

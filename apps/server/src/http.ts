@@ -26,6 +26,19 @@ function json(response: ServerResponse, status: number, value: unknown): void {
   response.end(body)
 }
 
+function artifactDownload(response: ServerResponse, artifact: ReturnType<PapyrusService['sessionArtifacts']>[number]): void {
+  const content = artifact.encoding === 'base64' ? Buffer.from(artifact.content, 'base64') : Buffer.from(artifact.content, 'utf8')
+  const filename = artifact.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 180) || 'artifact'
+  response.writeHead(200, {
+    'content-type': artifact.mediaType,
+    'content-length': content.length,
+    'content-disposition': `attachment; filename="${filename}"`,
+    'cache-control': 'no-store',
+    'x-content-type-options': 'nosniff',
+  })
+  response.end(content)
+}
+
 async function body(request: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = []
   let size = 0
@@ -235,6 +248,18 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
       const sessionRuns = url.pathname.match(/^\/api\/sessions\/([^/]+)\/runs$/)
       if (sessionRuns && request.method === 'GET') {
         return json(response, 200, { runs: service.sessionRuns(principal, decodeURIComponent(sessionRuns[1] as string)) })
+      }
+      const sessionArtifacts = url.pathname.match(/^\/api\/sessions\/([^/]+)\/artifacts$/)
+      if (sessionArtifacts && request.method === 'GET') {
+        const artifacts = service.sessionArtifacts(principal, decodeURIComponent(sessionArtifacts[1] as string))
+        return json(response, 200, { artifacts: artifacts.map(({ content: _content, encoding: _encoding, ...artifact }) => artifact) })
+      }
+      const artifactFile = url.pathname.match(/^\/api\/sessions\/([^/]+)\/artifacts\/([^/]+)\/download$/)
+      if (artifactFile && request.method === 'GET') {
+        const artifacts = service.sessionArtifacts(principal, decodeURIComponent(artifactFile[1] as string))
+        const artifact = artifacts.find((candidate) => candidate.id === decodeURIComponent(artifactFile[2] as string))
+        if (!artifact) throw new HttpError(404, 'ARTIFACT_NOT_FOUND', 'Artifact not found')
+        return artifactDownload(response, artifact)
       }
       const cancelSession = url.pathname.match(/^\/api\/sessions\/([^/]+)\/cancel$/)
       if (cancelSession && request.method === 'POST') {

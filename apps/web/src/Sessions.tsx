@@ -1,14 +1,20 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import type { Session, SessionEvent, Workspace } from '@papyrus/contracts'
-import { cancelSession, createSession, promptSession, resumeSession, sessionEvents, sessionPage } from './api.js'
+import type { Artifact, Session, SessionEvent, SessionRun, Workspace } from '@papyrus/contracts'
+import { cancelSession, createSession, promptSession, resumeSession, sessionArtifacts, sessionEvents, sessionPage, sessionRuns } from './api.js'
 
 interface ConversationMessage { id: string; role: 'user' | 'agent'; text: string; sequence: number }
+interface ToolActivity { id: string; title: string; kind: string; status: string; sequence: number; locations: string[] }
+interface PlanItem { content: string; status: string; priority: string }
+type SessionTab = 'conversation' | 'activity' | 'artifacts'
 
 export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
   const [sessions, setSessions] = useState<Session[]>([])
   const [nextCursor, setNextCursor] = useState<string>()
   const [selectedId, setSelectedId] = useState<string>()
   const [events, setEvents] = useState<SessionEvent[]>([])
+  const [runs, setRuns] = useState<SessionRun[]>([])
+  const [artifacts, setArtifacts] = useState<Artifact[]>([])
+  const [tab, setTab] = useState<SessionTab>('conversation')
   const [loading, setLoading] = useState(true)
   const [running, setRunning] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -16,6 +22,12 @@ export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
   const streamRef = useRef<EventSource | null>(null)
   const selected = sessions.find((session) => session.id === selectedId)
   const messages = useMemo(() => conversation(events), [events])
+  const activity = useMemo(() => projectActivity(events), [events])
+
+  const loadContext = async (sessionId: string) => {
+    const [nextRuns, nextArtifacts] = await Promise.all([sessionRuns(sessionId), sessionArtifacts(sessionId)])
+    setRuns(nextRuns); setArtifacts(nextArtifacts)
+  }
 
   const loadSessions = async (cursor?: string) => {
     const page = await sessionPage(cursor)
@@ -27,9 +39,9 @@ export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
   useEffect(() => { void loadSessions().catch(showError).finally(() => setLoading(false)) }, [])
   useEffect(() => {
     streamRef.current?.close()
-    if (!selectedId) { setEvents([]); return }
+    if (!selectedId) { setEvents([]); setRuns([]); setArtifacts([]); return }
     let active = true
-    void sessionEvents(selectedId).then((history) => {
+    void Promise.all([sessionEvents(selectedId), loadContext(selectedId)]).then(([history]) => {
       if (!active) return
       setEvents(history)
       const after = history.at(-1)?.sequence ?? 0
@@ -61,7 +73,7 @@ export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
     try {
       if (selected?.status === 'stopped' || selected?.status === 'failed' || selected?.status === 'interrupted') await resumeSession(selectedId)
       await promptSession(selectedId, prompt)
-      await loadSessions()
+      await Promise.all([loadSessions(), loadContext(selectedId)])
     } catch (cause) { showError(cause) }
     finally { setRunning(false) }
   }
@@ -83,8 +95,10 @@ export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
       {error && <div className="error">{error}<button onClick={() => setError(undefined)}>×</button></div>}
       {creating && <form className="create-session" onSubmit={create}><div><strong>New governed session</strong><button type="button" className="icon-button" onClick={() => setCreating(false)}>×</button></div><label>Workspace<select name="workspace" required>{workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select></label><label>Session title<input name="title" required maxLength={256} autoFocus placeholder="Research current policy guidance" /></label><button className="primary" disabled={!workspaces.length}>Create session →</button></form>}
       {!selected ? <div className="conversation-empty"><h2>Start a governed session.</h2><p>Choose an authorized workspace, describe the work, and retain the complete history on the server.</p><button className="primary" disabled={!workspaces.length} onClick={() => setCreating(true)}>New session →</button></div> : <>
-        <div className="conversation-head"><div><strong>{selected.title}</strong><span>{selected.status} · {workspaceName(workspaces, selected.workspaceId)}</span></div>{running && <button className="danger" onClick={() => void cancel()}>Cancel run</button>}</div>
-        <div className="messages" aria-live="polite">{messages.length ? messages.map((message) => <article className={`message ${message.role}`} key={message.id}><span>{message.role === 'user' ? 'YOU' : 'PAPYRUS'}</span><p>{message.text}</p></article>) : <div className="conversation-empty compact"><h2>What work should Papyrus begin?</h2><p>The runtime and tools are selected by deployment policy.</p></div>}{running && <div className="working"><span className="dot good" />Working under policy…</div>}</div>
+        <div className="conversation-head"><div><strong>{selected.title}</strong><span>{selected.status} · {workspaceName(workspaces, selected.workspaceId)}</span></div><div className="session-actions"><div className="session-tabs">{(['conversation', 'activity', 'artifacts'] as SessionTab[]).map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item}{item === 'artifacts' && artifacts.length ? ` ${artifacts.length}` : ''}</button>)}</div>{running && <button className="danger" onClick={() => void cancel()}>Cancel run</button>}</div></div>
+        {tab === 'conversation' && <div className="messages" aria-live="polite">{messages.length ? messages.map((message) => <article className={`message ${message.role}`} key={message.id}><span>{message.role === 'user' ? 'YOU' : 'PAPYRUS'}</span><p>{message.text}</p></article>) : <div className="conversation-empty compact"><h2>What work should Papyrus begin?</h2><p>The runtime and tools are selected by deployment policy.</p></div>}{running && <div className="working"><span className="dot good" />Working under policy…</div>}</div>}
+        {tab === 'activity' && <ActivityView plan={activity.plan} tools={activity.tools} runs={runs} />}
+        {tab === 'artifacts' && <ArtifactView artifacts={artifacts} />}
         <form className="composer" onSubmit={send}><textarea name="prompt" required disabled={running} placeholder="Describe the work to perform…" onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} /><div><span>Enter to submit · Shift+Enter for a new line</span><button className="primary" disabled={running}>{running ? 'Running…' : 'Send →'}</button></div></form>
       </>}
     </div>
@@ -106,3 +120,34 @@ function conversation(events: SessionEvent[]): ConversationMessage[] {
 }
 
 function workspaceName(workspaces: Workspace[], id: string) { return workspaces.find((workspace) => workspace.id === id)?.name ?? 'Workspace' }
+
+function projectActivity(events: SessionEvent[]): { plan: PlanItem[]; tools: ToolActivity[] } {
+  let plan: PlanItem[] = []
+  const tools = new Map<string, ToolActivity>()
+  for (const event of events) {
+    if (event.kind !== 'update' || !event.data || typeof event.data !== 'object') continue
+    const update = event.data as { sessionUpdate?: string; entries?: PlanItem[]; toolCallId?: string; title?: string; kind?: string; status?: string; locations?: Array<{ path?: string }> }
+    if (update.sessionUpdate === 'plan' && Array.isArray(update.entries)) plan = update.entries
+    if ((update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') && update.toolCallId) {
+      const current = tools.get(update.toolCallId)
+      tools.set(update.toolCallId, {
+        id: update.toolCallId, title: update.title ?? current?.title ?? 'Tool activity', kind: update.kind ?? current?.kind ?? 'other',
+        status: update.status ?? current?.status ?? 'pending', sequence: current?.sequence ?? event.sequence,
+        locations: update.locations?.flatMap((location) => typeof location.path === 'string' ? [location.path] : []) ?? current?.locations ?? [],
+      })
+    }
+  }
+  return { plan, tools: [...tools.values()].sort((left, right) => left.sequence - right.sequence) }
+}
+
+function ActivityView({ plan, tools, runs }: { plan: PlanItem[]; tools: ToolActivity[]; runs: SessionRun[] }) {
+  return <div className="activity-view">
+    <section><div className="section-label">PLAN</div>{plan.length ? <div className="plan-list">{plan.map((item, index) => <div className="plan-item" key={`${index}-${item.content}`}><span className={`activity-status ${item.status}`} /> <strong>{item.content}</strong><small>{item.status} · {item.priority}</small></div>)}</div> : <div className="empty">The runtime has not reported a structured plan.</div>}</section>
+    <section><div className="section-label">TOOL ACTIVITY</div>{tools.length ? <div className="tool-list">{tools.map((tool) => <article key={tool.id}><span className={`tool-kind ${tool.kind}`}>{tool.kind}</span><div><strong>{tool.title}</strong><small>{tool.locations.join(' · ') || tool.id}</small></div><span className={`pill ${tool.status}`}>{tool.status}</span></article>)}</div> : <div className="empty">No governed tool activity yet.</div>}</section>
+    <section><div className="section-label">RUN HISTORY</div><div className="run-list">{runs.map((run) => <div key={run.id}><span className={`activity-status ${run.status}`} /><strong>{run.status}</strong><small>{new Date(run.startedAt).toLocaleString()}{run.stopReason ? ` · ${run.stopReason}` : ''}</small></div>)}</div></section>
+  </div>
+}
+
+function ArtifactView({ artifacts }: { artifacts: Artifact[] }) {
+  return <div className="artifact-view">{artifacts.length ? artifacts.map((artifact) => <article key={artifact.id}><div className={`artifact-icon ${artifact.kind}`}>{artifact.kind === 'diff' ? 'Δ' : '↧'}</div><div><strong>{artifact.name}</strong><span>{artifact.mediaType} · version {artifact.version} · {new Date(artifact.createdAt).toLocaleString()}</span></div><a className="secondary" href={artifact.downloadUrl}>Download</a></article>) : <div className="conversation-empty"><h2>No artifacts yet.</h2><p>Embedded resources and file results emitted by governed tools will appear here with durable versions.</p></div>}</div>
+}

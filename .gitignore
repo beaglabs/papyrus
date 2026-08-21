@@ -48,6 +48,8 @@ apps/server/.papyrus/
 *.pfx
 *.cert
 *.crt
+*.srl
+*.csr
 
 # Large binary / model files
 *.gguf

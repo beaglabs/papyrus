@@ -101,6 +101,13 @@ describe('governed session HTTP API', () => {
     const headers = { authorization }
 
     try {
+      const created = await fetch(`${origin}/api/sessions`, {
+        method: 'POST', headers: { ...headers, 'content-type': 'application/json' },
+        body: JSON.stringify({ workspaceId: workspace.id, title: 'Browser session' }),
+      })
+      expect(created.status).toBe(201)
+      expect(await created.json()).toMatchObject({ title: 'Browser session', agent: 'goose' })
+
       const page = await fetch(`${origin}/api/sessions?limit=1`, { headers })
       const pageBody = await page.json() as { sessions: unknown[]; nextCursor?: string }
       expect(pageBody.sessions).toHaveLength(1)

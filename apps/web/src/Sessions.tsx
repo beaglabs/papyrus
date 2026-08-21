@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import type { Approval, Artifact, Attachment, ResearchSource, Session, SessionEvent, SessionRun, Workspace } from '@papyrus/contracts'
-import { cancelSession, createSession, decideApproval, promptSession, resumeSession, sessionApprovals, sessionArtifacts, sessionAttachments, sessionEvents, sessionPage, sessionRuns, sessionSources, uploadAttachment } from './api.js'
+import type { Approval, Artifact, ResearchSource, Session, SessionEvent, SessionRun, Workspace } from '@papyrus/contracts'
+import { cancelSession, createSession, decideApproval, promptSession, resumeSession, sessionApprovals, sessionArtifacts, sessionEvents, sessionPage, sessionRuns, sessionSources } from './api.js'
 import { SourceList } from './Sources.js'
 
 interface ConversationMessage { id: string; role: 'user' | 'agent'; text: string; sequence: number }
@@ -17,25 +17,21 @@ export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [approvals, setApprovals] = useState<Approval[]>([])
   const [sources, setSources] = useState<ResearchSource[]>([])
-  const [attachments, setAttachments] = useState<Attachment[]>([])
-  const [draftAttachmentIds, setDraftAttachmentIds] = useState<string[]>([])
   const [tab, setTab] = useState<SessionTab>('conversation')
   const [loading, setLoading] = useState(true)
   const [running, setRunning] = useState(false)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string>()
-  const [uploading, setUploading] = useState(false)
   const [followingLatest, setFollowingLatest] = useState(true)
   const streamRef = useRef<EventSource | null>(null)
   const messagesRef = useRef<HTMLDivElement | null>(null)
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const selected = sessions.find((session) => session.id === selectedId)
   const messages = useMemo(() => conversation(events), [events])
   const activity = useMemo(() => projectActivity(events), [events])
 
   const loadContext = async (sessionId: string) => {
-    const [nextRuns, nextArtifacts, nextApprovals, nextSources, nextAttachments] = await Promise.all([sessionRuns(sessionId), sessionArtifacts(sessionId), sessionApprovals(sessionId), sessionSources(sessionId), sessionAttachments(sessionId)])
-    setRuns(nextRuns); setArtifacts(nextArtifacts); setApprovals(nextApprovals); setSources(nextSources); setAttachments(nextAttachments)
+    const [nextRuns, nextArtifacts, nextApprovals, nextSources] = await Promise.all([sessionRuns(sessionId), sessionArtifacts(sessionId), sessionApprovals(sessionId), sessionSources(sessionId)])
+    setRuns(nextRuns); setArtifacts(nextArtifacts); setApprovals(nextApprovals); setSources(nextSources)
   }
 
   const loadSessions = async (cursor?: string) => {
@@ -54,8 +50,7 @@ export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
   useEffect(() => {
     streamRef.current?.close()
     setFollowingLatest(true)
-    setDraftAttachmentIds([])
-    if (!selectedId) { setEvents([]); setRuns([]); setArtifacts([]); setApprovals([]); setSources([]); setAttachments([]); return }
+    if (!selectedId) { setEvents([]); setRuns([]); setArtifacts([]); setApprovals([]); setSources([]); return }
     let active = true
     void Promise.all([sessionEvents(selectedId), loadContext(selectedId)]).then(([history]) => {
       if (!active) return
@@ -88,12 +83,11 @@ export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
   const send = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); if (!selectedId || running) return
     const form = event.currentTarget; const values = new FormData(form); const prompt = String(values.get('prompt')).trim()
-    if (!prompt && draftAttachmentIds.length === 0) return
+    if (!prompt) return
     form.reset(); setRunning(true); setError(undefined)
     try {
       if (selected?.status === 'stopped' || selected?.status === 'failed' || selected?.status === 'interrupted') await resumeSession(selectedId)
-      await promptSession(selectedId, prompt, draftAttachmentIds)
-      setDraftAttachmentIds([])
+      await promptSession(selectedId, prompt)
       await Promise.all([loadSessions(), loadContext(selectedId)])
     } catch (cause) { showError(cause) }
     finally { setRunning(false) }
@@ -102,18 +96,6 @@ export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
   const cancel = async () => {
     if (!selectedId) return
     try { await cancelSession(selectedId); setRunning(false); await loadSessions() } catch (cause) { showError(cause) }
-  }
-
-  const addFiles = async (files: FileList | null) => {
-    if (!selectedId || !files?.length) return
-    setUploading(true); setError(undefined)
-    try {
-      const uploaded: Attachment[] = []
-      for (const file of Array.from(files)) uploaded.push(await uploadAttachment(selectedId, file))
-      setAttachments((current) => [...uploaded, ...current])
-      setDraftAttachmentIds((current) => [...new Set([...current, ...uploaded.map((item) => item.id)])])
-    } catch (cause) { showError(cause) }
-    finally { setUploading(false); if (fileInputRef.current) fileInputRef.current.value = '' }
   }
 
   const reviewApproval = async (approvalId: string, decision: 'approved' | 'denied', reason?: string) => {
@@ -146,12 +128,7 @@ export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
         {tab === 'approvals' && <ApprovalView approvals={approvals} onDecision={reviewApproval} />}
         {tab === 'sources' && <SourceList sources={sources} />}
         {tab === 'artifacts' && <ArtifactView artifacts={artifacts} />}
-        <form className="composer" onSubmit={send}>
-          {draftAttachmentIds.length > 0 && <div className="attachment-chips">{draftAttachmentIds.map((id) => { const attachment = attachments.find((item) => item.id === id); return attachment && <span key={id}><span>↧ {attachment.name} · {formatBytes(attachment.size)}</span><button type="button" onClick={() => setDraftAttachmentIds((current) => current.filter((item) => item !== id))} aria-label={`Remove ${attachment.name}`}>×</button></span> })}</div>}
-          <textarea name="prompt" disabled={running} placeholder={draftAttachmentIds.length ? 'Add instructions for these files…' : 'Describe the work to perform…'} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} />
-          <input ref={fileInputRef} className="visually-hidden" type="file" multiple accept="text/*,image/*,.pdf,.json,.xml,.zip,.docx,.xlsx,.pptx" onChange={(event) => void addFiles(event.currentTarget.files)} />
-          <div><span>Enter to submit · Shift+Enter for a new line · 10 MB per file</span><div className="composer-actions"><button type="button" className="attach-button" disabled={running || uploading} onClick={() => fileInputRef.current?.click()}>{uploading ? 'Uploading…' : 'Attach files'}</button><button className="primary" disabled={running || uploading}>{running ? 'Running…' : 'Send →'}</button></div></div>
-        </form>
+        <form className="composer" onSubmit={send}><textarea name="prompt" required disabled={running} placeholder="Describe the work to perform…" onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} /><div><span>Enter to submit · Shift+Enter for a new line</span><button className="primary" disabled={running}>{running ? 'Running…' : 'Send →'}</button></div></form>
       </>}
     </div>
   </section>
@@ -172,7 +149,6 @@ function conversation(events: SessionEvent[]): ConversationMessage[] {
 }
 
 function workspaceName(workspaces: Workspace[], id: string) { return workspaces.find((workspace) => workspace.id === id)?.name ?? 'Workspace' }
-function formatBytes(size: number) { return size < 1024 ? `${size} B` : size < 1024 * 1024 ? `${(size / 1024).toFixed(1)} KB` : `${(size / 1024 / 1024).toFixed(1)} MB` }
 
 function projectActivity(events: SessionEvent[]): { plan: PlanItem[]; tools: ToolActivity[] } {
   let plan: PlanItem[] = []

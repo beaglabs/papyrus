@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import type { Approval, Artifact, Session, SessionEvent, SessionRun, Workspace } from '@papyrus/contracts'
-import { cancelSession, createSession, decideApproval, promptSession, resumeSession, sessionApprovals, sessionArtifacts, sessionEvents, sessionPage, sessionRuns } from './api.js'
+import type { Approval, Artifact, ResearchSource, Session, SessionEvent, SessionRun, Workspace } from '@papyrus/contracts'
+import { cancelSession, createSession, decideApproval, promptSession, resumeSession, sessionApprovals, sessionArtifacts, sessionEvents, sessionPage, sessionRuns, sessionSources } from './api.js'
+import { SourceList } from './Sources.js'
 
 interface ConversationMessage { id: string; role: 'user' | 'agent'; text: string; sequence: number }
 interface ToolActivity { id: string; title: string; kind: string; status: string; sequence: number; locations: string[] }
 interface PlanItem { content: string; status: string; priority: string }
-type SessionTab = 'conversation' | 'activity' | 'approvals' | 'artifacts'
+type SessionTab = 'conversation' | 'activity' | 'approvals' | 'sources' | 'artifacts'
 
 export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
   const [sessions, setSessions] = useState<Session[]>([])
@@ -15,6 +16,7 @@ export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
   const [runs, setRuns] = useState<SessionRun[]>([])
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [approvals, setApprovals] = useState<Approval[]>([])
+  const [sources, setSources] = useState<ResearchSource[]>([])
   const [tab, setTab] = useState<SessionTab>('conversation')
   const [loading, setLoading] = useState(true)
   const [running, setRunning] = useState(false)
@@ -26,8 +28,8 @@ export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
   const activity = useMemo(() => projectActivity(events), [events])
 
   const loadContext = async (sessionId: string) => {
-    const [nextRuns, nextArtifacts, nextApprovals] = await Promise.all([sessionRuns(sessionId), sessionArtifacts(sessionId), sessionApprovals(sessionId)])
-    setRuns(nextRuns); setArtifacts(nextArtifacts); setApprovals(nextApprovals)
+    const [nextRuns, nextArtifacts, nextApprovals, nextSources] = await Promise.all([sessionRuns(sessionId), sessionArtifacts(sessionId), sessionApprovals(sessionId), sessionSources(sessionId)])
+    setRuns(nextRuns); setArtifacts(nextArtifacts); setApprovals(nextApprovals); setSources(nextSources)
   }
 
   const loadSessions = async (cursor?: string) => {
@@ -40,7 +42,7 @@ export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
   useEffect(() => { void loadSessions().catch(showError).finally(() => setLoading(false)) }, [])
   useEffect(() => {
     streamRef.current?.close()
-    if (!selectedId) { setEvents([]); setRuns([]); setArtifacts([]); setApprovals([]); return }
+    if (!selectedId) { setEvents([]); setRuns([]); setArtifacts([]); setApprovals([]); setSources([]); return }
     let active = true
     void Promise.all([sessionEvents(selectedId), loadContext(selectedId)]).then(([history]) => {
       if (!active) return
@@ -106,10 +108,11 @@ export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
       {error && <div className="error">{error}<button onClick={() => setError(undefined)}>×</button></div>}
       {creating && <form className="create-session" onSubmit={create}><div><strong>New governed session</strong><button type="button" className="icon-button" onClick={() => setCreating(false)}>×</button></div><label>Workspace<select name="workspace" required>{workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select></label><label>Session title<input name="title" required maxLength={256} autoFocus placeholder="Research current policy guidance" /></label><button className="primary" disabled={!workspaces.length}>Create session →</button></form>}
       {!selected ? <div className="conversation-empty"><h2>Start a governed session.</h2><p>Choose an authorized workspace, describe the work, and retain the complete history on the server.</p><button className="primary" disabled={!workspaces.length} onClick={() => setCreating(true)}>New session →</button></div> : <>
-        <div className="conversation-head"><div><strong>{selected.title}</strong><span>{selected.status} · {workspaceName(workspaces, selected.workspaceId)}</span></div><div className="session-actions"><div className="session-tabs">{(['conversation', 'activity', 'approvals', 'artifacts'] as SessionTab[]).map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item}{item === 'approvals' && approvals.filter((approval) => approval.status === 'pending').length ? ` ${approvals.filter((approval) => approval.status === 'pending').length}` : item === 'artifacts' && artifacts.length ? ` ${artifacts.length}` : ''}</button>)}</div>{(running || selected.status === 'running') && <button className="danger" onClick={() => void cancel()}>Cancel run</button>}</div></div>
+        <div className="conversation-head"><div><strong>{selected.title}</strong><span>{selected.status} · {workspaceName(workspaces, selected.workspaceId)}</span></div><div className="session-actions"><div className="session-tabs">{(['conversation', 'activity', 'approvals', 'sources', 'artifacts'] as SessionTab[]).map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item}{item === 'approvals' && approvals.filter((approval) => approval.status === 'pending').length ? ` ${approvals.filter((approval) => approval.status === 'pending').length}` : item === 'sources' && sources.length ? ` ${sources.length}` : item === 'artifacts' && artifacts.length ? ` ${artifacts.length}` : ''}</button>)}</div>{(running || selected.status === 'running') && <button className="danger" onClick={() => void cancel()}>Cancel run</button>}</div></div>
         {tab === 'conversation' && <div className="messages" aria-live="polite">{messages.length ? messages.map((message) => <article className={`message ${message.role}`} key={message.id}><span>{message.role === 'user' ? 'YOU' : 'PAPYRUS'}</span><p>{message.text}</p></article>) : <div className="conversation-empty compact"><h2>What work should Papyrus begin?</h2><p>The runtime and tools are selected by deployment policy.</p></div>}{running && <div className="working"><span className="dot good" />Working under policy…</div>}</div>}
         {tab === 'activity' && <ActivityView plan={activity.plan} tools={activity.tools} runs={runs} />}
         {tab === 'approvals' && <ApprovalView approvals={approvals} onDecision={reviewApproval} />}
+        {tab === 'sources' && <SourceList sources={sources} />}
         {tab === 'artifacts' && <ArtifactView artifacts={artifacts} />}
         <form className="composer" onSubmit={send}><textarea name="prompt" required disabled={running} placeholder="Describe the work to perform…" onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} /><div><span>Enter to submit · Shift+Enter for a new line</span><button className="primary" disabled={running}>{running ? 'Running…' : 'Send →'}</button></div></form>
       </>}

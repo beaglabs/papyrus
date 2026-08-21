@@ -451,7 +451,7 @@ export class PapyrusService {
     return {
       deployment: {
         topology: 'on-premises', profile: this.config.profile, publicOrigin: this.config.publicOrigin,
-        authentication: this.config.profile.startsWith('government') ? 'mtls' : this.config.oidc ? 'oidc' : this.config.identityProxy ? 'trusted-proxy' : 'loopback-development',
+        authentication: this.config.profile.startsWith('government') ? 'mtls' : this.config.oidc ? 'oidc' : this.config.identityProxy ? 'trusted-proxy' : 'none',
         mtlsConfigured: Boolean(this.config.tls),
         identityProxyConfigured: Boolean(this.config.identityProxy), gatewayConfigured: Boolean(this.config.gateway),
         licenseRequired: this.config.licenseRequired,

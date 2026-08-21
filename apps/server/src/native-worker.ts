@@ -7,12 +7,16 @@ import type {
   RuntimePromptResult,
   RuntimeTool,
 } from '@papyrus/acp-runtime'
+import { promises as fs } from 'node:fs'
+import { resolve, relative, isAbsolute } from 'node:path'
+import { spawn } from 'node:child_process'
 
 export interface PapyrusWorkerConfig {
   endpoint?: string
   model?: string
   apiKey?: string
   promptTimeoutMs?: number
+  cwd?: string
 }
 
 export const PAPYRUS_WORKER_CAPABILITIES: RuntimeCapabilities = {
@@ -37,6 +41,206 @@ export class PapyrusWorker implements AgentRuntime {
     return { available: true, version: 'native' }
   }
 
+  private resolvePath(requestedPath: string): string {
+    const base = this.config.cwd ?? process.cwd()
+    const absolute = isAbsolute(requestedPath) ? requestedPath : resolve(base, requestedPath)
+    if (!absolute.startsWith(resolve(base))) throw new Error('Path traversal not allowed')
+    return absolute
+  }
+
+  private async readFileTool(args: Record<string, unknown>): Promise<unknown> {
+    const path = this.resolvePath(String(args.path))
+    const encoding = (args.encoding as string) ?? 'utf-8'
+    const content = await fs.readFile(path, encoding as BufferEncoding)
+    const mimeType = path.endsWith('.py') ? 'text/x-python'
+      : path.endsWith('.js') || path.endsWith('.ts') ? 'text/javascript'
+      : path.endsWith('.json') ? 'application/json'
+      : path.endsWith('.md') ? 'text/markdown'
+      : 'text/plain'
+    return { type: 'resource', resource: { uri: `file://${path}`, mimeType, text: content } }
+  }
+
+  private async writeFileTool(args: Record<string, unknown>): Promise<unknown> {
+    const path = this.resolvePath(String(args.path))
+    const content = String(args.content ?? '')
+    await fs.mkdir(resolve(path, '..'), { recursive: true })
+    await fs.writeFile(path, content, 'utf-8')
+    return { type: 'text', text: `Wrote ${content.length} bytes to ${path}` }
+  }
+
+  private async listFilesTool(args: Record<string, unknown>): Promise<unknown> {
+    const dir = this.resolvePath(String(args.path ?? '.'))
+    const entries = await fs.readdir(dir, { withFileTypes: true })
+    const items = entries.map(e => ({
+      name: e.name,
+      type: e.isDirectory() ? 'directory' : e.isFile() ? 'file' : 'other',
+      path: relative(this.config.cwd ?? process.cwd(), resolve(dir, e.name)),
+    }))
+    return { type: 'text', text: JSON.stringify(items, null, 2) }
+  }
+
+  private async globTool(args: Record<string, unknown>): Promise<unknown> {
+    const pattern = String(args.pattern)
+    const base = this.config.cwd ?? process.cwd()
+    const { glob } = await import('node:fs/promises')
+    const matches: string[] = []
+    for await (const match of glob(pattern, { cwd: base })) {
+      matches.push(resolve(base, match))
+    }
+    return { type: 'text', text: JSON.stringify(matches, null, 2) }
+  }
+
+  private async execCodeTool(args: Record<string, unknown>): Promise<unknown> {
+    const { SandboxManager } = await import('@anthropic-ai/sandbox-runtime')
+    await SandboxManager.initialize({} as any)
+    
+    const code = String(args.code)
+    const language = (args.language as string) ?? 'python'
+    const timeoutMs = Number(args.timeoutMs ?? 30000)
+    
+    let command: string
+    if (language === 'python') {
+      command = `python3 -c ${JSON.stringify(code)}`
+    } else if (language === 'javascript' || language === 'typescript') {
+      command = `node -e ${JSON.stringify(code)}`
+    } else {
+      throw new Error(`Unsupported language: ${language}`)
+    }
+    
+    const wrapped = await SandboxManager.wrapWithSandbox(command, undefined, { timeoutMs } as any)
+    const result = await this.runWrappedCommand(wrapped)
+    
+    return { type: 'text', text: result }
+  }
+
+  private async runWrappedCommand(wrappedCommand: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const child = spawn('sh', ['-c', wrappedCommand], { timeout: 60000 })
+      let stdout = '', stderr = ''
+      child.stdout.on('data', d => stdout += d.toString())
+      child.stderr.on('data', d => stderr += d.toString())
+      child.on('close', code => {
+        if (code === 0) resolve(stdout || 'OK')
+        else reject(new Error(stderr || `Exit code ${code}`))
+      })
+      child.on('error', reject)
+    })
+  }
+
+  private async generateImageTool(args: Record<string, unknown>): Promise<unknown> {
+    const prompt = String(args.prompt)
+    const model = (args.model as string) ?? 'gpt-image-1'
+    const size = (args.size as string) ?? '1024x1024'
+    const quality = (args.quality as string) ?? 'medium'
+    
+    const endpoint = this.config.endpoint!.replace(/\/$/, '')
+    const response = await fetch(`${endpoint}/images/generations`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(this.config.apiKey ? { authorization: `Bearer ${this.config.apiKey}` } : {}),
+      },
+      body: JSON.stringify({ model, prompt, size, quality, n: 1, response_format: 'b64_json' }),
+      signal: AbortSignal.timeout(60000),
+    })
+    
+    if (!response.ok) throw new Error(`Image generation failed: ${response.status}`)
+    const data = await response.json() as { data?: Array<{ b64_json?: string; revised_prompt?: string }> }
+    const b64 = data.data?.[0]?.b64_json
+    if (!b64) throw new Error('No image data returned')
+    
+    return { type: 'image', data: b64, mimeType: 'image/png' }
+  }
+
+  private browserInstance: { stagehand: any; proxyUrl?: string | undefined } | null = null
+
+  private async getBrowser(args: Record<string, unknown>): Promise<any> {
+    if (this.browserInstance) return this.browserInstance.stagehand
+    
+    let proxyUrl: string | undefined
+    if (args.useTor) {
+      const { SandboxManager } = await import('@anthropic-ai/sandbox-runtime')
+      await SandboxManager.initialize({} as any)
+      const socksPort = SandboxManager.getSocksProxyPort()
+      if (socksPort) proxyUrl = `socks5://127.0.0.1:${socksPort}`
+    }
+    
+    const { Stagehand, localBrowser } = await import('@browserbasehq/stagehand')
+    
+    // Use Playwright's full Chromium (not headless shell) which supports extensions
+    const playwrightChromiumPath = '/Users/jdbohrman/Library/Caches/ms-playwright/chromium-1234/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing'
+    
+    // Launch local browser first
+    const launchOptions: any = {
+      args: ['--enable-unsafe-extension-debugging', '--remote-allow-origins=*', '--headless'],
+      executablePath: playwrightChromiumPath,
+    }
+    if (proxyUrl) {
+      launchOptions.proxy = { server: proxyUrl }
+    }
+    
+    const browser = await localBrowser.launch(launchOptions)
+    
+    const stagehand = await Stagehand.create({
+      browser,
+      model: {
+        apiKey: this.config.apiKey,
+        headers: {},
+        modelName: 'openai/gpt-4o',
+      },
+    })
+    
+    this.browserInstance = { stagehand, proxyUrl }
+    return stagehand
+  }
+
+  private async getPage(stagehand: any): Promise<any> {
+    if (stagehand.page) return stagehand.page
+    // Fallback: get the first page from the browser context
+    const pages = await stagehand.browser.pages()
+    if (pages.length > 0) return pages[0]
+    // Create a new page if none exists
+    return await stagehand.browser.newPage()
+  }
+
+  private async browserLaunchTool(args: Record<string, unknown>): Promise<unknown> {
+    await this.getBrowser(args)
+    return { type: 'text', text: 'Browser launched successfully' }
+  }
+
+  private async browserActTool(args: Record<string, unknown>): Promise<unknown> {
+    const stagehand = await this.getBrowser(args)
+    const page = await this.getPage(stagehand)
+    const action = String(args.action)
+    const result = await page.act({ action })
+    return { type: 'text', text: JSON.stringify(result, null, 2) }
+  }
+
+  private async browserExtractTool(args: Record<string, unknown>): Promise<unknown> {
+    const stagehand = await this.getBrowser(args)
+    const page = await this.getPage(stagehand)
+    const instruction = String(args.instruction)
+    const schema = args.schema as Record<string, unknown> ?? {}
+    const result = await page.extract({ instruction, schema })
+    return { type: 'text', text: JSON.stringify(result, null, 2) }
+  }
+
+  private async browserObserveTool(args: Record<string, unknown>): Promise<unknown> {
+    const stagehand = await this.getBrowser(args)
+    const page = await this.getPage(stagehand)
+    const instruction = String(args.instruction ?? 'Observe the page')
+    const result = await page.observe({ instruction })
+    return { type: 'text', text: JSON.stringify(result, null, 2) }
+  }
+
+  private async browserGotoTool(args: Record<string, unknown>): Promise<unknown> {
+    const stagehand = await this.getBrowser(args)
+    const page = await this.getPage(stagehand)
+    const url = String(args.url)
+    await page.goto(url)
+    return { type: 'text', text: `Navigated to ${url}` }
+  }
+
   async runPrompt(request: RuntimePromptRequest): Promise<RuntimePromptResult> {
     if (!this.config.endpoint || !this.config.model) {
       throw new Error('Configure PAPYRUS_MODEL_ENDPOINT and PAPYRUS_MODEL before starting a session')
@@ -52,12 +256,172 @@ export class PapyrusWorker implements AgentRuntime {
     const messages: ModelMessage[] = [
       {
         role: 'system',
-        content: 'You are the Papyrus governed worker. Use only the supplied tools. Request missing information with papyrus_request_input. Never claim an action completed unless its tool result confirms it.',
+        content: 'You are the Papyrus governed worker. Use the supplied tools to complete tasks. Built-in tools: papyrus_read_file, papyrus_write_file, papyrus_list_files, papyrus_glob for filesystem access; papyrus_exec_code for sandboxed code execution (Python/JS); papyrus_generate for image generation; papyrus_browser_launch/act/extract/observe/goto for web automation (supports Tor via sandbox SOCKS5 proxy); papyrus_request_input for user clarification. Never claim an action completed unless its tool result confirms it.',
       },
       { role: 'user', content: promptContent(request.prompt) },
     ]
     const tools = [
       ...(request.tools ?? []).map(modelTool),
+      {
+        type: 'function' as const,
+        function: {
+          name: 'papyrus_read_file',
+          description: 'Read a file from the workspace. Returns file content as a resource.',
+          parameters: {
+            type: 'object',
+            properties: {
+              path: { type: 'string', description: 'Path to file (relative to workspace root or absolute)' },
+              encoding: { type: 'string', enum: ['utf-8', 'base64'], default: 'utf-8' },
+            },
+            required: ['path'],
+          },
+        },
+      },
+      {
+        type: 'function' as const,
+        function: {
+          name: 'papyrus_write_file',
+          description: 'Write content to a file in the workspace. Creates parent directories if needed.',
+          parameters: {
+            type: 'object',
+            properties: {
+              path: { type: 'string', description: 'Path to file (relative to workspace root or absolute)' },
+              content: { type: 'string', description: 'Content to write' },
+            },
+            required: ['path', 'content'],
+          },
+        },
+      },
+      {
+        type: 'function' as const,
+        function: {
+          name: 'papyrus_list_files',
+          description: 'List files and directories in a workspace path.',
+          parameters: {
+            type: 'object',
+            properties: {
+              path: { type: 'string', description: 'Directory path (relative to workspace root)', default: '.' },
+            },
+          },
+        },
+      },
+      {
+        type: 'function' as const,
+        function: {
+          name: 'papyrus_glob',
+          description: 'Find files matching a glob pattern in the workspace.',
+          parameters: {
+            type: 'object',
+            properties: {
+              pattern: { type: 'string', description: 'Glob pattern (e.g., "**/*.ts", "src/**/*.py")' },
+            },
+            required: ['pattern'],
+          },
+        },
+      },
+      {
+        type: 'function' as const,
+        function: {
+          name: 'papyrus_exec_code',
+          description: 'Execute code in a secure sandbox (Python, JavaScript, TypeScript). Returns stdout, stderr, and any generated files/images as resources.',
+          parameters: {
+            type: 'object',
+            properties: {
+              code: { type: 'string', description: 'Code to execute' },
+              language: { type: 'string', enum: ['python', 'javascript', 'typescript'], default: 'python' },
+              timeoutMs: { type: 'number', default: 30000 },
+            },
+            required: ['code'],
+          },
+        },
+      },
+      {
+        type: 'function' as const,
+        function: {
+          name: 'papyrus_generate',
+          description: 'Generate an image from a text prompt. Returns image as base64-encoded PNG.',
+          parameters: {
+            type: 'object',
+            properties: {
+              prompt: { type: 'string', description: 'Image generation prompt' },
+              model: { type: 'string', default: 'gpt-image-1' },
+              size: { type: 'string', enum: ['1024x1024', '1792x1024', '1024x1792'], default: '1024x1024' },
+              quality: { type: 'string', enum: ['low', 'medium', 'high'], default: 'medium' },
+            },
+            required: ['prompt'],
+          },
+        },
+      },
+      {
+        type: 'function' as const,
+        function: {
+          name: 'papyrus_browser_launch',
+          description: 'Launch a browser session. Optionally enable Tor routing via sandbox SOCKS5 proxy.',
+          parameters: {
+            type: 'object',
+            properties: {
+              useTor: { type: 'boolean', default: false, description: 'Route traffic through Tor via sandbox SOCKS5 proxy' },
+            },
+          },
+        },
+      },
+      {
+        type: 'function' as const,
+        function: {
+          name: 'papyrus_browser_goto',
+          description: 'Navigate to a URL in the browser.',
+          parameters: {
+            type: 'object',
+            properties: {
+              url: { type: 'string', description: 'URL to navigate to' },
+            },
+            required: ['url'],
+          },
+        },
+      },
+      {
+        type: 'function' as const,
+        function: {
+          name: 'papyrus_browser_act',
+          description: 'Perform an action in the browser (click, type, scroll, etc.) using natural language.',
+          parameters: {
+            type: 'object',
+            properties: {
+              action: { type: 'string', description: 'Action to perform (e.g., "click the login button", "type hello in search box")' },
+            },
+            required: ['action'],
+          },
+        },
+      },
+      {
+        type: 'function' as const,
+        function: {
+          name: 'papyrus_browser_extract',
+          description: 'Extract structured data from the current page using natural language and optional JSON schema.',
+          parameters: {
+            type: 'object',
+            properties: {
+              instruction: { type: 'string', description: 'What to extract (e.g., "extract all product prices as a list")' },
+              schema: { type: 'object', description: 'Optional JSON schema for structured output' },
+            },
+            required: ['instruction'],
+          },
+        },
+      },
+      {
+        type: 'function' as const,
+        function: {
+          name: 'papyrus_browser_observe',
+          description: 'Observe the current page and return actionable elements.',
+          parameters: {
+            type: 'object',
+            properties: {
+              instruction: { type: 'string', description: 'What to look for (e.g., "find all forms", "locate the submit button")' },
+            },
+            required: ['instruction'],
+          },
+        },
+      },
       {
         type: 'function' as const,
         function: {
@@ -113,7 +477,29 @@ export class PapyrusWorker implements AgentRuntime {
 
         let result: unknown
         try {
-          if (name === 'papyrus_request_input') {
+          if (name === 'papyrus_read_file') {
+            result = await this.readFileTool(args)
+          } else if (name === 'papyrus_write_file') {
+            result = await this.writeFileTool(args)
+          } else if (name === 'papyrus_list_files') {
+            result = await this.listFilesTool(args)
+          } else if (name === 'papyrus_glob') {
+            result = await this.globTool(args)
+          } else if (name === 'papyrus_exec_code') {
+            result = await this.execCodeTool(args)
+          } else if (name === 'papyrus_generate') {
+            result = await this.generateImageTool(args)
+          } else if (name === 'papyrus_browser_launch') {
+            result = await this.browserLaunchTool(args)
+          } else if (name === 'papyrus_browser_goto') {
+            result = await this.browserGotoTool(args)
+          } else if (name === 'papyrus_browser_act') {
+            result = await this.browserActTool(args)
+          } else if (name === 'papyrus_browser_extract') {
+            result = await this.browserExtractTool(args)
+          } else if (name === 'papyrus_browser_observe') {
+            result = await this.browserObserveTool(args)
+          } else if (name === 'papyrus_request_input') {
             if (!request.elicit) throw new Error('Interactive input is unavailable')
             result = await request.elicit({
               message: typeof args.message === 'string' ? args.message : 'The worker needs more information.',
@@ -234,9 +620,7 @@ function parseArguments(value: string): Record<string, unknown> {
   try {
     const parsed = JSON.parse(value) as unknown
     return isRecord(parsed) ? parsed : {}
-  } catch {
-    return {}
-  }
+  } catch { return {} }
 }
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)

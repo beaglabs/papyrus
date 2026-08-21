@@ -93,6 +93,10 @@ h2 { font-size: 19px; margin-bottom: 20px; }
 .message { max-width: min(780px, 88%); }
 .message > span { display: block; margin-bottom: 5px; font: 10px ui-monospace, monospace; letter-spacing: .1em; }
 .message p { margin: 0; white-space: pre-wrap; line-height: 1.55; }
+.markdown-text p { margin: 8px 0; line-height: 1.55; }
+.markdown-text pre { margin: 8px 0; padding: 12px 14px; background: #171717; color: #d8f5df; border: 1px solid #111; border-radius: 0; overflow-x: auto; font: 12px ui-monospace, monospace; line-height: 1.5; }
+.markdown-text code { font: inherit; }
+.markdown-text pre code { background: transparent; padding: 0; color: inherit; }
 .content-blocks { display: grid; gap: 10px; }.message-image { display: block; max-width: min(100%, 680px); max-height: 520px; border: 2px solid #111; object-fit: contain; }.resource-card { display: grid; gap: 3px; border: 1px solid #111; background: #f5f1e8; padding: 10px; color: #111; text-decoration: none; }.resource-card small { color: #666; font: 10px ui-monospace, monospace; overflow-wrap: anywhere; }
 .message.user { justify-self: end; border: 2px solid #111; background: #82c9ff; box-shadow: 3px 3px 0 #111; padding: 14px 16px; }
 .message.agent { justify-self: start; }

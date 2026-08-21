@@ -113,7 +113,9 @@ export function assertRuntime(input: RuntimeCheckInput): void {
     if (input.mode === 'persistent') throw new Error(`Persistent mode requires Node.js 24+ (current: ${nodeVersion})`)
     console.warn(`[papyrus] Node.js ${nodeVersion} is below the supported major (24).`)
   }
-  if (input.profile.startsWith('government') && !fipsEnabled) {
+  // Allow government profiles in local mode without FIPS for development testing.
+  // Production deployments MUST use FIPS-validated OpenSSL.
+  if (input.profile.startsWith('government') && !fipsEnabled && input.mode === 'persistent') {
     throw new Error('Government profiles require a FIPS-validated OpenSSL runtime (start Node with --enable-fips)')
   }
   if (input.profile === 'commercial' && input.mode === 'persistent' && !fipsEnabled) {
@@ -180,7 +182,14 @@ export function loadConfig(env = process.env): ServerConfig {
     throw new Error('Persistent commercial mode requires OIDC or a trusted identity proxy')
   }
   if (profile === 'commercial' && !oidc && !identityProxy && !isLoopback(new URL(publicOrigin).hostname)) {
-    throw new Error('Remote commercial access requires OIDC or a trusted identity proxy; development authentication is loopback-only')
+    throw new Error('Remote commercial access requires OIDC or a trusted identity proxy')
+  }
+  // Fail closed: require at least one production authentication method.
+  if (profile === 'commercial' && !oidc && !identityProxy) {
+    throw new Error('Commercial profile requires OIDC (PAPYRUS_OIDC_ISSUER) or a trusted identity proxy (PAPYRUS_IDENTITY_PROXY_ALLOW_FINGERPRINTS)')
+  }
+  if (profile.startsWith('government') && !tls) {
+    throw new Error('Government profiles require direct mTLS (PAPYRUS_TLS_CERT, PAPYRUS_TLS_KEY, PAPYRUS_TLS_CA)')
   }
 
   const runtimeWorkerTls = env.PAPYRUS_RUNTIME_MTLS_CERT ? {

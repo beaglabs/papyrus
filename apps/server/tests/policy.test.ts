@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Principal } from '@papyrus/contracts'
 import { ACTIONS, PolicyEngine, cedarUser, cedarUsers, type PolicyAction } from '../src/policy.js'
 
-const principal = (id: string, roles: Principal['roles']): Principal => ({ id, externalId: id, displayName: id, roles, authMethod: 'development' })
+const principal = (id: string, roles: Principal['roles']): Principal => ({ id, externalId: id, displayName: id, roles, authMethod: 'oidc' })
 
 describe('fixed Cedar policy', () => {
   const policy = new PolicyEngine()

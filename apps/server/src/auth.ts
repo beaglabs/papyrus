@@ -16,7 +16,7 @@ interface OidcDiscovery {
 interface PendingOidc { verifier: string; nonce: string; expiresAt: number; nativeTransactionId?: string }
 interface PendingNativeOidc { exchangeDigest: Buffer; expiresAt: number; userId?: string }
 
-export type AuthenticationMethod = 'oidc' | 'mtls' | 'mtls-proxy' | 'development'
+export type AuthenticationMethod = 'oidc' | 'mtls' | 'mtls-proxy'
 
 export interface AuthenticationChallenge {
   error: 'authentication_required'
@@ -85,29 +85,11 @@ export class AuthService {
     return `${name}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0; Priority=High${secure ? '; Secure' : ''}`
   }
 
-  developmentEnabled(): boolean {
-    const origin = new URL(this.config.publicOrigin)
-    return this.config.mode === 'local' && ['127.0.0.1', '::1'].includes(this.config.host)
-      && ['127.0.0.1', '::1', 'localhost'].includes(origin.hostname)
-  }
-
-  developmentPrincipal(name: string): Principal {
-    if (!this.developmentEnabled()) throw new Error('Development authentication is not available')
-    const normalized = name.trim().replace(/\s+/g, ' ')
-    if (!normalized || normalized.length > 128) throw new Error('Development identity name is invalid')
-    return this.db.upsertUser({
-      externalId: `dev:${normalized.toLowerCase()}`,
-      displayName: normalized,
-      authMethod: 'development',
-    })
-  }
-
-  challenge(includeDevelopment = true): AuthenticationChallenge {
+  challenge(): AuthenticationChallenge {
     const methods: AuthenticationMethod[] = []
     if (this.config.oidc) methods.push('oidc')
     if (this.config.profile.startsWith('government')) methods.push('mtls')
     if (this.config.identityProxy) methods.push('mtls-proxy')
-    if (includeDevelopment && this.developmentEnabled()) methods.push('development')
     return {
       error: 'authentication_required',
       code: 'UNAUTHENTICATED',

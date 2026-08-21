@@ -65,5 +65,5 @@ export function EnvironmentsView({ me, items }: { me: Principal; items: Environm
 }
 
 function authenticationLabel(method: Principal['authMethod']) {
-  return method === 'development' ? 'Loopback development identity' : method === 'oidc' ? 'Organizational OIDC identity' : 'CAC/PIV certificate identity'
+  return method === 'oidc' ? 'Organizational OIDC identity' : 'CAC/PIV certificate identity'
 }

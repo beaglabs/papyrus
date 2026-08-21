@@ -11,7 +11,7 @@ export interface Principal {
   displayName: string
   email?: string
   roles: Role[]
-  authMethod: 'oidc' | 'mtls' | 'development'
+  authMethod: 'oidc' | 'mtls'
 }
 
 export interface Environment {
@@ -150,7 +150,7 @@ export interface AdminOverview {
     topology: 'on-premises'
     profile: DeploymentProfile
     publicOrigin: string
-    authentication: 'oidc' | 'mtls' | 'trusted-proxy' | 'loopback-development'
+    authentication: 'oidc' | 'mtls' | 'trusted-proxy' | 'none'
     mtlsConfigured: boolean
     identityProxyConfigured: boolean
     gatewayConfigured: boolean

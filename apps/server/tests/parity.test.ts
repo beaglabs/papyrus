@@ -23,7 +23,9 @@ function context(mode: 'local' | 'persistent') {
 describe('runtime and mode parity', () => {
   it('enforces Node 24+ and FIPS requirements', () => {
     expect(() => assertRuntime({ profile: 'commercial', mode: 'persistent', nodeVersion: '22.23.1' })).toThrow(/Node\.js 24/)
-    expect(() => assertRuntime({ profile: 'government-il4', mode: 'local', nodeVersion: '24.0.0', fipsEnabled: false })).toThrow(/FIPS/)
+    // Government profiles only enforce FIPS in persistent mode (production)
+    expect(() => assertRuntime({ profile: 'government-il4', mode: 'local', nodeVersion: '24.0.0', fipsEnabled: false })).not.toThrow()
+    expect(() => assertRuntime({ profile: 'government-il4', mode: 'persistent', nodeVersion: '24.0.0', fipsEnabled: false })).toThrow(/FIPS/)
     expect(() => assertRuntime({ profile: 'government-il6', mode: 'persistent', nodeVersion: '24.0.0', fipsEnabled: true })).not.toThrow()
     expect(() => assertRuntime({ profile: 'commercial', mode: 'local', nodeVersion: '24.0.0', fipsEnabled: false })).not.toThrow()
   })
@@ -33,9 +35,9 @@ describe('runtime and mode parity', () => {
     const persistent = context('persistent')
     try {
       expect(persistent.service.policy.policyVersion).toBe(local.service.policy.policyVersion)
-      const alice = local.db.upsertUser({ externalId: 'dev:alice', displayName: 'Alice', authMethod: 'development' })
+      const alice = local.db.upsertUser({ externalId: 'oidc:issuer:alice', displayName: 'Alice', authMethod: 'oidc' })
       local.db.setRole(alice.id, 'User')
-      const bob = persistent.db.upsertUser({ externalId: 'dev:bob', displayName: 'Bob', authMethod: 'development' })
+      const bob = persistent.db.upsertUser({ externalId: 'oidc:issuer:bob', displayName: 'Bob', authMethod: 'oidc' })
       persistent.db.setRole(bob.id, 'User')
       const resource = { type: 'Deployment' as const, id: local.service.license.deploymentId }
       const localDecision = local.service.policy.authorize(local.db.getPrincipal(alice.id)!, 'ManageUsers', resource)

@@ -14,13 +14,13 @@ function runtime(runPrompt: AgentRuntime['runPrompt']): AgentRuntime {
 
 function setup(factory?: (options: RuntimeLaunchOptions) => AgentRuntime) {
   const context = testContext(factory)
-  const owner = context.db.upsertUser({ externalId: 'dev:owner', displayName: 'Owner', authMethod: 'development' })
+  const owner = context.db.upsertUser({ externalId: 'oidc:issuer:owner', displayName: 'Owner', authMethod: 'oidc' })
   context.db.setRole(owner.id, 'Owner')
   const activeOwner = context.db.getPrincipal(owner.id)!
-  const user = context.db.upsertUser({ externalId: 'dev:user', displayName: 'User', authMethod: 'development' })
+  const user = context.db.upsertUser({ externalId: 'oidc:issuer:user', displayName: 'User', authMethod: 'oidc' })
   context.db.setRole(user.id, 'User')
   const activeUser = context.db.getPrincipal(user.id)!
-  const other = context.db.upsertUser({ externalId: 'dev:other', displayName: 'Other', authMethod: 'development' })
+  const other = context.db.upsertUser({ externalId: 'oidc:issuer:other', displayName: 'Other', authMethod: 'oidc' })
   context.db.setRole(other.id, 'User')
   const activeOther = context.db.getPrincipal(other.id)!
   const environment = context.service.createEnvironment(activeOwner, { name: 'Mission', description: '' })

@@ -10,7 +10,7 @@ export interface Health {
 export interface AuthenticationChallenge {
   error: 'authentication_required'
   code: 'UNAUTHENTICATED'
-  methods: Array<'oidc' | 'mtls' | 'mtls-proxy' | 'development'>
+  methods: Array<'oidc' | 'mtls' | 'mtls-proxy'>
   login_url?: string
 }
 
@@ -65,10 +65,6 @@ export async function loadShell(): Promise<ShellData> {
 
 export async function logout(): Promise<void> {
   await api('/api/auth/logout', { method: 'POST' })
-}
-
-export async function developmentLogin(name: string): Promise<Principal> {
-  return api('/api/auth/development', { method: 'POST', body: JSON.stringify({ name }) })
 }
 
 export interface SessionPage {

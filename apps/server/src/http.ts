@@ -201,13 +201,6 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
           'cache-control': 'no-store', 'referrer-policy': 'no-referrer',
         }); return response.end()
       }
-      if (url.pathname === '/api/auth/development' && request.method === 'POST') {
-        if (!auth.developmentEnabled()) throw new HttpError(404, 'NOT_FOUND', 'Development authentication is not available')
-        const input = await body(request)
-        const principal = auth.developmentPrincipal(text(input.name, 'name', 128))
-        response.setHeader('set-cookie', auth.sessionCookie(auth.issueSession(principal.id)))
-        return json(response, 200, principal)
-      }
       const runtimeMcp = url.pathname.match(/^\/api\/runtime\/mcp\/([^/]+)\/([^/]+)$/)
       if (runtimeMcp && request.method === 'POST') {
         const authorization = request.headers.authorization

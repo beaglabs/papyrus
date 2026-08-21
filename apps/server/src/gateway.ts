@@ -20,19 +20,16 @@ interface ConnectionBinding {
 }
 
 function devPrincipal(config: ServerConfig, request: IncomingMessage, service: PapyrusService): Principal | undefined {
-  const secrets = (config.gateway ? [config.gateway.devToken].filter(Boolean) : []) as string[]
+  if (!config.gateway?.devToken) return undefined
   const match = (presented: string): boolean => {
     const a = createHash('sha256').update(presented).digest()
-    for (const expected of secrets) {
-      const b = createHash('sha256').update(expected).digest()
-      if (timingSafeEqual(a, b)) return true
-    }
-    return false
+    const b = createHash('sha256').update(config.gateway!.devToken!).digest()
+    return timingSafeEqual(a, b)
   }
   const authorization = request.headers.authorization
   const xSecretKey = singleHeader(request.headers['x-secret-key'])
   if ((authorization?.startsWith('Bearer ') && match(authorization.slice(7))) || (xSecretKey && match(xSecretKey))) {
-    const principal = service.db.upsertUser({ externalId: 'dev:gateway:token', displayName: 'Gateway Developer', authMethod: 'development' })
+    const principal = service.db.upsertUser({ externalId: 'dev:gateway:token', displayName: 'Gateway Developer', authMethod: 'oidc' })
     service.db.setRole(principal.id, 'User')
     return service.db.getPrincipal(principal.id)
   }
@@ -54,7 +51,7 @@ function resolveRequestEnvironment(service: PapyrusService, config: ServerConfig
   const requested = request.headers['x-papyrus-environment-id'] ?? request.headers['x-papyrus-workspace-id']
   const environment = resolveEnvironment(service, principal, requested)
   if (environment) return environment
-  if (!config.gateway?.devToken || singleHeader(requested)) return undefined
+  if (!config.gateway?.devToken) return undefined
   const existing = service.listEnvironments(principal)
   if (existing.length >= 1) return existing[0]
   const created = service.db.createEnvironment({ name: 'development', description: 'Loopback ACP development environment' })
@@ -157,7 +154,7 @@ export function createGatewayServer(config: ServerConfig, service: PapyrusServic
 
     const principal = authenticate(config, service, auth, request)
     if (!principal) {
-      json(response, 401, auth.challenge(false), { 'www-authenticate': 'Bearer realm="Papyrus"' })
+      json(response, 401, auth.challenge(), { 'www-authenticate': 'Bearer realm="Papyrus"' })
       return
     }
 

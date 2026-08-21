@@ -30,12 +30,26 @@ export function ContentMessage({ message }: { message: AcpContentItem }) {
 }
 
 function ContentBlock({ block }: { block: Record<string, unknown> }) {
-  if (block.type === 'text') return <p>{String(block.text ?? '')}</p>
+  if (block.type === 'text') return <MarkdownText text={String(block.text ?? '')} />
   if (block.type === 'image' && typeof block.data === 'string' && typeof block.mimeType === 'string') return <img className="message-image" src={`data:${block.mimeType};base64,${block.data}`} alt="Agent-provided visual" />
   if (block.type === 'resource_link' && typeof block.uri === 'string') return <a className="resource-card" href={safeUri(block.uri)}><strong>{String(block.title ?? block.name ?? 'Resource')}</strong><small>{String(block.mimeType ?? block.uri)}</small></a>
   if (block.type === 'resource' && record(block.resource)) return <div className="resource-card"><strong>{fileName(String(block.resource.uri ?? 'Embedded resource'))}</strong><small>{String(block.resource.mimeType ?? 'embedded context')}</small></div>
   if (block.type === 'audio') return <div className="resource-card"><strong>Audio content</strong><small>{String(block.mimeType ?? 'audio')}</small></div>
   return <div className="resource-card"><strong>Structured ACP content</strong><small>{String(block.type ?? 'unknown')}</small></div>
+}
+
+function MarkdownText({ text }: { text: string }) {
+  const parts = text.split(/```(\w+)?\n([\s\S]*?)```/g)
+  return (
+    <div className="markdown-text">
+      {parts.map((part, i) => {
+        if (i % 3 === 0) return part ? <p>{part}</p> : null
+        const lang = part
+        const code = parts[i + 1]
+        return <pre key={i}><code className={lang ? `language-${lang}` : ''}>{code}</code></pre>
+      })}
+    </div>
+  )
 }
 
 function safeUri(uri: string) { return /^(https?:|\/)/.test(uri) ? uri : '#' }

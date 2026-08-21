@@ -99,7 +99,7 @@ describe('session authentication', () => {
       expect(ctx.auth.challenge()).toEqual({
         error: 'authentication_required',
         code: 'UNAUTHENTICATED',
-        methods: ['oidc', 'development'],
+        methods: ['oidc'],
         login_url: 'http://127.0.0.1:3210/api/auth/oidc/start',
         native_start_url: 'http://127.0.0.1:3210/api/auth/oidc/native/start',
       })

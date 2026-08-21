@@ -9,7 +9,7 @@ describe('Papyrus control plane', () => {
 
   it('uses a single-use secret for Owner bootstrap', () => {
     const context = testContext(); contexts.push(context)
-    const user = context.db.upsertUser({ externalId: 'dev:alice', displayName: 'Alice', authMethod: 'development' })
+    const user = context.db.upsertUser({ externalId: 'oidc:issuer:alice', displayName: 'Alice', authMethod: 'oidc' })
     expect(() => context.service.bootstrap(user, 'wrong')).toThrow(/Invalid bootstrap secret/)
     expect(context.service.bootstrap(user, 'correct horse battery staple').roles).toContain('Owner')
     expect(() => context.service.bootstrap(user, 'correct horse battery staple')).toThrow(/already complete/)
@@ -27,8 +27,8 @@ describe('Papyrus control plane', () => {
 
   it('prevents an Admin from assigning privileged roles', () => {
     const context = testContext(); contexts.push(context)
-    const admin = context.db.upsertUser({ externalId: 'dev:admin', displayName: 'Admin', authMethod: 'development' })
-    const target = context.db.upsertUser({ externalId: 'dev:target', displayName: 'Target', authMethod: 'development' })
+    const admin = context.db.upsertUser({ externalId: 'oidc:issuer:admin', displayName: 'Admin', authMethod: 'oidc' })
+    const target = context.db.upsertUser({ externalId: 'oidc:issuer:target', displayName: 'Target', authMethod: 'oidc' })
     context.db.setRole(admin.id, 'Admin')
     expect(() => context.service.assignRole(context.db.getPrincipal(admin.id)!, target.id, 'Owner')).toThrow(AuthorizationDenied)
     expect(context.service.assignRole(context.db.getPrincipal(admin.id)!, target.id, 'User').roles).toContain('User')
@@ -58,7 +58,7 @@ describe('Papyrus control plane', () => {
 
     // A second user in a different environment cannot use the first environment's grant.
     const other = context.service.createEnvironment(owner, { name: 'Other', description: '' })
-    const otherUser = context.db.upsertUser({ externalId: 'dev:other', displayName: 'Other', authMethod: 'development' })
+    const otherUser = context.db.upsertUser({ externalId: 'oidc:issuer:other', displayName: 'Other', authMethod: 'oidc' })
     context.db.setRole(otherUser.id, 'User')
     const activeOther = context.db.getPrincipal(otherUser.id)!
     context.service.assign(owner, activeOther.id, other.id)
@@ -122,10 +122,10 @@ describe('Papyrus control plane', () => {
 })
 
 function setup(context: ReturnType<typeof testContext>) {
-  const owner = context.db.upsertUser({ externalId: 'dev:owner', displayName: 'Owner', authMethod: 'development' })
+  const owner = context.db.upsertUser({ externalId: 'oidc:issuer:owner', displayName: 'Owner', authMethod: 'oidc' })
   context.db.setRole(owner.id, 'Owner')
   const activeOwner = context.db.getPrincipal(owner.id)!
-  const user = context.db.upsertUser({ externalId: 'dev:user', displayName: 'User', authMethod: 'development' })
+  const user = context.db.upsertUser({ externalId: 'oidc:issuer:user', displayName: 'User', authMethod: 'oidc' })
   context.db.setRole(user.id, 'User')
   const activeUser = context.db.getPrincipal(user.id)!
   const environment = context.service.createEnvironment(activeOwner, { name: 'Mission', description: 'Segmented mission work' })

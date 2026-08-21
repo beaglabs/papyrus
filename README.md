@@ -37,16 +37,25 @@ The active daemon-first migration plan is documented in [ACP daemon stack](docs/
 - A configured ACP runtime; Goose remains the current adapter until the runtime-neutral layer lands
 - An approved customer model endpoint
 
-## Local development
+## Local development (commercial profile)
 
 ```bash
 pnpm install --frozen-lockfile
 pnpm build
 
 export PAPYRUS_MODE=local
+export PAPYRUS_PROFILE=commercial
 export PAPYRUS_DEV_IDENTITY='owner:Local Owner'
 export PAPYRUS_BOOTSTRAP_SECRET='replace-with-single-use-bootstrap-secret'
 export PAPYRUS_SESSION_SECRET="$(openssl rand -hex 32)"
+export PAPYRUS_LICENSE_REQUIRED=false
+
+# Model endpoint (required for agent sessions)
+export PAPYRUS_MODEL_ENDPOINT=https://openrouter.ai/api
+export PAPYRUS_MODEL=liquid/lfm-2.5-2.6b:free
+export PAPYRUS_MODEL_API_KEY=your-openrouter-key
+
+# Optional: ACP gateway for Goose/ACP clients
 export PAPYRUS_GATEWAY_ENABLED=true
 export PAPYRUS_GATEWAY_DEV_TOKEN="$(openssl rand -hex 32)"
 
@@ -55,7 +64,45 @@ pnpm start
 
 The API listens on `http://127.0.0.1:3210`; the ACP gateway listens on `127.0.0.1:3220`. Do not set `GOOSE_SERVER__SECRET_KEY`; it belongs to the Goose runtime process.
 
-Local mode does not require a production license. Persistent mode always requires a valid signed license and has no environment-variable bypass.
+## Local development (government profile with mTLS)
+
+```bash
+pnpm install --frozen-lockfile
+pnpm build
+
+# Generate test certificates (one-time)
+mkdir -p certs
+openssl req -x509 -newkey rsa:4096 -keyout certs/cac-ca-key.pem -out certs/cac-ca.pem -days 365 -nodes -subj "/CN=Test CAC CA"
+openssl req -newkey rsa:4096 -keyout certs/server-key.pem -out certs/server.csr -nodes -subj "/CN=papyrus.local"
+openssl x509 -req -in certs/server.csr -CA certs/cac-ca.pem -CAkey certs/cac-ca-key.pem -CAcreateserial -out certs/server.pem -days 365 -sha256
+openssl req -newkey rsa:4096 -keyout certs/client-key.pem -out certs/client.csr -nodes -subj "/CN=Test User/emailAddress=user@test.local"
+openssl x509 -req -in certs/client.csr -CA certs/cac-ca.pem -CAkey certs/cac-ca-key.pem -CAcreateserial -out certs/client.pem -days 365 -sha256
+openssl pkcs12 -export -in certs/client.pem -inkey certs/client-key.pem -out certs/client.p12 -name "Test CAC User" -passout pass:test123
+
+export PAPYRUS_MODE=local
+export PAPYRUS_PROFILE=government-il4
+export PAPYRUS_HOST=127.0.0.1
+export PAPYRUS_PORT=3210
+export PAPYRUS_PUBLIC_ORIGIN=https://127.0.0.1:3210
+export PAPYRUS_TLS_CERT=/Users/jdbohrman/papyrus/certs/server.pem
+export PAPYRUS_TLS_KEY=/Users/jdbohrman/papyrus/certs/server-key.pem
+export PAPYRUS_TLS_CA=/Users/jdbohrman/papyrus/certs/cac-ca.pem
+export PAPYRUS_SESSION_SECRET="$(openssl rand -hex 32)"
+export PAPYRUS_BOOTSTRAP_SECRET="$(openssl rand -hex 32)"
+export PAPYRUS_LICENSE_REQUIRED=false
+
+# Model endpoint
+export PAPYRUS_MODEL_ENDPOINT=https://openrouter.ai/api
+export PAPYRUS_MODEL=liquid/lfm-2.5-2.6b:free
+export PAPYRUS_MODEL_API_KEY=your-openrouter-key
+
+# Optional: sandbox runtime for code execution and Tor
+# export PAPYRUS_SANDBOX_API_KEY=... (not required for local sandbox-runtime)
+
+pnpm start
+```
+
+Import `certs/client.p12` into your browser (password: `test123`), then visit `https://127.0.0.1:3210` and select the certificate when prompted.
 
 ## Production profiles
 
@@ -66,6 +113,23 @@ Local mode does not require a production license. Persistent mode always require
 | `government-il6` | CAC/PIV certificate identity | Direct mutual TLS |
 
 Profile names are deployment baselines, not accreditation or authorization claims.
+
+### Required production environment variables
+
+**Commercial:**
+- `PAPYRUS_OIDC_ISSUER`, `PAPYRUS_OIDC_CLIENT_ID`, `PAPYRUS_OIDC_REDIRECT_URI`
+- `PAPYRUS_SESSION_SECRET` (32+ random chars)
+- `PAPYRUS_BOOTSTRAP_SECRET` (single-use)
+- `PAPYRUS_MODEL_ENDPOINT`, `PAPYRUS_MODEL`, `PAPYRUS_MODEL_API_KEY`
+
+**Government:**
+- `PAPYRUS_TLS_CERT`, `PAPYRUS_TLS_KEY`, `PAPYRUS_TLS_CA` (CAC/PIV trust bundle)
+- `PAPYRUS_TLS_CRL` (optional revocation list)
+- `PAPYRUS_SESSION_SECRET`, `PAPYRUS_BOOTSTRAP_SECRET`
+- `PAPYRUS_MODEL_ENDPOINT`, `PAPYRUS_MODEL`, `PAPYRUS_MODEL_API_KEY`
+- Node.js 24+ with `--enable-fips` (FIPS-validated OpenSSL required)
+
+Local mode does not require a production license. Persistent mode always requires a valid signed license and has no environment-variable bypass.
 
 ## Verification
 

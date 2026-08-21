@@ -25,7 +25,7 @@ function setup(factory?: (options: RuntimeLaunchOptions) => AgentRuntime) {
   const activeOther = context.db.getPrincipal(other.id)!
   const environment = context.service.createEnvironment(activeOwner, { name: 'Mission', description: '' })
   context.service.assign(activeOwner, activeUser.id, environment.id)
-  const session = context.service.createSession(activeUser, environment.id, 'goose', 'Governed')
+  const session = context.service.createSession(activeUser, environment.id, 'papyrus', 'Governed')
   return { context, owner: activeOwner, user: activeUser, other: activeOther, environment, session }
 }
 

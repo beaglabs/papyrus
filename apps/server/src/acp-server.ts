@@ -4,13 +4,13 @@
 // does not own sessions, provider secrets, runtime state, or authorization.
 import * as acp from '@agentclientprotocol/sdk'
 import { AcpServer } from '@agentclientprotocol/sdk/experimental/server'
-import type { Principal, SessionEvent, Workspace } from '@papyrus/contracts'
+import type { Environment, Principal, SessionEvent } from '@papyrus/contracts'
 import type { RuntimeEvent } from '@papyrus/acp-runtime'
 import type { PapyrusService } from './service.js'
 
 export interface AcpAgentContext {
   principal: Principal
-  workspace: Workspace
+  environment: Environment
 }
 
 // Build an AgentApp backed by the daemon's authoritative session governor.
@@ -36,7 +36,7 @@ export function buildAcpAgent(
   app.onRequest(acp.methods.agent.session.new, async (ctx) => {
     const session = service.createSession(
       context.principal,
-      context.workspace.id,
+      context.environment.id,
       service.defaultGatewayAgent(),
       sessionTitle(ctx.params.cwd),
       ctx.params.cwd,

@@ -67,6 +67,10 @@ export async function logout(): Promise<void> {
   await api('/api/auth/logout', { method: 'POST' })
 }
 
+export async function developmentLogin(): Promise<void> {
+  await api('/api/auth/development', { method: 'POST' })
+}
+
 export interface SessionPage {
   sessions: Session[]
   nextCursor?: string

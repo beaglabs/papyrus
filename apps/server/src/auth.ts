@@ -85,6 +85,14 @@ export class AuthService {
     return `${name}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0; Priority=High${secure ? '; Secure' : ''}`
   }
 
+  developmentSignedOutCookie(): string {
+    return 'papyrus_dev_signed_out=1; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800; Priority=High'
+  }
+
+  clearDevelopmentSignedOutCookie(): string {
+    return 'papyrus_dev_signed_out=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0; Priority=High'
+  }
+
   challenge(): AuthenticationChallenge {
     const methods: AuthenticationMethod[] = []
     if (this.config.oidc) methods.push('oidc')
@@ -109,6 +117,7 @@ export class AuthService {
 
   authenticate(request: IncomingMessage): Principal | undefined {
     if (this.config.devIdentity) {
+      if (this.cookie(request, 'papyrus_dev_signed_out') === '1') return undefined
       const parts = this.config.devIdentity.split(':')
       const principal = this.db.upsertUser({ externalId: `dev:${parts[0]}`, displayName: parts[1] ?? parts[0] ?? 'Developer', authMethod: 'development' })
       const role = ({ owner: 'Owner', admin: 'Admin', auditor: 'Auditor', user: 'User' } as const)[(parts[0] ?? '').toLowerCase() as 'owner' | 'admin' | 'auditor' | 'user'] ?? 'User'

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import type { Workspace } from '@papyrus/contracts'
-import { api, AuthenticationRequired, loadShell, logout, type AuthenticationChallenge, type Health, type ShellData } from './api.js'
+import { api, AuthenticationRequired, developmentLogin, loadShell, logout, type AuthenticationChallenge, type Health, type ShellData } from './api.js'
 import { SessionHarness } from './Sessions.js'
 import { SourcesView } from './Sources.js'
 import { AdminView } from './Admin.js'
@@ -85,6 +85,7 @@ function SignedOut({ health, challenge }: { health: Health; challenge: Authentic
   const oidc = challenge.methods.includes('oidc') && challenge.login_url
   return <><HandlingBanner profile={health.profile} /><main className="center login auth-entry"><Logo /><p className="eyebrow">GOVERNED AGENT WORKSPACE</p><h1>Identity before<br />authority.</h1><p>Papyrus binds every session, tool request, and policy decision to an authenticated organizational identity.</p><div className="auth-grid">
     {oidc && <a className="primary" href={challenge.login_url}>Continue with organizational login →</a>}
+    {challenge.methods.includes('development') && <button className="primary" onClick={() => void developmentLogin().then(() => window.location.reload())}>Continue with development identity →</button>}
     {government && <article className="profile-card"><strong>CAC/PIV authentication</strong><p>Insert your card, select its authentication certificate when prompted, then reload this page.</p><button className="secondary" onClick={() => window.location.reload()}>Retry certificate authentication</button></article>}
     {challenge.methods.includes('mtls-proxy') && <article className="profile-card"><strong>Trusted identity gateway</strong><p>Open Papyrus through your organization’s authorized access gateway.</p></article>}
     {challenge.methods.length === 0 && <div className="error">This deployment has no configured authentication method.</div>}

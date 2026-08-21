@@ -164,6 +164,11 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
           'cache-control': 'no-store', 'referrer-policy': 'no-referrer',
         }); return response.end()
       }
+      if (url.pathname === '/api/auth/development' && request.method === 'POST') {
+        if (!config.devIdentity) throw new HttpError(404, 'NOT_FOUND', 'Development authentication is not configured')
+        response.writeHead(204, { 'set-cookie': auth.clearDevelopmentSignedOutCookie(), 'cache-control': 'no-store' })
+        return response.end()
+      }
       const runtimeMcp = url.pathname.match(/^\/api\/runtime\/mcp\/([^/]+)\/([^/]+)$/)
       if (runtimeMcp && request.method === 'POST') {
         const authorization = request.headers.authorization
@@ -177,7 +182,12 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
       if (url.pathname === '/api/admin/overview' && request.method === 'GET') return json(response, 200, service.adminOverview(principal))
       if (url.pathname === '/api/auth/logout' && request.method === 'POST') {
         auth.revokeSessions(principal.id)
-        response.writeHead(204, { 'set-cookie': auth.clearSessionCookie(), 'cache-control': 'no-store' })
+        response.writeHead(204, {
+          'set-cookie': principal.authMethod === 'development'
+            ? [auth.clearSessionCookie(), auth.developmentSignedOutCookie()]
+            : auth.clearSessionCookie(),
+          'cache-control': 'no-store',
+        })
         return response.end()
       }
       if (url.pathname === '/api/bootstrap' && request.method === 'POST') {

@@ -43,6 +43,48 @@ describe('Papyrus native worker', () => {
     }))
   })
 
+
+  it('allows at most one elicitation per prompt turn', async () => {
+    const elicitationCall = (id: string) => new Response(JSON.stringify({
+      choices: [{ message: {
+        role: 'assistant',
+        content: null,
+        tool_calls: [{ id, type: 'function', function: {
+          name: 'papyrus_request_input',
+          arguments: '{"message":"Provide more information"}',
+        } }],
+      } }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } })
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(elicitationCall('elicit-1'))
+      .mockResolvedValueOnce(elicitationCall('elicit-2'))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        choices: [{ message: { role: 'assistant', content: 'Continued with the available information.' } }],
+      }), { status: 200, headers: { 'content-type': 'application/json' } })))
+    const elicit = vi.fn(async () => ({ response: 'required value' }))
+    const events: Array<{ kind: string; data: unknown }> = []
+    const worker = new PapyrusWorker({ endpoint: 'http://127.0.0.1:8000', model: 'test-model' })
+
+    await worker.runPrompt({
+      cwd: '/',
+      prompt: 'Perform the work',
+      authorizeTool: async () => false,
+      elicit,
+      onEvent: (event) => { events.push(event) },
+    })
+
+    expect(elicit).toHaveBeenCalledTimes(1)
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: 'update',
+      data: expect.objectContaining({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'elicit-2',
+        status: 'failed',
+      }),
+    }))
+  })
+
+
   it('routes model tool calls through Papyrus authorization and execution', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({

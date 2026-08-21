@@ -11,13 +11,13 @@ function setup(runtimeFactory?: Parameters<typeof testContext>[0]) {
   const user = context.db.upsertUser({ externalId: 'dev:user', displayName: 'User', authMethod: 'development' })
   context.db.setRole(user.id, 'User')
   const activeUser = context.db.getPrincipal(user.id)!
-  const workspace = context.service.createWorkspace(activeOwner, { name: 'Mission', description: '' })
-  context.service.assign(activeOwner, activeUser.id, workspace.id)
-  return { context, user: activeUser, workspace }
+  const environment = context.service.createEnvironment(activeOwner, { name: 'Mission', description: '' })
+  context.service.assign(activeOwner, activeUser.id, environment.id)
+  return { context, user: activeUser, environment }
 }
 
 function connect(ctx: ReturnType<typeof setup>, updates: acp.SessionUpdate[] = []) {
-  const agentContext: AcpAgentContext = { principal: ctx.user, workspace: ctx.workspace }
+  const agentContext: AcpAgentContext = { principal: ctx.user, environment: ctx.environment }
   const agentApp = buildAcpAgent(ctx.context.service, agentContext)
   const clientApp = acp.client({ name: 'test-client' })
     .onNotification(acp.methods.client.session.update, ({ params }) => { updates.push(params.update) })

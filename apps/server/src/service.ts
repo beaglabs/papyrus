@@ -688,7 +688,17 @@ export class PapyrusService {
         id: crypto.randomUUID(),
         method: 'tools/list',
         params: {},
-      }, this.mcpAuthorization(server.id))
+      }, this.mcpAuthorization(server.id)).catch((error) => {
+        this.audit.append({
+          actorId: session.ownerId,
+          action: 'DiscoverTools',
+          resourceType: 'McpServer',
+          resourceId: server.id,
+          decision: 'deny',
+          metadata: { sessionId: session.id, error: safeError(error) },
+        })
+        return undefined
+      })
       if (!response || typeof response !== 'object') continue
       const listed = (response as { result?: { tools?: Array<{ name?: unknown; description?: unknown; inputSchema?: unknown }> } }).result?.tools
       if (!Array.isArray(listed)) continue

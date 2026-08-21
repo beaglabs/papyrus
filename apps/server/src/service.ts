@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { Agent as HttpsAgent } from 'node:https'
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
-import type { ActivitySummary, AdminOverview, Approval, Attachment, Environment, McpServer, Principal, ResearchSource, Role, Session, SessionEvent, SessionRun, SignedLicense } from '@papyrus/contracts'
+import type { ActivitySummary, AdminOverview, Approval, Attachment, Elicitation, Environment, McpServer, Principal, ResearchSource, Role, Session, SessionEvent, SessionRun, SignedLicense } from '@papyrus/contracts'
 import type { ContentBlock } from '@agentclientprotocol/sdk'
 import type { AgentRuntime, RuntimeEvent, RuntimeLaunchOptions } from '@papyrus/acp-runtime'
 import { gooseRuntimeAdapter } from '@papyrus/goose-runtime'
@@ -21,7 +21,7 @@ export class AuthorizationDenied extends Error {
 
 export class SessionLifecycleError extends Error {
   constructor(
-    readonly code: 'SESSION_NOT_FOUND' | 'SESSION_BUSY' | 'SESSION_STOPPED' | 'SESSION_CWD_MISMATCH',
+    readonly code: 'SESSION_NOT_FOUND' | 'SESSION_BUSY' | 'SESSION_STOPPED' | 'SESSION_CWD_MISMATCH' | 'INVALID_SESSION_MODE',
     message: string,
   ) { super(message) }
 }
@@ -52,6 +52,7 @@ export class PapyrusService {
   readonly license: LicenseService
   private readonly activeSessionRuns = new Map<string, ActiveSessionRun>()
   private readonly pendingApprovalResolvers = new Map<string, (approved: boolean) => void>()
+  private readonly pendingElicitationResolvers = new Map<string, (response: Record<string, unknown>) => void>()
 
   constructor(
     readonly db: PapyrusDatabase,
@@ -224,6 +225,24 @@ export class PapyrusService {
     return this.db.listApprovals(sessionId)
   }
 
+  sessionElicitations(actor: Principal, sessionId: string): Elicitation[] {
+    const session = this.requireSession(sessionId)
+    this.check(actor, 'ReadSession', this.sessionResource(session))
+    return this.db.listElicitations(sessionId)
+  }
+
+  respondElicitation(actor: Principal, sessionId: string, elicitationId: string, response: Record<string, unknown>): Elicitation {
+    const session = this.requireSession(sessionId)
+    this.check(actor, 'PromptSession', this.sessionResource(session))
+    const existing = this.db.listElicitations(sessionId).find((item) => item.id === elicitationId)
+    if (!existing) throw new Error('Elicitation not found')
+    const elicitation = this.db.respondElicitation(elicitationId, response)
+    if (!elicitation) throw new Error('Elicitation already answered')
+    this.db.addRuntimeEvent(sessionId, existing.runId, 'elicitation', new Date().toISOString(), elicitation)
+    this.pendingElicitationResolvers.get(elicitationId)?.(response)
+    return elicitation
+  }
+
   sessionSources(actor: Principal, sessionId: string): ResearchSource[] {
     const session = this.requireSession(sessionId)
     this.check(actor, 'ReadSession', this.sessionResource(session))
@@ -285,6 +304,23 @@ export class PapyrusService {
     return this.requireSession(sessionId)
   }
 
+  deleteSession(actor: Principal, sessionId: string): void {
+    const session = this.requireSession(sessionId)
+    this.check(actor, 'DeleteSession', this.sessionResource(session))
+    const active = this.activeSessionRuns.get(sessionId)
+    if (active) throw new SessionLifecycleError('SESSION_BUSY', 'Cancel the active run before deleting this session')
+    if (!this.db.deleteSession(sessionId)) throw new SessionLifecycleError('SESSION_NOT_FOUND', 'Session not found')
+    this.audit.append({ actorId: actor.id, action: 'DeleteSession', resourceType: 'Session', resourceId: sessionId, decision: 'info', metadata: { title: session.title } })
+  }
+
+  setSessionMode(actor: Principal, sessionId: string, modeId: string): void {
+    const session = this.requireSession(sessionId)
+    this.check(actor, 'SetSessionMode', this.sessionResource(session))
+    if (!['ask', 'governed'].includes(modeId)) throw new SessionLifecycleError('INVALID_SESSION_MODE', 'Unsupported session mode')
+    this.db.addRuntimeEvent(sessionId, undefined, 'update', new Date().toISOString(), { sessionUpdate: 'current_mode_update', modeId })
+    this.audit.append({ actorId: actor.id, action: 'SetSessionMode', resourceType: 'Session', resourceId: sessionId, decision: 'info', metadata: { modeId } })
+  }
+
   resumeSession(actor: Principal, sessionId: string, expectedCwd?: string): Session {
     const session = this.requireSession(sessionId)
     this.check(actor, 'ResumeSession', this.sessionResource(session))
@@ -337,6 +373,7 @@ export class PapyrusService {
         environment: spec.environment(),
         mcpServers: this.runtimeMcpServers(session),
         authorizeTool: async (title) => this.requestToolApproval(actor, session, run.runId, title, run.controller.signal),
+        elicit: async (request) => this.requestElicitation(session, run.runId, request, run.controller.signal),
         onEvent: async (event) => {
           events.push(event)
           this.db.addRuntimeEvent(session.id, run.runId, event.kind, event.at, event.data)
@@ -622,6 +659,22 @@ export class PapyrusService {
 
   private recordApprovalEvent(approval: Approval): void {
     this.db.addRuntimeEvent(approval.sessionId, approval.runId, 'approval', new Date().toISOString(), approval)
+  }
+
+  private async requestElicitation(session: Session, runId: string, request: Record<string, unknown>, signal: AbortSignal): Promise<Record<string, unknown>> {
+    const elicitation = this.db.createElicitation(session.id, runId, request)
+    this.db.addRuntimeEvent(session.id, runId, 'elicitation', new Date().toISOString(), elicitation)
+    return await new Promise((resolve) => {
+      const finish = (response: Record<string, unknown>) => {
+        signal.removeEventListener('abort', abort)
+        this.pendingElicitationResolvers.delete(elicitation.id)
+        resolve(response)
+      }
+      const abort = () => finish({ action: 'cancel' })
+      this.pendingElicitationResolvers.set(elicitation.id, finish)
+      signal.addEventListener('abort', abort, { once: true })
+      if (signal.aborted) abort()
+    })
   }
 
   /** Session-bound Papyrus MCP proxy endpoints for the runtime to consume. */

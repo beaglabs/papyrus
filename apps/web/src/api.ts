@@ -1,4 +1,4 @@
-import type { Principal, Workspace } from '@papyrus/contracts'
+import type { Principal, Session, SessionEvent, Workspace } from '@papyrus/contracts'
 
 export interface Health {
   mode: string
@@ -65,4 +65,42 @@ export async function loadShell(): Promise<ShellData> {
 
 export async function logout(): Promise<void> {
   await api('/api/auth/logout', { method: 'POST' })
+}
+
+export interface SessionPage {
+  sessions: Session[]
+  nextCursor?: string
+}
+
+export async function sessionPage(cursor?: string): Promise<SessionPage> {
+  const query = new URLSearchParams({ limit: '50' })
+  if (cursor) query.set('cursor', cursor)
+  return api(`/api/sessions?${query}`)
+}
+
+export async function createSession(workspaceId: string, title: string): Promise<Session> {
+  return api('/api/sessions', { method: 'POST', body: JSON.stringify({ workspaceId, title }) })
+}
+
+export async function sessionEvents(sessionId: string): Promise<SessionEvent[]> {
+  const events: SessionEvent[] = []
+  let after = 0
+  for (;;) {
+    const page = await api<{ events: SessionEvent[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/events?after=${after}&limit=1000`)
+    events.push(...page.events)
+    if (page.events.length < 1000) return events
+    after = page.events.at(-1)?.sequence ?? after
+  }
+}
+
+export async function promptSession(sessionId: string, prompt: string): Promise<{ stopReason: string }> {
+  return api(`/api/sessions/${encodeURIComponent(sessionId)}/prompts`, { method: 'POST', body: JSON.stringify({ prompt }) })
+}
+
+export async function cancelSession(sessionId: string): Promise<{ cancelled: boolean }> {
+  return api(`/api/sessions/${encodeURIComponent(sessionId)}/cancel`, { method: 'POST' })
+}
+
+export async function resumeSession(sessionId: string): Promise<Session> {
+  return api(`/api/sessions/${encodeURIComponent(sessionId)}/resume`, { method: 'POST' })
 }

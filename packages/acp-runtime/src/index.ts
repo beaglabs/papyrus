@@ -34,11 +34,19 @@ export interface RuntimeMcpServer {
   headers?: Array<{ name: string; value: string }>
 }
 
+export interface RuntimeTool {
+  name: string
+  description?: string
+  inputSchema: Record<string, unknown>
+}
+
 export interface RuntimePromptRequest {
   cwd: string
   prompt: string | acp.ContentBlock[]
   environment?: Record<string, string>
   mcpServers?: RuntimeMcpServer[]
+  tools?: RuntimeTool[]
+  invokeTool?: (name: string, args: Record<string, unknown>) => Promise<unknown>
   authorizeTool: (title: string) => Promise<boolean>
   elicit?: (request: Record<string, unknown>) => Promise<Record<string, unknown>>
   onEvent: (event: RuntimeEvent) => void | Promise<void>

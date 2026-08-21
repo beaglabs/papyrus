@@ -6,7 +6,7 @@ import { createServer as createHttpsServer } from 'node:https'
 import type { Duplex } from 'node:stream'
 import { AcpServer } from '@agentclientprotocol/sdk/experimental/server'
 import { createNodeHttpHandler } from '@agentclientprotocol/sdk/experimental/node'
-import type { Principal, Workspace } from '@papyrus/contracts'
+import type { Environment, Principal } from '@papyrus/contracts'
 import { AuthService } from './auth.js'
 import { buildAcpAgent, type AcpAgentContext } from './acp-server.js'
 import type { ServerConfig } from './config.js'
@@ -14,7 +14,7 @@ import { PapyrusService } from './service.js'
 
 interface ConnectionBinding {
   principalId: string
-  workspaceId: string
+  environmentId: string
   lastSeenAt: number
   activeRequests: number
 }
@@ -43,22 +43,23 @@ function authenticate(config: ServerConfig, service: PapyrusService, auth: AuthS
   return auth.authenticate(request) ?? devPrincipal(config, request, service)
 }
 
-function resolveWorkspace(service: PapyrusService, principal: Principal, headerValue: string | string[] | undefined): Workspace | undefined {
-  const available = service.listWorkspaces(principal)
+function resolveEnvironment(service: PapyrusService, principal: Principal, headerValue: string | string[] | undefined): Environment | undefined {
+  const available = service.listEnvironments(principal)
   const header = singleHeader(headerValue)
-  if (header) return available.find((workspace) => workspace.id === header)
+  if (header) return available.find((environment) => environment.id === header)
   return available.length === 1 ? available[0] : undefined
 }
 
-function resolveRequestWorkspace(service: PapyrusService, config: ServerConfig, request: IncomingMessage, principal: Principal): Workspace | undefined {
-  const workspace = resolveWorkspace(service, principal, request.headers['x-papyrus-workspace-id'])
-  if (workspace) return workspace
-  if (!config.gateway?.devToken || singleHeader(request.headers['x-papyrus-workspace-id'])) return undefined
-  const existing = service.listWorkspaces(principal)
+function resolveRequestEnvironment(service: PapyrusService, config: ServerConfig, request: IncomingMessage, principal: Principal): Environment | undefined {
+  const requested = request.headers['x-papyrus-environment-id'] ?? request.headers['x-papyrus-workspace-id']
+  const environment = resolveEnvironment(service, principal, requested)
+  if (environment) return environment
+  if (!config.gateway?.devToken || singleHeader(requested)) return undefined
+  const existing = service.listEnvironments(principal)
   if (existing.length >= 1) return existing[0]
-  const created = service.db.createWorkspace({ name: 'default', description: 'Auto-created dev workspace' })
-  service.db.assign('user', principal.id, 'workspace', created.id)
-  console.log(`[gateway] Auto-created default workspace ${created.id} for dev principal`)
+  const created = service.db.createEnvironment({ name: 'development', description: 'Loopback ACP development environment' })
+  service.db.assign('user', principal.id, 'environment', created.id)
+  console.log(`[gateway] Auto-created development environment ${created.id} for dev principal`)
   return created
 }
 
@@ -167,9 +168,9 @@ export function createGatewayServer(config: ServerConfig, service: PapyrusServic
         json(response, 404, { error: 'connection_not_found', code: 'CONNECTION_NOT_FOUND' })
         return
       }
-      const requestedWorkspace = singleHeader(request.headers['x-papyrus-workspace-id'])
-      if (requestedWorkspace && requestedWorkspace !== binding.workspaceId) {
-        json(response, 403, { error: 'workspace_mismatch', code: 'WORKSPACE_MISMATCH' })
+      const requestedEnvironment = singleHeader(request.headers['x-papyrus-environment-id'] ?? request.headers['x-papyrus-workspace-id'])
+      if (requestedEnvironment && requestedEnvironment !== binding.environmentId) {
+        json(response, 403, { error: 'environment_mismatch', code: 'ENVIRONMENT_MISMATCH' })
         return
       }
       binding.lastSeenAt = Date.now()
@@ -196,12 +197,12 @@ export function createGatewayServer(config: ServerConfig, service: PapyrusServic
       json(response, 429, { error: 'connection_limit_reached', code: 'CONNECTION_LIMIT_REACHED' }, { 'retry-after': '1' })
       return
     }
-    const workspace = resolveRequestWorkspace(service, config, request, principal)
-    if (!workspace) {
+    const environment = resolveRequestEnvironment(service, config, request, principal)
+    if (!environment) {
       json(response, 400, {
-        error: 'workspace_required',
-        code: 'WORKSPACE_REQUIRED',
-        message: 'Workspace is missing, ambiguous, or unavailable; set X-Papyrus-Workspace-Id',
+        error: 'environment_required',
+        code: 'ENVIRONMENT_REQUIRED',
+        message: 'Environment is missing, ambiguous, or unavailable; set X-Papyrus-Environment-Id',
       })
       return
     }
@@ -216,14 +217,14 @@ export function createGatewayServer(config: ServerConfig, service: PapyrusServic
       if (typeof initializedConnectionId !== 'string') return
       bindings.set(initializedConnectionId, {
         principalId: principal.id,
-        workspaceId: workspace.id,
+        environmentId: environment.id,
         lastSeenAt: Date.now(),
         activeRequests: 0,
       })
     }
     response.once('finish', () => settleInitialization(true))
     response.once('close', () => settleInitialization(false))
-    agentContext.run({ principal, workspace }, () => httpHandler(request, response))
+    agentContext.run({ principal, environment }, () => httpHandler(request, response))
   }
 
   let server: ReturnType<typeof createHttpServer>

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { Agent as HttpsAgent } from 'node:https'
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import type { ActivitySummary, AdminOverview, Approval, Attachment, Elicitation, Environment, McpServer, Principal, ResearchSource, Role, Session, SessionEvent, SessionRun, SignedLicense } from '@papyrus/contracts'
 import type { ContentBlock } from '@agentclientprotocol/sdk'
 import type { AgentRuntime, RuntimeEvent, RuntimeLaunchOptions } from '@papyrus/acp-runtime'
@@ -13,6 +13,7 @@ import { projectResearchSources } from './sources.js'
 import type { ServerConfig } from './config.js'
 import { PapyrusDatabase } from './db.js'
 import { LicenseService } from './license.js'
+import { exchangeMcpCode, registerRemoteMcp } from './mcp-oauth.js'
 import { PolicyEngine, cedarUser, cedarUsers, type AuthorizationResource, type PolicyAction } from './policy.js'
 
 export class AuthorizationDenied extends Error {
@@ -400,12 +401,25 @@ export class PapyrusService {
     }
   }
 
-  addMcpServer(actor: Principal, input: Pick<McpServer, 'name' | 'endpoint'>): McpServer {
+  async addMcpServer(actor: Principal, input: Pick<McpServer, 'name' | 'endpoint'>): Promise<{ server: McpServer; authorizationUrl?: string }> {
     this.check(actor, 'ManageTools', { type: 'Deployment', id: this.license.deploymentId })
     const parsed = new URL(input.endpoint)
-    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Only HTTP MCP transports are supported')
-    const server = this.db.addMcpServer(input)
+    if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && ['127.0.0.1', '::1', 'localhost'].includes(parsed.hostname))) throw new Error('Remote MCP endpoints must use HTTPS')
+    const redirectUri = `${this.config.publicOrigin}/api/mcp/oauth/callback`
+    const oauth = await registerRemoteMcp(parsed.toString(), redirectUri, `Papyrus — ${input.name}`)
+    const server = this.db.addMcpServer({ ...input, oauthStatus: oauth ? 'authorization_required' : 'not_required', ...(oauth ? { oauthIssuer: oauth.issuer } : {}) })
+    if (oauth) this.db.createMcpOauthPending({ state: oauth.state, serverId: server.id, actorId: actor.id, issuer: oauth.issuer, tokenEndpoint: oauth.tokenEndpoint, clientId: oauth.clientId, ...(oauth.clientSecret ? { clientSecret: this.seal(oauth.clientSecret) } : {}), verifier: this.seal(oauth.verifier), redirectUri, resource: oauth.resource })
     this.audit.append({ actorId: actor.id, action: 'AddMcpServer', resourceType: 'McpServer', resourceId: server.id, decision: 'info', metadata: { name: server.name } })
+    return { server, ...(oauth ? { authorizationUrl: oauth.authorizationUrl } : {}) }
+  }
+
+  async completeMcpOauth(actor: Principal, state: string, code: string): Promise<McpServer> {
+    const pending = this.db.getMcpOauthPending(state)
+    if (!pending || String(pending.actor_id) !== actor.id) throw new Error('OAuth state is invalid or expired')
+    const token = await exchangeMcpCode({ ...pending, verifier: this.open(String(pending.verifier)), ...(pending.client_secret ? { client_secret: this.open(String(pending.client_secret)) } : {}) }, code)
+    const server = this.db.finishMcpOauth(state, this.seal(token.accessToken), token.refreshToken ? this.seal(token.refreshToken) : undefined, token.expiresAt)
+    if (!server) throw new Error('MCP server registration was not found')
+    this.audit.append({ actorId: actor.id, action: 'AuthorizeMcpServer', resourceType: 'McpServer', resourceId: server.id, decision: 'allow', metadata: { issuer: server.oauthIssuer } })
     return server
   }
 
@@ -475,7 +489,7 @@ export class PapyrusService {
     if (!server?.enabled) throw new Error('MCP server unavailable')
     const started = Date.now()
     const response = await fetch(server.endpoint, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST', headers: { 'content-type': 'application/json', ...this.mcpAuthorization(server.id) },
       body: JSON.stringify({ jsonrpc: '2.0', id: crypto.randomUUID(), method: 'tools/call', params: { name: toolName, arguments: args } }),
       signal: AbortSignal.timeout(30_000),
     })
@@ -499,7 +513,7 @@ export class PapyrusService {
     const server = this.db.getMcpServer(mcpServerId)
     if (!server?.enabled) throw new Error('MCP server unavailable')
     if (method === 'tools/list') {
-      const result = await this.forwardMcp(server.endpoint, message)
+      const result = await this.forwardMcp(server.endpoint, message, this.mcpAuthorization(server.id))
       if (result && typeof result === 'object') {
         const envelope = result as { result?: { tools?: Array<{ name?: string }> } }
         if (Array.isArray(envelope.result?.tools)) envelope.result.tools = envelope.result.tools.filter((tool) => typeof tool.name === 'string' && this.db.isToolGranted(session.environmentId, mcpServerId, tool.name))
@@ -508,7 +522,7 @@ export class PapyrusService {
       return result
     }
     if (!['initialize', 'notifications/initialized', 'ping'].includes(method)) throw new AuthorizationDenied('McpMethod', method)
-    return this.forwardMcp(server.endpoint, message)
+    return this.forwardMcp(server.endpoint, message, this.mcpAuthorization(server.id))
   }
 
   activity(actor: Principal): ActivitySummary {
@@ -703,8 +717,23 @@ export class PapyrusService {
     } catch { return false }
   }
 
-  private async forwardMcp(endpoint: string, message: Record<string, unknown>): Promise<unknown> {
-    const response = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, body: JSON.stringify(message), signal: AbortSignal.timeout(30_000) })
+  private mcpAuthorization(serverId: string): Record<string, string> { const token = this.db.mcpAccessToken(serverId); return token ? { authorization: `Bearer ${this.open(token)}` } : {} }
+
+  private seal(value: string): string {
+    const iv = randomBytes(12); const cipher = createCipheriv('aes-256-gcm', createHash('sha256').update(this.config.sessionSecret).digest(), iv)
+    const ciphertext = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()])
+    return `${iv.toString('base64url')}.${cipher.getAuthTag().toString('base64url')}.${ciphertext.toString('base64url')}`
+  }
+
+  private open(value: string): string {
+    const [iv, tag, ciphertext] = value.split('.'); if (!iv || !tag || !ciphertext) throw new Error('Stored MCP credential is invalid')
+    const decipher = createDecipheriv('aes-256-gcm', createHash('sha256').update(this.config.sessionSecret).digest(), Buffer.from(iv, 'base64url'))
+    decipher.setAuthTag(Buffer.from(tag, 'base64url'))
+    return Buffer.concat([decipher.update(Buffer.from(ciphertext, 'base64url')), decipher.final()]).toString('utf8')
+  }
+
+  private async forwardMcp(endpoint: string, message: Record<string, unknown>, authorization: Record<string, string> = {}): Promise<unknown> {
+    const response = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...authorization }, body: JSON.stringify(message), signal: AbortSignal.timeout(30_000) })
     if (!response.ok) throw new Error(`MCP server returned ${response.status}`)
     return response.json()
   }

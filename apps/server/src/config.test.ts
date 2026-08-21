@@ -131,3 +131,35 @@ describe('authentication deployment boundaries', () => {
     })).not.toThrow()
   })
 })
+
+describe('model endpoint configuration', () => {
+  it('accepts and normalizes an OpenAI-compatible provider base path', () => {
+    const config = loadConfig({
+      PAPYRUS_MODE: 'local',
+      PAPYRUS_PROFILE: 'commercial',
+      PAPYRUS_MODEL_ENDPOINT: 'https://openrouter.ai/api/',
+      PAPYRUS_MODEL: 'example/model',
+    })
+
+    expect(config.model).toMatchObject({
+      endpoint: 'https://openrouter.ai/api',
+      model: 'example/model',
+    })
+  })
+
+  it('rejects model endpoint credentials, queries, and fragments', () => {
+    const base = {
+      PAPYRUS_MODE: 'local',
+      PAPYRUS_PROFILE: 'commercial',
+      PAPYRUS_MODEL: 'example/model',
+    }
+    expect(() => loadConfig({
+      ...base,
+      PAPYRUS_MODEL_ENDPOINT: 'https://user:secret@example.test/api',
+    })).toThrow(/without a query, fragment, or credentials/)
+    expect(() => loadConfig({
+      ...base,
+      PAPYRUS_MODEL_ENDPOINT: 'https://example.test/api?tenant=one',
+    })).toThrow(/without a query, fragment, or credentials/)
+  })
+})

@@ -16,7 +16,6 @@ export interface ServerConfig {
   promptTimeoutMs: number
   bootstrapSecret?: string
   sessionSecret: string
-  devIdentity?: string
   oidc?: {
     issuer: string
     clientId: string
@@ -129,10 +128,6 @@ export function loadConfig(env = process.env): ServerConfig {
   const originHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host
   const publicOrigin = parseOrigin('PAPYRUS_PUBLIC_ORIGIN', env.PAPYRUS_PUBLIC_ORIGIN ?? `http://${originHost}:${port}`)
 
-  if (env.PAPYRUS_DEV_IDENTITY && (mode !== 'local' || !isLoopback(host))) {
-    throw new Error('PAPYRUS_DEV_IDENTITY is restricted to local mode on a loopback listener')
-  }
-
   const oidc = env.PAPYRUS_OIDC_ISSUER ? {
     issuer: validateOidcUrl('PAPYRUS_OIDC_ISSUER', env.PAPYRUS_OIDC_ISSUER, mode).toString().replace(/\/$/, ''),
     clientId: required('PAPYRUS_OIDC_CLIENT_ID', env.PAPYRUS_OIDC_CLIENT_ID),
@@ -168,7 +163,7 @@ export function loadConfig(env = process.env): ServerConfig {
   if (identityProxy && !/^[a-z0-9-]+$/.test(identityProxy.certificateHeader)) throw new Error('Invalid PAPYRUS_IDENTITY_PROXY_CERT_HEADER')
   if (identityProxy && !tls) throw new Error('Trusted identity proxy federation requires direct Papyrus TLS for the authenticated proxy hop')
 
-  if (profile.startsWith('government') && !tls && !env.PAPYRUS_DEV_IDENTITY) {
+  if (profile.startsWith('government') && !tls && !(mode === 'local' && isLoopback(host))) {
     throw new Error('Government profiles require direct mTLS configuration')
   }
   if (mode === 'persistent' && !tls && !publicOrigin.startsWith('https://')) {
@@ -227,7 +222,6 @@ export function loadConfig(env = process.env): ServerConfig {
     promptTimeoutMs,
     ...(env.PAPYRUS_BOOTSTRAP_SECRET ? { bootstrapSecret: env.PAPYRUS_BOOTSTRAP_SECRET } : {}),
     sessionSecret: sessionSecret || 'local-development-only-change-me',
-    ...(env.PAPYRUS_DEV_IDENTITY ? { devIdentity: env.PAPYRUS_DEV_IDENTITY } : {}),
     ...(oidc ? { oidc } : {}),
     ...(tls ? { tls } : {}),
     ...(identityProxy ? { identityProxy } : {}),

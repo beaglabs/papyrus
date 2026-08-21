@@ -137,20 +137,6 @@ export interface AdminEnvironment extends Environment {
   assignedUserIds: string[]
 }
 
-export interface AdminRuntimeProfile {
-  id: string
-  label: string
-  command: string
-  args: string[]
-  source: string
-}
-
-export interface AdminAgent {
-  id: string
-  profile: string
-  isDefault: boolean
-}
-
 export interface AdminConnector {
   id: string
   label: string
@@ -174,8 +160,6 @@ export interface AdminOverview {
   environments: AdminEnvironment[]
   mcpServers: McpServer[]
   toolGrants: ToolGrant[]
-  runtimeProfiles: AdminRuntimeProfile[]
-  agents: AdminAgent[]
   connectors: AdminConnector[]
   license: LicenseStatus
 }

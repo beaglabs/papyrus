@@ -54,6 +54,3 @@ export function connectorPolicyAction(toolName: string): BrowserPolicyAction | u
   return CHROME_TOOL_ACTIONS[toolName]
 }
 
-export function isRuntimeProfileId(value: string): value is RuntimeProfileId {
-  return (RUNTIME_PROFILE_IDS as readonly string[]).includes(value)
-}

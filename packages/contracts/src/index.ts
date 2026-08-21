@@ -79,6 +79,18 @@ export interface Approval {
   reason?: string
 }
 
+export interface ResearchSource {
+  id: string
+  sessionId: string
+  runId?: string
+  title: string
+  url: string
+  host: string
+  excerpt?: string
+  sequence: number
+  capturedAt: string
+}
+
 export interface McpServer {
   id: string
   name: string

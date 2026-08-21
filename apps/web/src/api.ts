@@ -1,4 +1,4 @@
-import type { Principal, Session, SessionEvent, Workspace } from '@papyrus/contracts'
+import type { AdminOverview, Approval, Artifact, McpServer, Principal, ResearchSource, Role, Session, SessionEvent, SessionRun, Workspace } from '@papyrus/contracts'
 
 export interface Health {
   mode: string
@@ -103,4 +103,56 @@ export async function cancelSession(sessionId: string): Promise<{ cancelled: boo
 
 export async function resumeSession(sessionId: string): Promise<Session> {
   return api(`/api/sessions/${encodeURIComponent(sessionId)}/resume`, { method: 'POST' })
+}
+
+export async function sessionRuns(sessionId: string): Promise<SessionRun[]> {
+  return (await api<{ runs: SessionRun[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/runs`)).runs
+}
+
+export async function sessionArtifacts(sessionId: string): Promise<Artifact[]> {
+  return (await api<{ artifacts: Artifact[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/artifacts`)).artifacts
+}
+
+export async function sessionApprovals(sessionId: string): Promise<Approval[]> {
+  return (await api<{ approvals: Approval[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/approvals`)).approvals
+}
+
+export async function decideApproval(sessionId: string, approvalId: string, decision: 'approved' | 'denied', reason?: string): Promise<Approval> {
+  return api(`/api/sessions/${encodeURIComponent(sessionId)}/approvals/${encodeURIComponent(approvalId)}/decision`, {
+    method: 'POST', body: JSON.stringify({ decision, ...(reason?.trim() ? { reason: reason.trim() } : {}) }),
+  })
+}
+
+export async function sessionSources(sessionId: string): Promise<ResearchSource[]> {
+  return (await api<{ sources: ResearchSource[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/sources`)).sources
+}
+
+export async function researchSources(): Promise<ResearchSource[]> {
+  return (await api<{ sources: ResearchSource[] }>('/api/sources')).sources
+}
+
+export async function adminOverview(): Promise<AdminOverview> { return api('/api/admin/overview') }
+export async function addUserRole(userId: string, role: Role): Promise<Principal> {
+  return api(`/api/users/${encodeURIComponent(userId)}/roles`, { method: 'POST', body: JSON.stringify({ role }) })
+}
+export async function revokeUserSessions(userId: string): Promise<void> {
+  await api(`/api/users/${encodeURIComponent(userId)}/revoke-sessions`, { method: 'POST' })
+}
+export async function createWorkspaceAdmin(name: string, description: string): Promise<Workspace> {
+  return api('/api/workspaces', { method: 'POST', body: JSON.stringify({ name, description }) })
+}
+export async function assignWorkspace(principalId: string, resourceId: string): Promise<void> {
+  await api('/api/assignments', { method: 'POST', body: JSON.stringify({ principalId, resourceId }) })
+}
+export async function addMcpServer(name: string, endpoint: string): Promise<McpServer> {
+  return api('/api/mcp/servers', { method: 'POST', body: JSON.stringify({ name, endpoint }) })
+}
+export async function setMcpServerEnabled(serverId: string, enabled: boolean): Promise<McpServer> {
+  return api(`/api/mcp/servers/${encodeURIComponent(serverId)}/state`, { method: 'POST', body: JSON.stringify({ enabled }) })
+}
+export async function grantTool(workspaceId: string, mcpServerId: string, toolName: string): Promise<void> {
+  await api('/api/mcp/grants', { method: 'POST', body: JSON.stringify({ workspaceId, mcpServerId, toolName }) })
+}
+export async function revokeToolGrant(grantId: string): Promise<void> {
+  await api(`/api/mcp/grants/${encodeURIComponent(grantId)}`, { method: 'DELETE' })
 }

@@ -53,6 +53,44 @@ export interface SessionEvent {
   data: unknown
 }
 
+export interface Artifact {
+  id: string
+  sessionId: string
+  runId?: string
+  name: string
+  kind: 'resource' | 'diff'
+  mediaType: string
+  version: number
+  sequence: number
+  createdAt: string
+  downloadUrl: string
+}
+
+export interface Approval {
+  id: string
+  sessionId: string
+  runId: string
+  requesterId: string
+  toolTitle: string
+  status: 'pending' | 'approved' | 'denied' | 'cancelled'
+  requestedAt: string
+  decidedAt?: string
+  decidedBy?: string
+  reason?: string
+}
+
+export interface ResearchSource {
+  id: string
+  sessionId: string
+  runId?: string
+  title: string
+  url: string
+  host: string
+  excerpt?: string
+  sequence: number
+  capturedAt: string
+}
+
 export interface McpServer {
   id: string
   name: string
@@ -69,6 +107,53 @@ export interface ToolGrant {
   toolName: string
   effect: 'allow'
   createdAt: string
+}
+
+export interface AdminWorkspace extends Workspace {
+  assignedUserIds: string[]
+}
+
+export interface AdminRuntimeProfile {
+  id: string
+  label: string
+  command: string
+  args: string[]
+  source: string
+}
+
+export interface AdminAgent {
+  id: string
+  profile: string
+  isDefault: boolean
+}
+
+export interface AdminConnector {
+  id: string
+  label: string
+  package: string
+  source: string
+  operations: Record<string, string>
+}
+
+export interface AdminOverview {
+  deployment: {
+    mode: ServerMode
+    profile: DeploymentProfile
+    publicOrigin: string
+    oidcConfigured: boolean
+    mtlsConfigured: boolean
+    identityProxyConfigured: boolean
+    gatewayConfigured: boolean
+    licenseRequired: boolean
+  }
+  users: Principal[]
+  workspaces: AdminWorkspace[]
+  mcpServers: McpServer[]
+  toolGrants: ToolGrant[]
+  runtimeProfiles: AdminRuntimeProfile[]
+  agents: AdminAgent[]
+  connectors: AdminConnector[]
+  license: LicenseStatus
 }
 
 export interface AuditEvent {

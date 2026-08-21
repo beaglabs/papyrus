@@ -400,8 +400,8 @@ export class PapyrusService {
   adminOverview(actor: Principal): AdminOverview {
     this.check(actor, 'ManageUsers', { type: 'Deployment', id: this.license.deploymentId })
     const configuredAgents = this.config.agents ?? {}
-    const agentIds = [...new Set(['goose', 'opencode', ...Object.keys(configuredAgents)])]
     const defaultAgent = this.defaultGatewayAgent()
+    const agentIds = [...new Set([defaultAgent, ...Object.keys(configuredAgents)])]
     return {
       deployment: {
         mode: this.config.mode, profile: this.config.profile, publicOrigin: this.config.publicOrigin,

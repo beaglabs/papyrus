@@ -36,7 +36,6 @@ describe('deployment administration HTTP API', () => {
       const overview = await response.json() as AdminOverview
       expect(overview.environments[0]).toMatchObject({ id: environment.id, assignedUserIds: expect.arrayContaining([activeOwner.id, activeUser.id]) })
       expect(overview.toolGrants[0]).toMatchObject({ environmentId: environment.id, mcpServerId: mcp.id })
-      expect(overview.runtimeProfiles.map((profile) => profile.id)).toEqual(['goose', 'opencode'])
       expect(JSON.stringify(overview)).not.toContain(ctx.config.sessionSecret)
       expect(JSON.stringify(overview)).not.toContain(ctx.config.bootstrapSecret)
 

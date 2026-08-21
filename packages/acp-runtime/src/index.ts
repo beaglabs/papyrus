@@ -40,6 +40,7 @@ export interface RuntimePromptRequest {
   environment?: Record<string, string>
   mcpServers?: RuntimeMcpServer[]
   authorizeTool: (title: string) => Promise<boolean>
+  elicit?: (request: Record<string, unknown>) => Promise<Record<string, unknown>>
   onEvent: (event: RuntimeEvent) => void | Promise<void>
   signal?: AbortSignal
 }

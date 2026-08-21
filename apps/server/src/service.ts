@@ -1,12 +1,14 @@
 import { readFileSync } from 'node:fs'
 import { Agent as HttpsAgent } from 'node:https'
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
-import type { ActivitySummary, McpServer, Principal, Role, Session, SessionEvent, SessionRun, SignedLicense, Workspace } from '@papyrus/contracts'
+import type { ActivitySummary, AdminOverview, Approval, McpServer, Principal, ResearchSource, Role, Session, SessionEvent, SessionRun, SignedLicense, Workspace } from '@papyrus/contracts'
 import type { AgentRuntime, RuntimeEvent, RuntimeLaunchOptions } from '@papyrus/acp-runtime'
 import { gooseRuntimeAdapter } from '@papyrus/goose-runtime'
 import { resolveAgentSpec } from './agents.js'
-import { connectorPolicyAction } from './catalog.js'
+import { RUNTIME_PROFILES, connectorPolicyAction } from './catalog.js'
 import { AuditLog } from './audit.js'
+import { projectArtifacts, type ProjectedArtifact } from './artifacts.js'
+import { projectResearchSources } from './sources.js'
 import type { ServerConfig } from './config.js'
 import { PapyrusDatabase } from './db.js'
 import { LicenseService } from './license.js'
@@ -21,6 +23,10 @@ export class SessionLifecycleError extends Error {
     readonly code: 'SESSION_NOT_FOUND' | 'SESSION_BUSY' | 'SESSION_STOPPED' | 'SESSION_CWD_MISMATCH',
     message: string,
   ) { super(message) }
+}
+
+export class ApprovalLifecycleError extends Error {
+  constructor(readonly code: 'APPROVAL_NOT_FOUND' | 'APPROVAL_ALREADY_DECIDED' | 'APPROVAL_SESSION_MISMATCH', message: string) { super(message) }
 }
 
 export type RuntimeFactory = (options: RuntimeLaunchOptions) => AgentRuntime
@@ -43,6 +49,7 @@ export class PapyrusService {
   readonly policy = new PolicyEngine()
   readonly license: LicenseService
   private readonly activeSessionRuns = new Map<string, ActiveSessionRun>()
+  private readonly pendingApprovalResolvers = new Map<string, (approved: boolean) => void>()
 
   constructor(
     readonly db: PapyrusDatabase,
@@ -60,6 +67,9 @@ export class PapyrusService {
         decision: 'info',
         metadata: { reason: 'daemon_restart' },
       })
+    }
+    for (const approval of db.cancelPendingApprovals('daemon_restart')) {
+      this.audit.append({ actorId: null, action: 'CancelApproval', resourceType: 'Approval', resourceId: approval.id, decision: 'info', metadata: { reason: 'daemon_restart', sessionId: approval.sessionId } })
     }
   }
 
@@ -172,6 +182,46 @@ export class PapyrusService {
     return this.db.listSessionRuns(sessionId)
   }
 
+  sessionArtifacts(actor: Principal, sessionId: string): ProjectedArtifact[] {
+    const session = this.requireSession(sessionId)
+    this.check(actor, 'ReadSession', this.sessionResource(session))
+    return projectArtifacts(sessionId, this.db.listSessionEvents(sessionId, 0, Number.MAX_SAFE_INTEGER))
+  }
+
+  sessionApprovals(actor: Principal, sessionId: string): Approval[] {
+    const session = this.requireSession(sessionId)
+    this.check(actor, 'ReadSession', this.sessionResource(session))
+    return this.db.listApprovals(sessionId)
+  }
+
+  sessionSources(actor: Principal, sessionId: string): ResearchSource[] {
+    const session = this.requireSession(sessionId)
+    this.check(actor, 'ReadSession', this.sessionResource(session))
+    return projectResearchSources(sessionId, this.db.listSessionEvents(sessionId, 0, Number.MAX_SAFE_INTEGER))
+  }
+
+  researchSources(actor: Principal): ResearchSource[] {
+    return this.listSessions(actor).flatMap((session) => projectResearchSources(session.id, this.db.listSessionEvents(session.id, 0, Number.MAX_SAFE_INTEGER)))
+      .sort((left, right) => right.sequence - left.sequence)
+  }
+
+  decideApproval(actor: Principal, sessionId: string, approvalId: string, decision: 'approved' | 'denied', reason?: string): Approval {
+    const session = this.requireSession(sessionId)
+    this.check(actor, 'DecideApproval', this.sessionResource(session))
+    const existing = this.db.getApproval(approvalId)
+    if (!existing) throw new ApprovalLifecycleError('APPROVAL_NOT_FOUND', 'Approval not found')
+    if (existing.sessionId !== sessionId) throw new ApprovalLifecycleError('APPROVAL_SESSION_MISMATCH', 'Approval does not belong to this session')
+    const approval = this.db.decideApproval(approvalId, decision, actor.id, reason)
+    if (!approval) throw new ApprovalLifecycleError('APPROVAL_ALREADY_DECIDED', 'Approval has already been decided')
+    this.recordApprovalEvent(approval)
+    this.audit.append({
+      actorId: actor.id, action: 'DecideApproval', resourceType: 'Approval', resourceId: approval.id,
+      decision: decision === 'approved' ? 'allow' : 'deny', metadata: { sessionId, runId: approval.runId, toolTitle: approval.toolTitle, reason: reason ?? null },
+    })
+    this.pendingApprovalResolvers.get(approval.id)?.(decision === 'approved')
+    return approval
+  }
+
   cancelSession(actor: Principal, sessionId: string): boolean {
     const session = this.requireSession(sessionId)
     this.check(actor, 'CancelSession', this.sessionResource(session))
@@ -239,7 +289,7 @@ export class PapyrusService {
         prompt,
         environment: spec.environment(),
         mcpServers: this.runtimeMcpServers(session),
-        authorizeTool: async (title) => this.isToolCallAllowed(actor, session, title),
+        authorizeTool: async (title) => this.requestToolApproval(actor, session, run.runId, title, run.controller.signal),
         onEvent: async (event) => {
           events.push(event)
           this.db.addRuntimeEvent(session.id, run.runId, event.kind, event.at, event.data)
@@ -280,10 +330,46 @@ export class PapyrusService {
     return this.db.listMcpServers()
   }
 
+  setMcpServerEnabled(actor: Principal, serverId: string, enabled: boolean): McpServer {
+    this.check(actor, 'ManageTools', { type: 'Deployment', id: this.license.deploymentId })
+    const server = this.db.setMcpServerEnabled(serverId, enabled)
+    if (!server) throw new Error('MCP server not found')
+    this.audit.append({ actorId: actor.id, action: 'SetMcpServerEnabled', resourceType: 'McpServer', resourceId: serverId, decision: 'info', metadata: { enabled } })
+    return server
+  }
+
   grantTool(actor: Principal, workspaceId: string, mcpServerId: string, toolName: string): void {
     this.check(actor, 'ManageTools', { type: 'Deployment', id: this.license.deploymentId })
     this.db.grantTool(workspaceId, mcpServerId, toolName)
     this.audit.append({ actorId: actor.id, action: 'GrantTool', resourceType: 'Tool', resourceId: `${mcpServerId}:${toolName}`, decision: 'info', metadata: { workspaceId } })
+  }
+
+  revokeToolGrant(actor: Principal, grantId: string): void {
+    this.check(actor, 'ManageTools', { type: 'Deployment', id: this.license.deploymentId })
+    if (!this.db.revokeToolGrant(grantId)) throw new Error('Tool grant not found')
+    this.audit.append({ actorId: actor.id, action: 'RevokeTool', resourceType: 'ToolGrant', resourceId: grantId, decision: 'info', metadata: {} })
+  }
+
+  adminOverview(actor: Principal): AdminOverview {
+    this.check(actor, 'ManageUsers', { type: 'Deployment', id: this.license.deploymentId })
+    const configuredAgents = this.config.agents ?? {}
+    const agentIds = [...new Set(['goose', 'opencode', ...Object.keys(configuredAgents)])]
+    const defaultAgent = this.defaultGatewayAgent()
+    return {
+      deployment: {
+        mode: this.config.mode, profile: this.config.profile, publicOrigin: this.config.publicOrigin,
+        oidcConfigured: Boolean(this.config.oidc), mtlsConfigured: Boolean(this.config.tls),
+        identityProxyConfigured: Boolean(this.config.identityProxy), gatewayConfigured: Boolean(this.config.gateway),
+        licenseRequired: this.config.licenseRequired,
+      },
+      users: this.db.listPrincipals(),
+      workspaces: this.db.listWorkspaces().map((workspace) => ({ ...workspace, assignedUserIds: this.db.assignedUserIds('workspace', workspace.id) })),
+      mcpServers: this.db.listMcpServers(), toolGrants: this.db.listToolGrants(),
+      runtimeProfiles: Object.entries(RUNTIME_PROFILES).map(([id, profile]) => ({ id, label: profile.label, command: profile.command, args: [...profile.args], source: profile.source })),
+      agents: agentIds.map((id) => ({ id, profile: configuredAgents[id]?.profile ?? id, isDefault: id === defaultAgent })),
+      connectors: (this.config.connectors ?? []).map((connector) => ({ id: connector.id, label: connector.label, package: connector.package, source: connector.source, operations: { ...connector.operations } })),
+      license: this.license.status(),
+    }
   }
 
   async invokeTool(actor: Principal, sessionId: string, mcpServerId: string, toolName: string, args: unknown): Promise<unknown> {
@@ -454,6 +540,38 @@ export class PapyrusService {
       if (connectorAction) this.check(actor, connectorAction, resource)
       return this.db.isToolGranted(session.workspaceId, mcpServerId, toolName)
     } catch { return false }
+  }
+
+  private async requestToolApproval(actor: Principal, session: Session, runId: string, toolTitle: string, signal: AbortSignal): Promise<boolean> {
+    if (signal.aborted || !this.isToolCallAllowed(actor, session, toolTitle)) return false
+    const approval = this.db.createApproval(session.id, runId, actor.id, toolTitle)
+    this.recordApprovalEvent(approval)
+    this.audit.append({ actorId: actor.id, action: 'RequestApproval', resourceType: 'Approval', resourceId: approval.id, decision: 'info', metadata: { sessionId: session.id, runId, toolTitle } })
+    return await new Promise<boolean>((resolve) => {
+      let settled = false
+      const finish = (approved: boolean) => {
+        if (settled) return
+        settled = true
+        signal.removeEventListener('abort', abort)
+        this.pendingApprovalResolvers.delete(approval.id)
+        resolve(approved)
+      }
+      const abort = () => {
+        const cancelled = this.db.decideApproval(approval.id, 'cancelled', undefined, 'run_cancelled')
+        if (cancelled) {
+          this.recordApprovalEvent(cancelled)
+          this.audit.append({ actorId: null, action: 'CancelApproval', resourceType: 'Approval', resourceId: approval.id, decision: 'info', metadata: { sessionId: session.id, runId, reason: 'run_cancelled' } })
+        }
+        finish(false)
+      }
+      this.pendingApprovalResolvers.set(approval.id, finish)
+      signal.addEventListener('abort', abort, { once: true })
+      if (signal.aborted) abort()
+    })
+  }
+
+  private recordApprovalEvent(approval: Approval): void {
+    this.db.addRuntimeEvent(approval.sessionId, approval.runId, 'approval', new Date().toISOString(), approval)
   }
 
   /** Session-bound Papyrus MCP proxy endpoints for the runtime to consume. */

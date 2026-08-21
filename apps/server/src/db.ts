@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import type { McpServer, Principal, Role, Session, SessionEvent, SessionRun, Workspace } from '@papyrus/contracts'
+import type { Approval, McpServer, Principal, Role, Session, SessionEvent, SessionRun, ToolGrant, Workspace } from '@papyrus/contracts'
 
 type Row = Record<string, unknown>
 
@@ -57,6 +57,12 @@ export class PapyrusDatabase {
         run_id TEXT REFERENCES session_runs(id), kind TEXT NOT NULL,
         occurred_at TEXT NOT NULL, data_json TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS approvals (
+        id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id),
+        run_id TEXT NOT NULL REFERENCES session_runs(id), requester_id TEXT NOT NULL REFERENCES users(id),
+        tool_title TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('pending','approved','denied','cancelled')),
+        requested_at TEXT NOT NULL, decided_at TEXT, decided_by TEXT REFERENCES users(id), reason TEXT
+      );
       CREATE TABLE IF NOT EXISTS mcp_servers (
         id TEXT PRIMARY KEY, name TEXT NOT NULL, transport TEXT NOT NULL CHECK(transport = 'http'),
         endpoint TEXT NOT NULL, enabled INTEGER NOT NULL, created_at TEXT NOT NULL
@@ -96,6 +102,8 @@ export class PapyrusDatabase {
       CREATE INDEX IF NOT EXISTS session_runs_session_started ON session_runs(session_id, started_at DESC);
       CREATE INDEX IF NOT EXISTS runtime_events_session_sequence ON runtime_events(session_id, id);
       CREATE UNIQUE INDEX IF NOT EXISTS session_runs_one_active ON session_runs(session_id) WHERE status='running';
+      CREATE INDEX IF NOT EXISTS approvals_session_requested ON approvals(session_id, requested_at DESC);
+      CREATE UNIQUE INDEX IF NOT EXISTS approvals_one_pending_per_run_tool ON approvals(run_id, tool_title) WHERE status='pending';
     `)
   }
 
@@ -300,6 +308,41 @@ export class PapyrusDatabase {
     }))
   }
 
+  createApproval(sessionId: string, runId: string, requesterId: string, toolTitle: string): Approval {
+    const approval: Approval = { id: crypto.randomUUID(), sessionId, runId, requesterId, toolTitle, status: 'pending', requestedAt: new Date().toISOString() }
+    this.sqlite.prepare(`INSERT INTO approvals(id,session_id,run_id,requester_id,tool_title,status,requested_at)
+      VALUES(?,?,?,?,?,'pending',?)`).run(approval.id, sessionId, runId, requesterId, toolTitle, approval.requestedAt)
+    return approval
+  }
+
+  getApproval(id: string): Approval | undefined {
+    const row = this.sqlite.prepare(`SELECT id,session_id sessionId,run_id runId,requester_id requesterId,
+      tool_title toolTitle,status,requested_at requestedAt,decided_at decidedAt,decided_by decidedBy,reason
+      FROM approvals WHERE id=?`).get(id) as Row | undefined
+    return row ? this.approval(row) : undefined
+  }
+
+  listApprovals(sessionId: string): Approval[] {
+    return (this.sqlite.prepare(`SELECT id,session_id sessionId,run_id runId,requester_id requesterId,
+      tool_title toolTitle,status,requested_at requestedAt,decided_at decidedAt,decided_by decidedBy,reason
+      FROM approvals WHERE session_id=? ORDER BY requested_at DESC`).all(sessionId) as Row[]).map((row) => this.approval(row))
+  }
+
+  decideApproval(id: string, status: Exclude<Approval['status'], 'pending'>, decidedBy: string | undefined, reason?: string): Approval | undefined {
+    const decidedAt = new Date().toISOString()
+    const result = this.sqlite.prepare(`UPDATE approvals SET status=?,decided_at=?,decided_by=?,reason=?
+      WHERE id=? AND status='pending'`).run(status, decidedAt, decidedBy ?? null, reason ?? null, id)
+    return Number(result.changes) === 1 ? this.getApproval(id) : undefined
+  }
+
+  cancelPendingApprovals(reason: string): Approval[] {
+    const pending = (this.sqlite.prepare("SELECT id FROM approvals WHERE status='pending'").all() as Row[]).map((row) => String(row.id))
+    return pending.flatMap((id) => {
+      const approval = this.decideApproval(id, 'cancelled', undefined, reason)
+      return approval ? [approval] : []
+    })
+  }
+
   private sessionRun(row: Row): SessionRun {
     return {
       id: String(row.id),
@@ -310,6 +353,16 @@ export class PapyrusDatabase {
       ...(row.error ? { error: String(row.error) } : {}),
       startedAt: String(row.startedAt),
       ...(row.completedAt ? { completedAt: String(row.completedAt) } : {}),
+    }
+  }
+
+  private approval(row: Row): Approval {
+    return {
+      id: String(row.id), sessionId: String(row.sessionId), runId: String(row.runId), requesterId: String(row.requesterId),
+      toolTitle: String(row.toolTitle), status: row.status as Approval['status'], requestedAt: String(row.requestedAt),
+      ...(row.decidedAt ? { decidedAt: String(row.decidedAt) } : {}),
+      ...(row.decidedBy ? { decidedBy: String(row.decidedBy) } : {}),
+      ...(row.reason ? { reason: String(row.reason) } : {}),
     }
   }
 
@@ -329,8 +382,22 @@ export class PapyrusDatabase {
     return rows.map((row) => ({ id: String(row.id), name: String(row.name), transport: 'http', endpoint: String(row.endpoint), enabled: Boolean(row.enabled), createdAt: String(row.created_at) }))
   }
 
+  setMcpServerEnabled(id: string, enabled: boolean): McpServer | undefined {
+    this.sqlite.prepare('UPDATE mcp_servers SET enabled=? WHERE id=?').run(enabled ? 1 : 0, id)
+    return this.getMcpServer(id)
+  }
+
   grantTool(workspaceId: string, mcpServerId: string, toolName: string): void {
     this.sqlite.prepare('INSERT OR IGNORE INTO tool_grants VALUES(?,?,?,?,?,?)').run(crypto.randomUUID(), workspaceId, mcpServerId, toolName, 'allow', new Date().toISOString())
+  }
+
+  listToolGrants(): ToolGrant[] {
+    return this.sqlite.prepare(`SELECT id,workspace_id workspaceId,mcp_server_id mcpServerId,tool_name toolName,effect,created_at createdAt
+      FROM tool_grants ORDER BY created_at DESC`).all() as unknown as ToolGrant[]
+  }
+
+  revokeToolGrant(id: string): boolean {
+    return Number(this.sqlite.prepare('DELETE FROM tool_grants WHERE id=?').run(id).changes) === 1
   }
 
   isToolGranted(workspaceId: string, mcpServerId: string, toolName: string): boolean {

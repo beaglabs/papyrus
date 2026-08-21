@@ -12,6 +12,24 @@ function fakeRuntime(): AgentRuntime {
     health: async () => ({ available: true }),
     runPrompt: async (request) => {
       await request.onEvent({
+        kind: 'update', at: new Date().toISOString(),
+        data: { sessionUpdate: 'plan', entries: [{ content: 'Prepare briefing', status: 'in_progress', priority: 'high' }] },
+      })
+      await request.onEvent({
+        kind: 'update', at: new Date().toISOString(),
+        data: {
+          sessionUpdate: 'tool_call', toolCallId: 'tool-1', title: 'Create briefing', kind: 'edit', status: 'completed',
+          content: [
+            { type: 'diff', path: '/workspace/brief.md', oldText: null, newText: '# Brief\n\nPrepared.' },
+            { type: 'content', content: { type: 'resource', resource: { uri: 'file:///workspace/evidence.txt', mimeType: 'text/plain', text: 'Evidence' } } },
+          ],
+        },
+      })
+      await request.onEvent({
+        kind: 'update', at: new Date().toISOString(),
+        data: { sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', status: 'completed', content: [{ type: 'diff', path: '/workspace/brief.md', oldText: '# Brief\n\nPrepared.', newText: '# Brief\n\nPrepared and reviewed.' }] },
+      })
+      await request.onEvent({
         kind: 'update',
         at: new Date().toISOString(),
         data: {
@@ -61,6 +79,14 @@ describe('governed session HTTP API', () => {
 
       const runs = await request(`/api/sessions/${session.id}/runs`)
       expect((await runs.json() as { runs: Array<{ status: string }> }).runs[0]?.status).toBe('completed')
+
+      const artifacts = await request(`/api/sessions/${session.id}/artifacts`)
+      const artifactBody = await artifacts.json() as { artifacts: Array<{ id: string; name: string; version: number; downloadUrl: string }> }
+      expect(artifactBody.artifacts.map((artifact) => artifact.name)).toEqual(['brief.md', 'evidence.txt', 'brief.md'])
+      expect(artifactBody.artifacts.filter((artifact) => artifact.name === 'brief.md').map((artifact) => artifact.version)).toEqual([1, 2])
+      const downloaded = await request(artifactBody.artifacts[0]!.downloadUrl)
+      expect(downloaded.headers.get('content-disposition')).toContain('brief.md')
+      expect(await downloaded.text()).toContain('Prepared.')
 
       expect((await request(`/api/sessions/${session.id}/close`, { method: 'POST' })).status).toBe(200)
       const blocked = await request(`/api/sessions/${session.id}/prompt`, {

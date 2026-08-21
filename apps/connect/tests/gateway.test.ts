@@ -14,7 +14,7 @@ describe('papyrus-connect gateway integration', () => {
     const owner = context.db.upsertUser({ externalId: 'oidc:owner', displayName: 'Owner', authMethod: 'oidc' })
     context.db.setRole(owner.id, 'Owner')
     const activeOwner = context.db.getPrincipal(owner.id)!
-    const workspace = context.service.createWorkspace(activeOwner, { name: 'Connector', description: '' })
+    const environment = context.service.createEnvironment(activeOwner, { name: 'Connector', description: '' })
     context.config.gateway = { host: '127.0.0.1', port: 3220 }
     const server = createGatewayServer(context.config, context.service, context.auth)
     server.listen(0, '127.0.0.1')
@@ -23,7 +23,7 @@ describe('papyrus-connect gateway integration', () => {
     const stream = createHttpStream(`http://127.0.0.1:${port}/acp`, {
       headers: {
         authorization: `Bearer ${context.auth.issueSession(activeOwner.id)}`,
-        'x-papyrus-workspace-id': workspace.id,
+        'x-papyrus-environment-id': environment.id,
       },
     })
     const frames = [
@@ -44,7 +44,7 @@ describe('papyrus-connect gateway integration', () => {
       expect(context.db.listSessions()).toContainEqual(expect.objectContaining({
         id: responses[1]?.result?.sessionId,
         ownerId: activeOwner.id,
-        workspaceId: workspace.id,
+        environmentId: environment.id,
         agent: 'goose',
       }))
     } finally {

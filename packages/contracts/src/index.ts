@@ -66,6 +66,17 @@ export interface Artifact {
   downloadUrl: string
 }
 
+export interface Attachment {
+  id: string
+  sessionId: string
+  name: string
+  mediaType: string
+  size: number
+  sha256: string
+  createdAt: string
+  downloadUrl: string
+}
+
 export interface Approval {
   id: string
   sessionId: string

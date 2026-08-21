@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import type { Workspace } from '@papyrus/contracts'
 import { api, AuthenticationRequired, developmentLogin, loadShell, logout, type AuthenticationChallenge, type Health, type ShellData } from './api.js'
 import { SessionHarness } from './Sessions.js'
 import { SourcesView } from './Sources.js'
 import { AdminView } from './Admin.js'
+import { WorkspacesView } from './Workspaces.js'
 
 type View = 'home' | 'sessions' | 'workspaces' | 'sources' | 'administration'
 type AppState =
@@ -119,7 +119,7 @@ function AccessPending({ me }: { me: string }) {
 function ShellView({ view, data, onNavigate }: { view: View; data: ShellData; onNavigate: (view: View) => void }) {
   if (view === 'home') return <section className="grid-two wide-left"><article className="panel hero-panel"><p className="eyebrow">CONTROL PLANE READY</p><h2>Begin governed work from one durable session.</h2><p>Every prompt, runtime event, cancellation, and policy decision remains bound to your authenticated identity.</p><button className="primary" onClick={() => onNavigate('sessions')}>Open sessions →</button></article><DeploymentFacts data={data} /></section>
   if (view === 'sessions') return <SessionHarness workspaces={data.workspaces} />
-  if (view === 'workspaces') return <WorkspaceCards items={data.workspaces} />
+  if (view === 'workspaces') return <WorkspacesView me={data.me} items={data.workspaces} />
   if (view === 'sources') return <SourcesView />
   if (view === 'administration') return <AdminView me={data.me} />
   return <article className="panel placeholder"><span>STACK PREVIEW</span><h2>{viewTitle(view)}</h2><p>{placeholder(view)}</p></article>
@@ -127,10 +127,6 @@ function ShellView({ view, data, onNavigate }: { view: View; data: ShellData; on
 
 function DeploymentFacts({ data }: { data: ShellData }) {
   return <article className="panel"><div className="panel-head"><h2>Deployment</h2><span className="status-good">ENFORCED</span></div><dl className="facts"><div><dt>Policy</dt><dd>Cedar {data.health.cedar}</dd></div><div><dt>Mode</dt><dd>{data.health.mode}</dd></div><div><dt>Identity</dt><dd>{data.me.authMethod}</dd></div><div><dt>Workspaces</dt><dd>{data.workspaces.length}</dd></div></dl></article>
-}
-
-function WorkspaceCards({ items }: { items: Workspace[] }) {
-  return <article className="panel"><div className="panel-head"><h2>Authorized workspaces</h2><span>{items.length}</span></div>{items.length ? <div className="cards">{items.map((item) => <div className="workspace" key={item.id}><span className="workspace-icon">↗</span><div><strong>{item.name}</strong><p>{item.description || 'No description'}</p></div></div>)}</div> : <div className="empty">No workspace assignments are available.</div>}</article>
 }
 
 function NavButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) { return <button className={active ? 'active' : ''} onClick={onClick}>{children}</button> }

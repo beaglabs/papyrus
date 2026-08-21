@@ -1,4 +1,4 @@
-import type { AdminOverview, Approval, Artifact, McpServer, Principal, ResearchSource, Role, Session, SessionEvent, SessionRun, Workspace } from '@papyrus/contracts'
+import type { AdminOverview, Approval, Artifact, Attachment, McpServer, Principal, ResearchSource, Role, Session, SessionEvent, SessionRun, Workspace } from '@papyrus/contracts'
 
 export interface Health {
   mode: string
@@ -97,8 +97,19 @@ export async function sessionEvents(sessionId: string): Promise<SessionEvent[]> 
   }
 }
 
-export async function promptSession(sessionId: string, prompt: string): Promise<{ stopReason: string }> {
-  return api(`/api/sessions/${encodeURIComponent(sessionId)}/prompts`, { method: 'POST', body: JSON.stringify({ prompt }) })
+export async function promptSession(sessionId: string, prompt: string, attachmentIds: string[] = []): Promise<{ stopReason: string }> {
+  return api(`/api/sessions/${encodeURIComponent(sessionId)}/prompts`, { method: 'POST', body: JSON.stringify({ prompt, attachmentIds }) })
+}
+
+export async function sessionAttachments(sessionId: string): Promise<Attachment[]> {
+  return (await api<{ attachments: Attachment[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/attachments`)).attachments
+}
+
+export async function uploadAttachment(sessionId: string, file: File): Promise<Attachment> {
+  return api(`/api/sessions/${encodeURIComponent(sessionId)}/attachments`, {
+    method: 'POST', body: file,
+    headers: { 'content-type': file.type || 'application/octet-stream', 'x-papyrus-file-name': encodeURIComponent(file.name) },
+  })
 }
 
 export async function cancelSession(sessionId: string): Promise<{ cancelled: boolean }> {

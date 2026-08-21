@@ -53,6 +53,29 @@ async function body(request: IncomingMessage): Promise<Record<string, unknown>> 
   catch { throw new HttpError(400, 'INVALID_JSON', 'Request body must be JSON') }
 }
 
+async function binaryBody(request: IncomingMessage, maximum = 10 * 1024 * 1024): Promise<Buffer> {
+  const chunks: Buffer[] = []
+  let size = 0
+  for await (const chunk of request) {
+    const buffer = Buffer.from(chunk)
+    size += buffer.length
+    if (size > maximum) throw new HttpError(413, 'ATTACHMENT_TOO_LARGE', 'Attachment exceeds 10 MB')
+    chunks.push(buffer)
+  }
+  if (size === 0) throw new HttpError(400, 'EMPTY_ATTACHMENT', 'Attachment is empty')
+  return Buffer.concat(chunks)
+}
+
+function attachmentDownload(response: ServerResponse, attachment: ReturnType<PapyrusService['attachmentContent']>): void {
+  const filename = attachment.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 180) || 'attachment'
+  response.writeHead(200, {
+    'content-type': attachment.mediaType, 'content-length': attachment.content.length,
+    'content-disposition': `attachment; filename="${filename}"`, 'cache-control': 'no-store',
+    'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'",
+  })
+  response.end(attachment.content)
+}
+
 function text(value: unknown, name: string, maximum = 256): string {
   if (typeof value !== 'string' || !value.trim() || value.length > maximum) throw new HttpError(400, 'INVALID_INPUT', `${name} is required and must not exceed ${maximum} characters`)
   return value.trim()
@@ -274,6 +297,32 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
         const artifacts = service.sessionArtifacts(principal, decodeURIComponent(sessionArtifacts[1] as string))
         return json(response, 200, { artifacts: artifacts.map(({ content: _content, encoding: _encoding, ...artifact }) => artifact) })
       }
+      const sessionAttachments = url.pathname.match(/^\/api\/sessions\/([^/]+)\/attachments$/)
+      if (sessionAttachments && request.method === 'GET') {
+        return json(response, 200, { attachments: service.sessionAttachments(principal, decodeURIComponent(sessionAttachments[1] as string)) })
+      }
+      if (sessionAttachments && request.method === 'POST') {
+        const rawName = request.headers['x-papyrus-file-name']
+        if (typeof rawName !== 'string') throw new HttpError(400, 'INVALID_INPUT', 'x-papyrus-file-name is required')
+        let name: string
+        try { name = decodeURIComponent(rawName) } catch { throw new HttpError(400, 'INVALID_INPUT', 'Attachment filename is invalid') }
+        const mediaType = String(request.headers['content-type'] ?? 'application/octet-stream').split(';')[0]!.trim().toLowerCase()
+        try {
+          return json(response, 201, service.addAttachment(principal, decodeURIComponent(sessionAttachments[1] as string), name, mediaType, await binaryBody(request)))
+        } catch (error) {
+          if (error instanceof Error && /Attachment (?:type|must)/.test(error.message)) throw new HttpError(415, 'ATTACHMENT_REJECTED', error.message)
+          throw error
+        }
+      }
+      const attachmentFile = url.pathname.match(/^\/api\/sessions\/([^/]+)\/attachments\/([^/]+)\/download$/)
+      if (attachmentFile && request.method === 'GET') {
+        try {
+          return attachmentDownload(response, service.attachmentContent(principal, decodeURIComponent(attachmentFile[1] as string), decodeURIComponent(attachmentFile[2] as string)))
+        } catch (error) {
+          if (error instanceof Error && error.message === 'Attachment not found') throw new HttpError(404, 'ATTACHMENT_NOT_FOUND', error.message)
+          throw error
+        }
+      }
       const sessionApprovals = url.pathname.match(/^\/api\/sessions\/([^/]+)\/approvals$/)
       if (sessionApprovals && request.method === 'GET') {
         return json(response, 200, { approvals: service.sessionApprovals(principal, decodeURIComponent(sessionApprovals[1] as string)) })
@@ -318,13 +367,17 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
       const prompt = url.pathname.match(/^\/api\/sessions\/([^/]+)\/(?:prompt|prompts)$/)
       if (prompt && request.method === 'POST') {
         const input = await body(request)
+        const attachmentIds = Array.isArray(input.attachmentIds) && input.attachmentIds.every((id) => typeof id === 'string' && id.length <= 128)
+          ? input.attachmentIds as string[] : []
+        const promptText = typeof input.prompt === 'string' ? input.prompt.trim().slice(0, 100_000) : ''
+        if (!promptText && attachmentIds.length === 0) throw new HttpError(400, 'INVALID_INPUT', 'prompt or attachmentIds is required')
         const controller = new AbortController()
         request.once('aborted', () => controller.abort(new Error('Client disconnected')))
         return json(response, 200, await service.prompt(
           principal,
           decodeURIComponent(prompt[1] as string),
-          text(input.prompt, 'prompt', 100_000),
-          { signal: controller.signal },
+          promptText,
+          { signal: controller.signal, attachmentIds },
         ))
       }
       if (url.pathname === '/api/mcp/servers' && request.method === 'POST') {

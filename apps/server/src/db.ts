@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import type { Approval, McpServer, Principal, Role, Session, SessionEvent, SessionRun, ToolGrant, Workspace } from '@papyrus/contracts'
+import type { Approval, Attachment, McpServer, Principal, Role, Session, SessionEvent, SessionRun, ToolGrant, Workspace } from '@papyrus/contracts'
 
 type Row = Record<string, unknown>
 
@@ -57,6 +57,11 @@ export class PapyrusDatabase {
         run_id TEXT REFERENCES session_runs(id), kind TEXT NOT NULL,
         occurred_at TEXT NOT NULL, data_json TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS attachments (
+        id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id),
+        name TEXT NOT NULL, media_type TEXT NOT NULL, size INTEGER NOT NULL,
+        sha256 TEXT NOT NULL, content BLOB NOT NULL, created_at TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS approvals (
         id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id),
         run_id TEXT NOT NULL REFERENCES session_runs(id), requester_id TEXT NOT NULL REFERENCES users(id),
@@ -103,6 +108,7 @@ export class PapyrusDatabase {
       CREATE INDEX IF NOT EXISTS runtime_events_session_sequence ON runtime_events(session_id, id);
       CREATE UNIQUE INDEX IF NOT EXISTS session_runs_one_active ON session_runs(session_id) WHERE status='running';
       CREATE INDEX IF NOT EXISTS approvals_session_requested ON approvals(session_id, requested_at DESC);
+      CREATE INDEX IF NOT EXISTS attachments_session_created ON attachments(session_id, created_at DESC);
       CREATE UNIQUE INDEX IF NOT EXISTS approvals_one_pending_per_run_tool ON approvals(run_id, tool_title) WHERE status='pending';
     `)
   }
@@ -306,6 +312,31 @@ export class PapyrusDatabase {
       occurredAt: String(row.occurredAt),
       data: JSON.parse(String(row.dataJson)) as unknown,
     }))
+  }
+
+  createAttachment(sessionId: string, name: string, mediaType: string, content: Buffer, sha256: string): Attachment {
+    const attachment: Attachment = {
+      id: crypto.randomUUID(), sessionId, name, mediaType, size: content.length, sha256,
+      createdAt: new Date().toISOString(), downloadUrl: '',
+    }
+    this.sqlite.prepare(`INSERT INTO attachments(id,session_id,name,media_type,size,sha256,content,created_at)
+      VALUES(?,?,?,?,?,?,?,?)`).run(attachment.id, sessionId, name, mediaType, attachment.size, sha256, content, attachment.createdAt)
+    return attachment
+  }
+
+  listAttachments(sessionId: string): Attachment[] {
+    return this.sqlite.prepare(`SELECT id,session_id sessionId,name,media_type mediaType,size,sha256,created_at createdAt,'' downloadUrl
+      FROM attachments WHERE session_id=? ORDER BY created_at DESC`).all(sessionId) as unknown as Attachment[]
+  }
+
+  getAttachment(id: string): (Attachment & { content: Buffer }) | undefined {
+    const row = this.sqlite.prepare(`SELECT id,session_id sessionId,name,media_type mediaType,size,sha256,created_at createdAt,content
+      FROM attachments WHERE id=?`).get(id) as Row | undefined
+    return row ? {
+      id: String(row.id), sessionId: String(row.sessionId), name: String(row.name), mediaType: String(row.mediaType),
+      size: Number(row.size), sha256: String(row.sha256), createdAt: String(row.createdAt), downloadUrl: '',
+      content: Buffer.from(row.content as Uint8Array),
+    } : undefined
   }
 
   createApproval(sessionId: string, runId: string, requesterId: string, toolTitle: string): Approval {

@@ -22,10 +22,14 @@ export async function runAcpPrompt(
   return await client.connectWith(stream, async (context) => {
     // Papyrus does not grant a child direct client-side filesystem or terminal
     // capabilities. Governed execution is exposed through mediated MCP tools.
-    await context.request(acp.methods.agent.initialize, {
+    const initialized = await context.request(acp.methods.agent.initialize, {
       protocolVersion: acp.PROTOCOL_VERSION,
       clientCapabilities: {},
     })
+
+    if (Array.isArray(request.prompt) && request.prompt.some((block) => block.type === 'resource') && !initialized.agentCapabilities?.promptCapabilities?.embeddedContext) {
+      throw new Error('Runtime does not advertise ACP embedded-context support required for attachments')
+    }
 
     const builder = context.buildSession({
       cwd: request.cwd,

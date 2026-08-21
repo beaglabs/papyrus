@@ -1,4 +1,4 @@
-import type { Principal, Session, SessionEvent, Workspace } from '@papyrus/contracts'
+import type { Artifact, Principal, Session, SessionEvent, SessionRun, Workspace } from '@papyrus/contracts'
 
 export interface Health {
   mode: string
@@ -103,4 +103,12 @@ export async function cancelSession(sessionId: string): Promise<{ cancelled: boo
 
 export async function resumeSession(sessionId: string): Promise<Session> {
   return api(`/api/sessions/${encodeURIComponent(sessionId)}/resume`, { method: 'POST' })
+}
+
+export async function sessionRuns(sessionId: string): Promise<SessionRun[]> {
+  return (await api<{ runs: SessionRun[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/runs`)).runs
+}
+
+export async function sessionArtifacts(sessionId: string): Promise<Artifact[]> {
+  return (await api<{ artifacts: Artifact[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/artifacts`)).artifacts
 }

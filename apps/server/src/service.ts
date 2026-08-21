@@ -7,6 +7,7 @@ import { gooseRuntimeAdapter } from '@papyrus/goose-runtime'
 import { resolveAgentSpec } from './agents.js'
 import { connectorPolicyAction } from './catalog.js'
 import { AuditLog } from './audit.js'
+import { projectArtifacts, type ProjectedArtifact } from './artifacts.js'
 import type { ServerConfig } from './config.js'
 import { PapyrusDatabase } from './db.js'
 import { LicenseService } from './license.js'
@@ -170,6 +171,12 @@ export class PapyrusService {
     const session = this.requireSession(sessionId)
     this.check(actor, 'ReadSession', this.sessionResource(session))
     return this.db.listSessionRuns(sessionId)
+  }
+
+  sessionArtifacts(actor: Principal, sessionId: string): ProjectedArtifact[] {
+    const session = this.requireSession(sessionId)
+    this.check(actor, 'ReadSession', this.sessionResource(session))
+    return projectArtifacts(sessionId, this.db.listSessionEvents(sessionId, 0, Number.MAX_SAFE_INTEGER))
   }
 
   cancelSession(actor: Principal, sessionId: string): boolean {

@@ -5,7 +5,7 @@ import { BROWSER_POLICY_ACTIONS } from './catalog.js'
 
 export const ACTIONS = [
   'ManageUsers', 'ManageWorkspaces', 'ManageTools', 'AssignResources',
-  'CreateSession', 'ReadSession', 'PromptSession', 'CancelSession', 'CloseSession', 'ResumeSession',
+  'CreateSession', 'ReadSession', 'PromptSession', 'CancelSession', 'CloseSession', 'ResumeSession', 'DecideApproval',
   'ReadAudit', 'ReadActivity',
   'ReadWorkspace', 'InvokeTool', 'ActivateLicense',
   ...BROWSER_POLICY_ACTIONS,
@@ -46,7 +46,7 @@ when {
   principal.roles.contains("User") &&
   (action == Action::"ReadSession" || action == Action::"PromptSession" ||
    action == Action::"CancelSession" || action == Action::"CloseSession" ||
-   action == Action::"ResumeSession") &&
+   action == Action::"ResumeSession" || action == Action::"DecideApproval") &&
   resource has owner && resource.owner == principal
 };
 

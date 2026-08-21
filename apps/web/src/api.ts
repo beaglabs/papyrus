@@ -175,7 +175,7 @@ export async function createEnvironmentAdmin(name: string, description: string):
 export async function assignEnvironment(principalId: string, environmentId: string): Promise<void> {
   await api('/api/assignments', { method: 'POST', body: JSON.stringify({ principalId, environmentId }) })
 }
-export async function addMcpServer(name: string, endpoint: string): Promise<McpServer> {
+export async function addMcpServer(name: string, endpoint: string): Promise<{ server: McpServer; authorizationUrl?: string }> {
   return api('/api/mcp/servers', { method: 'POST', body: JSON.stringify({ name, endpoint }) })
 }
 export async function setMcpServerEnabled(serverId: string, enabled: boolean): Promise<McpServer> {

@@ -58,7 +58,7 @@ describe('ACP server agent', () => {
         title: 'mission',
       })
       expect(ctx.context.db.getSession(created.sessionId)?.ownerId).toBe(ctx.user.id)
-      expect(ctx.context.db.getSession(created.sessionId)?.agent).toBe('goose')
+      expect(ctx.context.db.getSession(created.sessionId)?.agent).toBe('papyrus')
     } finally { ctx.context.dispose() }
   })
 

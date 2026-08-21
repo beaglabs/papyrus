@@ -132,6 +132,12 @@ export class PapyrusService {
     return this.db.listSessions().filter((session) => this.decide(actor, 'ReadSession', this.sessionResource(session)).allowed)
   }
 
+  getSession(actor: Principal, sessionId: string): Session {
+    const session = this.requireSession(sessionId)
+    this.check(actor, 'ReadSession', this.sessionResource(session))
+    return session
+  }
+
   defaultGatewayAgent(): string {
     const agent = this.config.gateway?.defaultAgent ?? 'goose'
     if (!resolveAgentSpec(agent, this.config.agents)) throw new Error(`Unknown gateway agent "${agent}"`)

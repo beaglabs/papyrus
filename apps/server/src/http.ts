@@ -54,6 +54,58 @@ function naturalNumber(value: string | null, fallback: number, maximum: number, 
   return parsed
 }
 
+function encodeCursor(offset: number): string {
+  return Buffer.from(String(offset)).toString('base64url')
+}
+
+function decodeCursor(value: string | null): number {
+  if (!value) return 0
+  const parsed = Number(Buffer.from(value, 'base64url').toString('utf8'))
+  if (!Number.isSafeInteger(parsed) || parsed < 0) throw new HttpError(400, 'INVALID_CURSOR', 'Cursor is invalid')
+  return parsed
+}
+
+function streamSessionEvents(
+  request: IncomingMessage,
+  response: ServerResponse,
+  service: PapyrusService,
+  principal: ReturnType<AuthService['authenticate']> & {},
+  sessionId: string,
+  initialAfter: number,
+): void {
+  // Authorize before committing streaming headers.
+  service.getSession(principal, sessionId)
+  response.writeHead(200, {
+    'content-type': 'text/event-stream; charset=utf-8',
+    'cache-control': 'no-store',
+    connection: 'keep-alive',
+    'x-accel-buffering': 'no',
+    'x-content-type-options': 'nosniff',
+  })
+
+  let after = initialAfter
+  const flush = () => {
+    for (;;) {
+      const events = service.sessionEvents(principal, sessionId, after, 200)
+      for (const event of events) {
+        response.write(`id: ${event.sequence}\nevent: session_event\ndata: ${JSON.stringify(event)}\n\n`)
+        after = event.sequence
+      }
+      if (events.length < 200) break
+    }
+  }
+
+  flush()
+  response.write(': connected\n\n')
+  const poll = setInterval(flush, 250)
+  const heartbeat = setInterval(() => response.write(': heartbeat\n\n'), 15_000)
+  request.once('close', () => {
+    clearInterval(poll)
+    clearInterval(heartbeat)
+    if (!response.writableEnded) response.end()
+  })
+}
+
 export function createPapyrusServer(config: ServerConfig, service: PapyrusService, auth: AuthService): Server {
   const handler = async (request: IncomingMessage, response: ServerResponse) => {
     const requestId = crypto.randomUUID()
@@ -138,11 +190,25 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
         service.assign(principal, text(input.principalId, 'principalId'), text(input.resourceId, 'resourceId'))
         return json(response, 204, null)
       }
-      if (url.pathname === '/api/sessions' && request.method === 'GET') return json(response, 200, service.listSessions(principal))
+      if (url.pathname === '/api/sessions' && request.method === 'GET') {
+        const sessions = service.listSessions(principal)
+        const offset = decodeCursor(url.searchParams.get('cursor'))
+        const limit = naturalNumber(url.searchParams.get('limit'), 50, 200, 1)
+        const page = sessions.slice(offset, offset + limit)
+        const next = offset + page.length
+        return json(response, 200, {
+          sessions: page,
+          ...(next < sessions.length ? { nextCursor: encodeCursor(next) } : {}),
+        })
+      }
       if (url.pathname === '/api/sessions' && request.method === 'POST') {
         const input = await body(request)
         const cwd = typeof input.cwd === 'string' ? text(input.cwd, 'cwd', 4096) : '/'
         return json(response, 201, service.createSession(principal, text(input.workspaceId, 'workspaceId'), text(input.agent, 'agent'), text(input.title, 'title'), cwd))
+      }
+      const sessionDetail = url.pathname.match(/^\/api\/sessions\/([^/]+)$/)
+      if (sessionDetail && request.method === 'GET') {
+        return json(response, 200, service.getSession(principal, decodeURIComponent(sessionDetail[1] as string)))
       }
       const sessionEvents = url.pathname.match(/^\/api\/sessions\/([^/]+)\/events$/)
       if (sessionEvents && request.method === 'GET') {
@@ -154,6 +220,16 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
             naturalNumber(url.searchParams.get('limit'), 200, 1_000, 1),
           ),
         })
+      }
+      const sessionEventStream = url.pathname.match(/^\/api\/sessions\/([^/]+)\/events\/stream$/)
+      if (sessionEventStream && request.method === 'GET') {
+        const lastEventId = request.headers['last-event-id']
+        const after = naturalNumber(
+          url.searchParams.get('after') ?? (typeof lastEventId === 'string' ? lastEventId : null),
+          0,
+          Number.MAX_SAFE_INTEGER,
+        )
+        return streamSessionEvents(request, response, service, principal, decodeURIComponent(sessionEventStream[1] as string), after)
       }
       const sessionRuns = url.pathname.match(/^\/api\/sessions\/([^/]+)\/runs$/)
       if (sessionRuns && request.method === 'GET') {
@@ -171,7 +247,7 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
       if (resumeSession && request.method === 'POST') {
         return json(response, 200, service.resumeSession(principal, decodeURIComponent(resumeSession[1] as string)))
       }
-      const prompt = url.pathname.match(/^\/api\/sessions\/([^/]+)\/prompt$/)
+      const prompt = url.pathname.match(/^\/api\/sessions\/([^/]+)\/(?:prompt|prompts)$/)
       if (prompt && request.method === 'POST') {
         const input = await body(request)
         const controller = new AbortController()

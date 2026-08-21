@@ -36,7 +36,7 @@ export interface RuntimeMcpServer {
 
 export interface RuntimePromptRequest {
   cwd: string
-  prompt: string
+  prompt: string | acp.ContentBlock[]
   environment?: Record<string, string>
   mcpServers?: RuntimeMcpServer[]
   authorizeTool: (title: string) => Promise<boolean>

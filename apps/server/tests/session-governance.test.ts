@@ -23,10 +23,10 @@ function setup(factory?: (options: RuntimeLaunchOptions) => AgentRuntime) {
   const other = context.db.upsertUser({ externalId: 'dev:other', displayName: 'Other', authMethod: 'development' })
   context.db.setRole(other.id, 'User')
   const activeOther = context.db.getPrincipal(other.id)!
-  const workspace = context.service.createWorkspace(activeOwner, { name: 'Mission', description: '' })
-  context.service.assign(activeOwner, activeUser.id, workspace.id)
-  const session = context.service.createSession(activeUser, workspace.id, 'goose', 'Governed')
-  return { context, owner: activeOwner, user: activeUser, other: activeOther, workspace, session }
+  const environment = context.service.createEnvironment(activeOwner, { name: 'Mission', description: '' })
+  context.service.assign(activeOwner, activeUser.id, environment.id)
+  const session = context.service.createSession(activeUser, environment.id, 'goose', 'Governed')
+  return { context, owner: activeOwner, user: activeUser, other: activeOther, environment, session }
 }
 
 describe('governed session lifecycle', () => {

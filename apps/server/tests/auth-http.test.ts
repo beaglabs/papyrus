@@ -20,6 +20,19 @@ async function withServer<T>(run: (origin: string, ctx: ReturnType<typeof testCo
 }
 
 describe('daemon authentication HTTP contract', () => {
+  it('serves the login-capable web shell while keeping APIs unauthenticated', async () => {
+    await withServer(async (origin) => {
+      const root = await fetch(`${origin}/`)
+      expect(root.status).toBe(200)
+      expect(root.headers.get('content-type')).toContain('text/html')
+      expect(await root.text()).toContain('<div id="root"></div>')
+
+      const api = await fetch(`${origin}/api/me`)
+      expect(api.status).toBe(401)
+      expect(await api.json()).toMatchObject({ code: 'UNAUTHENTICATED', methods: ['development'] })
+    })
+  })
+
   it('returns a structured 401 challenge with the OIDC login URL', async () => {
     await withServer(async (origin, ctx) => {
       ctx.config.oidc = {

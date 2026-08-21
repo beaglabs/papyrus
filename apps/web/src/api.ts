@@ -1,4 +1,4 @@
-import type { Artifact, Principal, Session, SessionEvent, SessionRun, Workspace } from '@papyrus/contracts'
+import type { Approval, Artifact, Principal, Session, SessionEvent, SessionRun, Workspace } from '@papyrus/contracts'
 
 export interface Health {
   mode: string
@@ -111,4 +111,14 @@ export async function sessionRuns(sessionId: string): Promise<SessionRun[]> {
 
 export async function sessionArtifacts(sessionId: string): Promise<Artifact[]> {
   return (await api<{ artifacts: Artifact[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/artifacts`)).artifacts
+}
+
+export async function sessionApprovals(sessionId: string): Promise<Approval[]> {
+  return (await api<{ approvals: Approval[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/approvals`)).approvals
+}
+
+export async function decideApproval(sessionId: string, approvalId: string, decision: 'approved' | 'denied', reason?: string): Promise<Approval> {
+  return api(`/api/sessions/${encodeURIComponent(sessionId)}/approvals/${encodeURIComponent(approvalId)}/decision`, {
+    method: 'POST', body: JSON.stringify({ decision, ...(reason?.trim() ? { reason: reason.trim() } : {}) }),
+  })
 }

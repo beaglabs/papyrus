@@ -1,7 +1,7 @@
 import { checkParsePolicySet, getCedarVersion, isAuthorized, type CedarValueJson, type EntityJson } from '@cedar-policy/cedar-wasm/nodejs'
 import type { Principal } from '@papyrus/contracts'
 import { POLICY_VERSION } from './audit.js'
-import { BROWSER_POLICY_ACTIONS } from './catalog.js'
+import { BROWSER_POLICY_ACTIONS, BROWSER_RESEARCH_ACTIONS } from './catalog.js'
 
 export const ACTIONS = [
   'ManageUsers', 'ManageWorkspaces', 'ManageTools', 'AssignResources',
@@ -36,7 +36,7 @@ when { principal.roles.contains("Auditor") && (${actionExpression(auditActions)}
 permit(principal, action, resource)
 when {
   principal.roles.contains("User") &&
-  (${actionExpression(['ReadWorkspace', 'CreateSession', 'InvokeTool', ...BROWSER_POLICY_ACTIONS])}) &&
+  (${actionExpression(['ReadWorkspace', 'CreateSession', 'InvokeTool', ...BROWSER_RESEARCH_ACTIONS])}) &&
   resource has assignedUsers && resource.assignedUsers.contains(principal)
 };
 

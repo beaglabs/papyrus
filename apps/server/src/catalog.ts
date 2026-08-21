@@ -36,6 +36,9 @@ export const BROWSER_POLICY_ACTIONS = [
 ] as const
 export type BrowserPolicyAction = (typeof BROWSER_POLICY_ACTIONS)[number]
 
+/** Context-gathering operations available to assigned Users. Mutating browser operations remain privileged. */
+export const BROWSER_RESEARCH_ACTIONS = ['BrowserNavigate', 'BrowserRead'] as const satisfies readonly BrowserPolicyAction[]
+
 export interface ConnectorProfile {
   id: string
   label: string

@@ -47,6 +47,12 @@ describe('fixed Cedar policy', () => {
     }
     expect(policy.authorize(auditor, 'ReadSession', session).allowed).toBe(true)
     expect(policy.authorize(auditor, 'PromptSession', session).allowed).toBe(false)
+    const browser = { type: 'Tool' as const, id: 'chrome:browser', attrs: { assignedUsers: cedarUsers(['user']) } }
+    expect(policy.authorize(user, 'BrowserNavigate', browser).allowed).toBe(true)
+    expect(policy.authorize(user, 'BrowserRead', browser).allowed).toBe(true)
+    for (const action of ['BrowserExecute', 'BrowserDownload', 'BrowserUpload', 'BrowserCredential', 'BrowserSubmit'] as const) {
+      expect(policy.authorize(user, action, browser).allowed, `User ${action}`).toBe(false)
+    }
   })
 })
 

@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import type { Approval, McpServer, Principal, Role, Session, SessionEvent, SessionRun, Workspace } from '@papyrus/contracts'
+import type { Approval, McpServer, Principal, Role, Session, SessionEvent, SessionRun, ToolGrant, Workspace } from '@papyrus/contracts'
 
 type Row = Record<string, unknown>
 
@@ -382,8 +382,22 @@ export class PapyrusDatabase {
     return rows.map((row) => ({ id: String(row.id), name: String(row.name), transport: 'http', endpoint: String(row.endpoint), enabled: Boolean(row.enabled), createdAt: String(row.created_at) }))
   }
 
+  setMcpServerEnabled(id: string, enabled: boolean): McpServer | undefined {
+    this.sqlite.prepare('UPDATE mcp_servers SET enabled=? WHERE id=?').run(enabled ? 1 : 0, id)
+    return this.getMcpServer(id)
+  }
+
   grantTool(workspaceId: string, mcpServerId: string, toolName: string): void {
     this.sqlite.prepare('INSERT OR IGNORE INTO tool_grants VALUES(?,?,?,?,?,?)').run(crypto.randomUUID(), workspaceId, mcpServerId, toolName, 'allow', new Date().toISOString())
+  }
+
+  listToolGrants(): ToolGrant[] {
+    return this.sqlite.prepare(`SELECT id,workspace_id workspaceId,mcp_server_id mcpServerId,tool_name toolName,effect,created_at createdAt
+      FROM tool_grants ORDER BY created_at DESC`).all() as unknown as ToolGrant[]
+  }
+
+  revokeToolGrant(id: string): boolean {
+    return Number(this.sqlite.prepare('DELETE FROM tool_grants WHERE id=?').run(id).changes) === 1
   }
 
   isToolGranted(workspaceId: string, mcpServerId: string, toolName: string): boolean {

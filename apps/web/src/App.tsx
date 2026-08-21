@@ -3,9 +3,9 @@ import { api, AuthenticationRequired, developmentLogin, loadShell, logout, type 
 import { SessionHarness } from './Sessions.js'
 import { SourcesView } from './Sources.js'
 import { AdminView } from './Admin.js'
-import { WorkspacesView } from './Workspaces.js'
+import { EnvironmentsView } from './Environments.js'
 
-type View = 'home' | 'sessions' | 'workspaces' | 'sources' | 'administration'
+type View = 'home' | 'sessions' | 'environments' | 'sources' | 'administration'
 type AppState =
   | { phase: 'loading' }
   | { phase: 'signed-out'; health: Health; challenge: AuthenticationChallenge }
@@ -52,7 +52,13 @@ export function App() {
     ? <Bootstrap me={state.data.me.displayName} onDone={refresh} />
     : <AccessPending me={state.data.me.displayName} />}</>
 
-  const signOut = async () => { try { await logout() } finally { await refresh() } }
+  const signOut = async () => {
+    await logout()
+    // Replace the entire authenticated application state after the server has
+    // revoked the token and expired the cookie. This also closes EventSource
+    // connections owned by the session harness.
+    window.location.replace('/')
+  }
 
   return <>
     <HandlingBanner profile={state.data.health.profile} />
@@ -63,7 +69,7 @@ export function App() {
         <nav aria-label="Primary navigation">
           <NavButton active={view === 'home'} onClick={() => setView('home')}>Overview</NavButton>
           <NavButton active={view === 'sessions'} onClick={() => setView('sessions')}>Sessions</NavButton>
-          <NavButton active={view === 'workspaces'} onClick={() => setView('workspaces')}>Workspaces</NavButton>
+          <NavButton active={view === 'environments'} onClick={() => setView('environments')}>Environments</NavButton>
           <NavButton active={view === 'sources'} onClick={() => setView('sources')}>Sources</NavButton>
           {state.data.me.roles.some((role) => role === 'Owner' || role === 'Admin') && <NavButton active={view === 'administration'} onClick={() => setView('administration')}>Administration</NavButton>}
         </nav>
@@ -113,24 +119,24 @@ function Bootstrap({ me, onDone }: { me: string; onDone: () => Promise<void> }) 
 }
 
 function AccessPending({ me }: { me: string }) {
-  return <main className="center login"><Logo /><p className="eyebrow">ACCESS PENDING</p><h1>Identity verified.<br />Authority required.</h1><p>{me}, an Owner or Admin must assign your fixed role and workspace access before you can enter Papyrus.</p></main>
+  return <main className="center login"><Logo /><p className="eyebrow">ACCESS PENDING</p><h1>Identity verified.<br />Authority required.</h1><p>{me}, an Owner or Admin must assign your fixed role and environment access before you can enter Papyrus.</p></main>
 }
 
 function ShellView({ view, data, onNavigate }: { view: View; data: ShellData; onNavigate: (view: View) => void }) {
   if (view === 'home') return <section className="grid-two wide-left"><article className="panel hero-panel"><p className="eyebrow">CONTROL PLANE READY</p><h2>Begin governed work from one durable session.</h2><p>Every prompt, runtime event, cancellation, and policy decision remains bound to your authenticated identity.</p><button className="primary" onClick={() => onNavigate('sessions')}>Open sessions →</button></article><DeploymentFacts data={data} /></section>
-  if (view === 'sessions') return <SessionHarness workspaces={data.workspaces} />
-  if (view === 'workspaces') return <WorkspacesView me={data.me} items={data.workspaces} />
+  if (view === 'sessions') return <SessionHarness environments={data.environments} />
+  if (view === 'environments') return <EnvironmentsView me={data.me} items={data.environments} />
   if (view === 'sources') return <SourcesView />
   if (view === 'administration') return <AdminView me={data.me} />
   return <article className="panel placeholder"><span>STACK PREVIEW</span><h2>{viewTitle(view)}</h2><p>{placeholder(view)}</p></article>
 }
 
 function DeploymentFacts({ data }: { data: ShellData }) {
-  return <article className="panel"><div className="panel-head"><h2>Deployment</h2><span className="status-good">ENFORCED</span></div><dl className="facts"><div><dt>Policy</dt><dd>Cedar {data.health.cedar}</dd></div><div><dt>Mode</dt><dd>{data.health.mode}</dd></div><div><dt>Identity</dt><dd>{data.me.authMethod}</dd></div><div><dt>Workspaces</dt><dd>{data.workspaces.length}</dd></div></dl></article>
+  return <article className="panel"><div className="panel-head"><h2>Deployment</h2><span className="status-good">ENFORCED</span></div><dl className="facts"><div><dt>Policy</dt><dd>Cedar {data.health.cedar}</dd></div><div><dt>Topology</dt><dd>ON-PREMISES</dd></div><div><dt>Identity</dt><dd>{data.me.authMethod === 'development' ? 'LOOPBACK DEVELOPMENT' : data.me.authMethod.toUpperCase()}</dd></div><div><dt>Environments</dt><dd>{data.environments.length}</dd></div></dl></article>
 }
 
 function NavButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) { return <button className={active ? 'active' : ''} onClick={onClick}>{children}</button> }
 function profileLabel(profile: string) { return ({ commercial: 'COMMERCIAL', 'government-il4': 'GOVERNMENT IL4', 'government-il6': 'GOVERNMENT IL6' } as Record<string, string>)[profile] ?? profile.toUpperCase() }
-function viewTitle(view: View) { return ({ home: 'Operational overview', sessions: 'Sessions', workspaces: 'Workspaces', sources: 'Sources', administration: 'Administration' })[view] }
-function placeholder(view: View) { return ({ sessions: '', sources: '', administration: 'Runtime, tool, browser, and deployment administration are implemented in layer 07.', home: '', workspaces: '' })[view] }
+function viewTitle(view: View) { return ({ home: 'Operational overview', sessions: 'Sessions', environments: 'Environments', sources: 'Sources', administration: 'Administration' })[view] }
+function placeholder(view: View) { return ({ sessions: '', sources: '', administration: '', home: '', environments: '' })[view] }
 function initials(name: string) { return name.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') }

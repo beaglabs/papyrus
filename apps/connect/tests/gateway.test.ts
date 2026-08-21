@@ -45,7 +45,7 @@ describe('papyrus-connect gateway integration', () => {
         id: responses[1]?.result?.sessionId,
         ownerId: activeOwner.id,
         environmentId: environment.id,
-        agent: 'goose',
+        agent: 'papyrus',
       }))
     } finally {
       server.closeAllConnections()

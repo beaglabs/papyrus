@@ -3,10 +3,9 @@ import { Agent as HttpsAgent } from 'node:https'
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import type { ActivitySummary, AdminOverview, Approval, Attachment, Elicitation, Environment, McpServer, Principal, ResearchSource, Role, Session, SessionEvent, SessionRun, SignedLicense } from '@papyrus/contracts'
 import type { ContentBlock } from '@agentclientprotocol/sdk'
-import type { AgentRuntime, RuntimeEvent, RuntimeLaunchOptions } from '@papyrus/acp-runtime'
-import { gooseRuntimeAdapter } from '@papyrus/goose-runtime'
-import { resolveAgentSpec } from './agents.js'
-import { RUNTIME_PROFILES, connectorPolicyAction } from './catalog.js'
+import type { AgentRuntime, RuntimeEvent, RuntimeLaunchOptions, RuntimeTool } from '@papyrus/acp-runtime'
+import { connectorPolicyAction } from './catalog.js'
+import { PapyrusWorker } from './native-worker.js'
 import { AuditLog } from './audit.js'
 import { projectArtifacts, type ProjectedArtifact } from './artifacts.js'
 import { projectResearchSources } from './sources.js'
@@ -58,7 +57,7 @@ export class PapyrusService {
   constructor(
     readonly db: PapyrusDatabase,
     private readonly config: ServerConfig,
-    private readonly runtimeFactory: RuntimeFactory = (options) => gooseRuntimeAdapter.create(options),
+    private readonly runtimeFactory: RuntimeFactory = (options) => new PapyrusWorker({ ...config.model, ...(options.promptTimeoutMs === undefined ? {} : { promptTimeoutMs: options.promptTimeoutMs }) }),
   ) {
     this.audit = new AuditLog(db)
     this.license = new LicenseService(db, config.dataDir, config.profile, config.licenseAuthorities, config.licenseRequired)
@@ -134,8 +133,7 @@ export class PapyrusService {
     this.license.require('gateway')
     this.check(actor, 'CreateSession', this.environmentResource(environmentId))
     if (!this.db.getEnvironment(environmentId)) throw new Error('Environment not found')
-    const spec = resolveAgentSpec(agent, this.config.agents)
-    if (!spec) throw new Error(`Unknown agent "${agent}"`)
+    if (agent !== 'papyrus') throw new Error('Papyrus is the only supported session engine')
     if (!isAbsoluteClientPath(cwd)) throw new Error('Session cwd must be an absolute path')
     const session = this.db.createSession(actor.id, environmentId, agent, title, cwd)
     this.audit.append({ actorId: actor.id, action: 'CreateSession', resourceType: 'Session', resourceId: session.id, decision: 'info', metadata: { environmentId, agent, cwd } })
@@ -152,11 +150,7 @@ export class PapyrusService {
     return session
   }
 
-  defaultGatewayAgent(): string {
-    const agent = this.config.gateway?.defaultAgent ?? 'goose'
-    if (!resolveAgentSpec(agent, this.config.agents)) throw new Error(`Unknown gateway agent "${agent}"`)
-    return agent
-  }
+  defaultGatewayAgent(): string { return 'papyrus' }
 
   async shutdown(timeoutMs = 5_000): Promise<void> {
     const active = [...this.activeSessionRuns.entries()]
@@ -339,8 +333,6 @@ export class PapyrusService {
     this.license.require('gateway')
     const session = this.requireSession(sessionId)
     this.check(actor, 'PromptSession', this.sessionResource(session))
-    const spec = resolveAgentSpec(session.agent, this.config.agents)
-    if (!spec) throw new Error(`Unknown agent "${session.agent}"`)
     const events: RuntimeEvent[] = []
     const attachments = [...new Set(options.attachmentIds ?? [])].map((id) => {
       const attachment = this.db.getAttachment(id)
@@ -361,7 +353,7 @@ export class PapyrusService {
     ]
     const run = this.beginRun(session, actor, options.signal)
     try {
-      const runtime = this.runtimeFactory({ ...this.runtimeCommand(session.agent), promptTimeoutMs: this.config.promptTimeoutMs })
+      const runtime = this.runtimeFactory({ promptTimeoutMs: this.config.promptTimeoutMs })
       this.db.addRuntimeEvent(session.id, run.runId, 'update', new Date().toISOString(), {
         sessionUpdate: 'user_message_chunk',
         content: { type: 'text', text: prompt },
@@ -371,8 +363,12 @@ export class PapyrusService {
       const result = await runtime.runPrompt({
         cwd: session.cwd,
         prompt: attachments.length ? contentBlocks : prompt,
-        environment: spec.environment(),
-        mcpServers: this.runtimeMcpServers(session),
+        tools: await this.nativeTools(session),
+        invokeTool: async (name, args) => {
+          const [mcpServerId] = this.findTool(session.environmentId, name)
+          if (!mcpServerId) throw new AuthorizationDenied('InvokeTool', name)
+          return await this.invokeTool(actor, session.id, mcpServerId, name, args)
+        },
         authorizeTool: async (title) => this.requestToolApproval(actor, session, run.runId, title, run.controller.signal),
         elicit: async (request) => this.requestElicitation(session, run.runId, request, run.controller.signal),
         onEvent: async (event) => {
@@ -452,9 +448,6 @@ export class PapyrusService {
 
   adminOverview(actor: Principal): AdminOverview {
     this.check(actor, 'ManageUsers', { type: 'Deployment', id: this.license.deploymentId })
-    const configuredAgents = this.config.agents ?? {}
-    const defaultAgent = this.defaultGatewayAgent()
-    const agentIds = [...new Set([defaultAgent, ...Object.keys(configuredAgents)])]
     return {
       deployment: {
         topology: 'on-premises', profile: this.config.profile, publicOrigin: this.config.publicOrigin,
@@ -466,8 +459,6 @@ export class PapyrusService {
       users: this.db.listPrincipals(),
       environments: this.db.listEnvironments().map((environment) => ({ ...environment, assignedUserIds: this.db.assignedUserIds('environment', environment.id) })),
       mcpServers: this.db.listMcpServers(), toolGrants: this.db.listToolGrants(),
-      runtimeProfiles: Object.entries(RUNTIME_PROFILES).map(([id, profile]) => ({ id, label: profile.label, command: profile.command, args: [...profile.args], source: profile.source })),
-      agents: agentIds.map((id) => ({ id, profile: configuredAgents[id]?.profile ?? id, isDefault: id === defaultAgent })),
       connectors: (this.config.connectors ?? []).map((connector) => ({ id: connector.id, label: connector.label, package: connector.package, source: connector.source, operations: { ...connector.operations } })),
       license: this.license.status(),
     }
@@ -616,13 +607,6 @@ export class PapyrusService {
     return row ? [row.mcp_server_id, title] : ['', '']
   }
 
-  /** Launch command and args for an agent. */
-  runtimeCommand(agent: string): { command: string; args: string[] } {
-    const spec = resolveAgentSpec(agent, this.config.agents)
-    if (!spec) throw new Error(`Unknown agent "${agent}"`)
-    return { command: spec.command, args: spec.args }
-  }
-
   /** Authorizes and audits a prompt against a Papyrus session (without running it). */
   authorizeSessionPrompt(actor: Principal, session: Session): void {
     this.check(actor, 'PromptSession', this.sessionResource(session))
@@ -689,6 +673,48 @@ export class PapyrusService {
       signal.addEventListener('abort', abort, { once: true })
       if (signal.aborted) abort()
     })
+  }
+
+  /** Discovers only the tools enabled for this session's authorization environment. */
+  private async nativeTools(session: Session): Promise<RuntimeTool[]> {
+    const grantedServerIds = new Set(this.db.listToolGrants()
+      .filter((grant) => grant.environmentId === session.environmentId)
+      .map((grant) => grant.mcpServerId))
+    const tools = new Map<string, RuntimeTool>()
+    for (const server of this.db.listMcpServers()) {
+      if (!server.enabled || !grantedServerIds.has(server.id)) continue
+      const response = await this.forwardMcp(server.endpoint, {
+        jsonrpc: '2.0',
+        id: crypto.randomUUID(),
+        method: 'tools/list',
+        params: {},
+      }, this.mcpAuthorization(server.id)).catch((error) => {
+        this.audit.append({
+          actorId: session.ownerId,
+          action: 'DiscoverTools',
+          resourceType: 'McpServer',
+          resourceId: server.id,
+          decision: 'deny',
+          metadata: { sessionId: session.id, error: safeError(error) },
+        })
+        return undefined
+      })
+      if (!response || typeof response !== 'object') continue
+      const listed = (response as { result?: { tools?: Array<{ name?: unknown; description?: unknown; inputSchema?: unknown }> } }).result?.tools
+      if (!Array.isArray(listed)) continue
+      for (const tool of listed) {
+        if (typeof tool.name !== 'string' || tools.has(tool.name)) continue
+        if (!this.db.isToolGranted(session.environmentId, server.id, tool.name)) continue
+        tools.set(tool.name, {
+          name: tool.name,
+          ...(typeof tool.description === 'string' ? { description: tool.description } : {}),
+          inputSchema: tool.inputSchema && typeof tool.inputSchema === 'object' && !Array.isArray(tool.inputSchema)
+            ? tool.inputSchema as Record<string, unknown>
+            : { type: 'object', properties: {} },
+        })
+      }
+    }
+    return [...tools.values()]
   }
 
   /** Session-bound Papyrus MCP proxy endpoints for the runtime to consume. */

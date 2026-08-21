@@ -1,7 +1,6 @@
 import { getFips } from 'node:crypto'
 import { resolve } from 'node:path'
 import type { DeploymentProfile, ServerMode } from '@papyrus/contracts'
-import type { AgentConfigEntry } from './agents.js'
 import { CONNECTOR_PROFILES, type ConnectorProfile } from './catalog.js'
 import { loadFileConfig } from './config-file.js'
 
@@ -28,7 +27,6 @@ export interface ServerConfig {
     host: string
     port: number
     devToken?: string
-    defaultAgent?: string
     maxRequestBodyBytes?: number
     maxConnections?: number
     connectionIdleMs?: number
@@ -37,7 +35,7 @@ export interface ServerConfig {
   }
   runtimeWorkerToken?: string
   runtimeWorkerTls?: { certPath: string; keyPath: string; caPath: string }
-  agents?: Record<string, AgentConfigEntry>
+  model?: { endpoint: string; model: string; apiKey?: string }
   connectors?: ConnectorProfile[]
   licenseRequired: boolean
   licenseAuthorities: Record<string, string>
@@ -190,7 +188,6 @@ export function loadConfig(env = process.env): ServerConfig {
     connectionIdleMs: boundedInteger('PAPYRUS_GATEWAY_CONNECTION_IDLE_MS', env.PAPYRUS_GATEWAY_CONNECTION_IDLE_MS, 900_000, 1_000, 86_400_000),
     requestTimeoutMs: boundedInteger('PAPYRUS_GATEWAY_REQUEST_TIMEOUT_MS', env.PAPYRUS_GATEWAY_REQUEST_TIMEOUT_MS, 30_000, 1_000, 600_000),
     ...(env.PAPYRUS_GATEWAY_DEV_TOKEN ? { devToken: env.PAPYRUS_GATEWAY_DEV_TOKEN } : {}),
-    ...(env.PAPYRUS_GATEWAY_DEFAULT_AGENT ? { defaultAgent: env.PAPYRUS_GATEWAY_DEFAULT_AGENT } : {}),
     ...(env.PAPYRUS_GATEWAY_TLS_CERT ? {
       tls: {
         certPath: env.PAPYRUS_GATEWAY_TLS_CERT,
@@ -212,7 +209,12 @@ export function loadConfig(env = process.env): ServerConfig {
   if (env.PAPYRUS_LICENSE_AUTHORITIES_JSON) {
     Object.assign(licenseAuthorities, JSON.parse(env.PAPYRUS_LICENSE_AUTHORITIES_JSON) as Record<string, string>)
   }
-  const agents: Record<string, AgentConfigEntry> | undefined = fileConfig.agents ? { ...fileConfig.agents } : undefined
+  const model = env.PAPYRUS_MODEL_ENDPOINT ? {
+    endpoint: parseOrigin('PAPYRUS_MODEL_ENDPOINT', env.PAPYRUS_MODEL_ENDPOINT),
+    model: required('PAPYRUS_MODEL', env.PAPYRUS_MODEL),
+    ...(env.PAPYRUS_MODEL_API_KEY ? { apiKey: env.PAPYRUS_MODEL_API_KEY } : {}),
+  } : undefined
+  if (mode === 'persistent' && model && !model.endpoint.startsWith('https://')) throw new Error('PAPYRUS_MODEL_ENDPOINT must use HTTPS in persistent mode')
   assertRuntime({ profile, mode })
   return {
     mode,
@@ -231,7 +233,7 @@ export function loadConfig(env = process.env): ServerConfig {
     ...(gateway ? { gateway } : {}),
     ...(env.PAPYRUS_RUNTIME_WORKER_TOKEN ? { runtimeWorkerToken: env.PAPYRUS_RUNTIME_WORKER_TOKEN } : {}),
     ...(runtimeWorkerTls ? { runtimeWorkerTls } : {}),
-    ...(agents ? { agents } : {}),
+    ...(model ? { model } : {}),
     ...(fileConfig.connectors ? { connectors: fileConfig.connectors.map((id) => CONNECTOR_PROFILES[id] as ConnectorProfile) } : {}),
     // Licensing is a deployment invariant: persistent mode always requires a valid license.
     // Local mode remains usable for development without a production bypass flag.

@@ -45,7 +45,7 @@ describe('durable human approval HTTP API', () => {
     ctx.service.assign(activeOwner, activeUser.id, environment.id)
     const mcp = ctx.db.addMcpServer({ name: 'Records', endpoint: 'http://127.0.0.1:9999', oauthStatus: 'not_required' })
     ctx.service.grantMcpServer(activeOwner, environment.id, mcp.id)
-    const session = ctx.service.createSession(activeUser, environment.id, 'goose', 'Approval review')
+    const session = ctx.service.createSession(activeUser, environment.id, 'papyrus', 'Approval review')
     const authorization = `Bearer ${ctx.auth.issueSession(activeUser.id)}`
     const server = createPapyrusServer(ctx.config, ctx.service, ctx.auth)
     server.listen(0, '127.0.0.1')

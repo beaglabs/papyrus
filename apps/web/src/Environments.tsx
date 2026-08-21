@@ -33,10 +33,30 @@ export function EnvironmentsView({ me, items }: { me: Principal; items: Environm
         <article className="panel environment-hero"><p className="eyebrow">CEDAR AUTHORIZATION BOUNDARY</p><h2>{selected.name}</h2><p>{selected.description || 'No purpose or handling description has been provided.'}</p></article>
         <div className="environment-controls">
           <article className="panel admin-panel"><div className="panel-head"><h2>Members</h2><span>{selected.assignedUserIds.length}</span></div>
-            {privileged && data ? <><form className="admin-form compact-form" onSubmit={(event) => { event.preventDefault(); const principalId = new FormData(event.currentTarget).get('principalId'); if (typeof principalId === 'string' && principalId) void act(() => assignEnvironment(principalId, selected.id)) }}><SelectField name="principalId" label="Eligible identity" placeholder="Choose an identity" options={eligibleUsers.map((user) => ({ value: user.id, label: user.displayName, detail: authenticationLabel(user.authMethod) }))} /><button className="primary" disabled={busy || eligibleUsers.length === 0}>Assign member</button></form><div className="admin-list compact">{selected.assignedUserIds.length ? selected.assignedUserIds.flatMap((id) => { const user = data.users.find((item) => item.id === id); return user ? [<article key={id}><div><strong>{user.displayName}</strong><span>{authenticationLabel(user.authMethod)} · {user.roles.join(' · ') || 'No role'}</span></div></article>] : [] }) : <div className="empty">No identities are assigned.</div>}</div></> : <p>Membership is managed by deployment administrators.</p>}
+            {privileged && data ? <div className="resource-list">
+              {selected.assignedUserIds.length ? selected.assignedUserIds.flatMap((id) => {
+                const user = data.users.find((item) => item.id === id)
+                return user ? [<article className="resource-list-card" key={id}><div><strong>{user.displayName}</strong><span>{authenticationLabel(user.authMethod)} · {user.roles.join(' · ') || 'No role'}</span></div><span className="pill completed">member</span></article>] : []
+              }) : <div className="resource-list-empty">No identities are assigned.</div>}
+              {eligibleUsers.length ? <form className="resource-list-card resource-list-action" onSubmit={(event) => {
+                event.preventDefault()
+                const principalId = new FormData(event.currentTarget).get('principalId')
+                if (typeof principalId === 'string' && principalId) void act(() => assignEnvironment(principalId, selected.id))
+              }}><SelectField name="principalId" label="Add member" placeholder="Choose an eligible identity" options={eligibleUsers.map((user) => ({ value: user.id, label: user.displayName, detail: authenticationLabel(user.authMethod) }))} /><button className="primary" disabled={busy}>Assign</button></form> : <div className="resource-list-empty">Every eligible identity is already assigned.</div>}
+            </div> : <p>Membership is managed by deployment administrators.</p>}
           </article>
           <article className="panel admin-panel"><div className="panel-head"><h2>MCP access</h2><span>{grantedServerIds.size}</span></div>
-            {privileged && data ? <><p className="admin-note">Enabling a registered MCP server makes its tools available to sessions in this environment. Individual tool calls remain subject to Cedar policy and approval.</p><form className="admin-form compact-form" onSubmit={(event) => { event.preventDefault(); const serverId = new FormData(event.currentTarget).get('mcpServerId'); if (typeof serverId === 'string' && serverId) void act(() => grantMcpServer(selected.id, serverId)) }}><SelectField name="mcpServerId" label="Registered MCP server" placeholder="Choose a tool source" options={eligibleServers.map((server) => ({ value: server.id, label: server.name, detail: server.endpoint }))} /><button className="primary" disabled={busy || eligibleServers.length === 0}>Enable server</button></form><div className="grant-list">{data.toolGrants.filter((grant) => grant.environmentId === selected.id).map((grant) => <div key={grant.id}><span><strong>{data.mcpServers.find((server) => server.id === grant.mcpServerId)?.name ?? 'Registered server'}</strong><small>Source of governed MCP tools</small></span><button className="danger" disabled={busy} onClick={() => void act(() => revokeToolGrant(grant.id))}>Disable</button></div>)}</div></> : <p>Effective MCP access is read-only for this identity.</p>}
+            {privileged && data ? <><p className="admin-note">Enabled sources expose tools to this environment. Cedar policy and approval still govern every call.</p><div className="resource-list">
+              {data.toolGrants.filter((grant) => grant.environmentId === selected.id).length ? data.toolGrants.filter((grant) => grant.environmentId === selected.id).map((grant) => {
+                const server = data.mcpServers.find((item) => item.id === grant.mcpServerId)
+                return <article className="resource-list-card" key={grant.id}><div><strong>{server?.name ?? 'Registered server'}</strong><span>{server?.endpoint ?? 'Governed MCP tool source'}</span></div><button className="danger" disabled={busy} onClick={() => void act(() => revokeToolGrant(grant.id))}>Disable</button></article>
+              }) : <div className="resource-list-empty">No MCP sources are enabled.</div>}
+              {eligibleServers.length ? <form className="resource-list-card resource-list-action" onSubmit={(event) => {
+                event.preventDefault()
+                const serverId = new FormData(event.currentTarget).get('mcpServerId')
+                if (typeof serverId === 'string' && serverId) void act(() => grantMcpServer(selected.id, serverId))
+              }}><SelectField name="mcpServerId" label="Enable source" placeholder="Choose a registered MCP server" options={eligibleServers.map((server) => ({ value: server.id, label: server.name, detail: server.endpoint }))} /><button className="primary" disabled={busy}>Enable</button></form> : <div className="resource-list-empty">No additional registered MCP sources are available.</div>}
+            </div></> : <p>Effective MCP access is read-only for this identity.</p>}
           </article>
         </div>
       </>}

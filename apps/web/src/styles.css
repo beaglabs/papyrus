@@ -166,6 +166,13 @@ h2 { font-size: 19px; margin-bottom: 20px; }
 .environment-controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; align-items: start; }.compact-form { grid-template-columns: minmax(0, 1fr) max-content; align-items: end; }.compact-form .select-field { align-self: start; }.compact-form .primary { white-space: nowrap; }
 .select-field { min-width: 0; display: grid; gap: 6px; color: #555; font: 700 10px ui-monospace, monospace; text-transform: uppercase; }.select-control { min-width: 0; position: relative; display: block; }.select-control select { width: 100%; min-height: 44px; appearance: none; border: 2px solid #111; border-radius: 0; background: #fff; padding: 10px 38px 10px 11px; color: #111; font: 600 13px ui-sans-serif, sans-serif; text-transform: none; }.select-control > span { position: absolute; right: 13px; top: 50%; transform: translateY(-50%); color: #111; font-size: 18px; pointer-events: none; }.select-control select:focus { outline: 2px solid #82c9ff; outline-offset: 2px; }.select-control select:disabled { color: #777; background: #e8e4db; cursor: not-allowed; }.select-field small { color: #777; font: 10px ui-monospace, monospace; text-transform: none; }
 .grant-list > div > span { display: grid; gap: 3px; }.grant-list small { color: #666; }
+.resource-list { display: grid; gap: 10px; }
+.resource-list-card { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 14px; border: 2px solid #111; background: #f5f1e8; padding: 13px 14px; }
+.resource-list-card > div { min-width: 0; display: grid; gap: 4px; }
+.resource-list-card span { color: #666; overflow-wrap: anywhere; font: 10px ui-monospace, monospace; }
+.resource-list-action { display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: end; background: #fff; }
+.resource-list-action .primary { min-height: 44px; padding-block: 9px; }
+.resource-list-empty { border: 1px dashed #999; background: #f5f1e8; padding: 16px; color: #666; font: 11px ui-monospace, monospace; text-align: left; }
 @media (max-width: 900px) {
   .handling-banner { position: static; }
   .with-handling-banner { height: auto; min-height: 100vh; overflow: visible; padding-top: 0; }
@@ -183,7 +190,7 @@ h2 { font-size: 19px; margin-bottom: 20px; }
   .artifact-view article { grid-template-columns: 42px 1fr; }.artifact-view article a { grid-column: 1 / -1; text-align: center; }
   .source-view article { grid-template-columns: 1fr; }
   .admin-summary { grid-template-columns: 1fr; }.admin-form { grid-template-columns: 1fr; }.admin-list article, .admin-list form { align-items: stretch; flex-direction: column; }
-  .environment-console { flex: none; min-height: 720px; grid-template-columns: 1fr; overflow: visible; }.environment-directory { max-height: 300px; border-right: 0; border-bottom: 2px solid #111; }.environment-controls { grid-template-columns: 1fr; }.compact-form { grid-template-columns: 1fr; }
+  .environment-console { flex: none; min-height: 720px; grid-template-columns: 1fr; overflow: visible; }.environment-directory { max-height: 300px; border-right: 0; border-bottom: 2px solid #111; }.environment-controls { grid-template-columns: 1fr; }.compact-form, .resource-list-action { grid-template-columns: 1fr; }
   .elicitation-card { grid-template-columns: 1fr; }.mode-control span { display: none; }
   header { align-items: flex-start; }
   .identity > div:first-child, .identity .text-button { display: none; }

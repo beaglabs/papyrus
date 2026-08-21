@@ -1,30 +1,3 @@
-import type { RuntimeLaunchSpec } from '@papyrus/acp-runtime'
-
-export const RUNTIME_PROFILE_IDS = ['goose', 'opencode'] as const
-export type RuntimeProfileId = (typeof RUNTIME_PROFILE_IDS)[number]
-
-export interface RuntimeProfile extends Omit<RuntimeLaunchSpec, 'environment'> {
-  label: string
-  source: string
-}
-
-export const RUNTIME_PROFILES: Readonly<Record<RuntimeProfileId, RuntimeProfile>> = {
-  goose: {
-    kind: 'goose',
-    label: 'Goose',
-    command: 'goose',
-    args: ['acp'],
-    source: 'https://github.com/block/goose',
-  },
-  opencode: {
-    kind: 'opencode',
-    label: 'OpenCode',
-    command: 'opencode',
-    args: ['acp'],
-    source: 'https://opencode.ai/docs/acp',
-  },
-}
-
 export const BROWSER_POLICY_ACTIONS = [
   'BrowserNavigate',
   'BrowserRead',
@@ -81,6 +54,3 @@ export function connectorPolicyAction(toolName: string): BrowserPolicyAction | u
   return CHROME_TOOL_ACTIONS[toolName]
 }
 
-export function isRuntimeProfileId(value: string): value is RuntimeProfileId {
-  return (RUNTIME_PROFILE_IDS as readonly string[]).includes(value)
-}

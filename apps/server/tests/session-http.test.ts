@@ -45,6 +45,44 @@ function fakeRuntime(): AgentRuntime {
 }
 
 describe('governed session HTTP API', () => {
+  it('governs uploads and sends selected files as ACP embedded content', async () => {
+    let receivedPrompt: unknown
+    const runtime = fakeRuntime()
+    runtime.runPrompt = async (request) => { receivedPrompt = request.prompt; return { runtimeSessionId: 'runtime-attachment', stopReason: 'end_turn' } }
+    const ctx = testContext(() => runtime)
+    const owner = ctx.db.upsertUser({ externalId: 'oidc:attachment-owner', displayName: 'Owner', authMethod: 'oidc' })
+    ctx.db.setRole(owner.id, 'Owner')
+    const principal = ctx.db.getPrincipal(owner.id)!
+    const workspace = ctx.service.createWorkspace(principal, { name: 'Files', description: '' })
+    const session = ctx.service.createSession(principal, workspace.id, 'goose', 'Attachment test')
+    const authorization = `Bearer ${ctx.auth.issueSession(principal.id)}`
+    const server = createPapyrusServer(ctx.config, ctx.service, ctx.auth)
+    server.listen(0, '127.0.0.1'); await once(server, 'listening')
+    const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+    try {
+      const uploaded = await fetch(`${origin}/api/sessions/${session.id}/attachments`, {
+        method: 'POST', headers: { authorization, 'content-type': 'text/plain', 'x-papyrus-file-name': encodeURIComponent('../brief.txt') }, body: 'governed context',
+      })
+      expect(uploaded.status).toBe(201)
+      const attachment = await uploaded.json() as { id: string; name: string; sha256: string; downloadUrl: string }
+      expect(attachment.name).toBe('.._brief.txt')
+      expect(attachment.sha256).toHaveLength(64)
+
+      const prompt = await fetch(`${origin}/api/sessions/${session.id}/prompts`, {
+        method: 'POST', headers: { authorization, 'content-type': 'application/json' }, body: JSON.stringify({ prompt: 'Summarize it', attachmentIds: [attachment.id] }),
+      })
+      expect(prompt.status).toBe(200)
+      expect(receivedPrompt).toMatchObject([
+        { type: 'text', text: 'Summarize it' },
+        { type: 'resource', resource: { mimeType: 'text/plain', blob: Buffer.from('governed context').toString('base64') } },
+      ])
+      const downloaded = await fetch(`${origin}${attachment.downloadUrl}`, { headers: { authorization } })
+      expect(await downloaded.text()).toBe('governed context')
+    } finally {
+      server.close(); await once(server, 'close'); ctx.dispose()
+    }
+  })
+
   it('exposes runs, cursor events, close, and resume to the session owner', async () => {
     const ctx = testContext(() => fakeRuntime())
     const owner = ctx.db.upsertUser({ externalId: 'oidc:owner', displayName: 'Owner', authMethod: 'oidc' })

@@ -41,7 +41,7 @@ describe('fixed Cedar policy', () => {
     }
 
     // A User may only operate their own session; an Auditor may read but not execute.
-    for (const action of ['ReadSession', 'PromptSession', 'CancelSession', 'CloseSession', 'ResumeSession'] as const) {
+    for (const action of ['ReadSession', 'PromptSession', 'CancelSession', 'CloseSession', 'ResumeSession', 'DecideApproval'] as const) {
       expect(policy.authorize(user, action, session).allowed, `User ${action}`).toBe(true)
       expect(policy.authorize(principal('other', ['User']), action, session).allowed, `Other ${action}`).toBe(false)
     }

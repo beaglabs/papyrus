@@ -1,7 +1,7 @@
-import type { AdminOverview, Approval, Artifact, Attachment, McpServer, Principal, ResearchSource, Role, Session, SessionEvent, SessionRun, Workspace } from '@papyrus/contracts'
+import type { AdminOverview, Approval, Artifact, Attachment, Environment, McpServer, Principal, ResearchSource, Role, Session, SessionEvent, SessionRun } from '@papyrus/contracts'
 
 export interface Health {
-  mode: string
+  topology: 'on-premises'
   profile: string
   cedar: string
   bootstrapRequired: boolean
@@ -17,7 +17,7 @@ export interface AuthenticationChallenge {
 export interface ShellData {
   me: Principal
   health: Health
-  workspaces: Workspace[]
+  environments: Environment[]
 }
 
 export class ApiError extends Error {
@@ -59,8 +59,8 @@ export async function loadShell(): Promise<ShellData> {
   }
   if (!meResponse.ok) throw new ApiError(meResponse.status, 'IDENTITY_FAILED', 'Unable to load identity')
   const me = await meResponse.json() as Principal
-  const workspaces = me.roles.length ? await api<Workspace[]>('/api/workspaces') : []
-  return { me, health, workspaces }
+  const environments = me.roles.length ? await api<Environment[]>('/api/environments') : []
+  return { me, health, environments }
 }
 
 export async function logout(): Promise<void> {
@@ -82,8 +82,8 @@ export async function sessionPage(cursor?: string): Promise<SessionPage> {
   return api(`/api/sessions?${query}`)
 }
 
-export async function createSession(workspaceId: string, title: string): Promise<Session> {
-  return api('/api/sessions', { method: 'POST', body: JSON.stringify({ workspaceId, title }) })
+export async function createSession(environmentId: string, title: string): Promise<Session> {
+  return api('/api/sessions', { method: 'POST', body: JSON.stringify({ environmentId, title }) })
 }
 
 export async function sessionEvents(sessionId: string): Promise<SessionEvent[]> {
@@ -153,11 +153,11 @@ export async function addUserRole(userId: string, role: Role): Promise<Principal
 export async function revokeUserSessions(userId: string): Promise<void> {
   await api(`/api/users/${encodeURIComponent(userId)}/revoke-sessions`, { method: 'POST' })
 }
-export async function createWorkspaceAdmin(name: string, description: string): Promise<Workspace> {
-  return api('/api/workspaces', { method: 'POST', body: JSON.stringify({ name, description }) })
+export async function createEnvironmentAdmin(name: string, description: string): Promise<Environment> {
+  return api('/api/environments', { method: 'POST', body: JSON.stringify({ name, description }) })
 }
-export async function assignWorkspace(principalId: string, resourceId: string): Promise<void> {
-  await api('/api/assignments', { method: 'POST', body: JSON.stringify({ principalId, resourceId }) })
+export async function assignEnvironment(principalId: string, environmentId: string): Promise<void> {
+  await api('/api/assignments', { method: 'POST', body: JSON.stringify({ principalId, environmentId }) })
 }
 export async function addMcpServer(name: string, endpoint: string): Promise<McpServer> {
   return api('/api/mcp/servers', { method: 'POST', body: JSON.stringify({ name, endpoint }) })
@@ -165,8 +165,8 @@ export async function addMcpServer(name: string, endpoint: string): Promise<McpS
 export async function setMcpServerEnabled(serverId: string, enabled: boolean): Promise<McpServer> {
   return api(`/api/mcp/servers/${encodeURIComponent(serverId)}/state`, { method: 'POST', body: JSON.stringify({ enabled }) })
 }
-export async function grantTool(workspaceId: string, mcpServerId: string, toolName: string): Promise<void> {
-  await api('/api/mcp/grants', { method: 'POST', body: JSON.stringify({ workspaceId, mcpServerId, toolName }) })
+export async function grantMcpServer(environmentId: string, mcpServerId: string): Promise<void> {
+  await api('/api/mcp/environment-grants', { method: 'POST', body: JSON.stringify({ environmentId, mcpServerId }) })
 }
 export async function revokeToolGrant(grantId: string): Promise<void> {
   await api(`/api/mcp/grants/${encodeURIComponent(grantId)}`, { method: 'DELETE' })

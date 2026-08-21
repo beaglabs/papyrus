@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import type { Approval, Attachment, Environment, McpServer, Principal, Role, Session, SessionEvent, SessionRun, ToolGrant } from '@papyrus/contracts'
+import type { Approval, Attachment, Elicitation, Environment, McpServer, Principal, Role, Session, SessionEvent, SessionRun, ToolGrant } from '@papyrus/contracts'
 
 type Row = Record<string, unknown>
 
@@ -72,6 +72,11 @@ export class PapyrusDatabase {
         tool_title TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('pending','approved','denied','cancelled')),
         requested_at TEXT NOT NULL, decided_at TEXT, decided_by TEXT REFERENCES users(id), reason TEXT
       );
+      CREATE TABLE IF NOT EXISTS elicitations (
+        id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id), run_id TEXT NOT NULL REFERENCES session_runs(id),
+        status TEXT NOT NULL, request_json TEXT NOT NULL, response_json TEXT,
+        requested_at TEXT NOT NULL, responded_at TEXT
+      );
       CREATE TABLE IF NOT EXISTS mcp_servers (
         id TEXT PRIMARY KEY, name TEXT NOT NULL, transport TEXT NOT NULL CHECK(transport = 'http'),
         endpoint TEXT NOT NULL, enabled INTEGER NOT NULL, created_at TEXT NOT NULL
@@ -114,6 +119,7 @@ export class PapyrusDatabase {
       CREATE UNIQUE INDEX IF NOT EXISTS session_runs_one_active ON session_runs(session_id) WHERE status='running';
       CREATE INDEX IF NOT EXISTS approvals_session_requested ON approvals(session_id, requested_at DESC);
       CREATE INDEX IF NOT EXISTS attachments_session_created ON attachments(session_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS elicitations_session_requested ON elicitations(session_id, requested_at DESC);
       CREATE UNIQUE INDEX IF NOT EXISTS approvals_one_pending_per_run_tool ON approvals(run_id, tool_title) WHERE status='pending';
     `)
   }
@@ -233,6 +239,36 @@ export class PapyrusDatabase {
 
   setSessionStatus(id: string, status: Session['status']): void {
     this.sqlite.prepare('UPDATE sessions SET status=?,updated_at=? WHERE id=?').run(status, new Date().toISOString(), id)
+  }
+
+  deleteSession(id: string): boolean {
+    return this.transaction(() => {
+      this.sqlite.prepare('DELETE FROM approvals WHERE session_id=?').run(id)
+      this.sqlite.prepare('DELETE FROM attachments WHERE session_id=?').run(id)
+      this.sqlite.prepare('DELETE FROM elicitations WHERE session_id=?').run(id)
+      this.sqlite.prepare('DELETE FROM runtime_events WHERE session_id=?').run(id)
+      this.sqlite.prepare('DELETE FROM session_runs WHERE session_id=?').run(id)
+      return Number(this.sqlite.prepare('DELETE FROM sessions WHERE id=?').run(id).changes) > 0
+    })
+  }
+
+  createElicitation(sessionId: string, runId: string, request: Record<string, unknown>): Elicitation {
+    const item: Elicitation = { id: crypto.randomUUID(), sessionId, runId, status: 'pending', request, requestedAt: new Date().toISOString() }
+    this.sqlite.prepare('INSERT INTO elicitations(id,session_id,run_id,status,request_json,requested_at) VALUES(?,?,?,?,?,?)').run(item.id, sessionId, runId, item.status, JSON.stringify(request), item.requestedAt)
+    return item
+  }
+
+  listElicitations(sessionId: string): Elicitation[] {
+    const rows = this.sqlite.prepare('SELECT id,session_id sessionId,run_id runId,status,request_json requestJson,response_json responseJson,requested_at requestedAt,responded_at respondedAt FROM elicitations WHERE session_id=? ORDER BY requested_at DESC').all(sessionId) as Row[]
+    return rows.map((row) => ({ id: String(row.id), sessionId: String(row.sessionId), runId: String(row.runId), status: row.status as Elicitation['status'], request: JSON.parse(String(row.requestJson)), ...(row.responseJson ? { response: JSON.parse(String(row.responseJson)) } : {}), requestedAt: String(row.requestedAt), ...(row.respondedAt ? { respondedAt: String(row.respondedAt) } : {}) }))
+  }
+
+  respondElicitation(id: string, response: Record<string, unknown>): Elicitation | undefined {
+    const status = response.action === 'accept' ? 'accepted' : response.action === 'cancel' ? 'cancelled' : 'declined'
+    const respondedAt = new Date().toISOString()
+    const result = this.sqlite.prepare("UPDATE elicitations SET status=?,response_json=?,responded_at=? WHERE id=? AND status='pending'").run(status, JSON.stringify(response), respondedAt, id)
+    if (!result.changes) return undefined
+    return this.listElicitations(String((this.sqlite.prepare('SELECT session_id sessionId FROM elicitations WHERE id=?').get(id) as Row).sessionId)).find((item) => item.id === id)
   }
 
   beginSessionRun(sessionId: string, actorId: string): SessionRun {

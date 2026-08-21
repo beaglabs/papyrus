@@ -98,6 +98,14 @@ h2 { font-size: 19px; margin-bottom: 20px; }
 .composer textarea:focus { box-shadow: 3px 3px 0 #111; }
 .composer > div { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-top: 10px; }
 .composer span { color: #666; font: 10px ui-monospace, monospace; }
+.visually-hidden { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.composer-actions { display: flex; align-items: center; gap: 10px; }
+.attach-button { border: 1px solid #111; background: #fff; padding: 10px 12px; cursor: pointer; font: 700 11px ui-monospace, monospace; }
+.attach-button:disabled { opacity: .45; cursor: not-allowed; }
+.attachment-chips { display: flex !important; justify-content: flex-start !important; flex-wrap: wrap; gap: 8px !important; margin: 0 0 10px !important; }
+.attachment-chips > span { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; border: 1px solid #111; background: #d8f5df; padding: 7px 8px; color: #111; }
+.attachment-chips > span > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #111; }
+.attachment-chips button { border: 0; background: transparent; padding: 0; cursor: pointer; font-weight: 900; }
 .conversation-empty { margin: auto; max-width: 560px; padding: 40px; text-align: center; }
 .conversation-empty h2 { font-size: 36px; margin-bottom: 10px; }
 .conversation-empty.compact { padding: 20px; }

@@ -48,7 +48,7 @@ describe('Papyrus control plane', () => {
     const context = testContext(); contexts.push(context)
     const { owner, user, environment } = setup(context)
     context.service.assign(owner, user.id, environment.id)
-    const server = context.service.addMcpServer(owner, { name: 'Tools', endpoint: 'http://tools.internal/mcp' })
+    const server = context.db.addMcpServer({ name: 'Tools', endpoint: 'http://tools.internal/mcp', oauthStatus: 'not_required' })
     const session = context.service.createSession(user, environment.id, 'goose', 'Tools')
 
     // A registered server is unavailable until it is explicitly enabled for the environment.

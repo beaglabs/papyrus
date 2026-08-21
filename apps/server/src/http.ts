@@ -26,6 +26,12 @@ function json(response: ServerResponse, status: number, value: unknown): void {
   response.end(body)
 }
 
+function oauthComplete(response: ServerResponse): void {
+  const body = '<!doctype html><meta charset="utf-8"><title>MCP connected</title><p>MCP authorization complete. You may close this window.</p><script>window.opener?.postMessage({type:"papyrus:mcp-connected"}, window.location.origin);window.close()</script>'
+  response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-length': Buffer.byteLength(body), 'cache-control': 'no-store', 'content-security-policy': "default-src 'none'; script-src 'unsafe-inline'" })
+  response.end(body)
+}
+
 function artifactDownload(response: ServerResponse, artifact: ReturnType<PapyrusService['sessionArtifacts']>[number]): void {
   const content = artifact.encoding === 'base64' ? Buffer.from(artifact.content, 'base64') : Buffer.from(artifact.content, 'utf8')
   const filename = artifact.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 180) || 'artifact'
@@ -410,7 +416,13 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
       }
       if (url.pathname === '/api/mcp/servers' && request.method === 'POST') {
         const input = await body(request)
-        return json(response, 201, service.addMcpServer(principal, { name: text(input.name, 'name'), endpoint: text(input.endpoint, 'endpoint', 2048) }))
+        return json(response, 201, await service.addMcpServer(principal, { name: text(input.name, 'name'), endpoint: text(input.endpoint, 'endpoint', 2048) }))
+      }
+      if (url.pathname === '/api/mcp/oauth/callback' && request.method === 'GET') {
+        const state = text(url.searchParams.get('state'), 'state', 256)
+        const code = text(url.searchParams.get('code'), 'code', 4096)
+        await service.completeMcpOauth(principal, state, code)
+        return oauthComplete(response)
       }
       if (url.pathname === '/api/mcp/servers' && request.method === 'GET') return json(response, 200, service.listMcpServers(principal))
       const mcpServerState = url.pathname.match(/^\/api\/mcp\/servers\/([^/]+)\/state$/)

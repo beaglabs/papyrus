@@ -119,6 +119,9 @@ export interface McpServer {
   transport: 'http'
   endpoint: string
   enabled: boolean
+  oauthStatus: 'not_required' | 'authorization_required' | 'connected' | 'error'
+  oauthIssuer?: string
+  oauthError?: string
   createdAt: string
 }
 

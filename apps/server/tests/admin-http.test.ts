@@ -16,7 +16,7 @@ describe('deployment administration HTTP API', () => {
     const activeUser = ctx.db.getPrincipal(user.id)!
     const environment = ctx.service.createEnvironment(activeOwner, { name: 'Admin environment', description: '' })
     ctx.service.assign(activeOwner, activeUser.id, environment.id)
-    const mcp = ctx.service.addMcpServer(activeOwner, { name: 'Browser', endpoint: 'http://127.0.0.1:9999' })
+    const mcp = ctx.db.addMcpServer({ name: 'Browser', endpoint: 'http://127.0.0.1:9999', oauthStatus: 'not_required' })
     ctx.service.grantMcpServer(activeOwner, environment.id, mcp.id)
 
     const server = createPapyrusServer(ctx.config, ctx.service, ctx.auth)

@@ -15,11 +15,11 @@ describe('Papyrus control plane', () => {
     expect(() => context.service.bootstrap(user, 'correct horse battery staple')).toThrow(/already complete/)
   })
 
-  it('requires workspace assignment for session creation', () => {
+  it('requires environment assignment for session creation', () => {
     const context = testContext(); contexts.push(context)
-    const { owner, user, workspace } = setup(context)
-    context.service.assign(owner, user.id, workspace.id)
-    const session = context.service.createSession(user, workspace.id, 'goose', 'Allowed')
+    const { owner, user, environment } = setup(context)
+    context.service.assign(owner, user.id, environment.id)
+    const session = context.service.createSession(user, environment.id, 'goose', 'Allowed')
     expect(session.ownerId).toBe(user.id)
     expect(context.service.listSessions(user)).toEqual([session])
     expect(context.service.audit.verify()).toEqual({ valid: true })
@@ -34,29 +34,30 @@ describe('Papyrus control plane', () => {
     expect(context.service.assignRole(context.db.getPrincipal(admin.id)!, target.id, 'User').roles).toContain('User')
   })
 
-  it('isolates sessions between workspaces', () => {
+  it('isolates sessions between environments', () => {
     const context = testContext(); contexts.push(context)
-    const { owner, user, workspace } = setup(context)
-    const other = context.service.createWorkspace(owner, { name: 'Other', description: '' })
-    context.service.assign(owner, user.id, workspace.id)
-    const session = context.service.createSession(user, workspace.id, 'goose', 'Mine')
+    const { owner, user, environment } = setup(context)
+    const other = context.service.createEnvironment(owner, { name: 'Other', description: '' })
+    context.service.assign(owner, user.id, environment.id)
+    const session = context.service.createSession(user, environment.id, 'goose', 'Mine')
     expect(() => context.service.createSession(user, other.id, 'goose', 'Cross')).toThrow(AuthorizationDenied)
     expect(context.service.listSessions(user)).toEqual([session])
   })
 
-  it('blocks MCP tool invocation without a workspace grant and across workspaces', async () => {
+  it('blocks MCP tool invocation without a environment grant and across environments', async () => {
     const context = testContext(); contexts.push(context)
-    const { owner, user, workspace } = setup(context)
-    context.service.assign(owner, user.id, workspace.id)
+    const { owner, user, environment } = setup(context)
+    context.service.assign(owner, user.id, environment.id)
     const server = context.service.addMcpServer(owner, { name: 'Tools', endpoint: 'http://tools.internal/mcp' })
-    context.service.grantTool(owner, workspace.id, server.id, 'read_file')
-    const session = context.service.createSession(user, workspace.id, 'goose', 'Tools')
+    const session = context.service.createSession(user, environment.id, 'goose', 'Tools')
 
-    // Unassigned tool in the same workspace is denied before any network call.
+    // A registered server is unavailable until it is explicitly enabled for the environment.
     await expect(context.service.invokeTool(user, session.id, server.id, 'delete_everything', {})).rejects.toThrow(AuthorizationDenied)
+    context.service.grantMcpServer(owner, environment.id, server.id)
+    expect(context.service.isToolCallAllowed(user, session, 'read_file')).toBe(true)
 
-    // A second user in a different workspace cannot use the first workspace's grant.
-    const other = context.service.createWorkspace(owner, { name: 'Other', description: '' })
+    // A second user in a different environment cannot use the first environment's grant.
+    const other = context.service.createEnvironment(owner, { name: 'Other', description: '' })
     const otherUser = context.db.upsertUser({ externalId: 'dev:other', displayName: 'Other', authMethod: 'development' })
     context.db.setRole(otherUser.id, 'User')
     const activeOther = context.db.getPrincipal(otherUser.id)!
@@ -90,9 +91,9 @@ describe('Papyrus control plane', () => {
     }))
     const context = testContext(factory); contexts.push(context)
     try {
-      const { owner, user, workspace } = setup(context)
-      context.service.assign(owner, user.id, workspace.id)
-      const session = context.service.createSession(user, workspace.id, 'goose', 'E2E')
+      const { owner, user, environment } = setup(context)
+      context.service.assign(owner, user.id, environment.id)
+      const session = context.service.createSession(user, environment.id, 'goose', 'E2E')
       const result = await context.service.prompt(user, session.id, 'hello')
       expect(result.stopReason).toBe('end_turn')
       expect(result.events.map((event) => event.kind)).toEqual(['session', 'update', 'complete'])
@@ -127,6 +128,6 @@ function setup(context: ReturnType<typeof testContext>) {
   const user = context.db.upsertUser({ externalId: 'dev:user', displayName: 'User', authMethod: 'development' })
   context.db.setRole(user.id, 'User')
   const activeUser = context.db.getPrincipal(user.id)!
-  const workspace = context.service.createWorkspace(activeOwner, { name: 'Mission', description: 'Segmented mission work' })
-  return { owner: activeOwner, user: activeUser, workspace }
+  const environment = context.service.createEnvironment(activeOwner, { name: 'Mission', description: 'Segmented mission work' })
+  return { owner: activeOwner, user: activeUser, environment }
 }

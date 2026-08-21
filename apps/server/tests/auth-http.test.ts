@@ -57,4 +57,22 @@ describe('daemon authentication HTTP contract', () => {
       expect((await fetch(`${origin}/api/me`, { headers })).status).toBe(401)
     })
   })
+
+  it('allows a local development identity to sign out and explicitly return', async () => {
+    await withServer(async (origin, ctx) => {
+      ctx.config.devIdentity = 'owner:Local Owner'
+      expect((await fetch(`${origin}/api/me`)).status).toBe(200)
+
+      const logout = await fetch(`${origin}/api/auth/logout`, { method: 'POST' })
+      expect(logout.status).toBe(204)
+      expect(logout.headers.getSetCookie().join(';')).toContain('papyrus_dev_signed_out=1')
+      const signedOutCookie = 'papyrus_dev_signed_out=1'
+      expect((await fetch(`${origin}/api/me`, { headers: { cookie: signedOutCookie } })).status).toBe(401)
+
+      const login = await fetch(`${origin}/api/auth/development`, { method: 'POST', headers: { cookie: signedOutCookie } })
+      expect(login.status).toBe(204)
+      expect(login.headers.get('set-cookie')).toContain('papyrus_dev_signed_out=;')
+      expect((await fetch(`${origin}/api/me`)).status).toBe(200)
+    })
+  })
 })

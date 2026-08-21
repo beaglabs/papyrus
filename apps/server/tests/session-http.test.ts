@@ -78,4 +78,51 @@ describe('governed session HTTP API', () => {
       ctx.dispose()
     }
   })
+
+  it('provides paginated session detail and a resumable event stream', async () => {
+    const ctx = testContext(() => fakeRuntime())
+    const owner = ctx.db.upsertUser({ externalId: 'oidc:owner-web', displayName: 'Owner', authMethod: 'oidc' })
+    ctx.db.setRole(owner.id, 'Owner')
+    const activeOwner = ctx.db.getPrincipal(owner.id)!
+    const user = ctx.db.upsertUser({ externalId: 'oidc:user-web', displayName: 'User', authMethod: 'oidc' })
+    ctx.db.setRole(user.id, 'User')
+    const activeUser = ctx.db.getPrincipal(user.id)!
+    const workspace = ctx.service.createWorkspace(activeOwner, { name: 'Web', description: '' })
+    ctx.service.assign(activeOwner, activeUser.id, workspace.id)
+    const first = ctx.service.createSession(activeUser, workspace.id, 'goose', 'First')
+    ctx.service.createSession(activeUser, workspace.id, 'goose', 'Second')
+    await ctx.service.prompt(activeUser, first.id, 'hello')
+
+    const authorization = `Bearer ${ctx.auth.issueSession(activeUser.id)}`
+    const server = createPapyrusServer(ctx.config, ctx.service, ctx.auth)
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+    const headers = { authorization }
+
+    try {
+      const page = await fetch(`${origin}/api/sessions?limit=1`, { headers })
+      const pageBody = await page.json() as { sessions: unknown[]; nextCursor?: string }
+      expect(pageBody.sessions).toHaveLength(1)
+      expect(pageBody.nextCursor).toBeTruthy()
+
+      const detail = await fetch(`${origin}/api/sessions/${first.id}`, { headers })
+      expect(await detail.json()).toMatchObject({ id: first.id, title: 'First' })
+
+      const controller = new AbortController()
+      const stream = await fetch(`${origin}/api/sessions/${first.id}/events/stream`, {
+        headers,
+        signal: controller.signal,
+      })
+      expect(stream.status).toBe(200)
+      expect(stream.headers.get('content-type')).toContain('text/event-stream')
+      const chunk = await stream.body!.getReader().read()
+      expect(new TextDecoder().decode(chunk.value)).toContain('event: session_event')
+      controller.abort()
+    } finally {
+      server.close()
+      await once(server, 'close')
+      ctx.dispose()
+    }
+  })
 })

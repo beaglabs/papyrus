@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { Agent as HttpsAgent } from 'node:https'
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
-import type { ActivitySummary, AdminOverview, Approval, McpServer, Principal, ResearchSource, Role, Session, SessionEvent, SessionRun, SignedLicense, Workspace } from '@papyrus/contracts'
+import type { ActivitySummary, AdminOverview, Approval, Attachment, McpServer, Principal, ResearchSource, Role, Session, SessionEvent, SessionRun, SignedLicense, Workspace } from '@papyrus/contracts'
+import type { ContentBlock } from '@agentclientprotocol/sdk'
 import type { AgentRuntime, RuntimeEvent, RuntimeLaunchOptions } from '@papyrus/acp-runtime'
 import { gooseRuntimeAdapter } from '@papyrus/goose-runtime'
 import { resolveAgentSpec } from './agents.js'
@@ -34,6 +35,7 @@ export type RuntimeFactory = (options: RuntimeLaunchOptions) => AgentRuntime
 export interface SessionPromptOptions {
   signal?: AbortSignal
   onEvent?: (event: RuntimeEvent) => void | Promise<void>
+  attachmentIds?: string[]
 }
 
 interface ActiveSessionRun {
@@ -188,6 +190,34 @@ export class PapyrusService {
     return projectArtifacts(sessionId, this.db.listSessionEvents(sessionId, 0, Number.MAX_SAFE_INTEGER))
   }
 
+  sessionAttachments(actor: Principal, sessionId: string): Attachment[] {
+    const session = this.requireSession(sessionId)
+    this.check(actor, 'ReadSession', this.sessionResource(session))
+    return this.db.listAttachments(sessionId).map((attachment) => ({
+      ...attachment,
+      downloadUrl: `/api/sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(attachment.id)}/download`,
+    }))
+  }
+
+  addAttachment(actor: Principal, sessionId: string, name: string, mediaType: string, content: Buffer): Attachment {
+    const session = this.requireSession(sessionId)
+    this.check(actor, 'PromptSession', this.sessionResource(session))
+    if (content.length === 0 || content.length > 10 * 1024 * 1024) throw new Error('Attachment must be between 1 byte and 10 MB')
+    if (!allowedAttachmentType(mediaType)) throw new Error(`Attachment type "${mediaType}" is not allowed`)
+    const safeName = name.replace(/[\u0000-\u001f\u007f/\\]/g, '_').trim().slice(0, 180) || 'attachment'
+    const attachment = this.db.createAttachment(sessionId, safeName, mediaType, content, createHash('sha256').update(content).digest('hex'))
+    this.audit.append({ actorId: actor.id, action: 'UploadAttachment', resourceType: 'Attachment', resourceId: attachment.id, decision: 'info', metadata: { sessionId, name: safeName, mediaType, size: content.length, sha256: attachment.sha256 } })
+    return { ...attachment, downloadUrl: `/api/sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(attachment.id)}/download` }
+  }
+
+  attachmentContent(actor: Principal, sessionId: string, attachmentId: string): Attachment & { content: Buffer } {
+    const session = this.requireSession(sessionId)
+    this.check(actor, 'ReadSession', this.sessionResource(session))
+    const attachment = this.db.getAttachment(attachmentId)
+    if (!attachment || attachment.sessionId !== sessionId) throw new Error('Attachment not found')
+    return attachment
+  }
+
   sessionApprovals(actor: Principal, sessionId: string): Approval[] {
     const session = this.requireSession(sessionId)
     this.check(actor, 'ReadSession', this.sessionResource(session))
@@ -275,6 +305,23 @@ export class PapyrusService {
     const spec = resolveAgentSpec(session.agent, this.config.agents)
     if (!spec) throw new Error(`Unknown agent "${session.agent}"`)
     const events: RuntimeEvent[] = []
+    const attachments = [...new Set(options.attachmentIds ?? [])].map((id) => {
+      const attachment = this.db.getAttachment(id)
+      if (!attachment || attachment.sessionId !== sessionId) throw new Error('Attachment does not belong to this session')
+      return attachment
+    })
+    const contentBlocks: ContentBlock[] = [
+      ...(prompt ? [{ type: 'text' as const, text: prompt }] : []),
+      ...attachments.map((attachment): ContentBlock => ({
+        type: 'resource',
+        resource: {
+          uri: `papyrus://sessions/${sessionId}/attachments/${attachment.id}/${encodeURIComponent(attachment.name)}`,
+          mimeType: attachment.mediaType,
+          blob: attachment.content.toString('base64'),
+        },
+        annotations: { audience: ['assistant'], priority: 1 },
+      })),
+    ]
     const run = this.beginRun(session, actor, options.signal)
     try {
       const runtime = this.runtimeFactory({ ...this.runtimeCommand(session.agent), promptTimeoutMs: this.config.promptTimeoutMs })
@@ -283,10 +330,10 @@ export class PapyrusService {
         content: { type: 'text', text: prompt },
         messageId: `user_${run.runId}`,
       })
-      this.audit.append({ actorId: actor.id, action: 'PromptSession', resourceType: 'Session', resourceId: session.id, decision: 'info', metadata: { promptBytes: Buffer.byteLength(prompt), runId: run.runId } })
+      this.audit.append({ actorId: actor.id, action: 'PromptSession', resourceType: 'Session', resourceId: session.id, decision: 'info', metadata: { promptBytes: Buffer.byteLength(prompt), attachmentIds: attachments.map((item) => item.id), runId: run.runId } })
       const result = await runtime.runPrompt({
         cwd: session.cwd,
-        prompt,
+        prompt: attachments.length ? contentBlocks : prompt,
         environment: spec.environment(),
         mcpServers: this.runtimeMcpServers(session),
         authorizeTool: async (title) => this.requestToolApproval(actor, session, run.runId, title, run.controller.signal),
@@ -621,6 +668,15 @@ function secureEqual(presented: string, expected: string): boolean {
 function safeError(error: unknown): string {
   const value = error instanceof Error ? `${error.name}: ${error.message}` : 'Unknown runtime failure'
   return value.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 512)
+}
+
+function allowedAttachmentType(mediaType: string): boolean {
+  return mediaType.startsWith('text/') || mediaType.startsWith('image/') || [
+    'application/pdf', 'application/json', 'application/xml', 'application/zip',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  ].includes(mediaType)
 }
 
 function isAbsoluteClientPath(value: string): boolean {

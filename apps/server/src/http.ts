@@ -81,6 +81,14 @@ function text(value: unknown, name: string, maximum = 256): string {
   return value.trim()
 }
 
+function identifier(value: unknown, name: string): string {
+  const result = text(value, name, 128)
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(result)) {
+    throw new HttpError(400, 'INVALID_INPUT', `${name} must identify an existing resource`)
+  }
+  return result
+}
+
 function boolean(value: unknown, name: string): boolean {
   if (typeof value !== 'boolean') throw new HttpError(400, 'INVALID_INPUT', `${name} must be a boolean`)
   return value
@@ -154,7 +162,7 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
     try {
       const url = new URL(request.url ?? '/', config.publicOrigin)
       if (url.pathname === '/api/health' && request.method === 'GET') {
-        return json(response, 200, { status: 'ok', mode: config.mode, profile: config.profile, cedar: service.policy.cedarVersion, bootstrapRequired: service.db.getSetting('bootstrapComplete') !== 'true' })
+        return json(response, 200, { status: 'ok', topology: 'on-premises', profile: config.profile, cedar: service.policy.cedarVersion, bootstrapRequired: service.db.getSetting('bootstrapComplete') !== 'true' })
       }
       if (url.pathname === '/api/license/request' && request.method === 'GET') return json(response, 200, service.license.activationRequest())
       if (url.pathname === '/api/auth/challenge' && request.method === 'GET') {
@@ -236,14 +244,15 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
         service.revokeSessions(principal, decodeURIComponent(revokeSessions[1] as string))
         return json(response, 204, null)
       }
-      if (url.pathname === '/api/workspaces' && request.method === 'GET') return json(response, 200, service.listWorkspaces(principal))
-      if (url.pathname === '/api/workspaces' && request.method === 'POST') {
+      if ((url.pathname === '/api/environments' || url.pathname === '/api/workspaces') && request.method === 'GET') return json(response, 200, service.listEnvironments(principal))
+      if ((url.pathname === '/api/environments' || url.pathname === '/api/workspaces') && request.method === 'POST') {
         const input = await body(request)
-        return json(response, 201, service.createWorkspace(principal, { name: text(input.name, 'name'), description: typeof input.description === 'string' ? input.description.slice(0, 2000) : '' }))
+        return json(response, 201, service.createEnvironment(principal, { name: text(input.name, 'name'), description: typeof input.description === 'string' ? input.description.slice(0, 2000) : '' }))
       }
       if (url.pathname === '/api/assignments' && request.method === 'POST') {
         const input = await body(request)
-        service.assign(principal, text(input.principalId, 'principalId'), text(input.resourceId, 'resourceId'))
+        try { service.assign(principal, identifier(input.principalId, 'principalId'), identifier(input.environmentId ?? input.resourceId, 'environmentId')) }
+        catch (error) { if (error instanceof Error && /not found/i.test(error.message)) throw new HttpError(400, 'INVALID_ASSIGNMENT', error.message); throw error }
         return json(response, 204, null)
       }
       if (url.pathname === '/api/sessions' && request.method === 'GET') {
@@ -261,7 +270,7 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
         const input = await body(request)
         const cwd = typeof input.cwd === 'string' ? text(input.cwd, 'cwd', 4096) : '/'
         const agent = typeof input.agent === 'string' ? text(input.agent, 'agent') : service.defaultGatewayAgent()
-        return json(response, 201, service.createSession(principal, text(input.workspaceId, 'workspaceId'), agent, text(input.title, 'title'), cwd))
+        return json(response, 201, service.createSession(principal, identifier(input.environmentId ?? input.workspaceId, 'environmentId'), agent, text(input.title, 'title'), cwd))
       }
       const sessionDetail = url.pathname.match(/^\/api\/sessions\/([^/]+)$/)
       if (sessionDetail && request.method === 'GET') {
@@ -327,6 +336,14 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
       if (sessionApprovals && request.method === 'GET') {
         return json(response, 200, { approvals: service.sessionApprovals(principal, decodeURIComponent(sessionApprovals[1] as string)) })
       }
+      const sessionElicitations = url.pathname.match(/^\/api\/sessions\/([^/]+)\/elicitations$/)
+      if (sessionElicitations && request.method === 'GET') return json(response, 200, { elicitations: service.sessionElicitations(principal, decodeURIComponent(sessionElicitations[1] as string)) })
+      const elicitationResponse = url.pathname.match(/^\/api\/sessions\/([^/]+)\/elicitations\/([^/]+)\/response$/)
+      if (elicitationResponse && request.method === 'POST') {
+        const input = await body(request)
+        if (!['accept', 'decline', 'cancel'].includes(String(input.action))) throw new HttpError(400, 'INVALID_INPUT', 'Invalid elicitation action')
+        return json(response, 200, service.respondElicitation(principal, decodeURIComponent(elicitationResponse[1] as string), decodeURIComponent(elicitationResponse[2] as string), input))
+      }
       const sessionSources = url.pathname.match(/^\/api\/sessions\/([^/]+)\/sources$/)
       if (sessionSources && request.method === 'GET') {
         return json(response, 200, { sources: service.sessionSources(principal, decodeURIComponent(sessionSources[1] as string)) })
@@ -360,6 +377,17 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
       if (closeSession && request.method === 'POST') {
         return json(response, 200, service.closeSession(principal, decodeURIComponent(closeSession[1] as string)))
       }
+      const deleteSession = url.pathname.match(/^\/api\/sessions\/([^/]+)$/)
+      if (deleteSession && request.method === 'DELETE') {
+        service.deleteSession(principal, decodeURIComponent(deleteSession[1] as string))
+        return json(response, 204, null)
+      }
+      const sessionMode = url.pathname.match(/^\/api\/sessions\/([^/]+)\/mode$/)
+      if (sessionMode && request.method === 'POST') {
+        const input = await body(request)
+        service.setSessionMode(principal, decodeURIComponent(sessionMode[1] as string), text(input.modeId, 'modeId'))
+        return json(response, 204, null)
+      }
       const resumeSession = url.pathname.match(/^\/api\/sessions\/([^/]+)\/resume$/)
       if (resumeSession && request.method === 'POST') {
         return json(response, 200, service.resumeSession(principal, decodeURIComponent(resumeSession[1] as string)))
@@ -390,9 +418,10 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
         const input = await body(request)
         return json(response, 200, service.setMcpServerEnabled(principal, decodeURIComponent(mcpServerState[1] as string), boolean(input.enabled, 'enabled')))
       }
-      if (url.pathname === '/api/mcp/grants' && request.method === 'POST') {
+      if ((url.pathname === '/api/mcp/environment-grants' || url.pathname === '/api/mcp/grants') && request.method === 'POST') {
         const input = await body(request)
-        service.grantTool(principal, text(input.workspaceId, 'workspaceId'), text(input.mcpServerId, 'mcpServerId'), text(input.toolName, 'toolName'))
+        try { service.grantMcpServer(principal, identifier(input.environmentId ?? input.workspaceId, 'environmentId'), identifier(input.mcpServerId, 'mcpServerId')) }
+        catch (error) { if (error instanceof Error && /not found/i.test(error.message)) throw new HttpError(400, 'INVALID_GRANT', error.message); throw error }
         return json(response, 204, null)
       }
       const revokeGrant = url.pathname.match(/^\/api\/mcp\/grants\/([^/]+)$/)

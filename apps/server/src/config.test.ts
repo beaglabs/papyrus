@@ -28,6 +28,15 @@ describe('license deployment invariant', () => {
 })
 
 describe('authentication deployment boundaries', () => {
+  it('fails closed when a commercial daemon has a remote origin without organizational authentication', () => {
+    expect(() => loadConfig({
+      PAPYRUS_MODE: 'local',
+      PAPYRUS_PROFILE: 'commercial',
+      PAPYRUS_PUBLIC_ORIGIN: 'https://papyrus.internal.example',
+      PAPYRUS_SESSION_SECRET: 'a'.repeat(32),
+    })).toThrow(/Remote commercial access requires OIDC or a trusted identity proxy/)
+  })
+
   it('requires a real authentication method in persistent commercial mode', () => {
     expect(() => loadConfig({
       PAPYRUS_MODE: 'persistent',

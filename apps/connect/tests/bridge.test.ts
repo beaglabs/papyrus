@@ -31,12 +31,12 @@ describe('papyrus-connect', () => {
     expect(resolveConnectOptions([], {
       PAPYRUS_CONNECT_URL: 'https://papyrus.example.test',
       PAPYRUS_CONNECT_TOKEN: 'session-token',
-      PAPYRUS_CONNECT_WORKSPACE: 'workspace-1',
+      PAPYRUS_CONNECT_ENVIRONMENT: 'environment-1',
     })).toEqual({
       url: 'https://papyrus.example.test/acp',
       headers: {
         authorization: 'Bearer session-token',
-        'x-papyrus-workspace-id': 'workspace-1',
+        'x-papyrus-environment-id': 'environment-1',
       },
     })
     expect(() => resolveConnectOptions([], {

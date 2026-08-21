@@ -14,7 +14,7 @@ export interface Principal {
   authMethod: 'oidc' | 'mtls' | 'development'
 }
 
-export interface Workspace {
+export interface Environment {
   id: string
   name: string
   description: string
@@ -24,7 +24,7 @@ export interface Workspace {
 export interface Session {
   id: string
   ownerId: string
-  workspaceId: string
+  environmentId: string
   agent: string
   title: string
   cwd: string
@@ -90,6 +90,17 @@ export interface Approval {
   reason?: string
 }
 
+export interface Elicitation {
+  id: string
+  sessionId: string
+  runId: string
+  status: 'pending' | 'accepted' | 'declined' | 'cancelled'
+  request: Record<string, unknown>
+  response?: Record<string, unknown>
+  requestedAt: string
+  respondedAt?: string
+}
+
 export interface ResearchSource {
   id: string
   sessionId: string
@@ -113,14 +124,13 @@ export interface McpServer {
 
 export interface ToolGrant {
   id: string
-  workspaceId: string
+  environmentId: string
   mcpServerId: string
-  toolName: string
   effect: 'allow'
   createdAt: string
 }
 
-export interface AdminWorkspace extends Workspace {
+export interface AdminEnvironment extends Environment {
   assignedUserIds: string[]
 }
 
@@ -148,17 +158,17 @@ export interface AdminConnector {
 
 export interface AdminOverview {
   deployment: {
-    mode: ServerMode
+    topology: 'on-premises'
     profile: DeploymentProfile
     publicOrigin: string
-    oidcConfigured: boolean
+    authentication: 'oidc' | 'mtls' | 'trusted-proxy' | 'loopback-development'
     mtlsConfigured: boolean
     identityProxyConfigured: boolean
     gatewayConfigured: boolean
     licenseRequired: boolean
   }
   users: Principal[]
-  workspaces: AdminWorkspace[]
+  environments: AdminEnvironment[]
   mcpServers: McpServer[]
   toolGrants: ToolGrant[]
   runtimeProfiles: AdminRuntimeProfile[]

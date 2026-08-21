@@ -4,13 +4,13 @@
 // does not own sessions, provider secrets, runtime state, or authorization.
 import * as acp from '@agentclientprotocol/sdk'
 import { AcpServer } from '@agentclientprotocol/sdk/experimental/server'
-import type { Principal, SessionEvent, Workspace } from '@papyrus/contracts'
+import type { Environment, Principal, SessionEvent } from '@papyrus/contracts'
 import type { RuntimeEvent } from '@papyrus/acp-runtime'
 import type { PapyrusService } from './service.js'
 
 export interface AcpAgentContext {
   principal: Principal
-  workspace: Workspace
+  environment: Environment
 }
 
 // Build an AgentApp backed by the daemon's authoritative session governor.
@@ -28,6 +28,7 @@ export function buildAcpAgent(
         list: {},
         resume: {},
         close: {},
+        delete: {},
       },
     },
     agentInfo: { name: 'papyrus', version: '0.1.0' },
@@ -36,12 +37,12 @@ export function buildAcpAgent(
   app.onRequest(acp.methods.agent.session.new, async (ctx) => {
     const session = service.createSession(
       context.principal,
-      context.workspace.id,
+      context.environment.id,
       service.defaultGatewayAgent(),
       sessionTitle(ctx.params.cwd),
       ctx.params.cwd,
     )
-    return { sessionId: session.id }
+    return { sessionId: session.id, modes: sessionModes('ask') }
   })
 
   app.onRequest(acp.methods.agent.session.list, async (ctx) => {
@@ -80,6 +81,17 @@ export function buildAcpAgent(
 
   app.onRequest(acp.methods.agent.session.close, async (ctx) => {
     service.closeSession(context.principal, ctx.params.sessionId)
+    return {}
+  })
+
+  app.onRequest(acp.methods.agent.session.delete, async (ctx) => {
+    service.deleteSession(context.principal, ctx.params.sessionId)
+    return {}
+  })
+
+  app.onRequest(acp.methods.agent.session.setMode, async (ctx) => {
+    service.setSessionMode(context.principal, ctx.params.sessionId, ctx.params.modeId)
+    await ctx.client.notify(acp.methods.client.session.update, { sessionId: ctx.params.sessionId, update: { sessionUpdate: 'current_mode_update', modeId: ctx.params.modeId } })
     return {}
   })
 
@@ -135,6 +147,13 @@ function normalizeStopReason(value: string): acp.StopReason {
 function sessionTitle(cwd: string): string {
   const normalized = cwd.replace(/[\\/]+$/, '')
   return normalized.split(/[\\/]/).pop() || 'Papyrus session'
+}
+
+function sessionModes(currentModeId: string): acp.SessionModeState {
+  return { currentModeId, availableModes: [
+    { id: 'ask', name: 'Ask', description: 'Read, analyze, and request approval before governed actions' },
+    { id: 'governed', name: 'Governed work', description: 'Perform policy-authorized work with Cedar checks and approvals' },
+  ] }
 }
 
 function encodeCursor(offset: number): string {

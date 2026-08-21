@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import type { Approval, Attachment, McpServer, Principal, Role, Session, SessionEvent, SessionRun, ToolGrant, Workspace } from '@papyrus/contracts'
+import type { Approval, Attachment, Elicitation, Environment, McpServer, Principal, Role, Session, SessionEvent, SessionRun, ToolGrant } from '@papyrus/contracts'
 
 type Row = Record<string, unknown>
 
@@ -18,6 +18,10 @@ export class PapyrusDatabase {
   close(): void { this.sqlite.close() }
 
   private migrate(): void {
+    // The original schema used workspace table/column names. They remain as
+    // physical storage identifiers so existing on-prem databases migrate
+    // without copying session history; every contract and policy surface uses
+    // Environment.
     this.sqlite.exec(`
       CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS users (
@@ -68,6 +72,11 @@ export class PapyrusDatabase {
         tool_title TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('pending','approved','denied','cancelled')),
         requested_at TEXT NOT NULL, decided_at TEXT, decided_by TEXT REFERENCES users(id), reason TEXT
       );
+      CREATE TABLE IF NOT EXISTS elicitations (
+        id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id), run_id TEXT NOT NULL REFERENCES session_runs(id),
+        status TEXT NOT NULL, request_json TEXT NOT NULL, response_json TEXT,
+        requested_at TEXT NOT NULL, responded_at TEXT
+      );
       CREATE TABLE IF NOT EXISTS mcp_servers (
         id TEXT PRIMARY KEY, name TEXT NOT NULL, transport TEXT NOT NULL CHECK(transport = 'http'),
         endpoint TEXT NOT NULL, enabled INTEGER NOT NULL, created_at TEXT NOT NULL
@@ -103,12 +112,14 @@ export class PapyrusDatabase {
     if (!eventColumns.some((column) => column.name === 'run_id')) {
       this.sqlite.exec('ALTER TABLE runtime_events ADD COLUMN run_id TEXT REFERENCES session_runs(id)')
     }
+    this.sqlite.prepare("UPDATE assignments SET resource_type='environment' WHERE resource_type='workspace'").run()
     this.sqlite.exec(`
       CREATE INDEX IF NOT EXISTS session_runs_session_started ON session_runs(session_id, started_at DESC);
       CREATE INDEX IF NOT EXISTS runtime_events_session_sequence ON runtime_events(session_id, id);
       CREATE UNIQUE INDEX IF NOT EXISTS session_runs_one_active ON session_runs(session_id) WHERE status='running';
       CREATE INDEX IF NOT EXISTS approvals_session_requested ON approvals(session_id, requested_at DESC);
       CREATE INDEX IF NOT EXISTS attachments_session_created ON attachments(session_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS elicitations_session_requested ON elicitations(session_id, requested_at DESC);
       CREATE UNIQUE INDEX IF NOT EXISTS approvals_one_pending_per_run_tool ON approvals(run_id, tool_title) WHERE status='pending';
     `)
   }
@@ -174,58 +185,90 @@ export class PapyrusDatabase {
     this.sqlite.prepare('UPDATE users SET token_version = token_version + 1 WHERE id=?').run(userId)
   }
 
-  createWorkspace(input: Pick<Workspace, 'name' | 'description'>): Workspace {
-    const workspace: Workspace = { id: crypto.randomUUID(), ...input, createdAt: new Date().toISOString() }
-    this.sqlite.prepare('INSERT INTO workspaces VALUES(?,?,?,?)').run(workspace.id, workspace.name, workspace.description, workspace.createdAt)
-    return workspace
+  createEnvironment(input: Pick<Environment, 'name' | 'description'>): Environment {
+    const environment: Environment = { id: crypto.randomUUID(), ...input, createdAt: new Date().toISOString() }
+    this.sqlite.prepare('INSERT INTO workspaces VALUES(?,?,?,?)').run(environment.id, environment.name, environment.description, environment.createdAt)
+    return environment
   }
 
-  getWorkspace(id: string): Workspace | undefined {
-    return this.sqlite.prepare('SELECT id,name,description,created_at createdAt FROM workspaces WHERE id=?').get(id) as unknown as Workspace | undefined
+  getEnvironment(id: string): Environment | undefined {
+    return this.sqlite.prepare('SELECT id,name,description,created_at createdAt FROM workspaces WHERE id=?').get(id) as unknown as Environment | undefined
   }
 
-  listWorkspaces(): Workspace[] {
-    return this.sqlite.prepare('SELECT id,name,description,created_at createdAt FROM workspaces ORDER BY name').all() as unknown as Workspace[]
+  listEnvironments(): Environment[] {
+    return this.sqlite.prepare('SELECT id,name,description,created_at createdAt FROM workspaces ORDER BY name').all() as unknown as Environment[]
   }
 
-  assign(principalType: 'user' | 'group', principalId: string, resourceType: 'workspace', resourceId: string): void {
+  assign(principalType: 'user' | 'group', principalId: string, resourceType: 'environment', resourceId: string): void {
+    if (principalType === 'user' && !this.getPrincipal(principalId)) throw new Error('User not found')
+    if (!this.getEnvironment(resourceId)) throw new Error('Environment not found')
     this.sqlite.prepare('INSERT OR IGNORE INTO assignments VALUES(?,?,?,?,?)').run(principalType, principalId, resourceType, resourceId, new Date().toISOString())
   }
 
-  isAssigned(userId: string, resourceType: 'workspace', resourceId: string): boolean {
+  isAssigned(userId: string, resourceType: 'environment', resourceId: string): boolean {
     const row = this.sqlite.prepare(`SELECT 1 FROM assignments a WHERE a.resource_type=? AND a.resource_id=? AND
       ((a.principal_type='user' AND a.principal_id=?) OR (a.principal_type='group' AND EXISTS
       (SELECT 1 FROM group_members gm WHERE gm.group_id=a.principal_id AND gm.user_id=?))) LIMIT 1`).get(resourceType, resourceId, userId, userId)
     return Boolean(row)
   }
 
-  assignedUserIds(resourceType: 'workspace', resourceId: string): string[] {
+  assignedUserIds(resourceType: 'environment', resourceId: string): string[] {
     const direct = this.sqlite.prepare("SELECT principal_id id FROM assignments WHERE resource_type=? AND resource_id=? AND principal_type='user'").all(resourceType, resourceId) as Row[]
     const groups = this.sqlite.prepare(`SELECT gm.user_id id FROM assignments a JOIN group_members gm ON gm.group_id=a.principal_id
       WHERE a.resource_type=? AND a.resource_id=? AND a.principal_type='group'`).all(resourceType, resourceId) as Row[]
     return [...new Set([...direct, ...groups].map((row) => String(row.id)))]
   }
 
-  createSession(ownerId: string, workspaceId: string, agent: string, title: string, cwd = '/'): Session {
+  createSession(ownerId: string, environmentId: string, agent: string, title: string, cwd = '/'): Session {
     const now = new Date().toISOString()
-    const session: Session = { id: crypto.randomUUID(), ownerId, workspaceId, agent, title, cwd, status: 'ready', createdAt: now, updatedAt: now }
+    const session: Session = { id: crypto.randomUUID(), ownerId, environmentId, agent, title, cwd, status: 'ready', createdAt: now, updatedAt: now }
     this.sqlite.prepare(`INSERT INTO sessions(id,owner_id,workspace_id,agent,title,cwd,status,created_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,?,?)`).run(session.id, ownerId, workspaceId, agent, title, cwd, session.status, now, now)
+      VALUES(?,?,?,?,?,?,?,?,?)`).run(session.id, ownerId, environmentId, agent, title, cwd, session.status, now, now)
     return session
   }
 
   getSession(id: string): Session | undefined {
-    return this.sqlite.prepare(`SELECT id,owner_id ownerId,workspace_id workspaceId,agent,title,cwd,status,
+    return this.sqlite.prepare(`SELECT id,owner_id ownerId,workspace_id environmentId,agent,title,cwd,status,
       created_at createdAt,updated_at updatedAt FROM sessions WHERE id=?`).get(id) as unknown as Session | undefined
   }
 
   listSessions(): Session[] {
-    return this.sqlite.prepare(`SELECT id,owner_id ownerId,workspace_id workspaceId,agent,title,cwd,status,
+    return this.sqlite.prepare(`SELECT id,owner_id ownerId,workspace_id environmentId,agent,title,cwd,status,
       created_at createdAt,updated_at updatedAt FROM sessions ORDER BY updated_at DESC`).all() as unknown as Session[]
   }
 
   setSessionStatus(id: string, status: Session['status']): void {
     this.sqlite.prepare('UPDATE sessions SET status=?,updated_at=? WHERE id=?').run(status, new Date().toISOString(), id)
+  }
+
+  deleteSession(id: string): boolean {
+    return this.transaction(() => {
+      this.sqlite.prepare('DELETE FROM approvals WHERE session_id=?').run(id)
+      this.sqlite.prepare('DELETE FROM attachments WHERE session_id=?').run(id)
+      this.sqlite.prepare('DELETE FROM elicitations WHERE session_id=?').run(id)
+      this.sqlite.prepare('DELETE FROM runtime_events WHERE session_id=?').run(id)
+      this.sqlite.prepare('DELETE FROM session_runs WHERE session_id=?').run(id)
+      return Number(this.sqlite.prepare('DELETE FROM sessions WHERE id=?').run(id).changes) > 0
+    })
+  }
+
+  createElicitation(sessionId: string, runId: string, request: Record<string, unknown>): Elicitation {
+    const item: Elicitation = { id: crypto.randomUUID(), sessionId, runId, status: 'pending', request, requestedAt: new Date().toISOString() }
+    this.sqlite.prepare('INSERT INTO elicitations(id,session_id,run_id,status,request_json,requested_at) VALUES(?,?,?,?,?,?)').run(item.id, sessionId, runId, item.status, JSON.stringify(request), item.requestedAt)
+    return item
+  }
+
+  listElicitations(sessionId: string): Elicitation[] {
+    const rows = this.sqlite.prepare('SELECT id,session_id sessionId,run_id runId,status,request_json requestJson,response_json responseJson,requested_at requestedAt,responded_at respondedAt FROM elicitations WHERE session_id=? ORDER BY requested_at DESC').all(sessionId) as Row[]
+    return rows.map((row) => ({ id: String(row.id), sessionId: String(row.sessionId), runId: String(row.runId), status: row.status as Elicitation['status'], request: JSON.parse(String(row.requestJson)), ...(row.responseJson ? { response: JSON.parse(String(row.responseJson)) } : {}), requestedAt: String(row.requestedAt), ...(row.respondedAt ? { respondedAt: String(row.respondedAt) } : {}) }))
+  }
+
+  respondElicitation(id: string, response: Record<string, unknown>): Elicitation | undefined {
+    const status = response.action === 'accept' ? 'accepted' : response.action === 'cancel' ? 'cancelled' : 'declined'
+    const respondedAt = new Date().toISOString()
+    const result = this.sqlite.prepare("UPDATE elicitations SET status=?,response_json=?,responded_at=? WHERE id=? AND status='pending'").run(status, JSON.stringify(response), respondedAt, id)
+    if (!result.changes) return undefined
+    return this.listElicitations(String((this.sqlite.prepare('SELECT session_id sessionId FROM elicitations WHERE id=?').get(id) as Row).sessionId)).find((item) => item.id === id)
   }
 
   beginSessionRun(sessionId: string, actorId: string): SessionRun {
@@ -418,26 +461,29 @@ export class PapyrusDatabase {
     return this.getMcpServer(id)
   }
 
-  grantTool(workspaceId: string, mcpServerId: string, toolName: string): void {
-    this.sqlite.prepare('INSERT OR IGNORE INTO tool_grants VALUES(?,?,?,?,?,?)').run(crypto.randomUUID(), workspaceId, mcpServerId, toolName, 'allow', new Date().toISOString())
+  grantMcpServer(environmentId: string, mcpServerId: string): void {
+    this.sqlite.prepare('INSERT OR IGNORE INTO tool_grants VALUES(?,?,?,?,?,?)').run(crypto.randomUUID(), environmentId, mcpServerId, '*', 'allow', new Date().toISOString())
   }
 
   listToolGrants(): ToolGrant[] {
-    return this.sqlite.prepare(`SELECT id,workspace_id workspaceId,mcp_server_id mcpServerId,tool_name toolName,effect,created_at createdAt
-      FROM tool_grants ORDER BY created_at DESC`).all() as unknown as ToolGrant[]
+    return this.sqlite.prepare(`SELECT min(id) id,workspace_id environmentId,mcp_server_id mcpServerId,'allow' effect,min(created_at) createdAt
+      FROM tool_grants GROUP BY workspace_id,mcp_server_id ORDER BY createdAt DESC`).all() as unknown as ToolGrant[]
   }
 
   revokeToolGrant(id: string): boolean {
-    return Number(this.sqlite.prepare('DELETE FROM tool_grants WHERE id=?').run(id).changes) === 1
+    const grant = this.sqlite.prepare('SELECT workspace_id,mcp_server_id FROM tool_grants WHERE id=?').get(id) as Row | undefined
+      ?? this.sqlite.prepare('SELECT workspace_id,mcp_server_id FROM tool_grants WHERE id=(SELECT min(id) FROM tool_grants GROUP BY workspace_id,mcp_server_id HAVING min(id)=?)').get(id) as Row | undefined
+    if (!grant) return false
+    return Number(this.sqlite.prepare('DELETE FROM tool_grants WHERE workspace_id=? AND mcp_server_id=?').run(String(grant.workspace_id), String(grant.mcp_server_id)).changes) > 0
   }
 
-  isToolGranted(workspaceId: string, mcpServerId: string, toolName: string): boolean {
-    return Boolean(this.sqlite.prepare('SELECT 1 FROM tool_grants WHERE workspace_id=? AND mcp_server_id=? AND tool_name=?').get(workspaceId, mcpServerId, toolName))
+  isToolGranted(environmentId: string, mcpServerId: string, toolName: string): boolean {
+    return Boolean(this.sqlite.prepare("SELECT 1 FROM tool_grants WHERE workspace_id=? AND mcp_server_id=? AND tool_name IN ('*',?)").get(environmentId, mcpServerId, toolName))
   }
 
-  listGrantedMcpServers(workspaceId: string): McpServer[] {
+  listGrantedMcpServers(environmentId: string): McpServer[] {
     const rows = this.sqlite.prepare(`SELECT DISTINCT s.* FROM mcp_servers s JOIN tool_grants g ON g.mcp_server_id=s.id
-      WHERE g.workspace_id=? AND s.enabled=1`).all(workspaceId) as Row[]
+      WHERE g.workspace_id=? AND s.enabled=1`).all(environmentId) as Row[]
     return rows.map((row) => ({ id: String(row.id), name: String(row.name), transport: 'http', endpoint: String(row.endpoint), enabled: true, createdAt: String(row.created_at) }))
   }
 }

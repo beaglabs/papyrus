@@ -7,7 +7,7 @@ import { resolveConnectOptions } from './options.js'
 
 export async function main(argv = process.argv.slice(2), env = process.env): Promise<void> {
   if (argv.includes('--help') || argv.includes('-h')) {
-    process.stderr.write('Usage: papyrus-connect [--url https://host/acp] [--workspace ID]\n')
+    process.stderr.write('Usage: papyrus-connect [--url https://host/acp] [--environment ID]\n')
     process.stderr.write('Authentication: PAPYRUS_CONNECT_TOKEN or PAPYRUS_CONNECT_TOKEN_FILE\n')
     return
   }

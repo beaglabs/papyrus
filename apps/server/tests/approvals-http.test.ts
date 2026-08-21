@@ -41,11 +41,11 @@ describe('durable human approval HTTP API', () => {
     const user = ctx.db.upsertUser({ externalId: 'oidc:approval-user', displayName: 'User', authMethod: 'oidc' })
     ctx.db.setRole(user.id, 'User')
     const activeUser = ctx.db.getPrincipal(user.id)!
-    const workspace = ctx.service.createWorkspace(activeOwner, { name: 'Approvals', description: '' })
-    ctx.service.assign(activeOwner, activeUser.id, workspace.id)
+    const environment = ctx.service.createEnvironment(activeOwner, { name: 'Approvals', description: '' })
+    ctx.service.assign(activeOwner, activeUser.id, environment.id)
     const mcp = ctx.service.addMcpServer(activeOwner, { name: 'Records', endpoint: 'http://127.0.0.1:9999' })
-    ctx.service.grantTool(activeOwner, workspace.id, mcp.id, 'records.search')
-    const session = ctx.service.createSession(activeUser, workspace.id, 'goose', 'Approval review')
+    ctx.service.grantMcpServer(activeOwner, environment.id, mcp.id)
+    const session = ctx.service.createSession(activeUser, environment.id, 'goose', 'Approval review')
     const authorization = `Bearer ${ctx.auth.issueSession(activeUser.id)}`
     const server = createPapyrusServer(ctx.config, ctx.service, ctx.auth)
     server.listen(0, '127.0.0.1')

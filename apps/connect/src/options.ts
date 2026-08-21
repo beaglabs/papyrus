@@ -9,7 +9,7 @@ export function resolveConnectOptions(argv: string[], env: NodeJS.ProcessEnv): C
   const values = new Map<string, string>()
   for (let index = 0; index < argv.length; index += 1) {
     const name = argv[index]
-    if (!['--url', '--workspace'].includes(name ?? '')) throw new Error(`Unknown papyrus-connect option: ${name ?? ''}`)
+    if (!['--url', '--environment', '--workspace'].includes(name ?? '')) throw new Error(`Unknown papyrus-connect option: ${name ?? ''}`)
     const value = argv[index + 1]
     if (!value || value.startsWith('--')) throw new Error(`${name} requires a value`)
     values.set(name as string, value)
@@ -26,10 +26,11 @@ export function resolveConnectOptions(argv: string[], env: NodeJS.ProcessEnv): C
   if (url.pathname !== '/acp') throw new Error('Papyrus connector URL must target the single /acp endpoint')
 
   const token = readToken(env)
-  const workspace = values.get('--workspace') ?? env.PAPYRUS_CONNECT_WORKSPACE
+  const environment = values.get('--environment') ?? values.get('--workspace')
+    ?? env.PAPYRUS_CONNECT_ENVIRONMENT ?? env.PAPYRUS_CONNECT_WORKSPACE
   const headers: Record<string, string> = {}
   if (token) headers.authorization = `Bearer ${token}`
-  if (workspace) headers['x-papyrus-workspace-id'] = workspace
+  if (environment) headers['x-papyrus-environment-id'] = environment
   return { url: url.toString(), headers }
 }
 

@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import type { Approval, Artifact, Attachment, ResearchSource, Session, SessionEvent, SessionRun, Workspace } from '@papyrus/contracts'
-import { cancelSession, createSession, decideApproval, promptSession, resumeSession, sessionApprovals, sessionArtifacts, sessionAttachments, sessionEvents, sessionPage, sessionRuns, sessionSources, uploadAttachment } from './api.js'
+import type { Approval, Artifact, Attachment, Elicitation, Environment, ResearchSource, Session, SessionEvent, SessionRun } from '@papyrus/contracts'
+import { cancelSession, createSession, decideApproval, deleteSession, promptSession, respondElicitation, resumeSession, sessionApprovals, sessionArtifacts, sessionAttachments, sessionElicitations, sessionEvents, sessionPage, sessionRuns, sessionSources, setSessionMode, uploadAttachment } from './api.js'
 import { SourceList } from './Sources.js'
+import { SelectField } from './SelectField.js'
+import { acpContent, ContentMessage } from './AcpSessionContent.js'
 
-interface ConversationMessage { id: string; role: 'user' | 'agent'; text: string; sequence: number }
-interface ToolActivity { id: string; title: string; kind: string; status: string; sequence: number; locations: string[] }
+interface ToolActivity { id: string; title: string; kind: string; status: string; sequence: number; locations: string[]; terminals: string[] }
 interface PlanItem { content: string; status: string; priority: string }
 type SessionTab = 'conversation' | 'activity' | 'approvals' | 'sources' | 'artifacts'
 
-export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
+export function SessionHarness({ environments }: { environments: Environment[] }) {
   const [sessions, setSessions] = useState<Session[]>([])
   const [nextCursor, setNextCursor] = useState<string>()
   const [selectedId, setSelectedId] = useState<string>()
@@ -18,6 +19,7 @@ export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
   const [approvals, setApprovals] = useState<Approval[]>([])
   const [sources, setSources] = useState<ResearchSource[]>([])
   const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [elicitations, setElicitations] = useState<Elicitation[]>([])
   const [draftAttachmentIds, setDraftAttachmentIds] = useState<string[]>([])
   const [tab, setTab] = useState<SessionTab>('conversation')
   const [loading, setLoading] = useState(true)
@@ -30,12 +32,13 @@ export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
   const messagesRef = useRef<HTMLDivElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const selected = sessions.find((session) => session.id === selectedId)
-  const messages = useMemo(() => conversation(events), [events])
+  const messages = useMemo(() => acpContent(events), [events])
+  const mode = useMemo(() => [...events].reverse().map((event) => event.data as { sessionUpdate?: string; modeId?: string }).find((item) => item?.sessionUpdate === 'current_mode_update')?.modeId ?? 'ask', [events])
   const activity = useMemo(() => projectActivity(events), [events])
 
   const loadContext = async (sessionId: string) => {
-    const [nextRuns, nextArtifacts, nextApprovals, nextSources, nextAttachments] = await Promise.all([sessionRuns(sessionId), sessionArtifacts(sessionId), sessionApprovals(sessionId), sessionSources(sessionId), sessionAttachments(sessionId)])
-    setRuns(nextRuns); setArtifacts(nextArtifacts); setApprovals(nextApprovals); setSources(nextSources); setAttachments(nextAttachments)
+    const [nextRuns, nextArtifacts, nextApprovals, nextSources, nextAttachments, nextElicitations] = await Promise.all([sessionRuns(sessionId), sessionArtifacts(sessionId), sessionApprovals(sessionId), sessionSources(sessionId), sessionAttachments(sessionId), sessionElicitations(sessionId)])
+    setRuns(nextRuns); setArtifacts(nextArtifacts); setApprovals(nextApprovals); setSources(nextSources); setAttachments(nextAttachments); setElicitations(nextElicitations)
   }
 
   const loadSessions = async (cursor?: string) => {
@@ -55,7 +58,7 @@ export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
     streamRef.current?.close()
     setFollowingLatest(true)
     setDraftAttachmentIds([])
-    if (!selectedId) { setEvents([]); setRuns([]); setArtifacts([]); setApprovals([]); setSources([]); setAttachments([]); return }
+    if (!selectedId) { setEvents([]); setRuns([]); setArtifacts([]); setApprovals([]); setSources([]); setAttachments([]); setElicitations([]); return }
     let active = true
     void Promise.all([sessionEvents(selectedId), loadContext(selectedId)]).then(([history]) => {
       if (!active) return
@@ -65,7 +68,7 @@ export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
       stream.addEventListener('session_event', (message) => {
         const event = JSON.parse((message as MessageEvent<string>).data) as SessionEvent
         setEvents((current) => current.some((item) => item.sequence === event.sequence) ? current : [...current, event])
-        if (event.kind === 'approval') {
+        if (event.kind === 'approval' || event.kind === 'elicitation') {
           void loadContext(selectedId).catch(showError)
           if ((event.data as { status?: string } | undefined)?.status === 'pending') setTab('approvals')
         }
@@ -80,7 +83,9 @@ export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
     event.preventDefault(); setError(undefined)
     const form = event.currentTarget; const values = new FormData(form)
     try {
-      const session = await createSession(String(values.get('workspace')), String(values.get('title')))
+      const environmentId = values.get('environment')
+      if (typeof environmentId !== 'string' || !environmentId) throw new Error('Choose an environment')
+      const session = await createSession(environmentId, String(values.get('title')))
       setSessions((current) => [session, ...current]); setSelectedId(session.id); setCreating(false); form.reset()
     } catch (cause) { showError(cause) }
   }
@@ -102,6 +107,16 @@ export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
   const cancel = async () => {
     if (!selectedId) return
     try { await cancelSession(selectedId); setRunning(false); await loadSessions() } catch (cause) { showError(cause) }
+  }
+
+  const removeSession = async () => {
+    if (!selectedId || !selected || !window.confirm(`Permanently delete “${selected.title}” and its durable history?`)) return
+    try { await deleteSession(selectedId); setSelectedId(undefined); await loadSessions() } catch (cause) { showError(cause) }
+  }
+
+  const changeMode = async (nextMode: 'ask' | 'governed') => {
+    if (!selectedId) return
+    try { await setSessionMode(selectedId, nextMode) } catch (cause) { showError(cause) }
   }
 
   const addFiles = async (files: FileList | null) => {
@@ -132,20 +147,21 @@ export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
     </aside>
     <div className="conversation-panel">
       {error && <div className="error">{error}<button onClick={() => setError(undefined)}>×</button></div>}
-      {creating && <form className="create-session" onSubmit={create}><div><strong>New governed session</strong><button type="button" className="icon-button" onClick={() => setCreating(false)}>×</button></div><label>Workspace<select name="workspace" required>{workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select></label><label>Session title<input name="title" required maxLength={256} autoFocus placeholder="Research current policy guidance" /></label><button className="primary" disabled={!workspaces.length}>Create session →</button></form>}
-      {!selected ? <div className="conversation-empty"><h2>Start a governed session.</h2><p>Choose an authorized workspace, describe the work, and retain the complete history on the server.</p><button className="primary" disabled={!workspaces.length} onClick={() => setCreating(true)}>New session →</button></div> : <>
-        <div className="conversation-head"><div><strong>{selected.title}</strong><span>{selected.status} · {workspaceName(workspaces, selected.workspaceId)}</span></div><div className="session-actions"><div className="session-tabs">{(['conversation', 'activity', 'approvals', 'sources', 'artifacts'] as SessionTab[]).map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item}{item === 'approvals' && approvals.filter((approval) => approval.status === 'pending').length ? ` ${approvals.filter((approval) => approval.status === 'pending').length}` : item === 'sources' && sources.length ? ` ${sources.length}` : item === 'artifacts' && artifacts.length ? ` ${artifacts.length}` : ''}</button>)}</div>{(running || selected.status === 'running') && <button className="danger" onClick={() => void cancel()}>Cancel run</button>}</div></div>
+      {creating && <form className="create-session" onSubmit={create}><div><strong>New governed session</strong><button type="button" className="icon-button" onClick={() => setCreating(false)}>×</button></div><SelectField name="environment" label="Environment" placeholder="Choose an environment" options={environments.map((environment) => ({ value: environment.id, label: environment.name, ...(environment.description ? { detail: environment.description } : {}) }))} /><label>Session title<input name="title" required maxLength={256} autoFocus placeholder="Research current policy guidance" /></label><button className="primary" disabled={!environments.length}>Create session →</button></form>}
+      {!selected ? <div className="conversation-empty"><h2>Start a governed session.</h2><p>Choose an authorized environment, describe the work, and retain the complete history on the server.</p><button className="primary" disabled={!environments.length} onClick={() => setCreating(true)}>New session →</button></div> : <>
+        <div className="conversation-head"><div><strong>{selected.title}</strong><span>{selected.status} · {environmentName(environments, selected.environmentId)}</span></div><div className="session-actions"><ModeControl value={mode === 'governed' ? 'governed' : 'ask'} disabled={running} onChange={changeMode} /><div className="session-tabs">{(['conversation', 'activity', 'approvals', 'sources', 'artifacts'] as SessionTab[]).map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item}{item === 'approvals' && approvals.filter((approval) => approval.status === 'pending').length ? ` ${approvals.filter((approval) => approval.status === 'pending').length}` : item === 'sources' && sources.length ? ` ${sources.length}` : item === 'artifacts' && artifacts.length ? ` ${artifacts.length}` : ''}</button>)}</div>{(running || selected.status === 'running') ? <button className="danger" onClick={() => void cancel()}>Cancel run</button> : <button className="text-button" onClick={() => void removeSession()}>Delete</button>}</div></div>
         {tab === 'conversation' && <div className="message-region">
           <div className="messages" ref={messagesRef} aria-live="polite" onScroll={(event) => {
             const element = event.currentTarget
             setFollowingLatest(element.scrollHeight - element.scrollTop - element.clientHeight < 72)
-          }}>{messages.length ? messages.map((message) => <article className={`message ${message.role}`} key={message.id}><span>{message.role === 'user' ? 'YOU' : 'PAPYRUS'}</span><p>{message.text}</p></article>) : <div className="conversation-empty compact"><h2>What work should Papyrus begin?</h2><p>The runtime and tools are selected by deployment policy.</p></div>}{running && <div className="working"><span className="dot good" />Working under policy…</div>}</div>
+          }}>{messages.length ? messages.map((message) => <ContentMessage message={message} key={message.id} />) : <div className="conversation-empty compact"><h2>What work should Papyrus begin?</h2><p>The runtime and tools are selected by deployment policy.</p></div>}{running && <div className="working"><span className="dot good" />Working under policy…</div>}</div>
           {!followingLatest && <button className="jump-latest" onClick={() => { setFollowingLatest(true); messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' }) }}>Jump to latest ↓</button>}
         </div>}
         {tab === 'activity' && <ActivityView plan={activity.plan} tools={activity.tools} runs={runs} />}
         {tab === 'approvals' && <ApprovalView approvals={approvals} onDecision={reviewApproval} />}
         {tab === 'sources' && <SourceList sources={sources} />}
         {tab === 'artifacts' && <ArtifactView artifacts={artifacts} />}
+        {elicitations.find((item) => item.status === 'pending') && <ElicitationCard item={elicitations.find((item) => item.status === 'pending')!} onRespond={async (id, response) => { await respondElicitation(selected.id, id, response); await loadContext(selected.id) }} />}
         <form className="composer" onSubmit={send}>
           {draftAttachmentIds.length > 0 && <div className="attachment-chips">{draftAttachmentIds.map((id) => { const attachment = attachments.find((item) => item.id === id); return attachment && <span key={id}><span>↧ {attachment.name} · {formatBytes(attachment.size)}</span><button type="button" onClick={() => setDraftAttachmentIds((current) => current.filter((item) => item !== id))} aria-label={`Remove ${attachment.name}`}>×</button></span> })}</div>}
           <textarea name="prompt" disabled={running} placeholder={draftAttachmentIds.length ? 'Add instructions for these files…' : 'Describe the work to perform…'} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} />
@@ -157,21 +173,22 @@ export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
   </section>
 }
 
-function conversation(events: SessionEvent[]): ConversationMessage[] {
-  const messages = new Map<string, ConversationMessage>()
-  for (const event of events) {
-    if (event.kind !== 'update' || !event.data || typeof event.data !== 'object') continue
-    const update = event.data as { sessionUpdate?: string; messageId?: string; content?: { type?: string; text?: string } }
-    const role = update.sessionUpdate === 'user_message_chunk' ? 'user' : update.sessionUpdate === 'agent_message_chunk' ? 'agent' : undefined
-    if (!role || update.content?.type !== 'text' || typeof update.content.text !== 'string') continue
-    const id = update.messageId ?? `${role}_${event.sequence}`
-    const current = messages.get(id)
-    messages.set(id, { id, role, text: `${current?.text ?? ''}${update.content.text}`, sequence: current?.sequence ?? event.sequence })
-  }
-  return [...messages.values()].sort((left, right) => left.sequence - right.sequence)
+function ModeControl({ value, disabled, onChange }: { value: 'ask' | 'governed'; disabled: boolean; onChange: (mode: 'ask' | 'governed') => Promise<void> }) {
+  return <label className="mode-control"><span>Mode</span><select value={value} disabled={disabled} onChange={(event) => void onChange(event.target.value as 'ask' | 'governed')}><option value="ask">Ask</option><option value="governed">Governed work</option></select></label>
 }
 
-function workspaceName(workspaces: Workspace[], id: string) { return workspaces.find((workspace) => workspace.id === id)?.name ?? 'Workspace' }
+function ElicitationCard({ item, onRespond }: { item: Elicitation; onRespond: (id: string, response: Record<string, unknown>) => Promise<void> }) {
+  const [saving, setSaving] = useState(false)
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); setSaving(true)
+    const values = Object.fromEntries(new FormData(event.currentTarget).entries())
+    try { await onRespond(item.id, { action: 'accept', content: values }) } finally { setSaving(false) }
+  }
+  const schema = item.request.requestedSchema as { properties?: Record<string, { title?: string; description?: string; type?: string }> } | undefined
+  return <form className="elicitation-card" onSubmit={submit}><div><span>INPUT REQUIRED</span><strong>{String(item.request.message ?? 'The agent needs more information')}</strong></div>{Object.entries(schema?.properties ?? { response: { title: 'Response', type: 'string' } }).map(([name, field]) => <label key={name}>{field.title ?? name}<input name={name} type={field.type === 'number' || field.type === 'integer' ? 'number' : 'text'} required />{field.description && <small>{field.description}</small>}</label>)}<div><button type="button" className="secondary" disabled={saving} onClick={() => void onRespond(item.id, { action: 'decline' })}>Decline</button><button className="primary" disabled={saving}>{saving ? 'Sending…' : 'Continue →'}</button></div></form>
+}
+
+function environmentName(environments: Environment[], id: string) { return environments.find((environment) => environment.id === id)?.name ?? 'Environment' }
 function formatBytes(size: number) { return size < 1024 ? `${size} B` : size < 1024 * 1024 ? `${(size / 1024).toFixed(1)} KB` : `${(size / 1024 / 1024).toFixed(1)} MB` }
 
 function projectActivity(events: SessionEvent[]): { plan: PlanItem[]; tools: ToolActivity[] } {
@@ -179,7 +196,7 @@ function projectActivity(events: SessionEvent[]): { plan: PlanItem[]; tools: Too
   const tools = new Map<string, ToolActivity>()
   for (const event of events) {
     if (event.kind !== 'update' || !event.data || typeof event.data !== 'object') continue
-    const update = event.data as { sessionUpdate?: string; entries?: PlanItem[]; toolCallId?: string; title?: string; kind?: string; status?: string; locations?: Array<{ path?: string }> }
+    const update = event.data as { sessionUpdate?: string; entries?: PlanItem[]; toolCallId?: string; title?: string; kind?: string; status?: string; locations?: Array<{ path?: string }>; content?: Array<{ type?: string; terminalId?: string }> }
     if (update.sessionUpdate === 'plan' && Array.isArray(update.entries)) plan = update.entries
     if ((update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') && update.toolCallId) {
       const current = tools.get(update.toolCallId)
@@ -187,6 +204,7 @@ function projectActivity(events: SessionEvent[]): { plan: PlanItem[]; tools: Too
         id: update.toolCallId, title: update.title ?? current?.title ?? 'Tool activity', kind: update.kind ?? current?.kind ?? 'other',
         status: update.status ?? current?.status ?? 'pending', sequence: current?.sequence ?? event.sequence,
         locations: update.locations?.flatMap((location) => typeof location.path === 'string' ? [location.path] : []) ?? current?.locations ?? [],
+        terminals: update.content?.flatMap((content) => content.type === 'terminal' && content.terminalId ? [content.terminalId] : []) ?? current?.terminals ?? [],
       })
     }
   }
@@ -196,7 +214,7 @@ function projectActivity(events: SessionEvent[]): { plan: PlanItem[]; tools: Too
 function ActivityView({ plan, tools, runs }: { plan: PlanItem[]; tools: ToolActivity[]; runs: SessionRun[] }) {
   return <div className="activity-view">
     <section><div className="section-label">PLAN</div>{plan.length ? <div className="plan-list">{plan.map((item, index) => <div className="plan-item" key={`${index}-${item.content}`}><span className={`activity-status ${item.status}`} /> <strong>{item.content}</strong><small>{item.status} · {item.priority}</small></div>)}</div> : <div className="empty">The runtime has not reported a structured plan.</div>}</section>
-    <section><div className="section-label">TOOL ACTIVITY</div>{tools.length ? <div className="tool-list">{tools.map((tool) => <article key={tool.id}><span className={`tool-kind ${tool.kind}`}>{tool.kind}</span><div><strong>{tool.title}</strong><small>{tool.locations.join(' · ') || tool.id}</small></div><span className={`pill ${tool.status}`}>{tool.status}</span></article>)}</div> : <div className="empty">No governed tool activity yet.</div>}</section>
+    <section><div className="section-label">TOOL ACTIVITY</div>{tools.length ? <div className="tool-list">{tools.map((tool) => <article key={tool.id}><span className={`tool-kind ${tool.kind}`}>{tool.kind}</span><div><strong>{tool.title}</strong><small>{tool.locations.join(' · ') || tool.id}</small>{tool.terminals.map((terminal) => <code className="terminal-ref" key={terminal}>terminal · {terminal}</code>)}</div><span className={`pill ${tool.status}`}>{tool.status}</span></article>)}</div> : <div className="empty">No governed tool activity yet.</div>}</section>
     <section><div className="section-label">RUN HISTORY</div><div className="run-list">{runs.map((run) => <div key={run.id}><span className={`activity-status ${run.status}`} /><strong>{run.status}</strong><small>{new Date(run.startedAt).toLocaleString()}{run.stopReason ? ` · ${run.stopReason}` : ''}</small></div>)}</div></section>
   </div>
 }

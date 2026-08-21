@@ -21,14 +21,14 @@ function fakeRuntime(): AgentRuntime {
           sessionUpdate: 'tool_call', toolCallId: 'tool-1', title: 'Create briefing', kind: 'edit', status: 'completed',
           locations: [{ path: 'https://example.mil/guidance?token=do-not-retain#evidence' }],
           content: [
-            { type: 'diff', path: '/workspace/brief.md', oldText: null, newText: '# Brief\n\nPrepared.' },
-            { type: 'content', content: { type: 'resource', resource: { uri: 'file:///workspace/evidence.txt', mimeType: 'text/plain', text: 'Evidence' } } },
+            { type: 'diff', path: '/environment/brief.md', oldText: null, newText: '# Brief\n\nPrepared.' },
+            { type: 'content', content: { type: 'resource', resource: { uri: 'file:///environment/evidence.txt', mimeType: 'text/plain', text: 'Evidence' } } },
           ],
         },
       })
       await request.onEvent({
         kind: 'update', at: new Date().toISOString(),
-        data: { sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', status: 'completed', content: [{ type: 'diff', path: '/workspace/brief.md', oldText: '# Brief\n\nPrepared.', newText: '# Brief\n\nPrepared and reviewed.' }] },
+        data: { sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', status: 'completed', content: [{ type: 'diff', path: '/environment/brief.md', oldText: '# Brief\n\nPrepared.', newText: '# Brief\n\nPrepared and reviewed.' }] },
       })
       await request.onEvent({
         kind: 'update',
@@ -53,8 +53,8 @@ describe('governed session HTTP API', () => {
     const owner = ctx.db.upsertUser({ externalId: 'oidc:attachment-owner', displayName: 'Owner', authMethod: 'oidc' })
     ctx.db.setRole(owner.id, 'Owner')
     const principal = ctx.db.getPrincipal(owner.id)!
-    const workspace = ctx.service.createWorkspace(principal, { name: 'Files', description: '' })
-    const session = ctx.service.createSession(principal, workspace.id, 'goose', 'Attachment test')
+    const environment = ctx.service.createEnvironment(principal, { name: 'Files', description: '' })
+    const session = ctx.service.createSession(principal, environment.id, 'goose', 'Attachment test')
     const authorization = `Bearer ${ctx.auth.issueSession(principal.id)}`
     const server = createPapyrusServer(ctx.config, ctx.service, ctx.auth)
     server.listen(0, '127.0.0.1'); await once(server, 'listening')
@@ -91,9 +91,9 @@ describe('governed session HTTP API', () => {
     const user = ctx.db.upsertUser({ externalId: 'oidc:user', displayName: 'User', authMethod: 'oidc' })
     ctx.db.setRole(user.id, 'User')
     const activeUser = ctx.db.getPrincipal(user.id)!
-    const workspace = ctx.service.createWorkspace(activeOwner, { name: 'Mission', description: '' })
-    ctx.service.assign(activeOwner, activeUser.id, workspace.id)
-    const session = ctx.service.createSession(activeUser, workspace.id, 'goose', 'HTTP')
+    const environment = ctx.service.createEnvironment(activeOwner, { name: 'Mission', description: '' })
+    ctx.service.assign(activeOwner, activeUser.id, environment.id)
+    const session = ctx.service.createSession(activeUser, environment.id, 'goose', 'HTTP')
     const authorization = `Bearer ${ctx.auth.issueSession(activeUser.id)}`
     const server = createPapyrusServer(ctx.config, ctx.service, ctx.auth)
     server.listen(0, '127.0.0.1')
@@ -157,10 +157,10 @@ describe('governed session HTTP API', () => {
     const user = ctx.db.upsertUser({ externalId: 'oidc:user-web', displayName: 'User', authMethod: 'oidc' })
     ctx.db.setRole(user.id, 'User')
     const activeUser = ctx.db.getPrincipal(user.id)!
-    const workspace = ctx.service.createWorkspace(activeOwner, { name: 'Web', description: '' })
-    ctx.service.assign(activeOwner, activeUser.id, workspace.id)
-    const first = ctx.service.createSession(activeUser, workspace.id, 'goose', 'First')
-    ctx.service.createSession(activeUser, workspace.id, 'goose', 'Second')
+    const environment = ctx.service.createEnvironment(activeOwner, { name: 'Web', description: '' })
+    ctx.service.assign(activeOwner, activeUser.id, environment.id)
+    const first = ctx.service.createSession(activeUser, environment.id, 'goose', 'First')
+    ctx.service.createSession(activeUser, environment.id, 'goose', 'Second')
     await ctx.service.prompt(activeUser, first.id, 'hello')
 
     const authorization = `Bearer ${ctx.auth.issueSession(activeUser.id)}`
@@ -173,7 +173,7 @@ describe('governed session HTTP API', () => {
     try {
       const created = await fetch(`${origin}/api/sessions`, {
         method: 'POST', headers: { ...headers, 'content-type': 'application/json' },
-        body: JSON.stringify({ workspaceId: workspace.id, title: 'Browser session' }),
+        body: JSON.stringify({ environmentId: environment.id, title: 'Browser session' }),
       })
       expect(created.status).toBe(201)
       expect(await created.json()).toMatchObject({ title: 'Browser session', agent: 'goose' })

@@ -86,7 +86,9 @@ export class AuthService {
   }
 
   developmentEnabled(): boolean {
+    const origin = new URL(this.config.publicOrigin)
     return this.config.mode === 'local' && ['127.0.0.1', '::1'].includes(this.config.host)
+      && ['127.0.0.1', '::1', 'localhost'].includes(origin.hostname)
   }
 
   developmentPrincipal(name: string): Principal {

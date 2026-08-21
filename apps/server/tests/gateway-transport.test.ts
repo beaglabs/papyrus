@@ -40,11 +40,11 @@ describe('ACP Streamable HTTP gateway', () => {
     const second = context.db.upsertUser({ externalId: 'oidc:second', displayName: 'Second', authMethod: 'oidc' })
     context.db.setRole(second.id, 'User')
     const activeSecond = context.db.getPrincipal(second.id)!
-    const firstWorkspace = context.service.createWorkspace(activeOwner, { name: 'First workspace', description: '' })
-    const secondWorkspace = context.service.createWorkspace(activeOwner, { name: 'Second workspace', description: '' })
-    context.service.assign(activeOwner, activeFirst.id, firstWorkspace.id)
-    context.service.assign(activeOwner, activeFirst.id, secondWorkspace.id)
-    context.service.assign(activeOwner, activeSecond.id, secondWorkspace.id)
+    const firstEnvironment = context.service.createEnvironment(activeOwner, { name: 'First environment', description: '' })
+    const secondEnvironment = context.service.createEnvironment(activeOwner, { name: 'Second environment', description: '' })
+    context.service.assign(activeOwner, activeFirst.id, firstEnvironment.id)
+    context.service.assign(activeOwner, activeFirst.id, secondEnvironment.id)
+    context.service.assign(activeOwner, activeSecond.id, secondEnvironment.id)
     context.config.gateway = { host: '127.0.0.1', port: 3220, ...gateway }
     const server = createGatewayServer(context.config, context.service, context.auth)
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
@@ -58,33 +58,33 @@ describe('ACP Streamable HTTP gateway', () => {
       port: (server.address() as AddressInfo).port,
       first: activeFirst,
       second: activeSecond,
-      firstWorkspace,
-      secondWorkspace,
+      firstEnvironment,
+      secondEnvironment,
       firstToken: context.auth.issueSession(activeFirst.id),
       secondToken: context.auth.issueSession(activeSecond.id),
     }
   }
 
-  function headers(token: string, workspaceId: string): Record<string, string> {
+  function headers(token: string, environmentId: string): Record<string, string> {
     return {
       authorization: `Bearer ${token}`,
       'content-type': 'application/json',
-      'x-papyrus-workspace-id': workspaceId,
+      'x-papyrus-environment-id': environmentId,
     }
   }
 
-  async function initialize(port: number, token: string, workspaceId: string): Promise<Response> {
+  async function initialize(port: number, token: string, environmentId: string): Promise<Response> {
     return fetch(`http://127.0.0.1:${port}/acp`, {
       method: 'POST',
-      headers: headers(token, workspaceId),
+      headers: headers(token, environmentId),
       body: initializeBody,
     })
   }
 
-  it('keeps authenticated principal and workspace context through Streamable HTTP', async () => {
-    const { context, port, first, firstToken, firstWorkspace } = await startGateway()
+  it('keeps authenticated principal and environment context through Streamable HTTP', async () => {
+    const { context, port, first, firstToken, firstEnvironment } = await startGateway()
     const stream = createHttpStream(`http://127.0.0.1:${port}/acp`, {
-      headers: headers(firstToken, firstWorkspace.id),
+      headers: headers(firstToken, firstEnvironment.id),
     })
     const sessionId = await acp.client({ name: 'http-context-client' }).connectWith(stream, async (connection) => {
       await connection.request(acp.methods.agent.initialize, {
@@ -97,32 +97,32 @@ describe('ACP Streamable HTTP gateway', () => {
 
     expect(context.db.getSession(sessionId)).toMatchObject({
       ownerId: first.id,
-      workspaceId: firstWorkspace.id,
+      environmentId: firstEnvironment.id,
     })
   })
 
-  it('binds connection IDs to the authenticated principal and workspace', async () => {
-    const { context, port, first, firstToken, secondToken, firstWorkspace, secondWorkspace } = await startGateway()
-    const initialized = await initialize(port, firstToken, firstWorkspace.id)
+  it('binds connection IDs to the authenticated principal and environment', async () => {
+    const { context, port, first, firstToken, secondToken, firstEnvironment, secondEnvironment } = await startGateway()
+    const initialized = await initialize(port, firstToken, firstEnvironment.id)
     expect(initialized.status).toBe(200)
     const connectionId = initialized.headers.get('acp-connection-id')
     expect(connectionId).toMatch(/^[0-9a-f-]{36}$/)
 
     const hijack = await fetch(`http://127.0.0.1:${port}/acp`, {
-      headers: { ...headers(secondToken, secondWorkspace.id), 'acp-connection-id': connectionId! },
+      headers: { ...headers(secondToken, secondEnvironment.id), 'acp-connection-id': connectionId! },
     })
     expect(hijack.status).toBe(404)
     expect(await hijack.json()).toMatchObject({ code: 'CONNECTION_NOT_FOUND' })
 
-    const workspaceSwap = await fetch(`http://127.0.0.1:${port}/acp`, {
-      headers: { ...headers(firstToken, secondWorkspace.id), 'acp-connection-id': connectionId! },
+    const environmentSwap = await fetch(`http://127.0.0.1:${port}/acp`, {
+      headers: { ...headers(firstToken, secondEnvironment.id), 'acp-connection-id': connectionId! },
     })
-    expect(workspaceSwap.status).toBe(403)
-    expect(await workspaceSwap.json()).toMatchObject({ code: 'WORKSPACE_MISMATCH' })
+    expect(environmentSwap.status).toBe(403)
+    expect(await environmentSwap.json()).toMatchObject({ code: 'ENVIRONMENT_MISMATCH' })
 
     context.auth.revokeSessions(first.id)
     const revoked = await fetch(`http://127.0.0.1:${port}/acp`, {
-      headers: { ...headers(firstToken, firstWorkspace.id), 'acp-connection-id': connectionId! },
+      headers: { ...headers(firstToken, firstEnvironment.id), 'acp-connection-id': connectionId! },
     })
     expect(revoked.status).toBe(401)
   })
@@ -131,27 +131,27 @@ describe('ACP Streamable HTTP gateway', () => {
     const limitedBody = await startGateway({ maxRequestBodyBytes: 64 })
     const oversized = await fetch(`http://127.0.0.1:${limitedBody.port}/acp`, {
       method: 'POST',
-      headers: headers(limitedBody.firstToken, limitedBody.firstWorkspace.id),
+      headers: headers(limitedBody.firstToken, limitedBody.firstEnvironment.id),
       body: 'x'.repeat(65),
     })
     expect(oversized.status).toBe(413)
 
     const limitedConnections = await startGateway({ maxConnections: 1 })
-    const first = await initialize(limitedConnections.port, limitedConnections.firstToken, limitedConnections.firstWorkspace.id)
+    const first = await initialize(limitedConnections.port, limitedConnections.firstToken, limitedConnections.firstEnvironment.id)
     const connectionId = first.headers.get('acp-connection-id')
     expect(first.status).toBe(200)
     expect(connectionId).toBeTruthy()
 
-    const rejected = await initialize(limitedConnections.port, limitedConnections.firstToken, limitedConnections.firstWorkspace.id)
+    const rejected = await initialize(limitedConnections.port, limitedConnections.firstToken, limitedConnections.firstEnvironment.id)
     expect(rejected.status).toBe(429)
     expect(await rejected.json()).toMatchObject({ code: 'CONNECTION_LIMIT_REACHED' })
 
     const closed = await fetch(`http://127.0.0.1:${limitedConnections.port}/acp`, {
       method: 'DELETE',
-      headers: { ...headers(limitedConnections.firstToken, limitedConnections.firstWorkspace.id), 'acp-connection-id': connectionId! },
+      headers: { ...headers(limitedConnections.firstToken, limitedConnections.firstEnvironment.id), 'acp-connection-id': connectionId! },
     })
     expect(closed.status).toBe(202)
-    expect((await initialize(limitedConnections.port, limitedConnections.firstToken, limitedConnections.firstWorkspace.id)).status).toBe(200)
+    expect((await initialize(limitedConnections.port, limitedConnections.firstToken, limitedConnections.firstEnvironment.id)).status).toBe(200)
   })
 
   it('propagates ACP cancellation to the governed runtime over HTTP', async () => {
@@ -169,9 +169,9 @@ describe('ACP Streamable HTTP gateway', () => {
         return { runtimeSessionId: 'never', stopReason: 'end_turn' }
       },
     })
-    const { context, port, firstToken, firstWorkspace } = await startGateway({}, runtimeFactory)
+    const { context, port, firstToken, firstEnvironment } = await startGateway({}, runtimeFactory)
     const stream = createHttpStream(`http://127.0.0.1:${port}/acp`, {
-      headers: headers(firstToken, firstWorkspace.id),
+      headers: headers(firstToken, firstEnvironment.id),
     })
 
     const result = await acp.client({ name: 'cancel-client' }).connectWith(stream, async (connection) => {

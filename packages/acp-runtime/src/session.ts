@@ -18,6 +18,10 @@ export async function runAcpPrompt(
         ? { outcome: { outcome: 'selected', optionId: option.optionId } }
         : { outcome: { outcome: 'cancelled' } }
     })
+    .onRequest(acp.methods.client.elicitation.create, async ({ params }) => {
+      if (!request.elicit) return { action: 'decline' }
+      return await request.elicit(params as unknown as Record<string, unknown>) as acp.CreateElicitationResponse
+    })
 
   return await client.connectWith(stream, async (context) => {
     // Papyrus does not grant a child direct client-side filesystem or terminal

@@ -4,16 +4,16 @@ import { POLICY_VERSION } from './audit.js'
 import { BROWSER_POLICY_ACTIONS, BROWSER_RESEARCH_ACTIONS } from './catalog.js'
 
 export const ACTIONS = [
-  'ManageUsers', 'ManageWorkspaces', 'ManageTools', 'AssignResources',
+  'ManageUsers', 'ManageEnvironments', 'ManageTools', 'AssignResources',
   'CreateSession', 'ReadSession', 'PromptSession', 'CancelSession', 'CloseSession', 'ResumeSession', 'DecideApproval',
   'ReadAudit', 'ReadActivity',
-  'ReadWorkspace', 'InvokeTool', 'ActivateLicense',
+  'ReadEnvironment', 'InvokeTool', 'ActivateLicense',
   ...BROWSER_POLICY_ACTIONS,
 ] as const
 export type PolicyAction = (typeof ACTIONS)[number]
 
 const adminActions = ACTIONS.filter((action) => !['ActivateLicense'].includes(action))
-const auditActions: PolicyAction[] = ['ReadAudit', 'ReadActivity', 'ReadSession', 'ReadWorkspace']
+const auditActions: PolicyAction[] = ['ReadAudit', 'ReadActivity', 'ReadSession', 'ReadEnvironment']
 
 function actionExpression(actions: readonly PolicyAction[]): string {
   return actions.map((action) => `action == Action::"${action}"`).join(' || ')
@@ -36,7 +36,7 @@ when { principal.roles.contains("Auditor") && (${actionExpression(auditActions)}
 permit(principal, action, resource)
 when {
   principal.roles.contains("User") &&
-  (${actionExpression(['ReadWorkspace', 'CreateSession', 'InvokeTool', ...BROWSER_RESEARCH_ACTIONS])}) &&
+  (${actionExpression(['ReadEnvironment', 'CreateSession', 'InvokeTool', ...BROWSER_RESEARCH_ACTIONS])}) &&
   resource has assignedUsers && resource.assignedUsers.contains(principal)
 };
 
@@ -58,7 +58,7 @@ when {
 `
 
 export interface AuthorizationResource {
-  type: 'Deployment' | 'Workspace' | 'Session' | 'Tool' | 'Audit'
+  type: 'Deployment' | 'Environment' | 'Session' | 'Tool' | 'Audit'
   id: string
   attrs?: Record<string, CedarValueJson>
 }

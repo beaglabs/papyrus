@@ -1,10 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { parse } from 'yaml'
-import type { AgentConfigEntry } from './agents.js'
-import { CONNECTOR_PROFILES, isRuntimeProfileId } from './catalog.js'
+import { CONNECTOR_PROFILES } from './catalog.js'
 
 export interface FileConfig {
-  agents?: Record<string, AgentConfigEntry>
   connectors?: string[]
   licenseAuthorities?: Record<string, string>
 }
@@ -26,25 +24,6 @@ export function loadFileConfig(path: string | undefined, environment: NodeJS.Pro
   if (!isObject(parsed)) return {}
 
   const config: FileConfig = {}
-
-  if (isObject(parsed.agents)) {
-    const agents: Record<string, AgentConfigEntry> = {}
-    for (const [kind, entry] of Object.entries(parsed.agents)) {
-      if (!isObject(entry)) continue
-      if (typeof entry.profile !== 'string' || !isRuntimeProfileId(entry.profile)) continue
-      const spec: AgentConfigEntry = { profile: entry.profile }
-      if (isObject(entry.environment)) {
-        const resolved: Record<string, string> = {}
-        for (const [name, source] of Object.entries(entry.environment)) {
-          if (!/^[A-Z][A-Z0-9_]*$/.test(name) || typeof source !== 'string' || !/^PAPYRUS_SECRET_[A-Z0-9_]+$/.test(source)) continue
-          if (environment[source] !== undefined) resolved[name] = environment[source] as string
-        }
-        if (Object.keys(resolved).length > 0) spec.environment = resolved
-      }
-      agents[kind] = spec
-    }
-    if (Object.keys(agents).length > 0) config.agents = agents
-  }
 
   if (Array.isArray(parsed.connectors)) {
     const connectors = [...new Set(parsed.connectors.filter((value): value is string => typeof value === 'string' && value in CONNECTOR_PROFILES))]

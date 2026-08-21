@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import type { Approval, Artifact, Attachment, ResearchSource, Session, SessionEvent, SessionRun, Workspace } from '@papyrus/contracts'
+import type { Approval, Artifact, Attachment, Environment, ResearchSource, Session, SessionEvent, SessionRun } from '@papyrus/contracts'
 import { cancelSession, createSession, decideApproval, promptSession, resumeSession, sessionApprovals, sessionArtifacts, sessionAttachments, sessionEvents, sessionPage, sessionRuns, sessionSources, uploadAttachment } from './api.js'
 import { SourceList } from './Sources.js'
+import { SelectField } from './SelectField.js'
 
 interface ConversationMessage { id: string; role: 'user' | 'agent'; text: string; sequence: number }
 interface ToolActivity { id: string; title: string; kind: string; status: string; sequence: number; locations: string[] }
 interface PlanItem { content: string; status: string; priority: string }
 type SessionTab = 'conversation' | 'activity' | 'approvals' | 'sources' | 'artifacts'
 
-export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
+export function SessionHarness({ environments }: { environments: Environment[] }) {
   const [sessions, setSessions] = useState<Session[]>([])
   const [nextCursor, setNextCursor] = useState<string>()
   const [selectedId, setSelectedId] = useState<string>()
@@ -80,7 +81,9 @@ export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
     event.preventDefault(); setError(undefined)
     const form = event.currentTarget; const values = new FormData(form)
     try {
-      const session = await createSession(String(values.get('workspace')), String(values.get('title')))
+      const environmentId = values.get('environment')
+      if (typeof environmentId !== 'string' || !environmentId) throw new Error('Choose an environment')
+      const session = await createSession(environmentId, String(values.get('title')))
       setSessions((current) => [session, ...current]); setSelectedId(session.id); setCreating(false); form.reset()
     } catch (cause) { showError(cause) }
   }
@@ -132,9 +135,9 @@ export function SessionHarness({ workspaces }: { workspaces: Workspace[] }) {
     </aside>
     <div className="conversation-panel">
       {error && <div className="error">{error}<button onClick={() => setError(undefined)}>×</button></div>}
-      {creating && <form className="create-session" onSubmit={create}><div><strong>New governed session</strong><button type="button" className="icon-button" onClick={() => setCreating(false)}>×</button></div><label>Workspace<select name="workspace" required>{workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select></label><label>Session title<input name="title" required maxLength={256} autoFocus placeholder="Research current policy guidance" /></label><button className="primary" disabled={!workspaces.length}>Create session →</button></form>}
-      {!selected ? <div className="conversation-empty"><h2>Start a governed session.</h2><p>Choose an authorized workspace, describe the work, and retain the complete history on the server.</p><button className="primary" disabled={!workspaces.length} onClick={() => setCreating(true)}>New session →</button></div> : <>
-        <div className="conversation-head"><div><strong>{selected.title}</strong><span>{selected.status} · {workspaceName(workspaces, selected.workspaceId)}</span></div><div className="session-actions"><div className="session-tabs">{(['conversation', 'activity', 'approvals', 'sources', 'artifacts'] as SessionTab[]).map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item}{item === 'approvals' && approvals.filter((approval) => approval.status === 'pending').length ? ` ${approvals.filter((approval) => approval.status === 'pending').length}` : item === 'sources' && sources.length ? ` ${sources.length}` : item === 'artifacts' && artifacts.length ? ` ${artifacts.length}` : ''}</button>)}</div>{(running || selected.status === 'running') && <button className="danger" onClick={() => void cancel()}>Cancel run</button>}</div></div>
+      {creating && <form className="create-session" onSubmit={create}><div><strong>New governed session</strong><button type="button" className="icon-button" onClick={() => setCreating(false)}>×</button></div><SelectField name="environment" label="Environment" placeholder="Choose an environment" options={environments.map((environment) => ({ value: environment.id, label: environment.name, ...(environment.description ? { detail: environment.description } : {}) }))} /><label>Session title<input name="title" required maxLength={256} autoFocus placeholder="Research current policy guidance" /></label><button className="primary" disabled={!environments.length}>Create session →</button></form>}
+      {!selected ? <div className="conversation-empty"><h2>Start a governed session.</h2><p>Choose an authorized environment, describe the work, and retain the complete history on the server.</p><button className="primary" disabled={!environments.length} onClick={() => setCreating(true)}>New session →</button></div> : <>
+        <div className="conversation-head"><div><strong>{selected.title}</strong><span>{selected.status} · {environmentName(environments, selected.environmentId)}</span></div><div className="session-actions"><div className="session-tabs">{(['conversation', 'activity', 'approvals', 'sources', 'artifacts'] as SessionTab[]).map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item}{item === 'approvals' && approvals.filter((approval) => approval.status === 'pending').length ? ` ${approvals.filter((approval) => approval.status === 'pending').length}` : item === 'sources' && sources.length ? ` ${sources.length}` : item === 'artifacts' && artifacts.length ? ` ${artifacts.length}` : ''}</button>)}</div>{(running || selected.status === 'running') && <button className="danger" onClick={() => void cancel()}>Cancel run</button>}</div></div>
         {tab === 'conversation' && <div className="message-region">
           <div className="messages" ref={messagesRef} aria-live="polite" onScroll={(event) => {
             const element = event.currentTarget
@@ -171,7 +174,7 @@ function conversation(events: SessionEvent[]): ConversationMessage[] {
   return [...messages.values()].sort((left, right) => left.sequence - right.sequence)
 }
 
-function workspaceName(workspaces: Workspace[], id: string) { return workspaces.find((workspace) => workspace.id === id)?.name ?? 'Workspace' }
+function environmentName(environments: Environment[], id: string) { return environments.find((environment) => environment.id === id)?.name ?? 'Environment' }
 function formatBytes(size: number) { return size < 1024 ? `${size} B` : size < 1024 * 1024 ? `${(size / 1024).toFixed(1)} KB` : `${(size / 1024 / 1024).toFixed(1)} MB` }
 
 function projectActivity(events: SessionEvent[]): { plan: PlanItem[]; tools: ToolActivity[] } {

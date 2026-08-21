@@ -336,6 +336,14 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
       if (sessionApprovals && request.method === 'GET') {
         return json(response, 200, { approvals: service.sessionApprovals(principal, decodeURIComponent(sessionApprovals[1] as string)) })
       }
+      const sessionElicitations = url.pathname.match(/^\/api\/sessions\/([^/]+)\/elicitations$/)
+      if (sessionElicitations && request.method === 'GET') return json(response, 200, { elicitations: service.sessionElicitations(principal, decodeURIComponent(sessionElicitations[1] as string)) })
+      const elicitationResponse = url.pathname.match(/^\/api\/sessions\/([^/]+)\/elicitations\/([^/]+)\/response$/)
+      if (elicitationResponse && request.method === 'POST') {
+        const input = await body(request)
+        if (!['accept', 'decline', 'cancel'].includes(String(input.action))) throw new HttpError(400, 'INVALID_INPUT', 'Invalid elicitation action')
+        return json(response, 200, service.respondElicitation(principal, decodeURIComponent(elicitationResponse[1] as string), decodeURIComponent(elicitationResponse[2] as string), input))
+      }
       const sessionSources = url.pathname.match(/^\/api\/sessions\/([^/]+)\/sources$/)
       if (sessionSources && request.method === 'GET') {
         return json(response, 200, { sources: service.sessionSources(principal, decodeURIComponent(sessionSources[1] as string)) })
@@ -368,6 +376,17 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
       const closeSession = url.pathname.match(/^\/api\/sessions\/([^/]+)\/close$/)
       if (closeSession && request.method === 'POST') {
         return json(response, 200, service.closeSession(principal, decodeURIComponent(closeSession[1] as string)))
+      }
+      const deleteSession = url.pathname.match(/^\/api\/sessions\/([^/]+)$/)
+      if (deleteSession && request.method === 'DELETE') {
+        service.deleteSession(principal, decodeURIComponent(deleteSession[1] as string))
+        return json(response, 204, null)
+      }
+      const sessionMode = url.pathname.match(/^\/api\/sessions\/([^/]+)\/mode$/)
+      if (sessionMode && request.method === 'POST') {
+        const input = await body(request)
+        service.setSessionMode(principal, decodeURIComponent(sessionMode[1] as string), text(input.modeId, 'modeId'))
+        return json(response, 204, null)
       }
       const resumeSession = url.pathname.match(/^\/api\/sessions\/([^/]+)\/resume$/)
       if (resumeSession && request.method === 'POST') {

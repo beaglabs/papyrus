@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from
 import type { Workspace } from '@papyrus/contracts'
 import { api, AuthenticationRequired, loadShell, logout, type AuthenticationChallenge, type Health, type ShellData } from './api.js'
 import { SessionHarness } from './Sessions.js'
+import { SourcesView } from './Sources.js'
 
 type View = 'home' | 'sessions' | 'workspaces' | 'sources' | 'administration'
 type AppState =
@@ -107,6 +108,7 @@ function ShellView({ view, data, onNavigate }: { view: View; data: ShellData; on
   if (view === 'home') return <section className="grid-two wide-left"><article className="panel hero-panel"><p className="eyebrow">CONTROL PLANE READY</p><h2>Begin governed work from one durable session.</h2><p>Every prompt, runtime event, cancellation, and policy decision remains bound to your authenticated identity.</p><button className="primary" onClick={() => onNavigate('sessions')}>Open sessions →</button></article><DeploymentFacts data={data} /></section>
   if (view === 'sessions') return <SessionHarness workspaces={data.workspaces} />
   if (view === 'workspaces') return <WorkspaceCards items={data.workspaces} />
+  if (view === 'sources') return <SourcesView />
   return <article className="panel placeholder"><span>STACK PREVIEW</span><h2>{viewTitle(view)}</h2><p>{placeholder(view)}</p></article>
 }
 
@@ -121,5 +123,5 @@ function WorkspaceCards({ items }: { items: Workspace[] }) {
 function NavButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) { return <button className={active ? 'active' : ''} onClick={onClick}>{children}</button> }
 function profileLabel(profile: string) { return ({ commercial: 'COMMERCIAL', 'government-il4': 'GOVERNMENT IL4', 'government-il6': 'GOVERNMENT IL6' } as Record<string, string>)[profile] ?? profile.toUpperCase() }
 function viewTitle(view: View) { return ({ home: 'Operational overview', sessions: 'Sessions', workspaces: 'Workspaces', sources: 'Sources', administration: 'Administration' })[view] }
-function placeholder(view: View) { return ({ sessions: '', sources: 'Governed browser sources and captured evidence are implemented in layer 06.', administration: 'Runtime, tool, browser, and deployment administration are implemented in layer 07.', home: '', workspaces: '' })[view] }
+function placeholder(view: View) { return ({ sessions: '', sources: '', administration: 'Runtime, tool, browser, and deployment administration are implemented in layer 07.', home: '', workspaces: '' })[view] }
 function initials(name: string) { return name.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') }

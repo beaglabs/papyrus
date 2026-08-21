@@ -204,7 +204,8 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
       if (url.pathname === '/api/sessions' && request.method === 'POST') {
         const input = await body(request)
         const cwd = typeof input.cwd === 'string' ? text(input.cwd, 'cwd', 4096) : '/'
-        return json(response, 201, service.createSession(principal, text(input.workspaceId, 'workspaceId'), text(input.agent, 'agent'), text(input.title, 'title'), cwd))
+        const agent = typeof input.agent === 'string' ? text(input.agent, 'agent') : service.defaultGatewayAgent()
+        return json(response, 201, service.createSession(principal, text(input.workspaceId, 'workspaceId'), agent, text(input.title, 'title'), cwd))
       }
       const sessionDetail = url.pathname.match(/^\/api\/sessions\/([^/]+)$/)
       if (sessionDetail && request.method === 'GET') {

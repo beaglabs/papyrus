@@ -7,18 +7,49 @@ export function projectResearchSources(sessionId: string, events: SessionEvent[]
     const update = event.data
     if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') continue
     const title = typeof update.title === 'string' && update.title.trim() ? update.title.trim().slice(0, 300) : 'Browser research'
-    const excerpt = sanitizeExcerpt(firstText(update))
+    const preview = serializedResourcePreview(update)
+    const excerpt = sanitizeExcerpt(preview?.text ?? firstText(update))
     const urls = [...collectUrls(update)].map(sanitizeUrl).filter((url): url is URL => Boolean(url))
     const unique = new Map(urls.map((url) => [url.href, url]))
     let index = 0
     for (const url of unique.values()) {
       sources.push({
         id: `${event.sequence}-${index++}`, sessionId, ...(event.runId ? { runId: event.runId } : {}), title,
-        url: url.href, host: url.host, ...(excerpt ? { excerpt } : {}), sequence: event.sequence, capturedAt: event.occurredAt,
+        url: url.href, host: url.host, ...(excerpt ? { excerpt } : {}),
+        ...(preview ? { preview: preview.text.slice(0, 100_000), previewMediaType: preview.mediaType } : {}),
+        sequence: event.sequence, capturedAt: event.occurredAt,
       })
     }
   }
   return sources
+}
+
+function serializedResourcePreview(value: unknown, depth = 0): { text: string; mediaType: string } | undefined {
+  if (depth > 8) return undefined
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed || (trimmed[0] !== '{' && trimmed[0] !== '[')) return undefined
+    try { return serializedResourcePreview(JSON.parse(trimmed), depth + 1) } catch { return undefined }
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const preview = serializedResourcePreview(item, depth + 1)
+      if (preview) return preview
+    }
+    return undefined
+  }
+  if (!record(value)) return undefined
+  if (record(value.resource) && typeof value.resource.text === 'string') {
+    return {
+      text: value.resource.text,
+      mediaType: typeof value.resource.mimeType === 'string' ? value.resource.mimeType : 'text/plain',
+    }
+  }
+  for (const item of Object.values(value)) {
+    const preview = serializedResourcePreview(item, depth + 1)
+    if (preview) return preview
+  }
+  return undefined
 }
 
 function* collectUrls(value: unknown, depth = 0): Generator<string> {
@@ -47,7 +78,7 @@ function sanitizeUrl(value: string): URL | undefined {
 function sanitizeExcerpt(value: string | undefined): string | undefined {
   if (!value) return undefined
   const sanitized = value.replace(/https?:\/\/[^\s<>"')\]]+/gi, (candidate) => sanitizeUrl(candidate)?.href ?? '[invalid URL]')
-    .replace(/\s+/g, ' ').trim().slice(0, 500)
+    .replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500)
   return sanitized || undefined
 }
 

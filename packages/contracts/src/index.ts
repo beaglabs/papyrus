@@ -109,6 +109,8 @@ export interface ResearchSource {
   url: string
   host: string
   excerpt?: string
+  preview?: string
+  previewMediaType?: string
   sequence: number
   capturedAt: string
 }

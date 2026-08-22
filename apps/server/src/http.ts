@@ -2,7 +2,7 @@ import { createServer as createHttpServer, type IncomingMessage, type Server, ty
 import { createServer as createHttpsServer } from 'node:https'
 import { readFileSync } from 'node:fs'
 import { extname, join, normalize } from 'node:path'
-import { ROLES, type Role, type SignedLicense } from '@papyrus/contracts'
+import { INVITATION_IDENTITY_KINDS, ROLES, type InvitationIdentityKind, type Role, type SignedLicense } from '@papyrus/contracts'
 import { AuthService } from './auth.js'
 import type { ServerConfig } from './config.js'
 import { ApprovalLifecycleError, AuthorizationDenied, PapyrusService, SessionLifecycleError } from './service.js'
@@ -168,7 +168,18 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
     try {
       const url = new URL(request.url ?? '/', config.publicOrigin)
       if (url.pathname === '/api/health' && request.method === 'GET') {
-        return json(response, 200, { status: 'ok', topology: 'on-premises', profile: config.profile, cedar: service.policy.cedarVersion, bootstrapRequired: service.db.getSetting('bootstrapComplete') !== 'true' })
+        const logoUrl = config.branding.organizationDomain && config.branding.logoDevPublishableKey
+          ? `https://img.logo.dev/${config.branding.organizationDomain}?token=${encodeURIComponent(config.branding.logoDevPublishableKey)}&size=128&format=png`
+          : undefined
+        return json(response, 200, {
+          status: 'ok', topology: 'on-premises', profile: config.profile, cedar: service.policy.cedarVersion,
+          bootstrapRequired: service.db.getSetting('bootstrapComplete') !== 'true',
+          branding: {
+            organizationName: config.branding.organizationName,
+            ...(config.branding.organizationDomain ? { organizationDomain: config.branding.organizationDomain } : {}),
+            ...(logoUrl ? { logoUrl } : {}),
+          },
+        })
       }
       if (url.pathname === '/api/license/request' && request.method === 'GET') return json(response, 200, service.license.activationRequest())
       if (url.pathname === '/api/auth/challenge' && request.method === 'GET') {
@@ -235,9 +246,14 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
         const input = await body(request)
         const role = text(input.role, 'role') as Role
         if (!ROLES.includes(role)) throw new HttpError(400, 'INVALID_INPUT', 'Unknown fixed role')
-        const authMethod = text(input.authMethod, 'authMethod') as 'oidc' | 'mtls'
-        if (!['oidc', 'mtls'].includes(authMethod)) throw new HttpError(400, 'INVALID_INPUT', 'Unknown authentication method')
-        return json(response, 201, service.createInvitation(principal, { email: text(input.email, 'email'), role, authMethod }))
+        const identityKind = text(input.identityKind, 'identityKind') as InvitationIdentityKind
+        if (!INVITATION_IDENTITY_KINDS.includes(identityKind)) throw new HttpError(400, 'INVALID_INPUT', 'Unknown identity selector')
+        return json(response, 201, service.createInvitation(principal, {
+          identityKind, identityValue: text(input.identityValue, 'identityValue', 1024),
+          displayName: text(input.displayName, 'displayName'),
+          ...(typeof input.email === 'string' && input.email.trim() ? { email: input.email.trim() } : {}),
+          role,
+        }))
       }
       const cancelInvitation = url.pathname.match(/^\/api\/invitations\/([^/]+)$/)
       if (cancelInvitation && request.method === 'DELETE') {
@@ -508,12 +524,12 @@ function serveWeb(pathname: string, response: ServerResponse, head = false): voi
   try {
     const content = readFileSync(file)
     const types: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' }
-    response.writeHead(200, { 'content-type': types[extname(file)] ?? 'application/octet-stream', 'x-content-type-options': 'nosniff' })
+    response.writeHead(200, { 'content-type': types[extname(file)] ?? 'application/octet-stream', 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; connect-src 'self'" })
     response.end(head ? undefined : content)
   } catch {
     try {
       const content = readFileSync(join(webRoot, 'index.html'))
-      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'x-content-type-options': 'nosniff' }); response.end(head ? undefined : content)
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; connect-src 'self'" }); response.end(head ? undefined : content)
     } catch { throw new HttpError(404, 'NOT_FOUND', 'Web UI has not been built') }
   }
 }

@@ -5,6 +5,7 @@ import { createRemoteJWKSet, jwtVerify } from 'jose'
 import type { Principal } from '@papyrus/contracts'
 import type { ServerConfig } from './config.js'
 import type { PapyrusDatabase } from './db.js'
+import { AuditLog } from './audit.js'
 
 interface OidcDiscovery {
   authorization_endpoint: string
@@ -46,13 +47,21 @@ function normalizeFingerprint(value: string): string {
   return value.replaceAll(':', '').toLowerCase()
 }
 
-function certificateName(certificate: X509Certificate): { displayName: string; email?: string } {
+function certificateIdentity(certificate: X509Certificate): { externalId: string; displayName: string; email?: string; stableKind: string } {
   const commonName = certificate.subject.match(/(?:^|\n)CN=([^\n]+)/)?.[1]
   const email = certificate.subjectAltName?.match(/(?:^|,\s*)email:([^,]+)/i)?.[1]
     ?? certificate.subject.match(/(?:^|\n)emailAddress=([^\n]+)/)?.[1]
+  const upn = certificate.subjectAltName?.match(/(?:^|,\s*)(?:othername:\s*)?UPN:([^,]+)/i)?.[1]
+  const edipi = commonName?.match(/(?:\.|\b)(\d{10})$/)?.[1]
+  const issuer = createHash('sha256').update(certificate.issuer).digest('hex').slice(0, 24)
+  const externalId = edipi ? `x509:edipi:${edipi}`
+    : upn ? `x509:upn:${upn.trim().toLowerCase()}`
+    : email ? `x509:email:${issuer}:${email.trim().toLowerCase()}`
+    : `x509:fingerprint:${normalizeFingerprint(certificate.fingerprint256)}`
   return {
-    displayName: commonName ?? email ?? certificate.fingerprint256,
-    ...(email ? { email } : {}),
+    externalId, displayName: commonName ?? upn ?? email ?? certificate.fingerprint256,
+    ...(email ? { email: email.trim().toLowerCase() } : {}),
+    stableKind: edipi ? 'edipi' : upn ? 'upn' : email ? 'issuer_email' : 'fingerprint_fallback',
   }
 }
 
@@ -62,10 +71,13 @@ function isCertificateCurrent(certificate: X509Certificate): boolean {
 }
 
 export class AuthService {
+  private readonly audit: AuditLog
   private readonly pendingOidc = new Map<string, PendingOidc>()
   private readonly pendingNativeOidc = new Map<string, PendingNativeOidc>()
 
-  constructor(private readonly config: ServerConfig, private readonly db: PapyrusDatabase) {}
+  constructor(private readonly config: ServerConfig, private readonly db: PapyrusDatabase) {
+    this.audit = new AuditLog(db)
+  }
 
   issueSession(userId: string): string {
     const body = base64url(JSON.stringify({ userId, v: this.db.getTokenVersion(userId), exp: Date.now() + 8 * 60 * 60 * 1000 }))
@@ -104,6 +116,15 @@ export class AuthService {
   /** Invalidates every outstanding session for a user by bumping their token version. */
   revokeSessions(userId: string): void {
     this.db.incrementTokenVersion(userId)
+  }
+
+  logout(userId: string): void {
+    this.revokeSessions(userId)
+    this.audit.append({ actorId: userId, action: 'Logout', resourceType: 'User', resourceId: userId, decision: 'info', metadata: { sessionsRevoked: true } })
+  }
+
+  recordAuthenticationFailure(method: AuthenticationMethod, reason: string, requestId: string): void {
+    this.audit.append({ actorId: null, action: 'Authenticate', resourceType: 'Deployment', resourceId: 'authentication', decision: 'deny', metadata: { method, reason: reason.slice(0, 128), requestId } })
   }
 
   authenticate(request: IncomingMessage): Principal | undefined {
@@ -215,10 +236,16 @@ export class AuthService {
     })
     if (verified.payload.nonce !== pending.nonce) throw new Error('OIDC nonce mismatch')
     if (!verified.payload.sub) throw new Error('OIDC token has no subject')
-    const principal = this.db.upsertUser({
+    const resolved = this.db.resolveAuthenticatedUser({
       externalId: `oidc:${discovery.issuer}:${verified.payload.sub}`,
       displayName: String(verified.payload.name ?? verified.payload.preferred_username ?? verified.payload.email ?? verified.payload.sub),
       ...(verified.payload.email ? { email: String(verified.payload.email) } : {}), authMethod: 'oidc',
+    })
+    const principal = resolved.principal
+    this.audit.append({
+      actorId: principal.id, action: resolved.invitation ? 'AcceptInvitation' : 'Authenticate',
+      resourceType: resolved.invitation ? 'Invitation' : 'User', resourceId: resolved.invitation?.id ?? principal.id,
+      decision: 'allow', metadata: { method: 'oidc', created: resolved.created, invitationId: resolved.invitation?.id ?? null },
     })
     if (pending.nativeTransactionId) {
       const transaction = this.pendingNativeOidc.get(pending.nativeTransactionId)
@@ -274,13 +301,21 @@ export class AuthService {
   }
 
   private principalFromCertificate(certificate: X509Certificate): Principal {
-    const identity = certificateName(certificate)
-    return this.db.upsertUser({
-      externalId: `x509:${certificate.fingerprint256}`,
+    const identity = certificateIdentity(certificate)
+    const resolved = this.db.resolveAuthenticatedUser({
+      externalId: identity.externalId,
       displayName: identity.displayName,
       ...(identity.email ? { email: identity.email } : {}),
       authMethod: 'mtls',
     })
+    if (resolved.created) {
+      this.audit.append({
+        actorId: resolved.principal.id, action: resolved.invitation ? 'AcceptInvitation' : 'Authenticate',
+        resourceType: resolved.invitation ? 'Invitation' : 'User', resourceId: resolved.invitation?.id ?? resolved.principal.id,
+        decision: 'allow', metadata: { method: 'mtls', created: true, invitationId: resolved.invitation?.id ?? null, certificateFingerprint: normalizeFingerprint(certificate.fingerprint256), stableIdentityKind: identity.stableKind },
+      })
+    }
+    return resolved.principal
   }
 
   private async discovery(): Promise<OidcDiscovery> {

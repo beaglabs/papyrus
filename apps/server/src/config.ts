@@ -12,6 +12,7 @@ export interface ServerConfig {
   dataDir: string
   databasePath: string
   publicOrigin: string
+  branding: { organizationName: string; organizationDomain?: string; logoDevPublishableKey?: string }
   promptTimeoutMs: number
   bootstrapSecret?: string
   sessionSecret: string
@@ -136,6 +137,19 @@ export function loadConfig(env = process.env): ServerConfig {
   if (!Number.isInteger(promptTimeoutMs) || promptTimeoutMs < 0) throw new Error('Invalid PAPYRUS_PROMPT_TIMEOUT_MS')
   const originHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host
   const publicOrigin = parseOrigin('PAPYRUS_PUBLIC_ORIGIN', env.PAPYRUS_PUBLIC_ORIGIN ?? `http://${originHost}:${port}`)
+  const organizationName = env.PAPYRUS_ORGANIZATION_NAME?.trim() || 'Your organization'
+  const organizationDomain = env.PAPYRUS_ORGANIZATION_DOMAIN?.trim().toLowerCase()
+  if (organizationDomain && !/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(organizationDomain)) {
+    throw new Error('PAPYRUS_ORGANIZATION_DOMAIN must be a valid DNS domain')
+  }
+  if (env.PAPYRUS_LOGO_DEV_PUBLISHABLE_KEY && !organizationDomain) {
+    throw new Error('PAPYRUS_LOGO_DEV_PUBLISHABLE_KEY requires PAPYRUS_ORGANIZATION_DOMAIN')
+  }
+  const branding = {
+    organizationName,
+    ...(organizationDomain ? { organizationDomain } : {}),
+    ...(env.PAPYRUS_LOGO_DEV_PUBLISHABLE_KEY ? { logoDevPublishableKey: env.PAPYRUS_LOGO_DEV_PUBLISHABLE_KEY } : {}),
+  }
 
   const oidc = env.PAPYRUS_OIDC_ISSUER ? {
     issuer: validateOidcUrl('PAPYRUS_OIDC_ISSUER', env.PAPYRUS_OIDC_ISSUER, mode).toString().replace(/\/$/, ''),
@@ -143,6 +157,7 @@ export function loadConfig(env = process.env): ServerConfig {
     ...(env.PAPYRUS_OIDC_CLIENT_SECRET ? { clientSecret: env.PAPYRUS_OIDC_CLIENT_SECRET } : {}),
     redirectUri: required('PAPYRUS_OIDC_REDIRECT_URI', env.PAPYRUS_OIDC_REDIRECT_URI),
   } : undefined
+  if (profile.startsWith('government') && oidc) throw new Error('Government profiles do not support OIDC; configure CAC/PIV mTLS only')
   if (oidc) {
     const redirect = validateOidcUrl('PAPYRUS_OIDC_REDIRECT_URI', oidc.redirectUri, mode)
     if (redirect.origin !== publicOrigin || redirect.pathname !== '/api/auth/oidc/callback') {
@@ -242,6 +257,7 @@ export function loadConfig(env = process.env): ServerConfig {
     dataDir,
     databasePath: resolve(dataDir, 'papyrus.db'),
     publicOrigin,
+    branding,
     promptTimeoutMs,
     ...(env.PAPYRUS_BOOTSTRAP_SECRET ? { bootstrapSecret: env.PAPYRUS_BOOTSTRAP_SECRET } : {}),
     sessionSecret: sessionSecret || 'local-development-only-change-me',

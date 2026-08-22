@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { Agent as HttpsAgent } from 'node:https'
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
-import type { ActivitySummary, AdminOverview, Approval, Attachment, Elicitation, Environment, Invitation, McpServer, Principal, ResearchSource, Role, Session, SessionEvent, SessionRun, SignedLicense } from '@papyrus/contracts'
+import type { ActivitySummary, AdminOverview, Approval, Attachment, Elicitation, Environment, Invitation, InvitationIdentityKind, McpServer, Principal, ResearchSource, Role, Session, SessionEvent, SessionRun, SignedLicense } from '@papyrus/contracts'
 import type { ContentBlock } from '@agentclientprotocol/sdk'
 import type { AgentRuntime, RuntimeEvent, RuntimeLaunchOptions, RuntimeTool } from '@papyrus/acp-runtime'
 import { connectorPolicyAction } from './catalog.js'
@@ -91,19 +91,39 @@ export class PapyrusService {
     return this.db.getPrincipal(principal.id) as Principal
   }
 
-  createInvitation(actor: Principal, input: { email: string; role: Role; authMethod: Invitation['authMethod'] }): Invitation {
+  createInvitation(actor: Principal, input: {
+    identityKind: InvitationIdentityKind
+    identityValue: string
+    displayName: string
+    email?: string
+    role: Role
+  }): Invitation {
     this.check(actor, 'ManageUsers', { type: 'Deployment', id: this.license.deploymentId })
     if (['Owner', 'Admin'].includes(input.role) && !actor.roles.includes('Owner')) {
       this.audit.append({ actorId: actor.id, action: 'CreateInvitation', resourceType: 'Invitation', resourceId: 'new', decision: 'deny', metadata: { role: input.role, reason: 'privileged_role_requires_owner' } })
-      throw new AuthorizationDenied('CreatePrivilegedInvitation', input.email)
+      throw new AuthorizationDenied('CreatePrivilegedInvitation', input.identityValue)
     }
-    const email = input.email.trim().toLowerCase()
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('A valid organizational email is required')
+    const commercial = this.config.profile === 'commercial'
+    if (commercial && input.identityKind !== 'email') throw new Error('Commercial invitations must use organizational email')
+    if (!commercial && input.identityKind === 'email') throw new Error('Government pending identities must use a stable CAC/PIV identifier')
+    const identityValue = normalizePendingIdentity(input.identityKind, input.identityValue)
+    const displayName = input.displayName.trim()
+    if (!displayName || displayName.length > 256) throw new Error('Display name is required and must not exceed 256 characters')
+    const email = input.email?.trim().toLowerCase()
+    if (email && !isEmail(email)) throw new Error('Optional contact email is invalid')
     const invitation = this.db.createInvitation({
-      email, role: input.role, authMethod: input.authMethod, invitedBy: actor.id,
+      identityKind: input.identityKind, identityValue, displayName,
+      ...(commercial ? { email: identityValue } : email ? { email } : {}),
+      role: input.role, authMethod: commercial ? 'oidc' : 'mtls', invitedBy: actor.id,
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
     })
-    this.audit.append({ actorId: actor.id, action: 'CreateInvitation', resourceType: 'Invitation', resourceId: invitation.id, decision: 'info', metadata: { email, role: input.role, authMethod: input.authMethod, expiresAt: invitation.expiresAt } })
+    this.audit.append({
+      actorId: actor.id, action: 'CreateInvitation', resourceType: 'Invitation', resourceId: invitation.id,
+      decision: 'info', metadata: {
+        identityKind: invitation.identityKind, identityValue: invitation.identityValue,
+        displayName, email: invitation.email ?? null, role: input.role, authMethod: invitation.authMethod, expiresAt: invitation.expiresAt,
+      },
+    })
     return invitation
   }
 
@@ -495,6 +515,8 @@ export class PapyrusService {
       deployment: {
         topology: 'on-premises', profile: this.config.profile, publicOrigin: this.config.publicOrigin,
         authentication: this.config.profile.startsWith('government') ? 'mtls' : this.config.oidc ? 'oidc' : this.config.identityProxy ? 'trusted-proxy' : 'none',
+        organizationName: this.config.branding.organizationName,
+        ...(this.config.branding.organizationDomain ? { organizationDomain: this.config.branding.organizationDomain } : {}),
         mtlsConfigured: Boolean(this.config.tls),
         identityProxyConfigured: Boolean(this.config.identityProxy), gatewayConfigured: Boolean(this.config.gateway),
         licenseRequired: this.config.licenseRequired,
@@ -807,6 +829,32 @@ export class PapyrusService {
     if (!response.ok) throw new Error(`MCP server returned ${response.status}`)
     return response.json()
   }
+}
+
+function isEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+}
+
+function normalizePendingIdentity(kind: InvitationIdentityKind, value: string): string {
+  const normalized = value.trim()
+  if (!normalized || normalized.length > 1024) throw new Error('Stable identity value is required and must not exceed 1024 characters')
+  if (kind === 'email' || kind === 'upn') {
+    if (!isEmail(normalized)) throw new Error(`${kind === 'email' ? 'Email' : 'UPN'} must use name@domain format`)
+    return normalized.toLowerCase()
+  }
+  if (kind === 'edipi') {
+    if (!/^\d{10}$/.test(normalized)) throw new Error('EDIPI/DoD ID must contain exactly 10 digits')
+    return normalized
+  }
+  if (kind === 'piv_uuid') {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(normalized)) throw new Error('PIV UUID must be a valid UUID')
+    return normalized.toLowerCase()
+  }
+  if (kind === 'issuer_subject') {
+    if (!/^[0-9a-f]{24}:.+$/i.test(normalized)) throw new Error('Issuer + subject mapping must use <issuer-hash>:<normalized-subject>')
+    return normalized.toLowerCase().replace(/\s+/g, ' ')
+  }
+  return normalized.toLowerCase().replace(/\s+/g, ' ')
 }
 
 function textValue(value: unknown, name: string): string {

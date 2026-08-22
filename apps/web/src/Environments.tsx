@@ -14,7 +14,7 @@ export function EnvironmentsView({ me, items }: { me: Principal; items: Environm
   useEffect(() => { void load().catch(show) }, [load])
   const environments = data?.environments ?? items.map((item) => ({ ...item, assignedUserIds: [] }))
   const selected = environments.find((item) => item.id === selectedId) ?? environments[0]
-  const act = async (operation: () => Promise<unknown>) => { setBusy(true); setError(undefined); try { await operation(); await load() } catch (cause) { show(cause) } finally { setBusy(false) } }
+  const act = async (operation: () => Promise<unknown>) => { setBusy(true); setError(undefined); try { await operation(); await load(); return true } catch (cause) { show(cause); return false } finally { setBusy(false) } }
   function show(cause: unknown) { setError(cause instanceof Error ? cause.message : 'Environment request failed') }
 
   const eligibleUsers = data?.users.filter((user) => !selected?.assignedUserIds.includes(user.id)) ?? []
@@ -33,9 +33,11 @@ export function EnvironmentsView({ me, items }: { me: Principal; items: Environm
         event.preventDefault()
         const form = event.currentTarget
         const values = new FormData(form)
-        void act(() => createEnvironmentAdmin(String(values.get('name')), String(values.get('description') ?? ''))).then(() => {
-          form.reset()
-          setCreating(false)
+        void act(() => createEnvironmentAdmin(String(values.get('name')), String(values.get('description') ?? ''))).then((created) => {
+          if (created) {
+            form.reset()
+            setCreating(false)
+          }
         })
       }}>
         <div><strong>New environment</strong><button type="button" className="icon-button" onClick={() => setCreating(false)} aria-label="Close environment form">×</button></div>

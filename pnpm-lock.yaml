@@ -32,9 +32,6 @@ importers:
       '@anthropic-ai/sandbox-runtime':
         specifier: ^0.0.73
         version: 0.0.73
-      '@browserbasehq/stagehand':
-        specifier: ^4.0.2
-        version: 4.0.2
       '@cedar-policy/cedar-wasm':
         specifier: 4.12.0
         version: 4.12.0
@@ -47,9 +44,6 @@ importers:
       jose:
         specifier: 6.2.9
         version: 6.2.9
-      playwright:
-        specifier: ^1.62.1
-        version: 1.62.1
       yaml:
         specifier: ^2.9.0
         version: 2.9.0

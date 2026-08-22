@@ -42,7 +42,7 @@ export function buildAcpAgent(
       sessionTitle(ctx.params.cwd),
       ctx.params.cwd,
     )
-    return { sessionId: session.id, modes: sessionModes('ask') }
+    return { sessionId: session.id, configOptions: service.sessionConfigOptions(context.principal, session.id) }
   })
 
   app.onRequest(acp.methods.agent.session.list, async (ctx) => {
@@ -64,6 +64,7 @@ export function buildAcpAgent(
 
   app.onRequest(acp.methods.agent.session.load, async (ctx) => {
     service.resumeSession(context.principal, ctx.params.sessionId, ctx.params.cwd)
+    const configOptions = service.sessionConfigOptions(context.principal, ctx.params.sessionId)
     let after = 0
     for (;;) {
       const events = service.sessionEvents(context.principal, ctx.params.sessionId, after, 500)
@@ -71,7 +72,7 @@ export function buildAcpAgent(
       if (events.length < 500) break
       after = events[events.length - 1]!.sequence
     }
-    return {}
+    return { configOptions }
   })
 
   app.onRequest(acp.methods.agent.session.resume, async (ctx) => {
@@ -89,10 +90,14 @@ export function buildAcpAgent(
     return {}
   })
 
-  app.onRequest(acp.methods.agent.session.setMode, async (ctx) => {
-    service.setSessionMode(context.principal, ctx.params.sessionId, ctx.params.modeId)
-    await ctx.client.notify(acp.methods.client.session.update, { sessionId: ctx.params.sessionId, update: { sessionUpdate: 'current_mode_update', modeId: ctx.params.modeId } })
-    return {}
+  app.onRequest(acp.methods.agent.session.setConfigOption, async (ctx) => {
+    if (typeof ctx.params.value !== 'string') throw new Error('Papyrus surface must be a string value')
+    const configOptions = service.setSessionConfigOption(context.principal, ctx.params.sessionId, ctx.params.configId, ctx.params.value)
+    await ctx.client.notify(acp.methods.client.session.update, {
+      sessionId: ctx.params.sessionId,
+      update: { sessionUpdate: 'config_option_update', configOptions },
+    })
+    return { configOptions }
   })
 
   app.onNotification(acp.methods.agent.session.cancel, async (ctx) => {
@@ -147,13 +152,6 @@ function normalizeStopReason(value: string): acp.StopReason {
 function sessionTitle(cwd: string): string {
   const normalized = cwd.replace(/[\\/]+$/, '')
   return normalized.split(/[\\/]/).pop() || 'Papyrus session'
-}
-
-function sessionModes(currentModeId: string): acp.SessionModeState {
-  return { currentModeId, availableModes: [
-    { id: 'ask', name: 'Ask', description: 'Read, analyze, and request approval before governed actions' },
-    { id: 'governed', name: 'Governed work', description: 'Perform policy-authorized work with Cedar checks and approvals' },
-  ] }
 }
 
 function encodeCursor(offset: number): string {

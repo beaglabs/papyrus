@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { Agent as HttpsAgent } from 'node:https'
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
-import type { ActivitySummary, AdminOverview, Approval, Attachment, Elicitation, Environment, Invitation, InvitationIdentityKind, McpServer, Principal, ResearchSource, Role, Session, SessionEvent, SessionRun, SignedLicense } from '@papyrus/contracts'
+import { SESSION_SURFACES } from '@papyrus/contracts'
+import type { ActivitySummary, AdminOverview, Approval, Attachment, Elicitation, Environment, Invitation, InvitationIdentityKind, McpServer, Principal, ResearchSource, Role, Session, SessionConfigOption, SessionEvent, SessionRun, SessionSurface, SignedLicense } from '@papyrus/contracts'
 import type { ContentBlock } from '@agentclientprotocol/sdk'
 import type { AgentRuntime, RuntimeEvent, RuntimeLaunchOptions, RuntimeTool } from '@papyrus/acp-runtime'
 import { connectorPolicyAction } from './catalog.js'
@@ -190,14 +191,15 @@ export class PapyrusService {
     this.audit.append({ actorId: actor.id, action: 'AssignResource', resourceType: 'Environment', resourceId, decision: 'info', metadata: { principalId } })
   }
 
-  createSession(actor: Principal, environmentId: string, agent: string, title: string, cwd = '/'): Session {
+  createSession(actor: Principal, environmentId: string, agent: string, title: string, cwd = '/', surface: SessionSurface = 'general'): Session {
     this.license.require('gateway')
     this.check(actor, 'CreateSession', this.environmentResource(environmentId))
     if (!this.db.getEnvironment(environmentId)) throw new Error('Environment not found')
     if (agent !== 'papyrus') throw new Error('Papyrus is the only supported session engine')
     if (!isAbsoluteClientPath(cwd)) throw new Error('Session cwd must be an absolute path')
-    const session = this.db.createSession(actor.id, environmentId, agent, title, cwd)
-    this.audit.append({ actorId: actor.id, action: 'CreateSession', resourceType: 'Session', resourceId: session.id, decision: 'info', metadata: { environmentId, agent, cwd } })
+    if (!SESSION_SURFACES.includes(surface)) throw new Error('Unsupported session surface')
+    const session = this.db.createSession(actor.id, environmentId, agent, title, cwd, surface)
+    this.audit.append({ actorId: actor.id, action: 'CreateSession', resourceType: 'Session', resourceId: session.id, decision: 'info', metadata: { environmentId, agent, cwd, surface } })
     return session
   }
 
@@ -369,12 +371,22 @@ export class PapyrusService {
     this.audit.append({ actorId: actor.id, action: 'DeleteSession', resourceType: 'Session', resourceId: sessionId, decision: 'info', metadata: { title: session.title } })
   }
 
-  setSessionMode(actor: Principal, sessionId: string, modeId: string): void {
+  sessionConfigOptions(actor: Principal, sessionId: string): SessionConfigOption[] {
+    const session = this.getSession(actor, sessionId)
+    return sessionSurfaceConfig(session.surface)
+  }
+
+  setSessionConfigOption(actor: Principal, sessionId: string, configId: string, value: string): SessionConfigOption[] {
     const session = this.requireSession(sessionId)
-    this.check(actor, 'SetSessionMode', this.sessionResource(session))
-    if (!['ask', 'governed'].includes(modeId)) throw new SessionLifecycleError('INVALID_SESSION_MODE', 'Unsupported session mode')
-    this.db.addRuntimeEvent(sessionId, undefined, 'update', new Date().toISOString(), { sessionUpdate: 'current_mode_update', modeId })
-    this.audit.append({ actorId: actor.id, action: 'SetSessionMode', resourceType: 'Session', resourceId: sessionId, decision: 'info', metadata: { modeId } })
+    this.check(actor, 'SetSessionConfig', this.sessionResource(session))
+    if (configId !== 'papyrus.surface') throw new SessionLifecycleError('INVALID_CONFIG_OPTION', 'Unsupported session configuration option')
+    if (!SESSION_SURFACES.includes(value as SessionSurface)) throw new SessionLifecycleError('INVALID_CONFIG_VALUE', 'Unsupported session surface')
+    const surface = value as SessionSurface
+    this.db.setSessionSurface(sessionId, surface)
+    const configOptions = sessionSurfaceConfig(surface)
+    this.db.addRuntimeEvent(sessionId, undefined, 'update', new Date().toISOString(), { sessionUpdate: 'config_option_update', configOptions })
+    this.audit.append({ actorId: actor.id, action: 'SetSessionSurface', resourceType: 'Session', resourceId: sessionId, decision: 'info', metadata: { previousSurface: session.surface, surface } })
+    return configOptions
   }
 
   resumeSession(actor: Principal, sessionId: string, expectedCwd?: string): Session {
@@ -826,6 +838,24 @@ export class PapyrusService {
     if (!response.ok) throw new Error(`MCP server returned ${response.status}`)
     return response.json()
   }
+}
+
+function sessionSurfaceConfig(currentValue: SessionSurface): SessionConfigOption[] {
+  return [{
+    id: 'papyrus.surface',
+    name: 'Work surface',
+    description: 'Changes how Papyrus presents the durable session without changing authorization.',
+    category: '_papyrus_surface',
+    type: 'select',
+    currentValue,
+    options: [
+      { value: 'general', name: 'General use', description: 'Conversation, activity, approvals, and artifacts.' },
+      { value: 'ide', name: 'IDE', description: 'Repository files, diffs, terminals, tests, and conversation.' },
+      { value: 'research', name: 'Research', description: 'Sources, citations, retrieval activity, and conversation.' },
+      { value: 'document', name: 'Document', description: 'Document preview, findings, citations, and metadata.' },
+      { value: 'data', name: 'Data', description: 'Inputs, schemas, mappings, transformations, validation, and exports.' },
+    ],
+  }]
 }
 
 function isEmail(value: string): boolean {

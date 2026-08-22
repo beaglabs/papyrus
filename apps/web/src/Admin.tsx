@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { ROLES, type AdminOverview, type Principal, type Role } from '@papyrus/contracts'
-import { addMcpServer, addUserRole, adminOverview, revokeUserSessions, setMcpServerEnabled } from './api.js'
+import { addMcpServer, addUserRole, adminOverview, cancelInvitation, createInvitation, revokeUserSessions, setMcpServerEnabled } from './api.js'
 import { SelectField } from './SelectField.js'
 
 type AdminTab = 'deployment' | 'identity' | 'integrations'
@@ -21,7 +21,38 @@ export function AdminView({ me }: { me: Principal }) {
     {error && <div className="error">{error}<button onClick={() => setError(undefined)}>×</button></div>}
     <div className="admin-tabs" role="tablist">{(['deployment', 'identity', 'integrations'] as AdminTab[]).map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item}</button>)}</div>
     {tab === 'deployment' && <section className="admin-summary"><AdminPanel title="Deployment"><dl className="facts"><Fact label="Profile" value={data.deployment.profile} /><Fact label="Topology" value="ON-PREMISES" /><Fact label="Origin" value={data.deployment.publicOrigin} /><Fact label="Authentication" value={authenticationLabel(data.deployment.authentication)} /><Fact label="Gateway" value={yes(data.deployment.gatewayConfigured)} /></dl></AdminPanel><AdminPanel title="License"><dl className="facts"><Fact label="Required" value={yes(data.deployment.licenseRequired)} /><Fact label="Status" value={data.license.valid ? 'VALID' : 'NOT ACTIVE'} /><Fact label="Deployment" value={data.license.deploymentId.slice(0, 16)} /></dl></AdminPanel></section>}
-    {tab === 'identity' && <AdminPanel title="Identity and roles"><div className="admin-list">{data.users.map((user) => { const eligibleRoles = allowedRoles.filter((role) => !user.roles.includes(role)); return <article key={user.id}><div><strong>{user.displayName}</strong><span>{user.email ?? authenticationLabel(user.authMethod)}</span><span>{user.roles.join(' · ') || 'No role'} · {authenticationLabel(user.authMethod)}</span></div><form onSubmit={(event) => { event.preventDefault(); const role = new FormData(event.currentTarget).get('role'); if (typeof role === 'string' && role) void act(() => addUserRole(user.id, role as Role)) }}><SelectField name="role" label="Eligible role" placeholder="Choose a role" options={eligibleRoles.map((role) => ({ value: role, label: role }))} /><button className="secondary" disabled={busy || eligibleRoles.length === 0}>Add role</button><button type="button" className="danger" disabled={busy} onClick={() => void act(() => revokeUserSessions(user.id))}>Revoke sessions</button></form></article> })}</div></AdminPanel>}
+    {tab === 'identity' && <section className="admin-summary">
+      <AdminPanel title="Invite a user">
+        <form className="admin-form" onSubmit={(event) => {
+          event.preventDefault()
+          const form = event.currentTarget
+          const values = new FormData(form)
+          void act(async () => {
+            await createInvitation(String(values.get('email')), String(values.get('role')) as Role, String(values.get('authMethod')) as 'oidc' | 'mtls')
+            form.reset()
+          })
+        }}>
+          <input name="email" type="email" required maxLength={256} placeholder="Organizational email" />
+          <SelectField name="role" label="Initial role" placeholder="Choose a role" options={allowedRoles.map((role) => ({ value: role, label: role }))} />
+          <SelectField name="authMethod" label="Authentication" placeholder="Choose authentication" options={[{ value: 'oidc', label: 'Organizational OIDC' }, { value: 'mtls', label: 'CAC/PIV mTLS' }]} />
+          <button className="primary" disabled={busy}>Create invitation</button>
+        </form>
+        <p className="admin-note">Invitations expire after seven days and are accepted only when the authenticated organizational email and authentication method match.</p>
+      </AdminPanel>
+      <AdminPanel title="Pending invitations">
+        <div className="admin-list compact">{data.invitations.filter((invitation) => invitation.status === 'pending').length
+          ? data.invitations.filter((invitation) => invitation.status === 'pending').map((invitation) => <article key={invitation.id}><div><strong>{invitation.email}</strong><span>{invitation.role} · {authenticationLabel(invitation.authMethod)}</span><span>Expires {new Date(invitation.expiresAt).toLocaleString()}</span></div><button className="danger" disabled={busy} onClick={() => void act(() => cancelInvitation(invitation.id))}>Cancel invite</button></article>)
+          : <div className="empty">No pending invitations.</div>}</div>
+      </AdminPanel>
+      <AdminPanel title="Identity and roles"><div className="admin-list">{data.users.map((user) => {
+        const eligibleRoles = allowedRoles.filter((role) => !user.roles.includes(role))
+        const isSelf = user.id === me.id
+        const protectedTarget = user.roles.includes('Owner') || (me.roles.includes('Admin') && user.roles.includes('Admin'))
+        return <article key={user.id}><div><strong>{user.displayName}{isSelf ? ' · This is you' : ''}</strong><span>{user.email ?? authenticationLabel(user.authMethod)}</span><span>{user.roles.join(' · ') || 'No role'} · {authenticationLabel(user.authMethod)}</span></div>{isSelf || protectedTarget
+          ? <span className="status-good">{isSelf ? 'CURRENT IDENTITY' : 'PROTECTED IDENTITY'}</span>
+          : <form onSubmit={(event) => { event.preventDefault(); const role = new FormData(event.currentTarget).get('role'); if (typeof role === 'string' && role) void act(() => addUserRole(user.id, role as Role)) }}><SelectField name="role" label="Eligible role" placeholder="Choose a role" options={eligibleRoles.map((role) => ({ value: role, label: role }))} /><button className="secondary" disabled={busy || eligibleRoles.length === 0}>Add role</button><button type="button" className="danger" disabled={busy} onClick={() => void act(() => revokeUserSessions(user.id))}>Revoke sessions</button></form>}</article>
+      })}</div></AdminPanel>
+    </section>}
     {tab === 'integrations' && <section className="admin-summary"><AdminPanel title="MCP servers"><form className="admin-form mcp-register" onSubmit={(event) => { event.preventDefault(); const form = event.currentTarget; const values = new FormData(form); setBusy(true); setError(undefined); void addMcpServer(String(values.get('name')), String(values.get('endpoint'))).then((result) => { form.reset(); if (result.authorizationUrl) window.open(result.authorizationUrl, 'papyrus-mcp-oauth', 'popup,width=720,height=820'); return load() }).catch(show).finally(() => setBusy(false)) }}><input name="name" required maxLength={256} placeholder="Server name" /><input name="endpoint" type="url" required maxLength={2048} placeholder="https://mcp.internal/rpc" /><button className="primary" disabled={busy}>{busy ? 'Discovering…' : 'Connect server'}</button></form><div className="admin-list compact">{data.mcpServers.map((server) => <article key={server.id}><div><strong>{server.name}</strong><span>{server.endpoint}</span><span>{server.oauthStatus === 'connected' ? `OAuth connected · ${server.oauthIssuer}` : server.oauthStatus === 'authorization_required' ? 'Waiting for OAuth authorization' : server.oauthStatus === 'error' ? server.oauthError : 'No OAuth challenge · direct connection'} </span></div><button className={server.enabled ? 'danger' : 'secondary'} disabled={busy || server.oauthStatus === 'authorization_required'} onClick={() => void act(() => setMcpServerEnabled(server.id, !server.enabled))}>{server.enabled ? 'Disable' : 'Enable'}</button></article>)}</div><p className="admin-note">Papyrus discovers protected-resource metadata, dynamically registers an OAuth client, and completes authorization-code + PKCE before a protected remote server becomes available.</p></AdminPanel><AdminPanel title="Browser connectors"><div className="admin-list compact">{data.connectors.length ? data.connectors.map((connector) => <article key={connector.id}><div><strong>{connector.label}</strong><span>{connector.package}</span><span>{Object.entries(connector.operations).map(([operation, action]) => `${operation}: ${action}`).join(' · ')}</span></div></article>) : <div className="empty">No browser connector is enabled in deployment configuration.</div>}</div></AdminPanel></section>}
   </div>
 }

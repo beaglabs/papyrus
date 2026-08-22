@@ -378,7 +378,7 @@ export class PapyrusService {
 
   setSessionConfigOption(actor: Principal, sessionId: string, configId: string, value: string): SessionConfigOption[] {
     const session = this.requireSession(sessionId)
-    this.check(actor, 'SetSessionMode', this.sessionResource(session))
+    this.check(actor, 'SetSessionConfig', this.sessionResource(session))
     if (configId !== 'papyrus.surface') throw new SessionLifecycleError('INVALID_CONFIG_OPTION', 'Unsupported session configuration option')
     if (!SESSION_SURFACES.includes(value as SessionSurface)) throw new SessionLifecycleError('INVALID_CONFIG_VALUE', 'Unsupported session surface')
     const surface = value as SessionSurface

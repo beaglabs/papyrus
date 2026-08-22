@@ -10,13 +10,21 @@ export interface Principal {
   externalId: string
   displayName: string
   email?: string
+  pictureUrl?: string
   roles: Role[]
   authMethod: 'oidc' | 'mtls'
 }
 
+export const GOVERNMENT_IDENTITY_KINDS = ['edipi', 'upn', 'piv_uuid', 'fasc_n', 'issuer_subject'] as const
+export type GovernmentIdentityKind = (typeof GOVERNMENT_IDENTITY_KINDS)[number]
+export type InvitationIdentityKind = GovernmentIdentityKind | 'email'
+
 export interface Invitation {
   id: string
-  email: string
+  identityKind: InvitationIdentityKind
+  identityValue: string
+  displayName: string
+  email?: string
   role: Role
   authMethod: 'oidc' | 'mtls'
   status: 'pending' | 'accepted' | 'cancelled' | 'expired'

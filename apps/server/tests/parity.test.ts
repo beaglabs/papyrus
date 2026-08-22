@@ -12,7 +12,7 @@ function context(mode: 'local' | 'persistent') {
   const config: ServerConfig = {
     mode, profile: 'commercial', host: mode === 'local' ? '127.0.0.1' : '0.0.0.0', port: 3210, dataDir,
     databasePath: ':memory:', publicOrigin: mode === 'local' ? 'http://127.0.0.1:3210' : 'https://example.gov',
-    promptTimeoutMs: 30_000, sessionSecret: 'parity-session-secret-that-is-at-least-32-characters',
+    branding: { organizationName: 'Parity Organization' }, promptTimeoutMs: 30_000, sessionSecret: 'parity-session-secret-that-is-at-least-32-characters',
     licenseRequired: false, licenseAuthorities: {},
   }
   const db = new PapyrusDatabase(':memory:')

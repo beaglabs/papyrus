@@ -57,12 +57,11 @@ URLs, logs, analytics, and browser storage. The bearer session is accepted in
 
 ## CAC/PIV
 
-Government profiles support direct CA-validated client mTLS. Papyrus currently maps the
-certificate SHA-256 fingerprint to a local principal and requires the validated
-certificate email to match the invitation. Deployments should configure their
-identity proxy to preserve stable organizational identity across certificate
-renewal; fingerprint remains authentication evidence rather than an invitation
-selector.
+Government profiles support direct CA-validated client mTLS. Papyrus derives a renewal-stable local identity from a validated EDIPI, UPN,
+or issuer-bound organizational email, in that order. The certificate fingerprint
+is retained only as authentication evidence. Certificates without a stable
+organizational identifier fall back to fingerprint identity and therefore require
+administrative reconciliation after renewal.
 
 For an external CAC/PIV identity proxy, configure:
 

@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import type { Approval, Attachment, Elicitation, Environment, Invitation, McpServer, Principal, Role, Session, SessionEvent, SessionRun, ToolGrant } from '@papyrus/contracts'
+import type { Approval, Attachment, Elicitation, Environment, Invitation, InvitationIdentityKind, McpServer, Principal, Role, Session, SessionEvent, SessionRun, ToolGrant } from '@papyrus/contracts'
 
 type Row = Record<string, unknown>
 
@@ -26,14 +26,15 @@ export class PapyrusDatabase {
       CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY, external_id TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL,
-        email TEXT, auth_method TEXT NOT NULL, token_version INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
+        email TEXT, picture_url TEXT, auth_method TEXT NOT NULL, token_version INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS user_roles (
         user_id TEXT NOT NULL REFERENCES users(id), role TEXT NOT NULL,
         PRIMARY KEY (user_id, role)
       );
       CREATE TABLE IF NOT EXISTS invitations (
-        id TEXT PRIMARY KEY, email TEXT NOT NULL, role TEXT NOT NULL, auth_method TEXT NOT NULL,
+        id TEXT PRIMARY KEY, identity_kind TEXT NOT NULL, identity_value TEXT NOT NULL,
+        display_name TEXT NOT NULL, email TEXT, role TEXT NOT NULL, auth_method TEXT NOT NULL,
         status TEXT NOT NULL CHECK(status IN ('pending','accepted','cancelled','expired')),
         invited_by TEXT NOT NULL REFERENCES users(id), accepted_by TEXT REFERENCES users(id),
         created_at TEXT NOT NULL, expires_at TEXT NOT NULL, accepted_at TEXT, cancelled_at TEXT
@@ -117,6 +118,27 @@ export class PapyrusDatabase {
     if (!userColumns.some((column) => column.name === 'token_version')) {
       this.sqlite.exec('ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0')
     }
+    if (!userColumns.some((column) => column.name === 'picture_url')) {
+      this.sqlite.exec('ALTER TABLE users ADD COLUMN picture_url TEXT')
+    }
+    const invitationColumns = this.sqlite.prepare('PRAGMA table_info(invitations)').all() as Row[]
+    if (!invitationColumns.some((column) => column.name === 'identity_kind')) {
+      this.sqlite.exec(`
+        DROP INDEX IF EXISTS invitations_one_pending_identity;
+        CREATE TABLE invitations_v2 (
+          id TEXT PRIMARY KEY, identity_kind TEXT NOT NULL, identity_value TEXT NOT NULL,
+          display_name TEXT NOT NULL, email TEXT, role TEXT NOT NULL, auth_method TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('pending','accepted','cancelled','expired')),
+          invited_by TEXT NOT NULL REFERENCES users(id), accepted_by TEXT REFERENCES users(id),
+          created_at TEXT NOT NULL, expires_at TEXT NOT NULL, accepted_at TEXT, cancelled_at TEXT
+        );
+        INSERT INTO invitations_v2
+          (id,identity_kind,identity_value,display_name,email,role,auth_method,status,invited_by,accepted_by,created_at,expires_at,accepted_at,cancelled_at)
+          SELECT id,'email',lower(email),email,email,role,auth_method,status,invited_by,accepted_by,created_at,expires_at,accepted_at,cancelled_at FROM invitations;
+        DROP TABLE invitations;
+        ALTER TABLE invitations_v2 RENAME TO invitations;
+      `)
+    }
     const sessionColumns = this.sqlite.prepare('PRAGMA table_info(sessions)').all() as Row[]
     if (!sessionColumns.some((column) => column.name === 'cwd')) {
       this.sqlite.exec("ALTER TABLE sessions ADD COLUMN cwd TEXT NOT NULL DEFAULT '/'")
@@ -132,7 +154,7 @@ export class PapyrusDatabase {
     this.sqlite.prepare("UPDATE assignments SET resource_type='environment' WHERE resource_type='workspace'").run()
     this.sqlite.exec(`
       CREATE UNIQUE INDEX IF NOT EXISTS invitations_one_pending_identity
-        ON invitations(lower(email), auth_method) WHERE status='pending';
+        ON invitations(identity_kind, lower(identity_value), auth_method) WHERE status='pending';
       CREATE INDEX IF NOT EXISTS invitations_status_created ON invitations(status, created_at DESC);
       CREATE INDEX IF NOT EXISTS session_runs_session_started ON session_runs(session_id, started_at DESC);
       CREATE INDEX IF NOT EXISTS runtime_events_session_sequence ON runtime_events(session_id, id);
@@ -169,9 +191,9 @@ export class PapyrusDatabase {
   upsertUser(input: Omit<Principal, 'id' | 'roles'>): Principal {
     const existing = this.sqlite.prepare('SELECT id FROM users WHERE external_id = ?').get(input.externalId) as Row | undefined
     const id = existing ? String(existing.id) : crypto.randomUUID()
-    this.sqlite.prepare(`INSERT INTO users(id,external_id,display_name,email,auth_method,created_at) VALUES(?,?,?,?,?,?)
-      ON CONFLICT(external_id) DO UPDATE SET display_name=excluded.display_name,email=excluded.email,auth_method=excluded.auth_method`)
-      .run(id, input.externalId, input.displayName, input.email ?? null, input.authMethod, new Date().toISOString())
+    this.sqlite.prepare(`INSERT INTO users(id,external_id,display_name,email,picture_url,auth_method,created_at) VALUES(?,?,?,?,?,?,?)
+      ON CONFLICT(external_id) DO UPDATE SET display_name=excluded.display_name,email=excluded.email,picture_url=excluded.picture_url,auth_method=excluded.auth_method`)
+      .run(id, input.externalId, input.displayName, input.email ?? null, input.pictureUrl ?? null, input.authMethod, new Date().toISOString())
     return this.getPrincipal(id) as Principal
   }
 
@@ -181,7 +203,8 @@ export class PapyrusDatabase {
     const roles = (this.sqlite.prepare('SELECT role FROM user_roles WHERE user_id = ? ORDER BY role').all(id) as Row[]).map((item) => item.role as Role)
     return {
       id: String(row.id), externalId: String(row.external_id), displayName: String(row.display_name),
-      ...(row.email ? { email: String(row.email) } : {}), roles,
+      ...(row.email ? { email: String(row.email) } : {}),
+      ...(row.picture_url ? { pictureUrl: String(row.picture_url) } : {}), roles,
       authMethod: row.auth_method as Principal['authMethod'],
     }
   }
@@ -196,15 +219,25 @@ export class PapyrusDatabase {
     this.sqlite.prepare('INSERT OR IGNORE INTO user_roles(user_id,role) VALUES(?,?)').run(userId, role)
   }
 
-  createInvitation(input: { email: string; role: Role; authMethod: Invitation['authMethod']; invitedBy: string; expiresAt: string }): Invitation {
+  createInvitation(input: {
+    identityKind: InvitationIdentityKind
+    identityValue: string
+    displayName: string
+    email?: string
+    role: Role
+    authMethod: Invitation['authMethod']
+    invitedBy: string
+    expiresAt: string
+  }): Invitation {
     this.sqlite.prepare("UPDATE invitations SET status='expired' WHERE status='pending' AND expires_at<=?").run(new Date().toISOString())
     const invitation: Invitation = {
-      id: crypto.randomUUID(), email: input.email.trim().toLowerCase(), role: input.role,
-      authMethod: input.authMethod, status: 'pending', invitedBy: input.invitedBy,
+      id: crypto.randomUUID(), identityKind: input.identityKind, identityValue: input.identityValue,
+      displayName: input.displayName, ...(input.email ? { email: input.email.trim().toLowerCase() } : {}),
+      role: input.role, authMethod: input.authMethod, status: 'pending', invitedBy: input.invitedBy,
       createdAt: new Date().toISOString(), expiresAt: input.expiresAt,
     }
-    this.sqlite.prepare('INSERT INTO invitations(id,email,role,auth_method,status,invited_by,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?)')
-      .run(invitation.id, invitation.email, invitation.role, invitation.authMethod, invitation.status, invitation.invitedBy, invitation.createdAt, invitation.expiresAt)
+    this.sqlite.prepare('INSERT INTO invitations(id,identity_kind,identity_value,display_name,email,role,auth_method,status,invited_by,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
+      .run(invitation.id, invitation.identityKind, invitation.identityValue, invitation.displayName, invitation.email ?? null, invitation.role, invitation.authMethod, invitation.status, invitation.invitedBy, invitation.createdAt, invitation.expiresAt)
     return invitation
   }
 
@@ -223,19 +256,37 @@ export class PapyrusDatabase {
     return Number(result.changes) === 1 ? this.getInvitation(id) : undefined
   }
 
-  resolveAuthenticatedUser(input: Omit<Principal, 'id' | 'roles'>): { principal: Principal; invitation?: Invitation; created: boolean } {
+  migrateExternalIdentity(legacyExternalId: string, input: Omit<Principal, 'id' | 'roles'>): Principal | undefined {
+    const legacy = this.sqlite.prepare('SELECT id FROM users WHERE external_id=?').get(legacyExternalId) as Row | undefined
+    if (!legacy) return undefined
+    const collision = this.sqlite.prepare('SELECT id FROM users WHERE external_id=?').get(input.externalId) as Row | undefined
+    if (collision && String(collision.id) !== String(legacy.id)) throw new Error('Stable identity is already assigned to another user')
+    this.sqlite.prepare('UPDATE users SET external_id=?,display_name=?,email=?,picture_url=?,auth_method=? WHERE id=?')
+      .run(input.externalId, input.displayName, input.email ?? null, input.pictureUrl ?? null, input.authMethod, String(legacy.id))
+    return this.getPrincipal(String(legacy.id))
+  }
+
+  resolveAuthenticatedUser(
+    input: Omit<Principal, 'id' | 'roles'>,
+    selectors: Array<{ kind: InvitationIdentityKind; value: string }>,
+  ): { principal: Principal; invitation?: Invitation; created: boolean } {
     const existing = this.sqlite.prepare('SELECT id FROM users WHERE external_id=?').get(input.externalId) as Row | undefined
     if (existing) return { principal: this.upsertUser(input), created: false }
     if (this.getSetting('bootstrapComplete') !== 'true') return { principal: this.upsertUser(input), created: true }
-    if (!input.email) throw new Error('INVITATION_REQUIRED')
     const now = new Date().toISOString()
-    const pending = this.sqlite.prepare("SELECT * FROM invitations WHERE lower(email)=lower(?) AND auth_method=? AND status='pending' AND expires_at>? ORDER BY created_at LIMIT 1")
-      .get(input.email, input.authMethod, now) as Row | undefined
+    let pending: Row | undefined
+    for (const selector of selectors) {
+      pending = this.sqlite.prepare("SELECT * FROM invitations WHERE identity_kind=? AND lower(identity_value)=lower(?) AND auth_method=? AND status='pending' AND expires_at>? ORDER BY created_at LIMIT 1")
+        .get(selector.kind, selector.value, input.authMethod, now) as Row | undefined
+      if (pending) break
+    }
     if (!pending) throw new Error('INVITATION_REQUIRED')
     return this.transaction(() => {
       const id = crypto.randomUUID()
-      this.sqlite.prepare('INSERT INTO users(id,external_id,display_name,email,auth_method,created_at) VALUES(?,?,?,?,?,?)')
-        .run(id, input.externalId, input.displayName, input.email ?? null, input.authMethod, now)
+      const displayName = input.displayName || String(pending.display_name)
+      const email = input.email ?? (pending.email ? String(pending.email) : undefined)
+      this.sqlite.prepare('INSERT INTO users(id,external_id,display_name,email,picture_url,auth_method,created_at) VALUES(?,?,?,?,?,?,?)')
+        .run(id, input.externalId, displayName, email ?? null, input.pictureUrl ?? null, input.authMethod, now)
       this.sqlite.prepare('INSERT INTO user_roles(user_id,role) VALUES(?,?)').run(id, String(pending.role))
       this.sqlite.prepare("UPDATE invitations SET status='accepted',accepted_by=?,accepted_at=? WHERE id=? AND status='pending'")
         .run(id, now, String(pending.id))
@@ -246,7 +297,9 @@ export class PapyrusDatabase {
   private invitation(row: Row): Invitation {
     const status = String(row.status) === 'pending' && Date.parse(String(row.expires_at)) <= Date.now() ? 'expired' : String(row.status)
     return {
-      id: String(row.id), email: String(row.email), role: row.role as Role,
+      id: String(row.id), identityKind: row.identity_kind as InvitationIdentityKind,
+      identityValue: String(row.identity_value), displayName: String(row.display_name),
+      ...(row.email ? { email: String(row.email) } : {}), role: row.role as Role,
       authMethod: row.auth_method as Invitation['authMethod'], status: status as Invitation['status'],
       invitedBy: String(row.invited_by), ...(row.accepted_by ? { acceptedBy: String(row.accepted_by) } : {}),
       createdAt: String(row.created_at), expiresAt: String(row.expires_at),

@@ -34,7 +34,7 @@ export class PapyrusDatabase {
       );
       CREATE TABLE IF NOT EXISTS invitations (
         id TEXT PRIMARY KEY, email TEXT NOT NULL, role TEXT NOT NULL, auth_method TEXT NOT NULL,
-        status TEXT NOT NULL CHECK(status IN ('pending','accepted','cancelled')),
+        status TEXT NOT NULL CHECK(status IN ('pending','accepted','cancelled','expired')),
         invited_by TEXT NOT NULL REFERENCES users(id), accepted_by TEXT REFERENCES users(id),
         created_at TEXT NOT NULL, expires_at TEXT NOT NULL, accepted_at TEXT, cancelled_at TEXT
       );
@@ -197,6 +197,7 @@ export class PapyrusDatabase {
   }
 
   createInvitation(input: { email: string; role: Role; authMethod: Invitation['authMethod']; invitedBy: string; expiresAt: string }): Invitation {
+    this.sqlite.prepare("UPDATE invitations SET status='expired' WHERE status='pending' AND expires_at<=?").run(new Date().toISOString())
     const invitation: Invitation = {
       id: crypto.randomUUID(), email: input.email.trim().toLowerCase(), role: input.role,
       authMethod: input.authMethod, status: 'pending', invitedBy: input.invitedBy,

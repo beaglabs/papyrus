@@ -16,8 +16,9 @@ export interface Principal {
 }
 
 export const GOVERNMENT_IDENTITY_KINDS = ['edipi', 'upn', 'piv_uuid', 'fasc_n', 'issuer_subject'] as const
+export const INVITATION_IDENTITY_KINDS = ['email', ...GOVERNMENT_IDENTITY_KINDS] as const
 export type GovernmentIdentityKind = (typeof GOVERNMENT_IDENTITY_KINDS)[number]
-export type InvitationIdentityKind = GovernmentIdentityKind | 'email'
+export type InvitationIdentityKind = (typeof INVITATION_IDENTITY_KINDS)[number]
 
 export interface Invitation {
   id: string

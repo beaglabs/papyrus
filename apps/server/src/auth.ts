@@ -2,7 +2,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual, X509Certificate }
 import type { IncomingMessage } from 'node:http'
 import type { TLSSocket } from 'node:tls'
 import { createRemoteJWKSet, jwtVerify } from 'jose'
-import type { Principal } from '@papyrus/contracts'
+import type { InvitationIdentityKind, Principal } from '@papyrus/contracts'
 import type { ServerConfig } from './config.js'
 import type { PapyrusDatabase } from './db.js'
 import { AuditLog } from './audit.js'
@@ -47,21 +47,48 @@ function normalizeFingerprint(value: string): string {
   return value.replaceAll(':', '').toLowerCase()
 }
 
-function certificateIdentity(certificate: X509Certificate): { externalId: string; displayName: string; email?: string; stableKind: string } {
+function normalizeIdentityValue(value: string): string {
+  return value.trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+function safePictureUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.length > 2048) return undefined
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' ? url.toString() : undefined
+  } catch { return undefined }
+}
+
+function certificateIdentity(certificate: X509Certificate): {
+  externalId: string
+  displayName: string
+  email?: string
+  stableKind: InvitationIdentityKind
+  selectors: Array<{ kind: InvitationIdentityKind; value: string }>
+} {
   const commonName = certificate.subject.match(/(?:^|\n)CN=([^\n]+)/)?.[1]
   const email = certificate.subjectAltName?.match(/(?:^|,\s*)email:([^,]+)/i)?.[1]
     ?? certificate.subject.match(/(?:^|\n)emailAddress=([^\n]+)/)?.[1]
   const upn = certificate.subjectAltName?.match(/(?:^|,\s*)(?:othername:\s*)?UPN:([^,]+)/i)?.[1]
   const edipi = commonName?.match(/(?:\.|\b)(\d{10})$/)?.[1]
+  const pivUuid = certificate.subjectAltName?.match(/(?:urn:uuid:|PIV(?:-|\s*)UUID:)([0-9a-f-]{36})/i)?.[1]
+  const fascN = certificate.subjectAltName?.match(/FASC(?:-|\s*)N:([^,]+)/i)?.[1]
   const issuer = createHash('sha256').update(certificate.issuer).digest('hex').slice(0, 24)
-  const externalId = edipi ? `x509:edipi:${edipi}`
-    : upn ? `x509:upn:${upn.trim().toLowerCase()}`
-    : email ? `x509:email:${issuer}:${email.trim().toLowerCase()}`
-    : `x509:fingerprint:${normalizeFingerprint(certificate.fingerprint256)}`
+  const issuerSubject = `${issuer}:${normalizeIdentityValue(certificate.subject)}`
+  const selectors: Array<{ kind: InvitationIdentityKind; value: string }> = [
+    ...(edipi ? [{ kind: 'edipi' as const, value: edipi }] : []),
+    ...(upn ? [{ kind: 'upn' as const, value: normalizeIdentityValue(upn) }] : []),
+    ...(pivUuid ? [{ kind: 'piv_uuid' as const, value: pivUuid.toLowerCase() }] : []),
+    ...(fascN ? [{ kind: 'fasc_n' as const, value: normalizeIdentityValue(fascN) }] : []),
+    { kind: 'issuer_subject', value: issuerSubject },
+  ]
+  const primary = selectors[0] as { kind: InvitationIdentityKind; value: string }
   return {
-    externalId, displayName: commonName ?? upn ?? email ?? certificate.fingerprint256,
+    externalId: `x509:${primary.kind}:${primary.value}`,
+    displayName: commonName ?? upn ?? email ?? 'CAC/PIV user',
     ...(email ? { email: email.trim().toLowerCase() } : {}),
-    stableKind: edipi ? 'edipi' : upn ? 'upn' : email ? 'issuer_email' : 'fingerprint_fallback',
+    stableKind: primary.kind,
+    selectors,
   }
 }
 
@@ -236,11 +263,14 @@ export class AuthService {
     })
     if (verified.payload.nonce !== pending.nonce) throw new Error('OIDC nonce mismatch')
     if (!verified.payload.sub) throw new Error('OIDC token has no subject')
+    if (verified.payload.email_verified === false) throw new Error('OIDC email is not verified')
+    const email = typeof verified.payload.email === 'string' ? verified.payload.email.trim().toLowerCase() : undefined
+    const pictureUrl = safePictureUrl(verified.payload.picture)
     const resolved = this.db.resolveAuthenticatedUser({
       externalId: `oidc:${discovery.issuer}:${verified.payload.sub}`,
-      displayName: String(verified.payload.name ?? verified.payload.preferred_username ?? verified.payload.email ?? verified.payload.sub),
-      ...(verified.payload.email ? { email: String(verified.payload.email) } : {}), authMethod: 'oidc',
-    })
+      displayName: String(verified.payload.name ?? verified.payload.preferred_username ?? email ?? verified.payload.sub),
+      ...(email ? { email } : {}), ...(pictureUrl ? { pictureUrl } : {}), authMethod: 'oidc',
+    }, email ? [{ kind: 'email', value: email }] : [])
     const principal = resolved.principal
     this.audit.append({
       actorId: principal.id, action: resolved.invitation ? 'AcceptInvitation' : 'Authenticate',
@@ -302,17 +332,26 @@ export class AuthService {
 
   private principalFromCertificate(certificate: X509Certificate): Principal {
     const identity = certificateIdentity(certificate)
-    const resolved = this.db.resolveAuthenticatedUser({
+    const input = {
       externalId: identity.externalId,
       displayName: identity.displayName,
       ...(identity.email ? { email: identity.email } : {}),
-      authMethod: 'mtls',
-    })
+      authMethod: 'mtls' as const,
+    }
+    const migrated = this.db.migrateExternalIdentity(`x509:${certificate.fingerprint256}`, input)
+    if (migrated) {
+      this.audit.append({
+        actorId: migrated.id, action: 'MigrateIdentity', resourceType: 'User', resourceId: migrated.id,
+        decision: 'info', metadata: { from: 'certificate_fingerprint', to: identity.stableKind, certificateFingerprint: normalizeFingerprint(certificate.fingerprint256) },
+      })
+      return migrated
+    }
+    const resolved = this.db.resolveAuthenticatedUser(input, identity.selectors)
     if (resolved.created) {
       this.audit.append({
         actorId: resolved.principal.id, action: resolved.invitation ? 'AcceptInvitation' : 'Authenticate',
         resourceType: resolved.invitation ? 'Invitation' : 'User', resourceId: resolved.invitation?.id ?? resolved.principal.id,
-        decision: 'allow', metadata: { method: 'mtls', created: true, invitationId: resolved.invitation?.id ?? null, certificateFingerprint: normalizeFingerprint(certificate.fingerprint256), stableIdentityKind: identity.stableKind },
+        decision: 'allow', metadata: { method: 'mtls', created: true, invitationId: resolved.invitation?.id ?? null, certificateFingerprint: normalizeFingerprint(certificate.fingerprint256), stableIdentityKind: identity.stableKind, matchedIdentityKind: resolved.invitation?.identityKind ?? null },
       })
     }
     return resolved.principal

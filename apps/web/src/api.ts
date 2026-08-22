@@ -1,10 +1,15 @@
-import type { AdminOverview, Approval, Artifact, Attachment, Elicitation, Environment, Invitation, McpServer, Principal, ResearchSource, Role, Session, SessionEvent, SessionRun } from '@papyrus/contracts'
+import type { AdminOverview, Approval, Artifact, Attachment, Elicitation, Environment, Invitation, InvitationIdentityKind, McpServer, Principal, ResearchSource, Role, Session, SessionEvent, SessionRun } from '@papyrus/contracts'
 
 export interface Health {
   topology: 'on-premises'
   profile: string
   cedar: string
   bootstrapRequired: boolean
+  branding: {
+    organizationName: string
+    organizationDomain?: string
+    logoUrl?: string
+  }
 }
 
 export interface AuthenticationChallenge {
@@ -159,8 +164,14 @@ export async function researchSources(): Promise<ResearchSource[]> {
 }
 
 export async function adminOverview(): Promise<AdminOverview> { return api('/api/admin/overview') }
-export async function createInvitation(email: string, role: Role, authMethod: Invitation['authMethod']): Promise<Invitation> {
-  return api('/api/invitations', { method: 'POST', body: JSON.stringify({ email, role, authMethod }) })
+export async function createInvitation(input: {
+  identityKind: InvitationIdentityKind
+  identityValue: string
+  displayName: string
+  email?: string
+  role: Role
+}): Promise<Invitation> {
+  return api('/api/invitations', { method: 'POST', body: JSON.stringify(input) })
 }
 
 export async function cancelInvitation(invitationId: string): Promise<Invitation> {

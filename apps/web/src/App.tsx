@@ -16,6 +16,21 @@ function Logo() {
   return <div className="brand"><span className="brand-mark" aria-hidden="true">P</span><span>PAPYRUS</span></div>
 }
 
+function OrganizationMark({ health }: { health: Health }) {
+  const [failed, setFailed] = useState(false)
+  const name = health.branding.organizationName
+  return <div className="organization-mark">{health.branding.logoUrl && !failed
+    ? <img src={health.branding.logoUrl} alt={`${name} logo`} referrerPolicy="no-referrer" onError={() => setFailed(true)} />
+    : <span aria-hidden="true">{initials(name)}</span>}</div>
+}
+
+function UserAvatar({ name, pictureUrl }: { name: string; pictureUrl?: string }) {
+  const [failed, setFailed] = useState(false)
+  return <div className="avatar">{pictureUrl && !failed
+    ? <img src={pictureUrl} alt="" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
+    : <span aria-hidden="true">{initials(name)}</span>}</div>
+}
+
 function HandlingBanner({ profile }: { profile: string }) {
   const government = profile.startsWith('government')
   return <div className={`handling-banner ${government ? 'government' : 'commercial'}`} role="status">
@@ -78,7 +93,7 @@ export function App() {
       <main>
         <header>
           <div><p className="eyebrow">GOVERNED AGENT WORKSPACE</p><h1>{viewTitle(view)}</h1></div>
-          <div className="identity"><div><strong>{state.data.me.displayName}</strong><span>{state.data.me.roles.join(' · ')} · {state.data.me.authMethod}</span></div><div className="avatar" aria-hidden="true">{initials(state.data.me.displayName)}</div><button className="text-button" onClick={() => void signOut()}>Sign out</button></div>
+          <div className="identity"><div><strong>{state.data.me.displayName}</strong><span>{state.data.me.roles.join(' · ')} · {state.data.me.authMethod}</span></div><UserAvatar name={state.data.me.displayName} pictureUrl={state.data.me.pictureUrl} /><button className="text-button" onClick={() => void signOut()}>Sign out</button></div>
         </header>
         <ShellView view={view} data={state.data} onNavigate={setView} />
       </main>
@@ -88,15 +103,26 @@ export function App() {
 
 function SignedOut({ health, challenge }: { health: Health; challenge: AuthenticationChallenge }) {
   const government = health.profile.startsWith('government')
-  const oidc = challenge.methods.includes('oidc') && challenge.login_url
+  const oidc = !government && challenge.methods.includes('oidc') && challenge.login_url
+  if (!government) {
+    return <><HandlingBanner profile={health.profile} /><main className="center login auth-entry tenant-login">
+      <OrganizationMark health={health} />
+      <p className="eyebrow">ORGANIZATIONAL ACCESS</p>
+      <h1>Welcome to<br />{health.branding.organizationName}.</h1>
+      <p>Continue with your organization-managed identity. Papyrus never receives your provider password.</p>
+      <div className="auth-grid">
+        {oidc && <a className="primary" href={challenge.login_url}>Continue with {health.branding.organizationName} →</a>}
+        {challenge.methods.includes('mtls-proxy') && <article className="profile-card"><strong>Trusted identity gateway</strong><p>Open Papyrus through your organization’s authorized access gateway.</p></article>}
+        {challenge.methods.length === 0 && <div className="error">This deployment has no configured organizational OIDC provider.</div>}
+      </div>
+      <Logo />
+    </main></>
+  }
   return <><HandlingBanner profile={health.profile} /><main className="center login auth-entry"><Logo /><p className="eyebrow">GOVERNED AGENT WORKSPACE</p><h1>Identity before<br />authority.</h1><p>Papyrus binds every session, tool request, and policy decision to an authenticated organizational identity.</p><div className="auth-grid">
-    {oidc && <a className="primary" href={challenge.login_url}>Continue with organizational login →</a>}
-    {government && <article className="profile-card"><strong>CAC/PIV authentication</strong><p>Insert your card, select its authentication certificate when prompted, then reload this page.</p><button className="secondary" onClick={() => window.location.reload()}>Retry certificate authentication</button></article>}
+    <article className="profile-card"><strong>CAC/PIV authentication</strong><p>Insert your card, select its authentication certificate when prompted, then reload this page.</p><button className="secondary" onClick={() => window.location.reload()}>Retry certificate authentication</button></article>
     {challenge.methods.includes('mtls-proxy') && <article className="profile-card"><strong>Trusted identity gateway</strong><p>Open Papyrus through your organization’s authorized access gateway.</p></article>}
-    {challenge.methods.length === 0 && <div className="error">This deployment has no configured authentication method.</div>}
   </div></main></>
 }
-
 
 function Bootstrap({ me, onDone }: { me: string; onDone: () => Promise<void> }) {
   const [error, setError] = useState<string>()

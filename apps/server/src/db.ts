@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import type { Approval, Attachment, Elicitation, Environment, Invitation, InvitationIdentityKind, McpServer, Principal, Role, Session, SessionEvent, SessionRun, ToolGrant } from '@papyrus/contracts'
+import type { Approval, Attachment, Elicitation, Environment, Invitation, InvitationIdentityKind, McpServer, Principal, Role, Session, SessionEvent, SessionSurface, SessionRun, ToolGrant } from '@papyrus/contracts'
 
 type Row = Record<string, unknown>
 
@@ -55,7 +55,7 @@ export class PapyrusDatabase {
       CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id),
         workspace_id TEXT NOT NULL REFERENCES workspaces(id), agent TEXT NOT NULL,
-        title TEXT NOT NULL, cwd TEXT NOT NULL DEFAULT '/', status TEXT NOT NULL,
+        title TEXT NOT NULL, cwd TEXT NOT NULL DEFAULT '/', surface TEXT NOT NULL DEFAULT 'general', status TEXT NOT NULL,
         created_at TEXT NOT NULL, updated_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS session_runs (
@@ -120,6 +120,10 @@ export class PapyrusDatabase {
     }
     if (!userColumns.some((column) => column.name === 'picture_url')) {
       this.sqlite.exec('ALTER TABLE users ADD COLUMN picture_url TEXT')
+    }
+    const sessionColumns = this.sqlite.prepare('PRAGMA table_info(sessions)').all() as Row[]
+    if (!sessionColumns.some((column) => column.name === 'surface')) {
+      this.sqlite.exec("ALTER TABLE sessions ADD COLUMN surface TEXT NOT NULL DEFAULT 'general'")
     }
     const invitationColumns = this.sqlite.prepare('PRAGMA table_info(invitations)').all() as Row[]
     if (!invitationColumns.some((column) => column.name === 'identity_kind')) {
@@ -351,22 +355,26 @@ export class PapyrusDatabase {
     return [...new Set([...direct, ...groups].map((row) => String(row.id)))]
   }
 
-  createSession(ownerId: string, environmentId: string, agent: string, title: string, cwd = '/'): Session {
+  createSession(ownerId: string, environmentId: string, agent: string, title: string, cwd = '/', surface: SessionSurface = 'general'): Session {
     const now = new Date().toISOString()
-    const session: Session = { id: crypto.randomUUID(), ownerId, environmentId, agent, title, cwd, status: 'ready', createdAt: now, updatedAt: now }
-    this.sqlite.prepare(`INSERT INTO sessions(id,owner_id,workspace_id,agent,title,cwd,status,created_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,?,?)`).run(session.id, ownerId, environmentId, agent, title, cwd, session.status, now, now)
+    const session: Session = { id: crypto.randomUUID(), ownerId, environmentId, agent, title, cwd, surface, status: 'ready', createdAt: now, updatedAt: now }
+    this.sqlite.prepare(`INSERT INTO sessions(id,owner_id,workspace_id,agent,title,cwd,surface,status,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?)`).run(session.id, ownerId, environmentId, agent, title, cwd, surface, session.status, now, now)
     return session
   }
 
   getSession(id: string): Session | undefined {
-    return this.sqlite.prepare(`SELECT id,owner_id ownerId,workspace_id environmentId,agent,title,cwd,status,
+    return this.sqlite.prepare(`SELECT id,owner_id ownerId,workspace_id environmentId,agent,title,cwd,surface,status,
       created_at createdAt,updated_at updatedAt FROM sessions WHERE id=?`).get(id) as unknown as Session | undefined
   }
 
   listSessions(): Session[] {
-    return this.sqlite.prepare(`SELECT id,owner_id ownerId,workspace_id environmentId,agent,title,cwd,status,
+    return this.sqlite.prepare(`SELECT id,owner_id ownerId,workspace_id environmentId,agent,title,cwd,surface,status,
       created_at createdAt,updated_at updatedAt FROM sessions ORDER BY updated_at DESC`).all() as unknown as Session[]
+  }
+
+  setSessionSurface(id: string, surface: SessionSurface): void {
+    this.sqlite.prepare('UPDATE sessions SET surface=?,updated_at=? WHERE id=?').run(surface, new Date().toISOString(), id)
   }
 
   setSessionStatus(id: string, status: Session['status']): void {

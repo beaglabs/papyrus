@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { Agent as HttpsAgent } from 'node:https'
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
-import type { ActivitySummary, AdminOverview, Approval, Attachment, Elicitation, Environment, McpServer, Principal, ResearchSource, Role, Session, SessionEvent, SessionRun, SignedLicense } from '@papyrus/contracts'
+import type { ActivitySummary, AdminOverview, Approval, Attachment, Elicitation, Environment, Invitation, McpServer, Principal, ResearchSource, Role, Session, SessionEvent, SessionRun, SignedLicense } from '@papyrus/contracts'
 import type { ContentBlock } from '@agentclientprotocol/sdk'
 import type { AgentRuntime, RuntimeEvent, RuntimeLaunchOptions, RuntimeTool } from '@papyrus/acp-runtime'
 import { connectorPolicyAction } from './catalog.js'
@@ -78,7 +78,10 @@ export class PapyrusService {
 
   bootstrap(principal: Principal, secret: string): Principal {
     if (this.db.getSetting('bootstrapComplete') === 'true') throw new Error('Owner bootstrap is already complete')
-    if (!this.config.bootstrapSecret || !secureEqual(secret, this.config.bootstrapSecret)) throw new Error('Invalid bootstrap secret')
+    if (!this.config.bootstrapSecret || !secureEqual(secret, this.config.bootstrapSecret)) {
+      this.audit.append({ actorId: principal.id, action: 'BootstrapOwner', resourceType: 'Deployment', resourceId: this.license.deploymentId, decision: 'deny', metadata: { reason: 'invalid_secret' } })
+      throw new Error('Invalid bootstrap secret')
+    }
     this.db.transaction(() => {
       if (this.db.getSetting('bootstrapComplete') === 'true') throw new Error('Owner bootstrap is already complete')
       this.db.setRole(principal.id, 'Owner')
@@ -88,19 +91,46 @@ export class PapyrusService {
     return this.db.getPrincipal(principal.id) as Principal
   }
 
+  createInvitation(actor: Principal, input: { email: string; role: Role; authMethod: Invitation['authMethod'] }): Invitation {
+    this.check(actor, 'ManageUsers', { type: 'Deployment', id: this.license.deploymentId })
+    if (['Owner', 'Admin'].includes(input.role) && !actor.roles.includes('Owner')) {
+      this.audit.append({ actorId: actor.id, action: 'CreateInvitation', resourceType: 'Invitation', resourceId: 'new', decision: 'deny', metadata: { role: input.role, reason: 'privileged_role_requires_owner' } })
+      throw new AuthorizationDenied('CreatePrivilegedInvitation', input.email)
+    }
+    const email = input.email.trim().toLowerCase()
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('A valid organizational email is required')
+    const invitation = this.db.createInvitation({
+      email, role: input.role, authMethod: input.authMethod, invitedBy: actor.id,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    })
+    this.audit.append({ actorId: actor.id, action: 'CreateInvitation', resourceType: 'Invitation', resourceId: invitation.id, decision: 'info', metadata: { email, role: input.role, authMethod: input.authMethod, expiresAt: invitation.expiresAt } })
+    return invitation
+  }
+
+  cancelInvitation(actor: Principal, invitationId: string): Invitation {
+    this.check(actor, 'ManageUsers', { type: 'Deployment', id: this.license.deploymentId })
+    const invitation = this.db.cancelInvitation(invitationId)
+    if (!invitation) throw new Error('Pending invitation not found')
+    this.audit.append({ actorId: actor.id, action: 'CancelInvitation', resourceType: 'Invitation', resourceId: invitation.id, decision: 'info', metadata: { email: invitation.email, role: invitation.role } })
+    return invitation
+  }
+
   assignRole(actor: Principal, userId: string, role: Role): Principal {
     this.check(actor, 'ManageUsers', { type: 'Deployment', id: this.license.deploymentId })
-    if (['Owner', 'Admin'].includes(role) && !actor.roles.includes('Owner')) throw new AuthorizationDenied('AssignPrivilegedRole', userId)
+    const target = this.protectUserAdministration(actor, userId, 'AssignRole')
+    if (['Owner', 'Admin'].includes(role) && !actor.roles.includes('Owner')) {
+      this.audit.append({ actorId: actor.id, action: 'AssignRole', resourceType: 'User', resourceId: userId, decision: 'deny', metadata: { role, reason: 'privileged_role_requires_owner' } })
+      throw new AuthorizationDenied('AssignPrivilegedRole', userId)
+    }
     this.db.setRole(userId, role)
     this.db.incrementTokenVersion(userId)
-    this.audit.append({ actorId: actor.id, action: 'AssignRole', resourceType: 'User', resourceId: userId, decision: 'info', metadata: { role, revokedSessions: true } })
-    const principal = this.db.getPrincipal(userId)
-    if (!principal) throw new Error('User not found')
-    return principal
+    this.audit.append({ actorId: actor.id, action: 'AssignRole', resourceType: 'User', resourceId: userId, decision: 'info', metadata: { role, previousRoles: target.roles, resultingRoles: [...new Set([...target.roles, role])], revokedSessions: true } })
+    return this.db.getPrincipal(userId) as Principal
   }
 
   revokeSessions(actor: Principal, userId: string): void {
     this.check(actor, 'ManageUsers', { type: 'Deployment', id: this.license.deploymentId })
+    this.protectUserAdministration(actor, userId, 'RevokeSessions')
     this.db.incrementTokenVersion(userId)
     this.audit.append({ actorId: actor.id, action: 'RevokeSessions', resourceType: 'User', resourceId: userId, decision: 'info', metadata: {} })
   }
@@ -108,6 +138,19 @@ export class PapyrusService {
   listUsers(actor: Principal): Principal[] {
     this.check(actor, 'ManageUsers', { type: 'Deployment', id: this.license.deploymentId })
     return this.db.listPrincipals()
+  }
+
+  private protectUserAdministration(actor: Principal, userId: string, action: string): Principal {
+    const target = this.db.getPrincipal(userId)
+    const reason = actor.id === userId ? 'self_administration_forbidden'
+      : target?.roles.includes('Owner') ? 'owner_is_protected'
+      : actor.roles.includes('Admin') && target?.roles.includes('Admin') ? 'admin_peer_is_protected'
+      : undefined
+    if (!target || reason) {
+      this.audit.append({ actorId: actor.id, action, resourceType: 'User', resourceId: userId, decision: 'deny', metadata: { reason: reason ?? 'user_not_found' } })
+      throw new AuthorizationDenied(action, userId)
+    }
+    return target
   }
 
   createEnvironment(actor: Principal, input: Pick<Environment, 'name' | 'description'>): Environment {
@@ -457,6 +500,7 @@ export class PapyrusService {
         licenseRequired: this.config.licenseRequired,
       },
       users: this.db.listPrincipals(),
+      invitations: this.db.listInvitations(),
       environments: this.db.listEnvironments().map((environment) => ({ ...environment, assignedUserIds: this.db.assignedUserIds('environment', environment.id) })),
       mcpServers: this.db.listMcpServers(), toolGrants: this.db.listToolGrants(),
       connectors: (this.config.connectors ?? []).map((connector) => ({ id: connector.id, label: connector.label, package: connector.package, source: connector.source, operations: { ...connector.operations } })),

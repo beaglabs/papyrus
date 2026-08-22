@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { api, AuthenticationRequired, loadShell, logout, type AuthenticationChallenge, type Health, type ShellData } from './api.js'
+import { api, AuthenticationRequired, EnrollmentRequired, loadShell, logout, type AuthenticationChallenge, type Health, type ShellData } from './api.js'
 import { SessionHarness } from './Sessions.js'
 import { SourcesView } from './Sources.js'
 import { AdminView } from './Admin.js'
@@ -9,6 +9,7 @@ type View = 'home' | 'sessions' | 'environments' | 'sources' | 'administration'
 type AppState =
   | { phase: 'loading' }
   | { phase: 'signed-out'; health: Health; challenge: AuthenticationChallenge }
+  | { phase: 'enrollment-required'; health: Health }
   | { phase: 'ready'; data: ShellData }
   | { phase: 'error'; message: string }
 
@@ -49,6 +50,7 @@ export function App() {
       setState({ phase: 'ready', data: await loadShell() })
     } catch (cause) {
       if (cause instanceof AuthenticationRequired) setState({ phase: 'signed-out', health: cause.health, challenge: cause.challenge })
+      else if (cause instanceof EnrollmentRequired) setState({ phase: 'enrollment-required', health: cause.health })
       else setState({ phase: 'error', message: cause instanceof Error ? cause.message : 'Unable to open Papyrus' })
     }
   }, [])
@@ -63,6 +65,7 @@ export function App() {
   if (state.phase === 'loading') return <main className="center"><Logo /><p className="eyebrow">OPENING GOVERNED WORKSPACE…</p></main>
   if (state.phase === 'error') return <main className="center login"><Logo /><p className="eyebrow">PAPYRUS IS UNAVAILABLE</p><h1>Unable to open<br />the control plane.</h1><div className="error">{state.message}</div><button className="primary" onClick={() => void refresh()}>Try again →</button></main>
   if (state.phase === 'signed-out') return <SignedOut health={state.health} challenge={state.challenge} />
+  if (state.phase === 'enrollment-required') return <EnrollmentMissing health={state.health} />
   if (state.data.me.roles.length === 0) return <><HandlingBanner profile={state.data.health.profile} />{state.data.health.bootstrapRequired
     ? <Bootstrap me={state.data.me.displayName} onDone={refresh} />
     : <AccessPending me={state.data.me.displayName} />}</>
@@ -123,6 +126,19 @@ function SignedOut({ health, challenge }: { health: Health; challenge: Authentic
     <article className="profile-card"><strong>CAC/PIV authentication</strong><p>Insert your card, select its authentication certificate when prompted, then reload this page.</p><button className="secondary" onClick={() => window.location.reload()}>Retry certificate authentication</button></article>
     {challenge.methods.includes('mtls-proxy') && <article className="profile-card"><strong>Trusted identity gateway</strong><p>Open Papyrus through your organization’s authorized access gateway.</p></article>}
   </div></main></>
+}
+
+function EnrollmentMissing({ health }: { health: Health }) {
+  const government = health.profile.startsWith('government')
+  return <><HandlingBanner profile={health.profile} /><main className="center login">
+    {government ? <Logo /> : <OrganizationMark health={health} />}
+    <p className="eyebrow">IDENTITY VERIFIED · ENROLLMENT REQUIRED</p>
+    <h1>No pending identity<br />matched your login.</h1>
+    <p>{government
+      ? 'Ask an Owner or Admin to create a pending CAC/PIV identity using your EDIPI, UPN, PIV UUID, FASC-N, or certificate mapping.'
+      : `Ask an Owner or Admin to invite your organizational email to ${health.branding.organizationName}.`}</p>
+    <button className="secondary" onClick={() => window.location.reload()}>Try again</button>
+  </main></>
 }
 
 function Bootstrap({ me, onDone }: { me: string; onDone: () => Promise<void> }) {

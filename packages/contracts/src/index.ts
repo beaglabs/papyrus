@@ -162,14 +162,6 @@ export interface AdminEnvironment extends Environment {
   assignedUserIds: string[]
 }
 
-export interface AdminConnector {
-  id: string
-  label: string
-  package: string
-  source: string
-  operations: Record<string, string>
-}
-
 export interface AdminOverview {
   deployment: {
     topology: 'on-premises'
@@ -188,7 +180,6 @@ export interface AdminOverview {
   environments: AdminEnvironment[]
   mcpServers: McpServer[]
   toolGrants: ToolGrant[]
-  connectors: AdminConnector[]
   license: LicenseStatus
 }
 

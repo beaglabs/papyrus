@@ -152,94 +152,6 @@ export class PapyrusWorker implements AgentRuntime {
     return { type: 'image', data: b64, mimeType: 'image/png' }
   }
 
-  private browserInstance: { stagehand: any; proxyUrl?: string | undefined } | null = null
-
-  private async getBrowser(args: Record<string, unknown>): Promise<any> {
-    if (this.browserInstance) return this.browserInstance.stagehand
-    
-    let proxyUrl: string | undefined
-    if (args.useTor) {
-      const { SandboxManager } = await import('@anthropic-ai/sandbox-runtime')
-      await SandboxManager.initialize({} as any)
-      const socksPort = SandboxManager.getSocksProxyPort()
-      if (socksPort) proxyUrl = `socks5://127.0.0.1:${socksPort}`
-    }
-    
-    const { Stagehand, localBrowser } = await import('@browserbasehq/stagehand')
-    
-    // Use Playwright's full Chromium (not headless shell) which supports extensions
-    const playwrightChromiumPath = '/Users/jdbohrman/Library/Caches/ms-playwright/chromium-1234/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing'
-    
-    // Launch local browser first
-    const launchOptions: any = {
-      args: ['--enable-unsafe-extension-debugging', '--remote-allow-origins=*', '--headless'],
-      executablePath: playwrightChromiumPath,
-    }
-    if (proxyUrl) {
-      launchOptions.proxy = { server: proxyUrl }
-    }
-    
-    const browser = await localBrowser.launch(launchOptions)
-    
-    const stagehand = await Stagehand.create({
-      browser,
-      model: {
-        apiKey: this.config.apiKey,
-        headers: {},
-        modelName: 'openai/gpt-4o',
-      },
-    })
-    
-    this.browserInstance = { stagehand, proxyUrl }
-    return stagehand
-  }
-
-  private async getPage(stagehand: any): Promise<any> {
-    if (stagehand.page) return stagehand.page
-    // Fallback: get the first page from the browser context
-    const pages = await stagehand.browser.pages()
-    if (pages.length > 0) return pages[0]
-    // Create a new page if none exists
-    return await stagehand.browser.newPage()
-  }
-
-  private async browserLaunchTool(args: Record<string, unknown>): Promise<unknown> {
-    await this.getBrowser(args)
-    return { type: 'text', text: 'Browser launched successfully' }
-  }
-
-  private async browserActTool(args: Record<string, unknown>): Promise<unknown> {
-    const stagehand = await this.getBrowser(args)
-    const page = await this.getPage(stagehand)
-    const action = String(args.action)
-    const result = await page.act({ action })
-    return { type: 'text', text: JSON.stringify(result, null, 2) }
-  }
-
-  private async browserExtractTool(args: Record<string, unknown>): Promise<unknown> {
-    const stagehand = await this.getBrowser(args)
-    const page = await this.getPage(stagehand)
-    const instruction = String(args.instruction)
-    const schema = args.schema as Record<string, unknown> ?? {}
-    const result = await page.extract({ instruction, schema })
-    return { type: 'text', text: JSON.stringify(result, null, 2) }
-  }
-
-  private async browserObserveTool(args: Record<string, unknown>): Promise<unknown> {
-    const stagehand = await this.getBrowser(args)
-    const page = await this.getPage(stagehand)
-    const instruction = String(args.instruction ?? 'Observe the page')
-    const result = await page.observe({ instruction })
-    return { type: 'text', text: JSON.stringify(result, null, 2) }
-  }
-
-  private async browserGotoTool(args: Record<string, unknown>): Promise<unknown> {
-    const stagehand = await this.getBrowser(args)
-    const page = await this.getPage(stagehand)
-    const url = String(args.url)
-    await page.goto(url)
-    return { type: 'text', text: `Navigated to ${url}` }
-  }
 
   async runPrompt(request: RuntimePromptRequest): Promise<RuntimePromptResult> {
     if (!this.config.endpoint || !this.config.model) {
@@ -256,7 +168,7 @@ export class PapyrusWorker implements AgentRuntime {
     const messages: ModelMessage[] = [
       {
         role: 'system',
-        content: 'You are the Papyrus governed worker. Use the supplied tools to complete tasks. Built-in tools: papyrus_read_file, papyrus_write_file, papyrus_list_files, papyrus_glob for filesystem access; papyrus_exec_code for sandboxed code execution (Python/JS); papyrus_generate for image generation; papyrus_browser_launch/act/extract/observe/goto for web automation (supports Tor via sandbox SOCKS5 proxy); papyrus_request_input for user clarification. Never claim an action completed unless its tool result confirms it.',
+        content: 'You are the Papyrus governed worker. Use the supplied tools to complete tasks. Built-in tools: papyrus_read_file, papyrus_write_file, papyrus_list_files, papyrus_glob for filesystem access; papyrus_exec_code for sandboxed code execution (Python/JS); papyrus_generate for image generation; papyrus_request_input for user clarification. Never claim an action completed unless its tool result confirms it.',
       },
       { role: 'user', content: promptContent(request.prompt) },
     ]
@@ -355,76 +267,6 @@ export class PapyrusWorker implements AgentRuntime {
       {
         type: 'function' as const,
         function: {
-          name: 'papyrus_browser_launch',
-          description: 'Launch a browser session. Optionally enable Tor routing via sandbox SOCKS5 proxy.',
-          parameters: {
-            type: 'object',
-            properties: {
-              useTor: { type: 'boolean', default: false, description: 'Route traffic through Tor via sandbox SOCKS5 proxy' },
-            },
-          },
-        },
-      },
-      {
-        type: 'function' as const,
-        function: {
-          name: 'papyrus_browser_goto',
-          description: 'Navigate to a URL in the browser.',
-          parameters: {
-            type: 'object',
-            properties: {
-              url: { type: 'string', description: 'URL to navigate to' },
-            },
-            required: ['url'],
-          },
-        },
-      },
-      {
-        type: 'function' as const,
-        function: {
-          name: 'papyrus_browser_act',
-          description: 'Perform an action in the browser (click, type, scroll, etc.) using natural language.',
-          parameters: {
-            type: 'object',
-            properties: {
-              action: { type: 'string', description: 'Action to perform (e.g., "click the login button", "type hello in search box")' },
-            },
-            required: ['action'],
-          },
-        },
-      },
-      {
-        type: 'function' as const,
-        function: {
-          name: 'papyrus_browser_extract',
-          description: 'Extract structured data from the current page using natural language and optional JSON schema.',
-          parameters: {
-            type: 'object',
-            properties: {
-              instruction: { type: 'string', description: 'What to extract (e.g., "extract all product prices as a list")' },
-              schema: { type: 'object', description: 'Optional JSON schema for structured output' },
-            },
-            required: ['instruction'],
-          },
-        },
-      },
-      {
-        type: 'function' as const,
-        function: {
-          name: 'papyrus_browser_observe',
-          description: 'Observe the current page and return actionable elements.',
-          parameters: {
-            type: 'object',
-            properties: {
-              instruction: { type: 'string', description: 'What to look for (e.g., "find all forms", "locate the submit button")' },
-            },
-            required: ['instruction'],
-          },
-        },
-      },
-      {
-        type: 'function' as const,
-        function: {
           name: 'papyrus_request_input',
           description: 'Request structured input from the authenticated user when required to continue.',
           parameters: {
@@ -489,16 +331,6 @@ export class PapyrusWorker implements AgentRuntime {
             result = await this.execCodeTool(args)
           } else if (name === 'papyrus_generate') {
             result = await this.generateImageTool(args)
-          } else if (name === 'papyrus_browser_launch') {
-            result = await this.browserLaunchTool(args)
-          } else if (name === 'papyrus_browser_goto') {
-            result = await this.browserGotoTool(args)
-          } else if (name === 'papyrus_browser_act') {
-            result = await this.browserActTool(args)
-          } else if (name === 'papyrus_browser_extract') {
-            result = await this.browserExtractTool(args)
-          } else if (name === 'papyrus_browser_observe') {
-            result = await this.browserObserveTool(args)
           } else if (name === 'papyrus_request_input') {
             if (!request.elicit) throw new Error('Interactive input is unavailable')
             result = await request.elicit({

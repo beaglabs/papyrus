@@ -67,8 +67,8 @@ function markdownBlocks(markdown: string): ReactNode[] {
     const heading = line.match(/^(#{1,4})\s+(.+)$/)
     if (heading) {
       flushParagraph()
-      const level = heading[1].length
-      const children = inlineMarkdown(heading[2])
+      const level = heading[1]!.length
+      const children = inlineMarkdown(heading[2]!)
       blocks.push(level === 1 ? <h1 key={`h-${blocks.length}`}>{children}</h1>
         : level === 2 ? <h2 key={`h-${blocks.length}`}>{children}</h2>
           : level === 3 ? <h3 key={`h-${blocks.length}`}>{children}</h3>
@@ -77,7 +77,7 @@ function markdownBlocks(markdown: string): ReactNode[] {
     }
     if (/^\s*([-*_])\1\1+\s*$/.test(line)) { flushParagraph(); blocks.push(<hr key={`hr-${blocks.length}`} />); continue }
     const item = line.match(/^\s*[-*+]\s+(.+)$/)
-    if (item) { flushParagraph(); blocks.push(<div className="source-preview-item" key={`li-${blocks.length}`}>• {inlineMarkdown(item[1])}</div>); continue }
+    if (item) { flushParagraph(); blocks.push(<div className="source-preview-item" key={`li-${blocks.length}`}>• {inlineMarkdown(item[1]!)}</div>); continue }
     if (!line.trim()) { flushParagraph(); continue }
     if (/^\s*<\/?(?:div|p|center)(?:\s[^>]*)?>\s*$/i.test(line)) continue
     paragraph.push(line.trim())
@@ -97,9 +97,9 @@ function inlineMarkdown(value: string): ReactNode[] {
     const token = match[0]
     const link = token.match(/^(!?)\[([^\]]*)\]\(([^)]+)\)$/)
     if (link) {
-      const image = link[1] === '!'
-      const label = link[2]
-      const href = safeHttpUrl(link[3])
+      const image = link[1]! === '!'
+      const label = link[2]!
+      const href = safeHttpUrl(link[3]!)
       output.push(image
         ? href ? <img key={match.index} src={href} alt={label} loading="lazy" /> : <span key={match.index}>{label}</span>
         : href ? <a key={match.index} href={href} target="_blank" rel="noreferrer">{label}</a> : <span key={match.index}>{label}</span>)

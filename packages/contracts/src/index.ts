@@ -14,6 +14,20 @@ export interface Principal {
   authMethod: 'oidc' | 'mtls'
 }
 
+export interface Invitation {
+  id: string
+  email: string
+  role: Role
+  authMethod: 'oidc' | 'mtls'
+  status: 'pending' | 'accepted' | 'cancelled' | 'expired'
+  invitedBy: string
+  acceptedBy?: string
+  createdAt: string
+  expiresAt: string
+  acceptedAt?: string
+  cancelledAt?: string
+}
+
 export interface Environment {
   id: string
   name: string
@@ -159,6 +173,7 @@ export interface AdminOverview {
     licenseRequired: boolean
   }
   users: Principal[]
+  invitations: Invitation[]
   environments: AdminEnvironment[]
   mcpServers: McpServer[]
   toolGrants: ToolGrant[]

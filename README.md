@@ -24,9 +24,11 @@ Papyrus is not an agent harness and does not provide a chat or browser-session U
 - **Authorization** — deny-by-default Cedar policy with fixed Owner, Admin, User, and Auditor roles
 - **Audit** — append-only SQLite events with a SHA-256 hash chain
 - **Sessions** — user-owned runtime sessions with administrative and audit visibility
-- **MCP mediation** — workspace-scoped server and tool grants through a session-bound proxy
+- **MCP mediation** — environment-scoped server and tool grants through a session-bound proxy
 - **Offline licensing** — deployment-bound signed licenses required in persistent mode
 - **Runtime adapter** — the current implementation uses Goose behind a replaceable ACP boundary
+
+Papyrus does not embed a browser engine or expose native browser tools. Browser and legacy web automation are supplied by an administrator-approved MCP server, assigned to an environment, and mediated through the existing Cedar browser actions. A separate reference `papyrus-browser-mcp` based on Lightpanda is planned; it is not part of the core daemon.
 
 The active daemon-first migration plan is documented in [ACP daemon stack](docs/acp-daemon-stack.md). Runtime-neutral core interfaces, local stdio supervision, remote Streamable HTTP, external client bridging, adapter profiles, and the hardened FIPS image land as separate stacked pull requests.
 
@@ -96,7 +98,7 @@ export PAPYRUS_MODEL_ENDPOINT=https://openrouter.ai/api
 export PAPYRUS_MODEL=liquid/lfm-2.5-2.6b:free
 export PAPYRUS_MODEL_API_KEY=your-openrouter-key
 
-# Optional: sandbox runtime for code execution and Tor
+# Optional: sandbox runtime for code execution
 # export PAPYRUS_SANDBOX_API_KEY=... (not required for local sandbox-runtime)
 
 pnpm start

@@ -176,6 +176,8 @@ export interface AdminOverview {
     profile: DeploymentProfile
     publicOrigin: string
     authentication: 'oidc' | 'mtls' | 'trusted-proxy' | 'none'
+    organizationName: string
+    organizationDomain?: string
     mtlsConfigured: boolean
     identityProxyConfigured: boolean
     gatewayConfigured: boolean

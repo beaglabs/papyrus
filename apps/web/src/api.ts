@@ -35,6 +35,12 @@ export class AuthenticationRequired extends ApiError {
   }
 }
 
+export class EnrollmentRequired extends ApiError {
+  constructor(readonly health: Health) {
+    super(403, 'INVITATION_REQUIRED', 'No pending identity matches this organizational identity')
+  }
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
@@ -61,6 +67,10 @@ export async function loadShell(): Promise<ShellData> {
   if (meResponse.status === 401) {
     const challenge = await meResponse.json() as AuthenticationChallenge
     throw new AuthenticationRequired(challenge, health)
+  }
+  if (meResponse.status === 403) {
+    const failure = await meResponse.json().catch(() => null) as { code?: string } | null
+    if (failure?.code === 'INVITATION_REQUIRED') throw new EnrollmentRequired(health)
   }
   if (!meResponse.ok) throw new ApiError(meResponse.status, 'IDENTITY_FAILED', 'Unable to load identity')
   const me = await meResponse.json() as Principal

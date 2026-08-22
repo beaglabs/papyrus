@@ -47,13 +47,21 @@ function normalizeFingerprint(value: string): string {
   return value.replaceAll(':', '').toLowerCase()
 }
 
-function certificateName(certificate: X509Certificate): { displayName: string; email?: string } {
+function certificateIdentity(certificate: X509Certificate): { externalId: string; displayName: string; email?: string; stableKind: string } {
   const commonName = certificate.subject.match(/(?:^|\n)CN=([^\n]+)/)?.[1]
   const email = certificate.subjectAltName?.match(/(?:^|,\s*)email:([^,]+)/i)?.[1]
     ?? certificate.subject.match(/(?:^|\n)emailAddress=([^\n]+)/)?.[1]
+  const upn = certificate.subjectAltName?.match(/(?:^|,\s*)(?:othername:\s*)?UPN:([^,]+)/i)?.[1]
+  const edipi = commonName?.match(/(?:\.|\b)(\d{10})$/)?.[1]
+  const issuer = createHash('sha256').update(certificate.issuer).digest('hex').slice(0, 24)
+  const externalId = edipi ? `x509:edipi:${edipi}`
+    : upn ? `x509:upn:${upn.trim().toLowerCase()}`
+    : email ? `x509:email:${issuer}:${email.trim().toLowerCase()}`
+    : `x509:fingerprint:${normalizeFingerprint(certificate.fingerprint256)}`
   return {
-    displayName: commonName ?? email ?? certificate.fingerprint256,
-    ...(email ? { email } : {}),
+    externalId, displayName: commonName ?? upn ?? email ?? certificate.fingerprint256,
+    ...(email ? { email: email.trim().toLowerCase() } : {}),
+    stableKind: edipi ? 'edipi' : upn ? 'upn' : email ? 'issuer_email' : 'fingerprint_fallback',
   }
 }
 
@@ -293,9 +301,9 @@ export class AuthService {
   }
 
   private principalFromCertificate(certificate: X509Certificate): Principal {
-    const identity = certificateName(certificate)
+    const identity = certificateIdentity(certificate)
     const resolved = this.db.resolveAuthenticatedUser({
-      externalId: `x509:${certificate.fingerprint256}`,
+      externalId: identity.externalId,
       displayName: identity.displayName,
       ...(identity.email ? { email: identity.email } : {}),
       authMethod: 'mtls',
@@ -304,7 +312,7 @@ export class AuthService {
       this.audit.append({
         actorId: resolved.principal.id, action: resolved.invitation ? 'AcceptInvitation' : 'Authenticate',
         resourceType: resolved.invitation ? 'Invitation' : 'User', resourceId: resolved.invitation?.id ?? resolved.principal.id,
-        decision: 'allow', metadata: { method: 'mtls', created: true, invitationId: resolved.invitation?.id ?? null, certificateFingerprint: normalizeFingerprint(certificate.fingerprint256) },
+        decision: 'allow', metadata: { method: 'mtls', created: true, invitationId: resolved.invitation?.id ?? null, certificateFingerprint: normalizeFingerprint(certificate.fingerprint256), stableIdentityKind: identity.stableKind },
       })
     }
     return resolved.principal

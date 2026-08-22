@@ -14,7 +14,7 @@ export function testContext(runtimeFactory?: RuntimeFactory) {
   const dataDir = mkdtempSync(join(tmpdir(), 'papyrus-test-'))
   const config: ServerConfig = {
     mode: 'local', profile: 'commercial', host: '127.0.0.1', port: 3210, dataDir,
-    databasePath: ':memory:', publicOrigin: 'http://127.0.0.1:3210', promptTimeoutMs: 30_000,
+    databasePath: ':memory:', publicOrigin: 'http://127.0.0.1:3210', branding: { organizationName: 'Test Organization', organizationDomain: 'example.test' }, promptTimeoutMs: 30_000,
     bootstrapSecret: 'correct horse battery staple',
     sessionSecret: 'test-session-secret-that-is-at-least-32-characters', licenseRequired: false, licenseAuthorities: {},
   }

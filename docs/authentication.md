@@ -26,18 +26,27 @@ signed, revocable `HttpOnly` session cookie.
 
 After the one-time Owner bootstrap is complete, Papyrus does not provision a new
 local principal merely because an identity provider or certificate chain accepts
-the identity. An Owner or Admin must first create an invitation containing the
-organizational email, initial fixed role, and required authentication method.
+the identity. An Owner or Admin must first create a profile-appropriate pending
+identity.
 
-On successful authentication Papyrus matches the validated email and method to
-one unexpired pending invitation, then atomically creates the local principal,
-assigns the initial role, and marks the invitation accepted. Unmatched identities
-receive `INVITATION_REQUIRED` and are not inserted into the user directory.
+Commercial deployments use a case-insensitive organizational email selector.
+The first validated OIDC login must match that email; Papyrus then binds the user
+durably to the validated issuer and subject (`iss + sub`). The tenant-branded
+entry screen may show a configured organization logo, while the user avatar uses
+the optional OIDC `picture` claim and falls back to initials.
+
+Government deployments never use email as the identity selector. A pending
+identity uses EDIPI/DoD ID, UPN, PIV UUID, FASC-N, or an issuer-plus-subject
+mapping. Contact email is optional metadata. Papyrus extracts all supported
+selectors from the CA-validated certificate, matches one unexpired pending
+identity, creates the local principal, assigns its initial role, and records the
+acceptance in the hash-chained audit log. Government avatars initially use
+initials; Papyrus does not extract the cardholder facial-image biometric.
 
 Invitations expire after seven days. Creation, cancellation, acceptance,
-authentication denial, bootstrap denial, role assignment, session revocation,
-and logout are recorded in the hash-chained audit log. Secrets, OIDC tokens,
-invitation credentials, and certificate bodies are never audit metadata.
+application-visible authentication denial, bootstrap denial, role assignment,
+session revocation, identity migration, and logout are audited. Secrets, OIDC
+tokens, certificate bodies, and biometric objects are never audit metadata.
 
 ## Native client browser handoff
 

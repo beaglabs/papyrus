@@ -28,7 +28,12 @@ h2 { font-size: 19px; margin-bottom: 20px; }
 .identity { display: flex; gap: 12px; align-items: center; }
 .identity > div:first-child { display: grid; text-align: right; }
 .identity span { color: #666; font: 11px ui-monospace, monospace; }
-.avatar { width: 44px; height: 44px; display: grid; place-items: center; border: 2px solid #111; background: #82c9ff; box-shadow: 3px 3px 0 #111; font-weight: 800; }
+.avatar { width: 44px; height: 44px; display: grid; place-items: center; overflow: hidden; border: 2px solid #111; background: #82c9ff; box-shadow: 3px 3px 0 #111; font-weight: 800; }
+.avatar img { width: 100%; height: 100%; object-fit: cover; }
+.organization-mark { width: 112px; height: 112px; display: grid; place-items: center; overflow: hidden; border: 3px solid #111; background: #fff; box-shadow: 7px 7px 0 #111; font-size: 2rem; font-weight: 900; }
+.organization-mark img { width: 82%; height: 82%; object-fit: contain; }
+.tenant-login > .brand { margin-top: 1.5rem; opacity: .72; }
+.logo-attribution { color: #555; font-size: .72rem; }
 .text-button { border: 0; border-bottom: 1px solid #111; background: transparent; padding: 4px 0; cursor: pointer; font: 11px ui-monospace, monospace; }
 .grid-two { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
 .wide-left { grid-template-columns: 1.3fr .7fr; }

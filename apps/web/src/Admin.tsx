@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { ROLES, type AdminOverview, type Principal, type Role } from '@papyrus/contracts'
+import { GOVERNMENT_IDENTITY_KINDS, ROLES, type AdminOverview, type InvitationIdentityKind, type Principal, type Role } from '@papyrus/contracts'
 import { addMcpServer, addUserRole, adminOverview, cancelInvitation, createInvitation, revokeUserSessions, setMcpServerEnabled } from './api.js'
 import { SelectField } from './SelectField.js'
 
@@ -22,27 +22,43 @@ export function AdminView({ me }: { me: Principal }) {
     <div className="admin-tabs" role="tablist">{(['deployment', 'identity', 'integrations'] as AdminTab[]).map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item}</button>)}</div>
     {tab === 'deployment' && <section className="admin-summary"><AdminPanel title="Deployment"><dl className="facts"><Fact label="Profile" value={data.deployment.profile} /><Fact label="Topology" value="ON-PREMISES" /><Fact label="Origin" value={data.deployment.publicOrigin} /><Fact label="Authentication" value={authenticationLabel(data.deployment.authentication)} /><Fact label="Gateway" value={yes(data.deployment.gatewayConfigured)} /></dl></AdminPanel><AdminPanel title="License"><dl className="facts"><Fact label="Required" value={yes(data.deployment.licenseRequired)} /><Fact label="Status" value={data.license.valid ? 'VALID' : 'NOT ACTIVE'} /><Fact label="Deployment" value={data.license.deploymentId.slice(0, 16)} /></dl></AdminPanel></section>}
     {tab === 'identity' && <section className="admin-summary">
-      <AdminPanel title="Invite a user">
+      <AdminPanel title={data.deployment.profile === 'commercial' ? 'Invite with organizational OIDC' : 'Create pending CAC/PIV identity'}>
         <form className="admin-form" onSubmit={(event) => {
           event.preventDefault()
           const form = event.currentTarget
           const values = new FormData(form)
+          const commercial = data.deployment.profile === 'commercial'
+          const identityValue = String(values.get(commercial ? 'commercialEmail' : 'identityValue'))
           void act(async () => {
-            await createInvitation(String(values.get('email')), String(values.get('role')) as Role, String(values.get('authMethod')) as 'oidc' | 'mtls')
+            await createInvitation({
+              identityKind: (commercial ? 'email' : String(values.get('identityKind'))) as InvitationIdentityKind,
+              identityValue,
+              displayName: String(values.get('displayName')),
+              ...(!commercial && values.get('contactEmail') ? { email: String(values.get('contactEmail')) } : {}),
+              role: String(values.get('role')) as Role,
+            })
             form.reset()
           })
         }}>
-          <input name="email" type="email" required maxLength={256} placeholder="Organizational email" />
+          <input name="displayName" required maxLength={256} placeholder="Display name" />
+          {data.deployment.profile === 'commercial'
+            ? <input name="commercialEmail" type="email" required maxLength={256} placeholder="Organizational email" />
+            : <>
+              <SelectField name="identityKind" label="Stable CAC/PIV identifier" placeholder="Choose an identifier" options={GOVERNMENT_IDENTITY_KINDS.map((kind) => ({ value: kind, label: identityKindLabel(kind) }))} />
+              <input name="identityValue" required maxLength={1024} placeholder="Validated identifier value" />
+              <input name="contactEmail" type="email" maxLength={256} placeholder="Contact email (optional)" />
+            </>}
           <SelectField name="role" label="Initial role" placeholder="Choose a role" options={allowedRoles.map((role) => ({ value: role, label: role }))} />
-          <SelectField name="authMethod" label="Authentication" placeholder="Choose authentication" options={[{ value: 'oidc', label: 'Organizational OIDC' }, { value: 'mtls', label: 'CAC/PIV mTLS' }]} />
-          <button className="primary" disabled={busy}>Create invitation</button>
+          <button className="primary" disabled={busy}>Create pending identity</button>
         </form>
-        <p className="admin-note">Invitations expire after seven days and are accepted only when the authenticated organizational email and authentication method match.</p>
+        <p className="admin-note">{data.deployment.profile === 'commercial'
+          ? 'The first validated OIDC login must match this email. Papyrus then binds the user to the provider issuer and subject.'
+          : 'Papyrus matches this value against the validated CAC/PIV certificate. Email is optional and is never the government identity selector.'}</p>
       </AdminPanel>
-      <AdminPanel title="Pending invitations">
+      <AdminPanel title="Pending identities">
         <div className="admin-list compact">{data.invitations.filter((invitation) => invitation.status === 'pending').length
-          ? data.invitations.filter((invitation) => invitation.status === 'pending').map((invitation) => <article key={invitation.id}><div><strong>{invitation.email}</strong><span>{invitation.role} · {authenticationLabel(invitation.authMethod)}</span><span>Expires {new Date(invitation.expiresAt).toLocaleString()}</span></div><button className="danger" disabled={busy} onClick={() => void act(() => cancelInvitation(invitation.id))}>Cancel invite</button></article>)
-          : <div className="empty">No pending invitations.</div>}</div>
+          ? data.invitations.filter((invitation) => invitation.status === 'pending').map((invitation) => <article key={invitation.id}><div><strong>{invitation.displayName}</strong><span>{identityKindLabel(invitation.identityKind)} · {invitation.identityValue}</span><span>{invitation.email ? `${invitation.email} · ` : ''}{invitation.role} · expires {new Date(invitation.expiresAt).toLocaleString()}</span></div><button className="danger" disabled={busy} onClick={() => void act(() => cancelInvitation(invitation.id))}>Cancel</button></article>)
+          : <div className="empty">No pending identities.</div>}</div>
       </AdminPanel>
       <AdminPanel title="Identity and roles"><div className="admin-list">{data.users.map((user) => {
         const eligibleRoles = allowedRoles.filter((role) => !user.roles.includes(role))
@@ -60,4 +76,7 @@ export function AdminView({ me }: { me: Principal }) {
 function AdminPanel({ title, children }: { title: string; children: ReactNode }) { return <article className="panel admin-panel"><div className="panel-head"><h2>{title}</h2></div>{children}</article> }
 function Fact({ label, value }: { label: string; value: string }) { return <div><dt>{label}</dt><dd>{value}</dd></div> }
 function yes(value: boolean) { return value ? 'CONFIGURED' : 'NOT CONFIGURED' }
+function identityKindLabel(value: string) {
+  return ({ email: 'Organizational email', edipi: 'EDIPI / DoD ID', upn: 'UPN', piv_uuid: 'PIV UUID', fasc_n: 'FASC-N', issuer_subject: 'Issuer + certificate subject' } as Record<string, string>)[value] ?? value
+}
 function authenticationLabel(value: Principal['authMethod'] | AdminOverview['deployment']['authentication']) { return ({ oidc: 'ORGANIZATIONAL OIDC', mtls: 'CAC/PIV MTLS', 'trusted-proxy': 'TRUSTED IDENTITY PROXY', none: 'NONE CONFIGURED' } as Record<string, string>)[value] ?? String(value).toUpperCase() }

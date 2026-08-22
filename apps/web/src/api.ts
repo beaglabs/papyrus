@@ -1,10 +1,15 @@
-import type { AdminOverview, Approval, Artifact, Attachment, Elicitation, Environment, Invitation, McpServer, Principal, ResearchSource, Role, Session, SessionEvent, SessionRun } from '@papyrus/contracts'
+import type { AdminOverview, Approval, Artifact, Attachment, Elicitation, Environment, Invitation, InvitationIdentityKind, McpServer, Principal, ResearchSource, Role, Session, SessionEvent, SessionRun } from '@papyrus/contracts'
 
 export interface Health {
   topology: 'on-premises'
   profile: string
   cedar: string
   bootstrapRequired: boolean
+  branding: {
+    organizationName: string
+    organizationDomain?: string
+    logoUrl?: string
+  }
 }
 
 export interface AuthenticationChallenge {
@@ -27,6 +32,12 @@ export class ApiError extends Error {
 export class AuthenticationRequired extends ApiError {
   constructor(readonly challenge: AuthenticationChallenge, readonly health: Health) {
     super(401, challenge.code, 'Authentication required')
+  }
+}
+
+export class EnrollmentRequired extends ApiError {
+  constructor(readonly health: Health) {
+    super(403, 'INVITATION_REQUIRED', 'No pending identity matches this organizational identity')
   }
 }
 
@@ -56,6 +67,10 @@ export async function loadShell(): Promise<ShellData> {
   if (meResponse.status === 401) {
     const challenge = await meResponse.json() as AuthenticationChallenge
     throw new AuthenticationRequired(challenge, health)
+  }
+  if (meResponse.status === 403) {
+    const failure = await meResponse.json().catch(() => null) as { code?: string } | null
+    if (failure?.code === 'INVITATION_REQUIRED') throw new EnrollmentRequired(health)
   }
   if (!meResponse.ok) throw new ApiError(meResponse.status, 'IDENTITY_FAILED', 'Unable to load identity')
   const me = await meResponse.json() as Principal
@@ -159,8 +174,14 @@ export async function researchSources(): Promise<ResearchSource[]> {
 }
 
 export async function adminOverview(): Promise<AdminOverview> { return api('/api/admin/overview') }
-export async function createInvitation(email: string, role: Role, authMethod: Invitation['authMethod']): Promise<Invitation> {
-  return api('/api/invitations', { method: 'POST', body: JSON.stringify({ email, role, authMethod }) })
+export async function createInvitation(input: {
+  identityKind: InvitationIdentityKind
+  identityValue: string
+  displayName: string
+  email?: string
+  role: Role
+}): Promise<Invitation> {
+  return api('/api/invitations', { method: 'POST', body: JSON.stringify(input) })
 }
 
 export async function cancelInvitation(invitationId: string): Promise<Invitation> {

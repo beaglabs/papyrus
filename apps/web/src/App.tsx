@@ -116,6 +116,7 @@ function SignedOut({ health, challenge }: { health: Health; challenge: Authentic
         {challenge.methods.length === 0 && <div className="error">This deployment has no configured organizational OIDC provider.</div>}
       </div>
       <Logo />
+      {health.branding.logoUrl && <a className="logo-attribution" href="https://logo.dev" rel="noreferrer">Logos provided by Logo.dev</a>}
     </main></>
   }
   return <><HandlingBanner profile={health.profile} /><main className="center login auth-entry"><Logo /><p className="eyebrow">GOVERNED AGENT WORKSPACE</p><h1>Identity before<br />authority.</h1><p>Papyrus binds every session, tool request, and policy decision to an authenticated organizational identity.</p><div className="auth-grid">

@@ -2,7 +2,7 @@ import { createServer as createHttpServer, type IncomingMessage, type Server, ty
 import { createServer as createHttpsServer } from 'node:https'
 import { readFileSync } from 'node:fs'
 import { extname, join, normalize } from 'node:path'
-import { INVITATION_IDENTITY_KINDS, ROLES, type InvitationIdentityKind, type Role, type SignedLicense } from '@papyrus/contracts'
+import { ROLES, type Role, type SignedLicense } from '@papyrus/contracts'
 import { AuthService } from './auth.js'
 import type { ServerConfig } from './config.js'
 import { ApprovalLifecycleError, AuthorizationDenied, PapyrusService, SessionLifecycleError } from './service.js'
@@ -246,10 +246,8 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
         const input = await body(request)
         const role = text(input.role, 'role') as Role
         if (!ROLES.includes(role)) throw new HttpError(400, 'INVALID_INPUT', 'Unknown fixed role')
-        const identityKind = text(input.identityKind, 'identityKind') as InvitationIdentityKind
-        if (!INVITATION_IDENTITY_KINDS.includes(identityKind)) throw new HttpError(400, 'INVALID_INPUT', 'Unknown identity selector')
         return json(response, 201, service.createInvitation(principal, {
-          identityKind, identityValue: text(input.identityValue, 'identityValue', 1024),
+          identityValue: text(input.identityValue, 'identityValue', 1024),
           displayName: text(input.displayName, 'displayName'),
           ...(typeof input.email === 'string' && input.email.trim() ? { email: input.email.trim() } : {}),
           role,

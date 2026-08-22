@@ -92,7 +92,6 @@ export class PapyrusService {
   }
 
   createInvitation(actor: Principal, input: {
-    identityKind: InvitationIdentityKind
     identityValue: string
     displayName: string
     email?: string
@@ -104,15 +103,14 @@ export class PapyrusService {
       throw new AuthorizationDenied('CreatePrivilegedInvitation', input.identityValue)
     }
     const commercial = this.config.profile === 'commercial'
-    if (commercial && input.identityKind !== 'email') throw new Error('Commercial invitations must use organizational email')
-    if (!commercial && input.identityKind === 'email') throw new Error('Government pending identities must use a stable CAC/PIV identifier')
-    const identityValue = normalizePendingIdentity(input.identityKind, input.identityValue)
+    const identityKind: InvitationIdentityKind = commercial ? 'email' : inferGovernmentIdentityKind(input.identityValue)
+    const identityValue = normalizePendingIdentity(identityKind, input.identityValue)
     const displayName = input.displayName.trim()
     if (!displayName || displayName.length > 256) throw new Error('Display name is required and must not exceed 256 characters')
     const email = input.email?.trim().toLowerCase()
     if (email && !isEmail(email)) throw new Error('Optional contact email is invalid')
     const invitation = this.db.createInvitation({
-      identityKind: input.identityKind, identityValue, displayName,
+      identityKind, identityValue, displayName,
       ...(commercial ? { email: identityValue } : email ? { email } : {}),
       role: input.role, authMethod: commercial ? 'oidc' : 'mtls', invitedBy: actor.id,
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
@@ -525,7 +523,6 @@ export class PapyrusService {
       invitations: this.db.listInvitations(),
       environments: this.db.listEnvironments().map((environment) => ({ ...environment, assignedUserIds: this.db.assignedUserIds('environment', environment.id) })),
       mcpServers: this.db.listMcpServers(), toolGrants: this.db.listToolGrants(),
-      connectors: (this.config.connectors ?? []).map((connector) => ({ id: connector.id, label: connector.label, package: connector.package, source: connector.source, operations: { ...connector.operations } })),
       license: this.license.status(),
     }
   }
@@ -833,6 +830,16 @@ export class PapyrusService {
 
 function isEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+}
+
+function inferGovernmentIdentityKind(value: string): InvitationIdentityKind {
+  const normalized = value.trim()
+  if (/^\d{10}$/.test(normalized)) return 'edipi'
+  if (/^\d{40}$/.test(normalized)) return 'fasc_n'
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(normalized)) return 'piv_uuid'
+  if (isEmail(normalized)) return 'upn'
+  if (/^[0-9a-f]{24}:.+$/i.test(normalized)) return 'issuer_subject'
+  throw new Error('CAC/PIV identifier must be a 10-digit EDIPI, UPN, PIV UUID, 40-digit FASC-N, or <issuer-hash>:<normalized-subject>')
 }
 
 function normalizePendingIdentity(kind: InvitationIdentityKind, value: string): string {

@@ -2,7 +2,7 @@ import { createServer as createHttpServer, type IncomingMessage, type Server, ty
 import { createServer as createHttpsServer } from 'node:https'
 import { readFileSync } from 'node:fs'
 import { extname, join, normalize } from 'node:path'
-import { ROLES, type Role, type SignedLicense } from '@papyrus/contracts'
+import { ROLES, SESSION_SURFACES, type Role, type SessionSurface, type SignedLicense } from '@papyrus/contracts'
 import { AuthService } from './auth.js'
 import type { ServerConfig } from './config.js'
 import { ApprovalLifecycleError, AuthorizationDenied, PapyrusService, SessionLifecycleError } from './service.js'
@@ -295,7 +295,9 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
         const input = await body(request)
         const cwd = typeof input.cwd === 'string' ? text(input.cwd, 'cwd', 4096) : '/'
         const agent = typeof input.agent === 'string' ? text(input.agent, 'agent') : service.defaultGatewayAgent()
-        return json(response, 201, service.createSession(principal, identifier(input.environmentId ?? input.workspaceId, 'environmentId'), agent, text(input.title, 'title'), cwd))
+        const surface = typeof input.surface === 'string' ? text(input.surface, 'surface') as SessionSurface : 'general'
+        if (!SESSION_SURFACES.includes(surface)) throw new HttpError(400, 'INVALID_INPUT', 'Unknown session surface')
+        return json(response, 201, service.createSession(principal, identifier(input.environmentId ?? input.workspaceId, 'environmentId'), agent, text(input.title, 'title'), cwd, surface))
       }
       const sessionDetail = url.pathname.match(/^\/api\/sessions\/([^/]+)$/)
       if (sessionDetail && request.method === 'GET') {
@@ -407,11 +409,20 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
         service.deleteSession(principal, decodeURIComponent(deleteSession[1] as string))
         return json(response, 204, null)
       }
-      const sessionMode = url.pathname.match(/^\/api\/sessions\/([^/]+)\/mode$/)
-      if (sessionMode && request.method === 'POST') {
+      const sessionConfig = url.pathname.match(/^\/api\/sessions\/([^/]+)\/config-options$/)
+      if (sessionConfig && request.method === 'GET') {
+        return json(response, 200, { configOptions: service.sessionConfigOptions(principal, decodeURIComponent(sessionConfig[1] as string)) })
+      }
+      if (sessionConfig && request.method === 'POST') {
         const input = await body(request)
-        service.setSessionMode(principal, decodeURIComponent(sessionMode[1] as string), text(input.modeId, 'modeId'))
-        return json(response, 204, null)
+        return json(response, 200, {
+          configOptions: service.setSessionConfigOption(
+            principal,
+            decodeURIComponent(sessionConfig[1] as string),
+            text(input.configId, 'configId'),
+            text(input.value, 'value'),
+          ),
+        })
       }
       const resumeSession = url.pathname.match(/^\/api\/sessions\/([^/]+)\/resume$/)
       if (resumeSession && request.method === 'POST') {

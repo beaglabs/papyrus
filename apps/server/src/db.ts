@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import type { Approval, Attachment, Elicitation, Environment, McpServer, Principal, Role, Session, SessionEvent, SessionRun, ToolGrant } from '@papyrus/contracts'
+import type { Approval, Attachment, Elicitation, Environment, Invitation, McpServer, Principal, Role, Session, SessionEvent, SessionRun, ToolGrant } from '@papyrus/contracts'
 
 type Row = Record<string, unknown>
 
@@ -31,6 +31,12 @@ export class PapyrusDatabase {
       CREATE TABLE IF NOT EXISTS user_roles (
         user_id TEXT NOT NULL REFERENCES users(id), role TEXT NOT NULL,
         PRIMARY KEY (user_id, role)
+      );
+      CREATE TABLE IF NOT EXISTS invitations (
+        id TEXT PRIMARY KEY, email TEXT NOT NULL, role TEXT NOT NULL, auth_method TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('pending','accepted','cancelled')),
+        invited_by TEXT NOT NULL REFERENCES users(id), accepted_by TEXT REFERENCES users(id),
+        created_at TEXT NOT NULL, expires_at TEXT NOT NULL, accepted_at TEXT, cancelled_at TEXT
       );
       CREATE TABLE IF NOT EXISTS groups (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS group_members (
@@ -125,6 +131,9 @@ export class PapyrusDatabase {
     }
     this.sqlite.prepare("UPDATE assignments SET resource_type='environment' WHERE resource_type='workspace'").run()
     this.sqlite.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS invitations_one_pending_identity
+        ON invitations(lower(email), auth_method) WHERE status='pending';
+      CREATE INDEX IF NOT EXISTS invitations_status_created ON invitations(status, created_at DESC);
       CREATE INDEX IF NOT EXISTS session_runs_session_started ON session_runs(session_id, started_at DESC);
       CREATE INDEX IF NOT EXISTS runtime_events_session_sequence ON runtime_events(session_id, id);
       CREATE UNIQUE INDEX IF NOT EXISTS session_runs_one_active ON session_runs(session_id) WHERE status='running';
@@ -185,6 +194,64 @@ export class PapyrusDatabase {
 
   setRole(userId: string, role: Role): void {
     this.sqlite.prepare('INSERT OR IGNORE INTO user_roles(user_id,role) VALUES(?,?)').run(userId, role)
+  }
+
+  createInvitation(input: { email: string; role: Role; authMethod: Invitation['authMethod']; invitedBy: string; expiresAt: string }): Invitation {
+    const invitation: Invitation = {
+      id: crypto.randomUUID(), email: input.email.trim().toLowerCase(), role: input.role,
+      authMethod: input.authMethod, status: 'pending', invitedBy: input.invitedBy,
+      createdAt: new Date().toISOString(), expiresAt: input.expiresAt,
+    }
+    this.sqlite.prepare('INSERT INTO invitations(id,email,role,auth_method,status,invited_by,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?)')
+      .run(invitation.id, invitation.email, invitation.role, invitation.authMethod, invitation.status, invitation.invitedBy, invitation.createdAt, invitation.expiresAt)
+    return invitation
+  }
+
+  listInvitations(): Invitation[] {
+    return (this.sqlite.prepare('SELECT * FROM invitations ORDER BY created_at DESC').all() as Row[]).map((row) => this.invitation(row))
+  }
+
+  getInvitation(id: string): Invitation | undefined {
+    const row = this.sqlite.prepare('SELECT * FROM invitations WHERE id=?').get(id) as Row | undefined
+    return row ? this.invitation(row) : undefined
+  }
+
+  cancelInvitation(id: string): Invitation | undefined {
+    const now = new Date().toISOString()
+    const result = this.sqlite.prepare("UPDATE invitations SET status='cancelled',cancelled_at=? WHERE id=? AND status='pending' AND expires_at>?").run(now, id, now)
+    return Number(result.changes) === 1 ? this.getInvitation(id) : undefined
+  }
+
+  resolveAuthenticatedUser(input: Omit<Principal, 'id' | 'roles'>): { principal: Principal; invitation?: Invitation; created: boolean } {
+    const existing = this.sqlite.prepare('SELECT id FROM users WHERE external_id=?').get(input.externalId) as Row | undefined
+    if (existing) return { principal: this.upsertUser(input), created: false }
+    if (this.getSetting('bootstrapComplete') !== 'true') return { principal: this.upsertUser(input), created: true }
+    if (!input.email) throw new Error('INVITATION_REQUIRED')
+    const now = new Date().toISOString()
+    const pending = this.sqlite.prepare("SELECT * FROM invitations WHERE lower(email)=lower(?) AND auth_method=? AND status='pending' AND expires_at>? ORDER BY created_at LIMIT 1")
+      .get(input.email, input.authMethod, now) as Row | undefined
+    if (!pending) throw new Error('INVITATION_REQUIRED')
+    return this.transaction(() => {
+      const id = crypto.randomUUID()
+      this.sqlite.prepare('INSERT INTO users(id,external_id,display_name,email,auth_method,created_at) VALUES(?,?,?,?,?,?)')
+        .run(id, input.externalId, input.displayName, input.email ?? null, input.authMethod, now)
+      this.sqlite.prepare('INSERT INTO user_roles(user_id,role) VALUES(?,?)').run(id, String(pending.role))
+      this.sqlite.prepare("UPDATE invitations SET status='accepted',accepted_by=?,accepted_at=? WHERE id=? AND status='pending'")
+        .run(id, now, String(pending.id))
+      return { principal: this.getPrincipal(id) as Principal, invitation: this.getInvitation(String(pending.id)) as Invitation, created: true }
+    })
+  }
+
+  private invitation(row: Row): Invitation {
+    const status = String(row.status) === 'pending' && Date.parse(String(row.expires_at)) <= Date.now() ? 'expired' : String(row.status)
+    return {
+      id: String(row.id), email: String(row.email), role: row.role as Role,
+      authMethod: row.auth_method as Invitation['authMethod'], status: status as Invitation['status'],
+      invitedBy: String(row.invited_by), ...(row.accepted_by ? { acceptedBy: String(row.accepted_by) } : {}),
+      createdAt: String(row.created_at), expiresAt: String(row.expires_at),
+      ...(row.accepted_at ? { acceptedAt: String(row.accepted_at) } : {}),
+      ...(row.cancelled_at ? { cancelledAt: String(row.cancelled_at) } : {}),
+    }
   }
 
   getTokenVersion(userId: string): number {

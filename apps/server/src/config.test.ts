@@ -58,6 +58,31 @@ describe('authentication deployment boundaries', () => {
     })).toThrow(/requires OIDC or a trusted identity proxy/)
   })
 
+  it('rejects OIDC configuration in government profiles', () => {
+    expect(() => loadConfig({
+      ...baseEnv,
+      PAPYRUS_PROFILE: 'government-il4',
+    })).toThrow(/do not support OIDC/)
+  })
+
+  it('loads commercial tenant branding and validates the logo domain', () => {
+    const config = loadConfig({
+      ...baseEnv,
+      PAPYRUS_ORGANIZATION_NAME: 'Beag Labs',
+      PAPYRUS_ORGANIZATION_DOMAIN: 'beaglabs.com',
+      PAPYRUS_LOGO_DEV_PUBLISHABLE_KEY: 'pk_test',
+    })
+    expect(config.branding).toEqual({
+      organizationName: 'Beag Labs',
+      organizationDomain: 'beaglabs.com',
+      logoDevPublishableKey: 'pk_test',
+    })
+    expect(() => loadConfig({
+      ...baseEnv,
+      PAPYRUS_ORGANIZATION_DOMAIN: 'not a domain',
+    })).toThrow(/valid DNS domain/)
+  })
+
   it('requires the OIDC callback to return to the configured daemon origin', () => {
     expect(() => loadConfig({
       ...baseEnv,

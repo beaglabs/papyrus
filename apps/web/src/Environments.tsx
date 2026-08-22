@@ -9,6 +9,7 @@ export function EnvironmentsView({ me, items }: { me: Principal; items: Environm
   const [selectedId, setSelectedId] = useState(items[0]?.id)
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
+  const [creating, setCreating] = useState(false)
   const load = useCallback(async () => { if (privileged) setData(await adminOverview()) }, [privileged])
   useEffect(() => { void load().catch(show) }, [load])
   const environments = data?.environments ?? items.map((item) => ({ ...item, assignedUserIds: [] }))
@@ -23,13 +24,25 @@ export function EnvironmentsView({ me, items }: { me: Principal; items: Environm
   return <div className="environment-console">
     {error && <div className="error">{error}<button onClick={() => setError(undefined)}>×</button></div>}
     <aside className="environment-directory">
-      <div className="panel-head"><h2>Environments</h2><span>{environments.length}</span></div>
+      <div className="session-sidebar-head"><strong>Environments</strong>{privileged && <button className="icon-button" onClick={() => setCreating(true)} aria-label="Create environment">＋</button>}</div>
       {environments.map((environment) => <button key={environment.id} className={environment.id === selected?.id ? 'selected' : ''} onClick={() => setSelectedId(environment.id)}><strong>{environment.name}</strong><span>{environment.description || 'No description'}</span></button>)}
       {!environments.length && <div className="empty">No environments are assigned to this identity.</div>}
-      {privileged && <form className="environment-create" onSubmit={(event) => { event.preventDefault(); const form = event.currentTarget; const values = new FormData(form); void act(() => createEnvironmentAdmin(String(values.get('name')), String(values.get('description') ?? ''))).then(() => form.reset()) }}><input name="name" required maxLength={256} placeholder="New environment" /><input name="description" maxLength={2000} placeholder="Purpose and handling boundary" /><button className="primary" disabled={busy}>Create environment</button></form>}
     </aside>
     <section className="environment-detail">
-      {!selected ? <div className="conversation-empty"><h2>No environment selected.</h2><p>Create or request access to an environment before starting sessions.</p></div> : <>
+      {creating ? <form className="create-session environment-create-panel" onSubmit={(event) => {
+        event.preventDefault()
+        const form = event.currentTarget
+        const values = new FormData(form)
+        void act(() => createEnvironmentAdmin(String(values.get('name')), String(values.get('description') ?? ''))).then(() => {
+          form.reset()
+          setCreating(false)
+        })
+      }}>
+        <div><strong>New environment</strong><button type="button" className="icon-button" onClick={() => setCreating(false)} aria-label="Close environment form">×</button></div>
+        <label>Environment name<input name="name" required maxLength={256} autoFocus placeholder="Development" /></label>
+        <label>Purpose and handling boundary<input name="description" maxLength={2000} placeholder="Describe the authorized work and data boundary" /></label>
+        <button className="primary" disabled={busy}>{busy ? 'Creating…' : 'Create environment →'}</button>
+      </form> : !selected ? <div className="conversation-empty"><h2>No environment selected.</h2><p>Create or request access to an environment before starting sessions.</p></div> : <>
         <article className="panel environment-hero"><p className="eyebrow">CEDAR AUTHORIZATION BOUNDARY</p><h2>{selected.name}</h2><p>{selected.description || 'No purpose or handling description has been provided.'}</p></article>
         <div className="environment-controls">
           <article className="panel admin-panel"><div className="panel-head"><h2>Members</h2><span>{selected.assignedUserIds.length}</span></div>

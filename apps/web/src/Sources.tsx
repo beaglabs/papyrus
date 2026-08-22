@@ -21,7 +21,7 @@ export function SourceList({ sources, empty }: { sources: ResearchSource[]; empt
       <strong>{source.title}</strong>
       <a href={source.url} target="_blank" rel="noreferrer">{source.url}</a>
       {source.preview
-        ? <SourcePreview content={source.preview} mediaType={source.previewMediaType} />
+        ? <SourcePreview content={source.preview} mediaType={source.previewMediaType ?? 'text/plain'} />
         : source.excerpt && <p>{source.excerpt}</p>}
       <span>Captured {new Date(source.capturedAt).toLocaleString()} · event {source.sequence}</span>
     </div>

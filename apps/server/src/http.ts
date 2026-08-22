@@ -165,8 +165,8 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
   const handler = async (request: IncomingMessage, response: ServerResponse) => {
     const requestId = crypto.randomUUID()
     response.setHeader('x-request-id', requestId)
+    const url = new URL(request.url ?? '/', config.publicOrigin)
     try {
-      const url = new URL(request.url ?? '/', config.publicOrigin)
       if (url.pathname === '/api/health' && request.method === 'GET') {
         const logoUrl = config.branding.organizationDomain && config.branding.logoDevPublishableKey
           ? `https://img.logo.dev/${config.branding.organizationDomain}?token=${encodeURIComponent(config.branding.logoDevPublishableKey)}&size=128&format=png`

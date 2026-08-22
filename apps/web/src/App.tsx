@@ -96,7 +96,7 @@ export function App() {
       <main>
         <header>
           <div><p className="eyebrow">GOVERNED AGENT WORKSPACE</p><h1>{viewTitle(view)}</h1></div>
-          <div className="identity"><div><strong>{state.data.me.displayName}</strong><span>{state.data.me.roles.join(' · ')} · {state.data.me.authMethod}</span></div><UserAvatar name={state.data.me.displayName} pictureUrl={state.data.me.pictureUrl} /><button className="text-button" onClick={() => void signOut()}>Sign out</button></div>
+          <div className="identity"><div><strong>{state.data.me.displayName}</strong><span>{state.data.me.roles.join(' · ')} · {state.data.me.authMethod}</span></div>{state.data.me.pictureUrl ? <UserAvatar name={state.data.me.displayName} pictureUrl={state.data.me.pictureUrl} /> : <UserAvatar name={state.data.me.displayName} />}<button className="text-button" onClick={() => void signOut()}>Sign out</button></div>
         </header>
         <ShellView view={view} data={state.data} onNavigate={setView} />
       </main>

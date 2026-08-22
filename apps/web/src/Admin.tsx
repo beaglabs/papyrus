@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { GOVERNMENT_IDENTITY_KINDS, ROLES, type AdminOverview, type InvitationIdentityKind, type Principal, type Role } from '@papyrus/contracts'
+import { ROLES, type AdminOverview, type Principal, type Role } from '@papyrus/contracts'
 import { addMcpServer, addUserRole, adminOverview, cancelInvitation, createInvitation, revokeUserSessions, setMcpServerEnabled } from './api.js'
 import { SelectField } from './SelectField.js'
 
@@ -21,9 +21,9 @@ export function AdminView({ me }: { me: Principal }) {
     {error && <div className="error">{error}<button onClick={() => setError(undefined)}>×</button></div>}
     <div className="admin-tabs" role="tablist">{(['deployment', 'identity', 'integrations'] as AdminTab[]).map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item}</button>)}</div>
     {tab === 'deployment' && <section className="admin-summary"><AdminPanel title="Deployment"><dl className="facts"><Fact label="Profile" value={data.deployment.profile} /><Fact label="Topology" value="ON-PREMISES" /><Fact label="Origin" value={data.deployment.publicOrigin} /><Fact label="Authentication" value={authenticationLabel(data.deployment.authentication)} /><Fact label="Gateway" value={yes(data.deployment.gatewayConfigured)} /></dl></AdminPanel><AdminPanel title="License"><dl className="facts"><Fact label="Required" value={yes(data.deployment.licenseRequired)} /><Fact label="Status" value={data.license.valid ? 'VALID' : 'NOT ACTIVE'} /><Fact label="Deployment" value={data.license.deploymentId.slice(0, 16)} /></dl></AdminPanel></section>}
-    {tab === 'identity' && <section className="admin-summary">
+    {tab === 'identity' && <section className="admin-summary identity-admin">
       <AdminPanel title={data.deployment.profile === 'commercial' ? 'Invite with organizational OIDC' : 'Create pending CAC/PIV identity'}>
-        <form className="admin-form" onSubmit={(event) => {
+        <form className={`admin-form identity-create ${data.deployment.profile === 'commercial' ? 'commercial' : 'government'}`} onSubmit={(event) => {
           event.preventDefault()
           const form = event.currentTarget
           const values = new FormData(form)
@@ -31,7 +31,6 @@ export function AdminView({ me }: { me: Principal }) {
           const identityValue = String(values.get(commercial ? 'commercialEmail' : 'identityValue'))
           void act(async () => {
             await createInvitation({
-              identityKind: (commercial ? 'email' : String(values.get('identityKind'))) as InvitationIdentityKind,
               identityValue,
               displayName: String(values.get('displayName')),
               ...(!commercial && values.get('contactEmail') ? { email: String(values.get('contactEmail')) } : {}),
@@ -44,16 +43,15 @@ export function AdminView({ me }: { me: Principal }) {
           {data.deployment.profile === 'commercial'
             ? <input name="commercialEmail" type="email" required maxLength={256} placeholder="Organizational email" />
             : <>
-              <SelectField name="identityKind" label="Stable CAC/PIV identifier" placeholder="Choose an identifier" options={GOVERNMENT_IDENTITY_KINDS.map((kind) => ({ value: kind, label: identityKindLabel(kind) }))} />
-              <input name="identityValue" required maxLength={1024} placeholder="Validated identifier value" />
+              <input name="identityValue" required maxLength={1024} placeholder="EDIPI, UPN, PIV UUID, FASC-N, or issuer:subject" aria-label="Stable CAC/PIV identifier" />
               <input name="contactEmail" type="email" maxLength={256} placeholder="Contact email (optional)" />
             </>}
           <SelectField name="role" label="Initial role" placeholder="Choose a role" options={allowedRoles.map((role) => ({ value: role, label: role }))} />
-          <button className="primary" disabled={busy}>Create pending identity</button>
+          <button className="primary" disabled={busy}>{commercialAction(data.deployment.profile)}</button>
         </form>
         <p className="admin-note">{data.deployment.profile === 'commercial'
           ? 'The first validated OIDC login must match this email. Papyrus then binds the user to the provider issuer and subject.'
-          : 'Papyrus matches this value against the validated CAC/PIV certificate. Email is optional and is never the government identity selector.'}</p>
+          : 'Papyrus detects the identifier format and matches it against the validated CAC/PIV certificate. Email is optional and is never the government identity selector.'}</p>
       </AdminPanel>
       <AdminPanel title="Pending identities">
         <div className="admin-list compact">{data.invitations.filter((invitation) => invitation.status === 'pending').length
@@ -69,13 +67,14 @@ export function AdminView({ me }: { me: Principal }) {
           : <form onSubmit={(event) => { event.preventDefault(); const role = new FormData(event.currentTarget).get('role'); if (typeof role === 'string' && role) void act(() => addUserRole(user.id, role as Role)) }}><SelectField name="role" label="Eligible role" placeholder="Choose a role" options={eligibleRoles.map((role) => ({ value: role, label: role }))} /><button className="secondary" disabled={busy || eligibleRoles.length === 0}>Add role</button><button type="button" className="danger" disabled={busy} onClick={() => void act(() => revokeUserSessions(user.id))}>Revoke sessions</button></form>}</article>
       })}</div></AdminPanel>
     </section>}
-    {tab === 'integrations' && <section className="admin-summary"><AdminPanel title="MCP servers"><form className="admin-form mcp-register" onSubmit={(event) => { event.preventDefault(); const form = event.currentTarget; const values = new FormData(form); setBusy(true); setError(undefined); void addMcpServer(String(values.get('name')), String(values.get('endpoint'))).then((result) => { form.reset(); if (result.authorizationUrl) window.open(result.authorizationUrl, 'papyrus-mcp-oauth', 'popup,width=720,height=820'); return load() }).catch(show).finally(() => setBusy(false)) }}><input name="name" required maxLength={256} placeholder="Server name" /><input name="endpoint" type="url" required maxLength={2048} placeholder="https://mcp.internal/rpc" /><button className="primary" disabled={busy}>{busy ? 'Discovering…' : 'Connect server'}</button></form><div className="admin-list compact">{data.mcpServers.map((server) => <article key={server.id}><div><strong>{server.name}</strong><span>{server.endpoint}</span><span>{server.oauthStatus === 'connected' ? `OAuth connected · ${server.oauthIssuer}` : server.oauthStatus === 'authorization_required' ? 'Waiting for OAuth authorization' : server.oauthStatus === 'error' ? server.oauthError : 'No OAuth challenge · direct connection'} </span></div><button className={server.enabled ? 'danger' : 'secondary'} disabled={busy || server.oauthStatus === 'authorization_required'} onClick={() => void act(() => setMcpServerEnabled(server.id, !server.enabled))}>{server.enabled ? 'Disable' : 'Enable'}</button></article>)}</div><p className="admin-note">Papyrus discovers protected-resource metadata, dynamically registers an OAuth client, and completes authorization-code + PKCE before a protected remote server becomes available.</p></AdminPanel><AdminPanel title="Browser connectors"><div className="admin-list compact">{data.connectors.length ? data.connectors.map((connector) => <article key={connector.id}><div><strong>{connector.label}</strong><span>{connector.package}</span><span>{Object.entries(connector.operations).map(([operation, action]) => `${operation}: ${action}`).join(' · ')}</span></div></article>) : <div className="empty">No browser connector is enabled in deployment configuration.</div>}</div></AdminPanel></section>}
+    {tab === 'integrations' && <section className="admin-single"><AdminPanel title="MCP servers"><form className="admin-form mcp-register" onSubmit={(event) => { event.preventDefault(); const form = event.currentTarget; const values = new FormData(form); setBusy(true); setError(undefined); void addMcpServer(String(values.get('name')), String(values.get('endpoint'))).then((result) => { form.reset(); if (result.authorizationUrl) window.open(result.authorizationUrl, 'papyrus-mcp-oauth', 'popup,width=720,height=820'); return load() }).catch(show).finally(() => setBusy(false)) }}><input name="name" required maxLength={256} placeholder="Server name" /><input name="endpoint" type="url" required maxLength={2048} placeholder="https://mcp.internal/rpc" /><button className="primary" disabled={busy}>{busy ? 'Discovering…' : 'Connect server'}</button></form><div className="admin-list compact">{data.mcpServers.map((server) => <article key={server.id}><div><strong>{server.name}</strong><span>{server.endpoint}</span><span>{server.oauthStatus === 'connected' ? `OAuth connected · ${server.oauthIssuer}` : server.oauthStatus === 'authorization_required' ? 'Waiting for OAuth authorization' : server.oauthStatus === 'error' ? server.oauthError : 'No OAuth challenge · direct connection'} </span></div><button className={server.enabled ? 'danger' : 'secondary'} disabled={busy || server.oauthStatus === 'authorization_required'} onClick={() => void act(() => setMcpServerEnabled(server.id, !server.enabled))}>{server.enabled ? 'Disable' : 'Enable'}</button></article>)}</div><p className="admin-note">Papyrus discovers protected-resource metadata, dynamically registers an OAuth client, and completes authorization-code + PKCE before a protected remote server becomes available.</p></AdminPanel></section>}
   </div>
 }
 
 function AdminPanel({ title, children }: { title: string; children: ReactNode }) { return <article className="panel admin-panel"><div className="panel-head"><h2>{title}</h2></div>{children}</article> }
 function Fact({ label, value }: { label: string; value: string }) { return <div><dt>{label}</dt><dd>{value}</dd></div> }
 function yes(value: boolean) { return value ? 'CONFIGURED' : 'NOT CONFIGURED' }
+function commercialAction(profile: AdminOverview['deployment']['profile']) { return profile === 'commercial' ? 'Send invite' : 'Create identity' }
 function identityKindLabel(value: string) {
   return ({ email: 'Organizational email', edipi: 'EDIPI / DoD ID', upn: 'UPN', piv_uuid: 'PIV UUID', fasc_n: 'FASC-N', issuer_subject: 'Issuer + certificate subject' } as Record<string, string>)[value] ?? value
 }

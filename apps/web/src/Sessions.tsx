@@ -1,13 +1,21 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import type { Approval, Artifact, Attachment, Elicitation, Environment, ResearchSource, Session, SessionEvent, SessionRun } from '@papyrus/contracts'
-import { cancelSession, createSession, decideApproval, deleteSession, promptSession, respondElicitation, resumeSession, sessionApprovals, sessionArtifacts, sessionAttachments, sessionElicitations, sessionEvents, sessionPage, sessionRuns, sessionSources, setSessionMode, uploadAttachment } from './api.js'
+import type { Approval, Artifact, Attachment, Elicitation, Environment, ResearchSource, Session, SessionEvent, SessionRun, SessionSurface } from '@papyrus/contracts'
+import { cancelSession, createSession, decideApproval, deleteSession, promptSession, respondElicitation, resumeSession, sessionApprovals, sessionArtifacts, sessionAttachments, sessionElicitations, sessionEvents, sessionPage, sessionRuns, sessionSources, setSessionConfigOption, uploadAttachment } from './api.js'
 import { SourceList } from './Sources.js'
 import { SelectField } from './SelectField.js'
 import { acpContent, ContentMessage } from './AcpSessionContent.js'
 
 interface ToolActivity { id: string; title: string; kind: string; status: string; sequence: number; locations: string[]; terminals: string[] }
 interface PlanItem { content: string; status: string; priority: string }
-type SessionTab = 'conversation' | 'activity' | 'approvals' | 'sources' | 'artifacts'
+type SessionTab = 'conversation' | 'plan' | 'activity' | 'approvals' | 'sources' | 'citations' | 'artifacts' | 'files' | 'editor' | 'diff' | 'terminal' | 'tests' | 'preview' | 'findings' | 'metadata' | 'input' | 'schema' | 'mapping' | 'transform' | 'validation' | 'export'
+
+const SURFACE_TABS: Record<SessionSurface, SessionTab[]> = {
+  general: ['conversation', 'plan', 'activity', 'approvals', 'artifacts'],
+  ide: ['files', 'editor', 'diff', 'terminal', 'tests', 'conversation'],
+  research: ['conversation', 'sources', 'activity', 'approvals', 'artifacts'],
+  document: ['preview', 'findings', 'citations', 'metadata', 'artifacts'],
+  data: ['input', 'schema', 'mapping', 'transform', 'validation', 'export'],
+}
 
 export function SessionHarness({ environments }: { environments: Environment[] }) {
   const [sessions, setSessions] = useState<Session[]>([])
@@ -33,8 +41,9 @@ export function SessionHarness({ environments }: { environments: Environment[] }
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const selected = sessions.find((session) => session.id === selectedId)
   const messages = useMemo(() => acpContent(events), [events])
-  const mode = useMemo(() => [...events].reverse().map((event) => event.data as { sessionUpdate?: string; modeId?: string }).find((item) => item?.sessionUpdate === 'current_mode_update')?.modeId ?? 'ask', [events])
   const activity = useMemo(() => projectActivity(events), [events])
+  const surface = selected?.surface ?? 'general'
+  const tabs = SURFACE_TABS[surface]
 
   const loadContext = async (sessionId: string) => {
     const [nextRuns, nextArtifacts, nextApprovals, nextSources, nextAttachments, nextElicitations] = await Promise.all([sessionRuns(sessionId), sessionArtifacts(sessionId), sessionApprovals(sessionId), sessionSources(sessionId), sessionAttachments(sessionId), sessionElicitations(sessionId)])
@@ -54,6 +63,10 @@ export function SessionHarness({ environments }: { environments: Environment[] }
     const frame = requestAnimationFrame(() => messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' }))
     return () => cancelAnimationFrame(frame)
   }, [messages, running, tab, followingLatest])
+  useEffect(() => {
+    if (!tabs.includes(tab)) setTab(tabs[0])
+  }, [surface])
+
   useEffect(() => {
     streamRef.current?.close()
     setFollowingLatest(true)
@@ -85,7 +98,8 @@ export function SessionHarness({ environments }: { environments: Environment[] }
     try {
       const environmentId = values.get('environment')
       if (typeof environmentId !== 'string' || !environmentId) throw new Error('Choose an environment')
-      const session = await createSession(environmentId, String(values.get('title')))
+      const surface = String(values.get('surface') ?? 'general') as SessionSurface
+      const session = await createSession(environmentId, String(values.get('title')), surface)
       setSessions((current) => [session, ...current]); setSelectedId(session.id); setCreating(false); form.reset()
     } catch (cause) { showError(cause) }
   }
@@ -114,9 +128,13 @@ export function SessionHarness({ environments }: { environments: Environment[] }
     try { await deleteSession(selectedId); setSelectedId(undefined); await loadSessions() } catch (cause) { showError(cause) }
   }
 
-  const changeMode = async (nextMode: 'ask' | 'governed') => {
-    if (!selectedId) return
-    try { await setSessionMode(selectedId, nextMode) } catch (cause) { showError(cause) }
+  const changeSurface = async (nextSurface: SessionSurface) => {
+    if (!selectedId || !selected) return
+    try {
+      await setSessionConfigOption(selectedId, 'papyrus.surface', nextSurface)
+      setSessions((current) => current.map((session) => session.id === selectedId ? { ...session, surface: nextSurface, updatedAt: new Date().toISOString() } : session))
+      setTab(SURFACE_TABS[nextSurface][0])
+    } catch (cause) { showError(cause) }
   }
 
   const addFiles = async (files: FileList | null) => {
@@ -147,9 +165,9 @@ export function SessionHarness({ environments }: { environments: Environment[] }
     </aside>
     <div className="conversation-panel">
       {error && <div className="error">{error}<button onClick={() => setError(undefined)}>×</button></div>}
-      {creating && <form className="create-session" onSubmit={create}><div><strong>New governed session</strong><button type="button" className="icon-button" onClick={() => setCreating(false)}>×</button></div><SelectField name="environment" label="Environment" placeholder="Choose an environment" options={environments.map((environment) => ({ value: environment.id, label: environment.name, ...(environment.description ? { detail: environment.description } : {}) }))} /><label>Session title<input name="title" required maxLength={256} autoFocus placeholder="Research current policy guidance" /></label><button className="primary" disabled={!environments.length}>Create session →</button></form>}
+      {creating && <form className="create-session" onSubmit={create}><div><strong>New durable session</strong><button type="button" className="icon-button" onClick={() => setCreating(false)}>×</button></div><SelectField name="environment" label="Environment" placeholder="Choose an environment" options={environments.map((environment) => ({ value: environment.id, label: environment.name, ...(environment.description ? { detail: environment.description } : {}) }))} /><SelectField name="surface" label="Work surface" placeholder="Choose a work surface" options={surfaceOptions()} /><label>Session title<input name="title" required maxLength={256} autoFocus placeholder="Describe the work" /></label><button className="primary" disabled={!environments.length}>Create session →</button></form>}
       {!selected ? <div className="conversation-empty"><h2>Start a governed session.</h2><p>Choose an authorized environment, describe the work, and retain the complete history on the server.</p><button className="primary" disabled={!environments.length} onClick={() => setCreating(true)}>New session →</button></div> : <>
-        <div className="conversation-head"><div><strong>{selected.title}</strong><span>{selected.status} · {environmentName(environments, selected.environmentId)}</span></div><div className="session-actions"><ModeControl value={mode === 'governed' ? 'governed' : 'ask'} disabled={running} onChange={changeMode} /><div className="session-tabs">{(['conversation', 'activity', 'approvals', 'sources', 'artifacts'] as SessionTab[]).map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item}{item === 'approvals' && approvals.filter((approval) => approval.status === 'pending').length ? ` ${approvals.filter((approval) => approval.status === 'pending').length}` : item === 'sources' && sources.length ? ` ${sources.length}` : item === 'artifacts' && artifacts.length ? ` ${artifacts.length}` : ''}</button>)}</div>{(running || selected.status === 'running') ? <button className="danger" onClick={() => void cancel()}>Cancel run</button> : <button className="text-button" onClick={() => void removeSession()}>Delete</button>}</div></div>
+        <div className="conversation-head"><div><strong>{selected.title}</strong><span>{selected.status} · {surfaceLabel(surface)} · {environmentName(environments, selected.environmentId)}</span></div><div className="session-actions"><SurfaceControl value={surface} disabled={running} onChange={changeSurface} /><div className="session-tabs">{tabs.map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{tabLabel(item)}{tabCount(item, approvals, sources, artifacts)}</button>)}</div>{(running || selected.status === 'running') ? <button className="danger" onClick={() => void cancel()}>Cancel run</button> : <button className="text-button" onClick={() => void removeSession()}>Delete</button>}</div></div>
         <div className="session-content">
         {tab === 'conversation' && <div className="message-region">
           <div className="messages" ref={messagesRef} aria-live="polite" onScroll={(event) => {
@@ -158,7 +176,23 @@ export function SessionHarness({ environments }: { environments: Environment[] }
           }}>{messages.length ? messages.map((message) => <ContentMessage message={message} key={message.id} />) : <div className="conversation-empty compact"><h2>What work should Papyrus begin?</h2><p>The runtime and tools are selected by deployment policy.</p></div>}{running && <div className="working"><span className="dot good" />Working under policy…</div>}</div>
           {!followingLatest && <button className="jump-latest" onClick={() => { setFollowingLatest(true); messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' }) }}>Jump to latest ↓</button>}
         </div>}
+        {tab === 'plan' && <ActivityView plan={activity.plan} tools={[]} runs={runs} />}
         {tab === 'activity' && <ActivityView plan={activity.plan} tools={activity.tools} runs={runs} />}
+        {tab === 'files' && <AttachmentView title="Session files" items={attachments} empty="No repository files have been attached or emitted." />}
+        {tab === 'editor' && <SurfaceEmpty title="No file selected." detail="Select a file emitted by an ACP worker or attached to this session to preview it here." />}
+        {tab === 'diff' && <ArtifactView artifacts={artifacts.filter((artifact) => artifact.kind === 'diff')} />}
+        {tab === 'terminal' && <SurfaceEmpty title="No terminal output." detail="ACP terminal updates will appear here when the assigned worker exposes terminal capability." />}
+        {tab === 'tests' && <SurfaceEmpty title="No test results." detail="Structured build and test results emitted by the worker will appear here." />}
+        {tab === 'preview' && <AttachmentView title="Documents" items={attachments} empty="Attach a PDF, Word file, solicitation, policy, or contract to begin review." />}
+        {tab === 'findings' && <SurfaceEmpty title="No document findings." detail="Findings emitted as structured ACP resources will appear here without being flattened into chat." />}
+        {tab === 'citations' && <SourceList sources={sources} />}
+        {tab === 'metadata' && <AttachmentView title="Document metadata" items={attachments} empty="No document metadata is available." />}
+        {tab === 'input' && <AttachmentView title="Input data" items={attachments} empty="Attach CSV, XML, SOAP, copybook, JSON, or another supported input." />}
+        {tab === 'schema' && <SurfaceEmpty title="No detected schema." detail="A Sieve-compatible MCP server can emit a structured schema artifact for this panel." />}
+        {tab === 'mapping' && <SurfaceEmpty title="No field mapping." detail="Source-to-target mappings will appear when emitted as structured resources." />}
+        {tab === 'transform' && <SurfaceEmpty title="No transformation steps." detail="Deterministic transformation steps emitted by the assigned data tool will appear here." />}
+        {tab === 'validation' && <SurfaceEmpty title="No validation results." detail="Validation failures and before/after samples will appear here." />}
+        {tab === 'export' && <ArtifactView artifacts={artifacts} />}
         {tab === 'approvals' && <ApprovalView approvals={approvals} onDecision={reviewApproval} />}
         {tab === 'sources' && <SourceList sources={sources} />}
         {tab === 'artifacts' && <ArtifactView artifacts={artifacts} />}
@@ -177,8 +211,32 @@ export function SessionHarness({ environments }: { environments: Environment[] }
   </section>
 }
 
-function ModeControl({ value, disabled, onChange }: { value: 'ask' | 'governed'; disabled: boolean; onChange: (mode: 'ask' | 'governed') => Promise<void> }) {
-  return <label className="mode-control"><span>Mode</span><select value={value} disabled={disabled} onChange={(event) => void onChange(event.target.value as 'ask' | 'governed')}><option value="ask">Ask</option><option value="governed">Governed work</option></select></label>
+function SurfaceControl({ value, disabled, onChange }: { value: SessionSurface; disabled: boolean; onChange: (surface: SessionSurface) => Promise<void> }) {
+  return <label className="surface-control"><span>Surface</span><select value={value} disabled={disabled} onChange={(event) => void onChange(event.target.value as SessionSurface)}>{surfaceOptions().map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label>
+}
+
+function surfaceOptions() {
+  return [
+    { value: 'general', label: 'General use', detail: 'Conversation and governed activity' },
+    { value: 'ide', label: 'IDE', detail: 'Repository and software engineering' },
+    { value: 'research', label: 'Research', detail: 'Sources, citations, and retrieval' },
+    { value: 'document', label: 'Document', detail: 'PDF, policy, contract, and CUI review' },
+    { value: 'data', label: 'Data', detail: 'Schema, mapping, transformation, and validation' },
+  ]
+}
+function surfaceLabel(surface: SessionSurface) { return surfaceOptions().find((option) => option.value === surface)?.label ?? surface }
+function tabLabel(tab: SessionTab) { return ({ ide: 'IDE', diff: 'Diff', terminal: 'Terminal', tests: 'Tests' } as Record<string, string>)[tab] ?? tab }
+function tabCount(tab: SessionTab, approvals: Approval[], sources: ResearchSource[], artifacts: Artifact[]) {
+  const count = tab === 'approvals' ? approvals.filter((item) => item.status === 'pending').length : tab === 'sources' || tab === 'citations' ? sources.length : tab === 'artifacts' || tab === 'export' ? artifacts.length : 0
+  return count ? ` ${count}` : ''
+}
+
+function SurfaceEmpty({ title, detail }: { title: string; detail: string }) {
+  return <div className="surface-empty"><h2>{title}</h2><p>{detail}</p></div>
+}
+
+function AttachmentView({ title, items, empty }: { title: string; items: Attachment[]; empty: string }) {
+  return <div className="surface-collection"><div className="section-label">{title.toUpperCase()}</div>{items.length ? items.map((item) => <article key={item.id}><div><strong>{item.name}</strong><span>{item.mediaType} · {formatBytes(item.size)}</span></div><span className="pill completed">input</span></article>) : <div className="empty">{empty}</div>}</div>
 }
 
 function ElicitationCard({ item, onRespond }: { item: Elicitation; onRespond: (id: string, response: Record<string, unknown>) => Promise<void> }) {

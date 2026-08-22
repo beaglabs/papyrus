@@ -220,7 +220,7 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
       if (url.pathname === '/api/me' && request.method === 'GET') return json(response, 200, principal)
       if (url.pathname === '/api/admin/overview' && request.method === 'GET') return json(response, 200, service.adminOverview(principal))
       if (url.pathname === '/api/auth/logout' && request.method === 'POST') {
-        auth.revokeSessions(principal.id)
+        auth.logout(principal.id)
         response.writeHead(204, { 'set-cookie': auth.clearSessionCookie(), 'cache-control': 'no-store' })
         return response.end()
       }
@@ -230,6 +230,18 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
       }
       if (url.pathname === '/api/users' && request.method === 'GET') {
         return json(response, 200, service.listUsers(principal))
+      }
+      if (url.pathname === '/api/invitations' && request.method === 'POST') {
+        const input = await body(request)
+        const role = text(input.role, 'role') as Role
+        if (!ROLES.includes(role)) throw new HttpError(400, 'INVALID_INPUT', 'Unknown fixed role')
+        const authMethod = text(input.authMethod, 'authMethod') as 'oidc' | 'mtls'
+        if (!['oidc', 'mtls'].includes(authMethod)) throw new HttpError(400, 'INVALID_INPUT', 'Unknown authentication method')
+        return json(response, 201, service.createInvitation(principal, { email: text(input.email, 'email'), role, authMethod }))
+      }
+      const cancelInvitation = url.pathname.match(/^\/api\/invitations\/([^/]+)$/)
+      if (cancelInvitation && request.method === 'DELETE') {
+        return json(response, 200, service.cancelInvitation(principal, identifier(decodeURIComponent(cancelInvitation[1] as string), 'invitationId')))
       }
       const userRole = url.pathname.match(/^\/api\/users\/([^/]+)\/roles$/)
       if (userRole && request.method === 'POST') {
@@ -445,8 +457,14 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
       if (url.pathname === '/api/license/activate' && request.method === 'POST') return json(response, 200, service.activateLicense(principal, await body(request) as unknown as SignedLicense))
       throw new HttpError(404, 'NOT_FOUND', 'Endpoint not found')
     } catch (error) {
+      if (url.pathname === '/api/auth/oidc/callback') {
+        auth.recordAuthenticationFailure('oidc', error instanceof Error ? error.message : 'authentication_failed', requestId)
+      }
+      const invitationRequired = error instanceof Error && error.message === 'INVITATION_REQUIRED'
       const status = error instanceof HttpError
         ? error.status
+        : invitationRequired
+          ? 403
         : error instanceof AuthorizationDenied
           ? 403
           : error instanceof SessionLifecycleError
@@ -456,6 +474,8 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
             : 500
       const code = error instanceof HttpError
         ? error.code
+        : invitationRequired
+          ? 'INVITATION_REQUIRED'
         : error instanceof AuthorizationDenied
           ? 'FORBIDDEN'
           : error instanceof SessionLifecycleError
@@ -463,7 +483,7 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
             : error instanceof ApprovalLifecycleError
               ? error.code
             : 'INTERNAL_ERROR'
-      const message = status === 500 ? 'Internal server error' : error instanceof Error ? error.message : 'Request failed'
+      const message = invitationRequired ? 'No active invitation matches this organizational identity' : status === 500 ? 'Internal server error' : error instanceof Error ? error.message : 'Request failed'
       if (status === 500) console.error(`[${requestId}]`, error)
       return json(response, status, { error: message, code, requestId })
     }

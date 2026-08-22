@@ -44,6 +44,19 @@ export interface Environment {
   createdAt: string
 }
 
+export const SESSION_SURFACES = ['general', 'ide', 'research', 'document', 'data'] as const
+export type SessionSurface = (typeof SESSION_SURFACES)[number]
+
+export interface SessionConfigOption {
+  id: 'papyrus.surface'
+  name: string
+  description: string
+  category: '_papyrus_surface'
+  type: 'select'
+  currentValue: SessionSurface
+  options: Array<{ value: SessionSurface; name: string; description: string }>
+}
+
 export interface Session {
   id: string
   ownerId: string
@@ -51,6 +64,7 @@ export interface Session {
   agent: string
   title: string
   cwd: string
+  surface: SessionSurface
   status: 'ready' | 'running' | 'stopped' | 'failed' | 'interrupted'
   createdAt: string
   updatedAt: string

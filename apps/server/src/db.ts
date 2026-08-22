@@ -192,7 +192,7 @@ export class PapyrusDatabase {
     const existing = this.sqlite.prepare('SELECT id FROM users WHERE external_id = ?').get(input.externalId) as Row | undefined
     const id = existing ? String(existing.id) : crypto.randomUUID()
     this.sqlite.prepare(`INSERT INTO users(id,external_id,display_name,email,picture_url,auth_method,created_at) VALUES(?,?,?,?,?,?,?)
-      ON CONFLICT(external_id) DO UPDATE SET display_name=excluded.display_name,email=excluded.email,picture_url=excluded.picture_url,auth_method=excluded.auth_method`)
+      ON CONFLICT(external_id) DO UPDATE SET display_name=excluded.display_name,email=COALESCE(excluded.email,users.email),picture_url=COALESCE(excluded.picture_url,users.picture_url),auth_method=excluded.auth_method`)
       .run(id, input.externalId, input.displayName, input.email ?? null, input.pictureUrl ?? null, input.authMethod, new Date().toISOString())
     return this.getPrincipal(id) as Principal
   }

@@ -5,6 +5,7 @@ import { createRemoteJWKSet, jwtVerify } from 'jose'
 import type { Principal } from '@papyrus/contracts'
 import type { ServerConfig } from './config.js'
 import type { PapyrusDatabase } from './db.js'
+import { AuditLog } from './audit.js'
 
 interface OidcDiscovery {
   authorization_endpoint: string
@@ -62,10 +63,13 @@ function isCertificateCurrent(certificate: X509Certificate): boolean {
 }
 
 export class AuthService {
+  private readonly audit: AuditLog
   private readonly pendingOidc = new Map<string, PendingOidc>()
   private readonly pendingNativeOidc = new Map<string, PendingNativeOidc>()
 
-  constructor(private readonly config: ServerConfig, private readonly db: PapyrusDatabase) {}
+  constructor(private readonly config: ServerConfig, private readonly db: PapyrusDatabase) {
+    this.audit = new AuditLog(db)
+  }
 
   issueSession(userId: string): string {
     const body = base64url(JSON.stringify({ userId, v: this.db.getTokenVersion(userId), exp: Date.now() + 8 * 60 * 60 * 1000 }))
@@ -104,6 +108,15 @@ export class AuthService {
   /** Invalidates every outstanding session for a user by bumping their token version. */
   revokeSessions(userId: string): void {
     this.db.incrementTokenVersion(userId)
+  }
+
+  logout(userId: string): void {
+    this.revokeSessions(userId)
+    this.audit.append({ actorId: userId, action: 'Logout', resourceType: 'User', resourceId: userId, decision: 'info', metadata: { sessionsRevoked: true } })
+  }
+
+  recordAuthenticationFailure(method: AuthenticationMethod, reason: string, requestId: string): void {
+    this.audit.append({ actorId: null, action: 'Authenticate', resourceType: 'Deployment', resourceId: 'authentication', decision: 'deny', metadata: { method, reason: reason.slice(0, 128), requestId } })
   }
 
   authenticate(request: IncomingMessage): Principal | undefined {
@@ -215,10 +228,16 @@ export class AuthService {
     })
     if (verified.payload.nonce !== pending.nonce) throw new Error('OIDC nonce mismatch')
     if (!verified.payload.sub) throw new Error('OIDC token has no subject')
-    const principal = this.db.upsertUser({
+    const resolved = this.db.resolveAuthenticatedUser({
       externalId: `oidc:${discovery.issuer}:${verified.payload.sub}`,
       displayName: String(verified.payload.name ?? verified.payload.preferred_username ?? verified.payload.email ?? verified.payload.sub),
       ...(verified.payload.email ? { email: String(verified.payload.email) } : {}), authMethod: 'oidc',
+    })
+    const principal = resolved.principal
+    this.audit.append({
+      actorId: principal.id, action: resolved.invitation ? 'AcceptInvitation' : 'Authenticate',
+      resourceType: resolved.invitation ? 'Invitation' : 'User', resourceId: resolved.invitation?.id ?? principal.id,
+      decision: 'allow', metadata: { method: 'oidc', created: resolved.created, invitationId: resolved.invitation?.id ?? null },
     })
     if (pending.nativeTransactionId) {
       const transaction = this.pendingNativeOidc.get(pending.nativeTransactionId)
@@ -275,12 +294,20 @@ export class AuthService {
 
   private principalFromCertificate(certificate: X509Certificate): Principal {
     const identity = certificateName(certificate)
-    return this.db.upsertUser({
+    const resolved = this.db.resolveAuthenticatedUser({
       externalId: `x509:${certificate.fingerprint256}`,
       displayName: identity.displayName,
       ...(identity.email ? { email: identity.email } : {}),
       authMethod: 'mtls',
     })
+    if (resolved.created) {
+      this.audit.append({
+        actorId: resolved.principal.id, action: resolved.invitation ? 'AcceptInvitation' : 'Authenticate',
+        resourceType: resolved.invitation ? 'Invitation' : 'User', resourceId: resolved.invitation?.id ?? resolved.principal.id,
+        decision: 'allow', metadata: { method: 'mtls', created: true, invitationId: resolved.invitation?.id ?? null, certificateFingerprint: normalizeFingerprint(certificate.fingerprint256) },
+      })
+    }
+    return resolved.principal
   }
 
   private async discovery(): Promise<OidcDiscovery> {

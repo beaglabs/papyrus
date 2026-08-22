@@ -88,7 +88,7 @@ h2 { font-size: 19px; margin-bottom: 20px; }
 .conversation-panel > .error { position: absolute; inset: 0 0 auto; z-index: 8; }
 .conversation-head > div { display: grid; gap: 4px; }
 .conversation-head .session-actions { min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
-.mode-control { display: flex; align-items: center; gap: 6px; color: #666; font: 9px ui-monospace, monospace; text-transform: uppercase; }.mode-control select { border: 1px solid #111; background: #fff; padding: 7px 26px 7px 8px; font: 10px ui-monospace, monospace; }
+.surface-control { display: flex; align-items: center; gap: 6px; color: #666; font: 9px ui-monospace, monospace; text-transform: uppercase; }.surface-control select { border: 1px solid #111; background: #fff; padding: 7px 26px 7px 8px; font: 10px ui-monospace, monospace; }
 .session-tabs { min-width: 0; display: flex; overflow-x: auto; border: 1px solid #111; scrollbar-width: thin; }
 .session-tabs button { border: 0; border-right: 1px solid #111; background: #fff; padding: 7px 9px; cursor: pointer; font: 10px ui-monospace, monospace; text-transform: uppercase; }
 .session-tabs button:last-child { border-right: 0; }.session-tabs button.active { background: #ff5f1f; }
@@ -157,6 +157,8 @@ h2 { font-size: 19px; margin-bottom: 20px; }
 .source-view article { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 16px; padding: 16px; border: 2px solid #111; background: #fff; box-shadow: 3px 3px 0 #111; }
 .source-host { align-self: start; overflow-wrap: anywhere; border: 1px solid #111; background: #82c9ff; padding: 7px; font: 10px ui-monospace, monospace; text-align: center; }
 .source-view article > div:last-child { display: grid; gap: 6px; min-width: 0; }.source-view a { color: #145a8d; overflow-wrap: anywhere; font: 11px ui-monospace, monospace; }.source-view p { margin: 4px 0; line-height: 1.45; }.source-view span { color: #666; font: 10px ui-monospace, monospace; }
+.surface-empty { width: 100%; min-height: 100%; display: grid; place-content: center; justify-items: center; padding: 32px; text-align: center; }.surface-empty h2 { margin-bottom: 8px; }.surface-empty p { max-width: 560px; margin: 0; color: #666; }
+.surface-collection { width: 100%; min-height: 0; overflow-y: auto; padding: 24px; display: grid; align-content: start; gap: 12px; }.surface-collection article { display: flex; justify-content: space-between; align-items: center; gap: 16px; border: 2px solid #111; background: #fff; padding: 14px; box-shadow: 3px 3px 0 #111; }.surface-collection article > div { min-width: 0; display: grid; gap: 4px; }.surface-collection article span { color: #666; font: 10px ui-monospace, monospace; overflow-wrap: anywhere; }
 .admin-view { display: grid; gap: 22px; }.admin-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }.admin-single { display: grid; }.identity-admin > .admin-panel:first-child { grid-column: 1 / -1; }.admin-panel { display: grid; align-content: start; gap: 16px; }.admin-panel .panel-head { margin-bottom: 0; }
 .admin-tabs { display: flex; width: fit-content; max-width: 100%; overflow-x: auto; border: 2px solid #111; background: #fff; }
 .admin-tabs button { border: 0; border-right: 1px solid #111; background: #fff; padding: 11px 15px; cursor: pointer; font: 700 11px ui-monospace, monospace; text-transform: uppercase; }.admin-tabs button:last-child { border-right: 0; }.admin-tabs button.active { background: #ff5f1f; }
@@ -200,7 +202,7 @@ h2 { font-size: 19px; margin-bottom: 20px; }
   .source-view article { grid-template-columns: 1fr; }
   .admin-summary { grid-template-columns: 1fr; }.admin-form { grid-template-columns: 1fr; }.admin-list article, .admin-list form { align-items: stretch; flex-direction: column; }
   .environment-console { flex: none; min-height: 720px; grid-template-columns: 1fr; overflow: visible; }.environment-directory { max-height: 300px; border-right: 0; border-bottom: 2px solid #111; }.environment-controls { grid-template-columns: 1fr; }.compact-form, .resource-list-action { grid-template-columns: 1fr; }
-  .elicitation-card { grid-template-columns: 1fr; }.mode-control span { display: none; }
+  .elicitation-card { grid-template-columns: 1fr; }.surface-control span { display: none; }
   header { align-items: flex-start; }
   .identity > div:first-child, .identity .text-button { display: none; }
 }

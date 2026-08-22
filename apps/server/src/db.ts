@@ -283,7 +283,7 @@ export class PapyrusDatabase {
     if (!pending) throw new Error('INVITATION_REQUIRED')
     return this.transaction(() => {
       const id = crypto.randomUUID()
-      const displayName = input.displayName || String(pending.display_name)
+      const displayName = input.displayName && input.displayName !== 'CAC/PIV user' ? input.displayName : String(pending.display_name)
       const email = input.email ?? (pending.email ? String(pending.email) : undefined)
       this.sqlite.prepare('INSERT INTO users(id,external_id,display_name,email,picture_url,auth_method,created_at) VALUES(?,?,?,?,?,?,?)')
         .run(id, input.externalId, displayName, email ?? null, input.pictureUrl ?? null, input.authMethod, now)

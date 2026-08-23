@@ -295,9 +295,7 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
         const input = await body(request)
         const cwd = typeof input.cwd === 'string' ? text(input.cwd, 'cwd', 4096) : '/'
         const agent = typeof input.agent === 'string' ? text(input.agent, 'agent') : service.defaultGatewayAgent()
-        const surface = typeof input.surface === 'string' ? text(input.surface, 'surface') as SessionSurface : 'general'
-        if (!SESSION_SURFACES.includes(surface)) throw new HttpError(400, 'INVALID_INPUT', 'Unknown session surface')
-        return json(response, 201, service.createSession(principal, identifier(input.environmentId ?? input.workspaceId, 'environmentId'), agent, text(input.title, 'title'), cwd, surface))
+        return json(response, 201, service.createSession(principal, identifier(input.environmentId ?? input.workspaceId, 'environmentId'), agent, text(input.title, 'title'), cwd, 'general'))
       }
       const sessionDetail = url.pathname.match(/^\/api\/sessions\/([^/]+)$/)
       if (sessionDetail && request.method === 'GET') {
@@ -408,21 +406,6 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
       if (deleteSession && request.method === 'DELETE') {
         service.deleteSession(principal, decodeURIComponent(deleteSession[1] as string))
         return json(response, 204, null)
-      }
-      const sessionConfig = url.pathname.match(/^\/api\/sessions\/([^/]+)\/config-options$/)
-      if (sessionConfig && request.method === 'GET') {
-        return json(response, 200, { configOptions: service.sessionConfigOptions(principal, decodeURIComponent(sessionConfig[1] as string)) })
-      }
-      if (sessionConfig && request.method === 'POST') {
-        const input = await body(request)
-        return json(response, 200, {
-          configOptions: service.setSessionConfigOption(
-            principal,
-            decodeURIComponent(sessionConfig[1] as string),
-            text(input.configId, 'configId'),
-            text(input.value, 'value'),
-          ),
-        })
       }
       const resumeSession = url.pathname.match(/^\/api\/sessions\/([^/]+)\/resume$/)
       if (resumeSession && request.method === 'POST') {

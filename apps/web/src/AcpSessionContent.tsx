@@ -36,7 +36,7 @@ export function ContentMessage({ message, active = false }: { message: AcpConten
   return <article className={`message ${message.role}`}><span>{message.role === 'user' ? 'YOU' : 'PAPYRUS'}</span><div className="content-blocks">{message.blocks.map((block, index) => <ContentBlock key={index} block={block} />)}</div></article>
 }
 
-function ContentBlock({ block }: { block: Record<string, unknown> }) {
+export function ContentBlock({ block }: { block: Record<string, unknown> }) {
   if (block.type === 'text') return <MarkdownText text={String(block.text ?? '')} />
   if (block.type === 'image' && typeof block.data === 'string' && typeof block.mimeType === 'string') return <img className="message-image" src={`data:${block.mimeType};base64,${block.data}`} alt="Agent-provided visual" />
   if (block.type === 'resource_link' && typeof block.uri === 'string') return <a className="resource-card" href={safeUri(block.uri)}><strong>{String(block.title ?? block.name ?? 'Resource')}</strong><small>{String(block.mimeType ?? block.uri)}</small></a>

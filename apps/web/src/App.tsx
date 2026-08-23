@@ -3,10 +3,9 @@ import { api, AuthenticationRequired, EnrollmentRequired, loadShell, logout, typ
 import { SessionHarness } from './Sessions.js'
 import { SourcesView } from './Sources.js'
 import { AdminView } from './Admin.js'
-import { EnvironmentsView } from './Environments.js'
 import { Alert, Avatar, Badge, Button, Card, DropdownMenu, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, Input } from './components/ui/index.js'
 
-type View = 'home' | 'sessions' | 'environments' | 'sources' | 'administration'
+type View = 'home' | 'sessions' | 'sources' | 'administration'
 type AppState =
   | { phase: 'loading' }
   | { phase: 'signed-out'; health: Health; challenge: AuthenticationChallenge }
@@ -44,6 +43,7 @@ function HandlingBanner({ profile }: { profile: string }) {
 export function App() {
   const [state, setState] = useState<AppState>({ phase: 'loading' })
   const [view, setView] = useState<View>('home')
+  const [newSessionRequest, setNewSessionRequest] = useState(0)
 
   const refresh = useCallback(async () => {
     setState({ phase: 'loading' })
@@ -79,6 +79,11 @@ export function App() {
     window.location.replace('/')
   }
 
+  const openNewSession = () => {
+    setView('sessions')
+    setNewSessionRequest((current) => current + 1)
+  }
+
   return <>
     <HandlingBanner profile={state.data.health.profile} />
     <div className="shell with-handling-banner">
@@ -87,18 +92,21 @@ export function App() {
         <div className="classification">{profileLabel(state.data.health.profile)}</div>
         <nav aria-label="Primary navigation">
           <NavButton active={view === 'home'} onClick={() => setView('home')}>Overview</NavButton>
-          <NavButton active={view === 'sessions'} onClick={() => setView('sessions')}>Sessions</NavButton>
-          <NavButton active={view === 'environments'} onClick={() => setView('environments')}>Environments</NavButton>
+          <NavButton active={view === 'sessions'} onClick={openNewSession}>New session</NavButton>
           <NavButton active={view === 'sources'} onClick={() => setView('sources')}>Sources</NavButton>
           {state.data.me.roles.some((role) => role === 'Owner' || role === 'Admin') && <NavButton active={view === 'administration'} onClick={() => setView('administration')}>Administration</NavButton>}
         </nav>
-        {view === 'sessions' && <div id="session-history-rail" className="session-history-rail" />}
+        <div id="session-history-rail" className="session-history-rail" />
         <div className="runtime-status"><span className="dot good" />Policy enforcement active</div>
         <div className="sidebar-account">
-          <DropdownMenu trigger={<>{state.data.me.pictureUrl ? <UserAvatar name={state.data.me.displayName} pictureUrl={state.data.me.pictureUrl} /> : <UserAvatar name={state.data.me.displayName} />}<span><strong>{state.data.me.displayName}</strong><small>{state.data.me.roles.join(' · ')}</small></span><span aria-hidden="true">•••</span></>}>
-            <DropdownMenuLabel><strong>{state.data.me.displayName}</strong><span>{state.data.me.authMethod}</span></DropdownMenuLabel>
+          <DropdownMenu className="account-menu" trigger={<div className="account-trigger-content">
+            <UserAvatar name={state.data.me.displayName} {...(state.data.me.pictureUrl ? { pictureUrl: state.data.me.pictureUrl } : {})} />
+            <span className="account-copy"><strong>{state.data.me.displayName}</strong><small>{state.data.me.authMethod.toUpperCase()} · {state.data.me.roles.join(' · ')}</small></span>
+            <span className="account-menu-mark" aria-hidden="true">•••</span>
+          </div>}>
+            <DropdownMenuLabel className="account-menu-label"><strong>{state.data.me.displayName}</strong><span>{state.data.me.authMethod.toUpperCase()} · {state.data.me.roles.join(' · ')}</span></DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem disabled>Settings <small>Coming later</small></DropdownMenuItem>
+            <DropdownMenuItem disabled><span>Settings</span><small>Coming later</small></DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem className="danger-item" onClick={() => void signOut()}>Sign out</DropdownMenuItem>
           </DropdownMenu>
@@ -106,7 +114,10 @@ export function App() {
       </aside>
       <main>
         {view !== 'sessions' && <header><div><p className="eyebrow">GOVERNED AGENT WORKSPACE</p><h1>{viewTitle(view)}</h1></div></header>}
-        <ShellView view={view} data={state.data} onNavigate={setView} />
+        <div className="session-workspace" hidden={view !== 'sessions'}>
+          <SessionHarness environments={state.data.environments} newSessionRequest={newSessionRequest} onActivate={() => setView('sessions')} />
+        </div>
+        {view !== 'sessions' && <ShellView view={view} data={state.data} onNewSession={openNewSession} />}
       </main>
     </div>
   </>
@@ -163,13 +174,11 @@ function AccessPending({ me }: { me: string }) {
   return <main className="center login"><Logo /><p className="eyebrow">ACCESS PENDING</p><h1>Identity verified.<br />Authority required.</h1><p>{me}, an Owner or Admin must assign your fixed role and environment access before you can enter Papyrus.</p></main>
 }
 
-function ShellView({ view, data, onNavigate }: { view: View; data: ShellData; onNavigate: (view: View) => void }) {
-  if (view === 'home') return <section className="grid-two wide-left"><Card className="panel hero-panel"><p className="eyebrow">CONTROL PLANE READY</p><h2>Begin governed work from one durable session.</h2><p>Every prompt, runtime event, cancellation, and policy decision remains bound to your authenticated identity.</p><Button className="primary" onClick={() => onNavigate('sessions')}>Open sessions →</Button></Card><DeploymentFacts data={data} /></section>
-  if (view === 'sessions') return <SessionHarness environments={data.environments} />
-  if (view === 'environments') return <EnvironmentsView me={data.me} items={data.environments} />
+function ShellView({ view, data, onNewSession }: { view: Exclude<View, 'sessions'>; data: ShellData; onNewSession: () => void }) {
+  if (view === 'home') return <section className="grid-two wide-left"><Card className="panel hero-panel"><p className="eyebrow">CONTROL PLANE READY</p><h2>Begin governed work from one durable session.</h2><p>Every prompt, runtime event, cancellation, and policy decision remains bound to your authenticated identity.</p><Button className="primary" onClick={onNewSession}>Start a session →</Button></Card><DeploymentFacts data={data} /></section>
   if (view === 'sources') return <SourcesView />
   if (view === 'administration') return <AdminView me={data.me} />
-  return <Card className="panel placeholder"><span>STACK PREVIEW</span><h2>{viewTitle(view)}</h2><p>{placeholder(view)}</p></Card>
+  return <Card className="panel placeholder"><span>STACK PREVIEW</span><h2>{viewTitle(view)}</h2></Card>
 }
 
 function DeploymentFacts({ data }: { data: ShellData }) {
@@ -178,6 +187,5 @@ function DeploymentFacts({ data }: { data: ShellData }) {
 
 function NavButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) { return <Button variant="ghost" className={active ? 'active' : ''} onClick={onClick}>{children}</Button> }
 function profileLabel(profile: string) { return ({ commercial: 'COMMERCIAL', 'government-il4': 'GOVERNMENT IL4', 'government-il6': 'GOVERNMENT IL6' } as Record<string, string>)[profile] ?? profile.toUpperCase() }
-function viewTitle(view: View) { return ({ home: 'Operational overview', sessions: 'Sessions', environments: 'Environments', sources: 'Sources', administration: 'Administration' })[view] }
-function placeholder(view: View) { return ({ sessions: '', sources: '', administration: '', home: '', environments: '' })[view] }
+function viewTitle(view: View) { return ({ home: 'Operational overview', sessions: 'Sessions', sources: 'Sources', administration: 'Administration' })[view] }
 function initials(name: string) { return name.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') }

@@ -53,6 +53,7 @@ describe('Papyrus native worker', () => {
         start(controller) {
           controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"reasoning_content":"Checking the attached policy. "}}]}\n\n'))
           controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"reasoning":{"summary":"Comparing relevant sections."}}}]}\n\n'))
+          controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"thinking":[{"type":"text","text":" Verifying citations."}]}}]}\n\n'))
           controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"Live "}}]}\n\n'))
           controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"response"}}]}\n\n'))
           controller.enqueue(encoder.encode('data: [DONE]\n\n'))
@@ -83,7 +84,39 @@ describe('Papyrus native worker', () => {
       const data = event.data as { sessionUpdate?: string; content?: { text?: string } }
       return data.sessionUpdate === 'agent_thought_chunk' ? [data.content?.text] : []
     })
-    expect(thoughts).toEqual(['Checking the attached policy. ', 'Comparing relevant sections.'])
+    expect(thoughts).toEqual(['Checking the attached policy. ', 'Comparing relevant sections.', ' Verifying citations.'])
+  })
+
+  it('announces streamed tool calls as soon as their identity is available', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder()
+          controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-live","type":"function","function":{"name":"lookup","arguments":""}}]}}]}\n\n'))
+          controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\\"query\\\":\\\"policy\\\"}"}}]}}]}\n\n'))
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+          controller.close()
+        },
+      }), { status: 200, headers: { 'content-type': 'text/event-stream' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        choices: [{ message: { role: 'assistant', content: 'Done.' } }],
+      }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const events: Array<{ kind: string; data: unknown }> = []
+    const worker = new PapyrusWorker({ endpoint: 'http://127.0.0.1:8000', model: 'test-model' })
+    await worker.runPrompt({
+      cwd: '/',
+      prompt: 'Look it up',
+      tools: [{ name: 'lookup', inputSchema: { type: 'object' } }],
+      authorizeTool: async () => true,
+      invokeTool: async () => ({ type: 'text', text: 'result' }),
+      onEvent: (event) => { events.push(event) },
+    })
+    const states = events.flatMap((event) => {
+      const data = event.data as { sessionUpdate?: string; status?: string }
+      return data.sessionUpdate === 'tool_call' || data.sessionUpdate === 'tool_call_update' ? [data.status] : []
+    })
+    expect(states).toEqual(['pending', 'in_progress', 'completed'])
   })
 
   it('routes model tool calls through Papyrus authorization and execution', async () => {

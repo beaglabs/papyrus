@@ -28,7 +28,14 @@ function projectItem(sessionId: string, event: SessionEvent, item: Record<string
       name: basename(item.path) || 'change.diff', kind: 'diff', mediaType: mediaType(item.path), encoding: 'utf8', content: item.newText,
     })
   }
-  if (item.type !== 'content' || !record(item.content) || item.content.type !== 'resource' || !record(item.content.resource)) return undefined
+  if (item.type !== 'content' || !record(item.content)) return undefined
+  if (item.content.type === 'image' && typeof item.content.data === 'string') {
+    const mediaType = typeof item.content.mimeType === 'string' ? item.content.mimeType : 'image/png'
+    return artifact(sessionId, event, index, versions, {
+      name: `generated-image-${event.sequence}.${imageExtension(mediaType)}`, kind: 'resource', mediaType, encoding: 'base64', content: item.content.data,
+    })
+  }
+  if (item.content.type !== 'resource' || !record(item.content.resource)) return undefined
   const resource = item.content.resource
   const name = typeof resource.uri === 'string' ? basename(resource.uri) || `artifact-${event.sequence}` : `artifact-${event.sequence}`
   if (typeof resource.text === 'string') {
@@ -68,3 +75,5 @@ function mediaType(path: string): string {
   const extension = path.toLowerCase().split('.').at(-1)
   return ({ md: 'text/markdown', txt: 'text/plain', json: 'application/json', csv: 'text/csv', html: 'text/html', xml: 'application/xml' } as Record<string, string>)[extension ?? ''] ?? 'text/plain'
 }
+
+function imageExtension(mediaType: string): string { return ({ 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif', 'image/svg+xml': 'svg' } as Record<string, string>)[mediaType] ?? 'png' }

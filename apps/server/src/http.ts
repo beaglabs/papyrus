@@ -2,7 +2,7 @@ import { createServer as createHttpServer, type IncomingMessage, type Server, ty
 import { createServer as createHttpsServer } from 'node:https'
 import { readFileSync } from 'node:fs'
 import { extname, join, normalize } from 'node:path'
-import { ROLES, SESSION_SURFACES, type ApprovedSourceKind, type Role, type SessionSurface, type SignedLicense } from '@papyrus/contracts'
+import { ROLES, type ApprovedSourceKind, type Role, type SignedLicense } from '@papyrus/contracts'
 import { AuthService } from './auth.js'
 import type { ServerConfig } from './config.js'
 import { ApprovalLifecycleError, AuthorizationDenied, PapyrusService, SessionLifecycleError } from './service.js'
@@ -32,13 +32,13 @@ function oauthComplete(response: ServerResponse): void {
   response.end(body)
 }
 
-function artifactDownload(response: ServerResponse, artifact: ReturnType<PapyrusService['sessionArtifacts']>[number]): void {
+function artifactDownload(response: ServerResponse, artifact: ReturnType<PapyrusService['sessionArtifacts']>[number], inline = false): void {
   const content = artifact.encoding === 'base64' ? Buffer.from(artifact.content, 'base64') : Buffer.from(artifact.content, 'utf8')
   const filename = artifact.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 180) || 'artifact'
   response.writeHead(200, {
     'content-type': artifact.mediaType,
     'content-length': content.length,
-    'content-disposition': `attachment; filename="${filename}"`,
+    'content-disposition': `${inline ? 'inline' : 'attachment'}; filename="${filename}"`,
     'cache-control': 'no-store',
     'x-content-type-options': 'nosniff',
   })
@@ -295,9 +295,7 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
         const input = await body(request)
         const cwd = typeof input.cwd === 'string' ? text(input.cwd, 'cwd', 4096) : '/'
         const agent = typeof input.agent === 'string' ? text(input.agent, 'agent') : service.defaultGatewayAgent()
-        const surface = typeof input.surface === 'string' ? text(input.surface, 'surface') as SessionSurface : 'general'
-        if (!SESSION_SURFACES.includes(surface)) throw new HttpError(400, 'INVALID_INPUT', 'Unknown session surface')
-        return json(response, 201, service.createSession(principal, identifier(input.environmentId ?? input.workspaceId, 'environmentId'), agent, text(input.title, 'title'), cwd, surface))
+        return json(response, 201, service.createSession(principal, identifier(input.environmentId ?? input.workspaceId, 'environmentId'), agent, text(input.title, 'title'), cwd, 'general'))
       }
       const sessionDetail = url.pathname.match(/^\/api\/sessions\/([^/]+)$/)
       if (sessionDetail && request.method === 'GET') {
@@ -394,7 +392,7 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
         const artifacts = service.sessionArtifacts(principal, decodeURIComponent(artifactFile[1] as string))
         const artifact = artifacts.find((candidate) => candidate.id === decodeURIComponent(artifactFile[2] as string))
         if (!artifact) throw new HttpError(404, 'ARTIFACT_NOT_FOUND', 'Artifact not found')
-        return artifactDownload(response, artifact)
+        return artifactDownload(response, artifact, url.searchParams.get('preview') === '1')
       }
       const cancelSession = url.pathname.match(/^\/api\/sessions\/([^/]+)\/cancel$/)
       if (cancelSession && request.method === 'POST') {
@@ -408,21 +406,6 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
       if (deleteSession && request.method === 'DELETE') {
         service.deleteSession(principal, decodeURIComponent(deleteSession[1] as string))
         return json(response, 204, null)
-      }
-      const sessionConfig = url.pathname.match(/^\/api\/sessions\/([^/]+)\/config-options$/)
-      if (sessionConfig && request.method === 'GET') {
-        return json(response, 200, { configOptions: service.sessionConfigOptions(principal, decodeURIComponent(sessionConfig[1] as string)) })
-      }
-      if (sessionConfig && request.method === 'POST') {
-        const input = await body(request)
-        return json(response, 200, {
-          configOptions: service.setSessionConfigOption(
-            principal,
-            decodeURIComponent(sessionConfig[1] as string),
-            text(input.configId, 'configId'),
-            text(input.value, 'value'),
-          ),
-        })
       }
       const resumeSession = url.pathname.match(/^\/api\/sessions\/([^/]+)\/resume$/)
       if (resumeSession && request.method === 'POST') {

@@ -92,7 +92,6 @@ export function App() {
         <div className="classification">{profileLabel(state.data.health.profile)}</div>
         <nav aria-label="Primary navigation">
           <NavButton active={view === 'home'} onClick={() => setView('home')}>Overview</NavButton>
-          <NavButton active={view === 'sessions'} onClick={openNewSession}>New session</NavButton>
           <NavButton active={view === 'sources'} onClick={() => setView('sources')}>Sources</NavButton>
           {state.data.me.roles.some((role) => role === 'Owner' || role === 'Admin') && <NavButton active={view === 'administration'} onClick={() => setView('administration')}>Administration</NavButton>}
         </nav>
@@ -115,7 +114,7 @@ export function App() {
       <main>
         {view !== 'sessions' && <header><div><p className="eyebrow">GOVERNED AGENT WORKSPACE</p><h1>{viewTitle(view)}</h1></div></header>}
         <div className="session-workspace" hidden={view !== 'sessions'}>
-          <SessionHarness environments={state.data.environments} newSessionRequest={newSessionRequest} onActivate={() => setView('sessions')} />
+          <SessionHarness newSessionRequest={newSessionRequest} onActivate={() => setView('sessions')} />
         </div>
         {view !== 'sessions' && <ShellView view={view} data={state.data} onNewSession={openNewSession} />}
       </main>
@@ -171,7 +170,7 @@ function Bootstrap({ me, onDone }: { me: string; onDone: () => Promise<void> }) 
 }
 
 function AccessPending({ me }: { me: string }) {
-  return <main className="center login"><Logo /><p className="eyebrow">ACCESS PENDING</p><h1>Identity verified.<br />Authority required.</h1><p>{me}, an Owner or Admin must assign your fixed role and environment access before you can enter Papyrus.</p></main>
+  return <main className="center login"><Logo /><p className="eyebrow">ACCESS PENDING</p><h1>Identity verified.<br />Authority required.</h1><p>{me}, an Owner or Admin must assign your fixed role before you can enter Papyrus.</p></main>
 }
 
 function ShellView({ view, data, onNewSession }: { view: Exclude<View, 'sessions'>; data: ShellData; onNewSession: () => void }) {
@@ -182,7 +181,7 @@ function ShellView({ view, data, onNewSession }: { view: Exclude<View, 'sessions
 }
 
 function DeploymentFacts({ data }: { data: ShellData }) {
-  return <Card className="panel"><div className="panel-head"><h2>Deployment</h2><Badge className="status-good">ENFORCED</Badge></div><dl className="facts"><div><dt>Policy</dt><dd>Cedar {data.health.cedar}</dd></div><div><dt>Topology</dt><dd>ON-PREMISES</dd></div><div><dt>Identity</dt><dd>{data.me.authMethod.toUpperCase()}</dd></div><div><dt>Environments</dt><dd>{data.environments.length}</dd></div></dl></Card>
+  return <Card className="panel"><div className="panel-head"><h2>Deployment</h2><Badge className="status-good">ENFORCED</Badge></div><dl className="facts"><div><dt>Policy</dt><dd>Cedar {data.health.cedar}</dd></div><div><dt>Topology</dt><dd>ON-PREMISES</dd></div><div><dt>Identity</dt><dd>{data.me.authMethod.toUpperCase()}</dd></div><div><dt>Runtime</dt><dd>PAPYRUS</dd></div></dl></Card>
 }
 
 function NavButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) { return <Button variant="ghost" className={active ? 'active' : ''} onClick={onClick}>{children}</Button> }

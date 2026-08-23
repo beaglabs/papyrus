@@ -757,3 +757,32 @@ nav [data-slot=button].active{border-color:var(--border);background:var(--main);
   }
   .mcp-server-actions [data-slot=button] { flex: 1; }
 }
+
+
+/* Immediate ACP turn and live tool output */
+.tool-live-output {
+  max-height: 280px;
+  margin-top: 8px;
+  overflow: auto;
+  border: 1px solid #aaa;
+  border-radius: 5px;
+  background: #171717;
+  color: #e8f5e9;
+}
+.tool-live-output .markdown-text {
+  padding: 10px 12px;
+  font: 12px/1.5 ui-monospace, monospace;
+}
+.tool-live-output .markdown-text > :first-child { margin-top: 0; }
+.tool-live-output .markdown-text > :last-child { margin-bottom: 0; }
+.tool-live-output pre {
+  max-height: none;
+  margin: 0;
+  border: 0;
+  box-shadow: none;
+}
+.tool-live-output .resource-card {
+  margin: 8px;
+  background: #fff;
+  color: var(--foreground);
+}

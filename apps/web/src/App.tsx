@@ -185,6 +185,6 @@ function DeploymentFacts({ data }: { data: ShellData }) {
 }
 
 function NavButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) { return <Button variant="ghost" className={active ? 'active' : ''} onClick={onClick}>{children}</Button> }
-function profileLabel(profile: string) { return ({ commercial: 'COMMERCIAL', 'government-il4': 'GOVERNMENT IL4', 'government-il6': 'GOVERNMENT IL6' } as Record<string, string>)[profile] ?? profile.toUpperCase() }
+function profileLabel(profile: string) { return ({ commercial: 'COMMERCIAL', 'government-il4': 'DoD IL4', 'government-il6': 'DoD IL6' } as Record<string, string>)[profile] ?? profile.toUpperCase() }
 function viewTitle(view: View) { return ({ home: 'Operational overview', sessions: 'Sessions', sources: 'Sources', administration: 'Administration' })[view] }
 function initials(name: string) { return name.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') }

@@ -33,7 +33,7 @@ export function AdminView({ me }: { me: Principal }) {
     {tab === 'deployment' && <section className="admin-summary"><AdminPanel title="Deployment"><dl className="facts"><Fact label="Profile" value={data.deployment.profile} /><Fact label="Topology" value="ON-PREMISES" /><Fact label="Origin" value={data.deployment.publicOrigin} /><Fact label="Authentication" value={authenticationLabel(data.deployment.authentication)} /><Fact label="Gateway" value={yes(data.deployment.gatewayConfigured)} /></dl></AdminPanel><AdminPanel title="License"><dl className="facts"><Fact label="Required" value={yes(data.deployment.licenseRequired)} /><Fact label="Status" value={data.license.valid ? 'VALID' : 'NOT ACTIVE'} /><Fact label="Deployment" value={data.license.deploymentId.slice(0, 16)} /></dl></AdminPanel></section>}
     {tab === 'identity' && <section className="admin-summary identity-admin">
       <AdminPanel title={data.deployment.profile === 'commercial' ? 'Invite with organizational OIDC' : 'Create pending CAC/PIV identity'}>
-        <form className={`admin-form identity-create ${data.deployment.profile === 'commercial' ? 'commercial' : 'government'}`} onSubmit={(event) => {
+        <form className={`admin-form identity-create ${data.deployment.profile === 'commercial' ? 'commercial' : 'dow'}`} onSubmit={(event) => {
           event.preventDefault()
           const form = event.currentTarget
           const values = new FormData(form)

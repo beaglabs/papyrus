@@ -417,24 +417,18 @@ export class PapyrusService {
     })
     const contentBlocks: ContentBlock[] = [
       ...(prompt ? [{ type: 'text' as const, text: prompt }] : []),
-      ...attachments.map((attachment): ContentBlock => ({
-        type: 'resource',
-        resource: {
-          uri: `papyrus://sessions/${sessionId}/attachments/${attachment.id}/${encodeURIComponent(attachment.name)}`,
-          mimeType: attachment.mediaType,
-          blob: attachment.content.toString('base64'),
-        },
-        annotations: { audience: ['assistant'], priority: 1 },
-      })),
+      ...attachments.map((attachment): ContentBlock => attachmentContentBlock(sessionId, attachment)),
     ]
     const run = this.beginRun(session, actor, options.signal)
     try {
       const runtime = this.runtimeFactory({ promptTimeoutMs: this.config.promptTimeoutMs })
-      this.db.addRuntimeEvent(session.id, run.runId, 'update', new Date().toISOString(), {
-        sessionUpdate: 'user_message_chunk',
-        content: { type: 'text', text: prompt },
-        messageId: `user_${run.runId}`,
-      })
+      for (const content of contentBlocks) {
+        this.db.addRuntimeEvent(session.id, run.runId, 'update', new Date().toISOString(), {
+          sessionUpdate: 'user_message_chunk',
+          content,
+          messageId: `user_${run.runId}`,
+        })
+      }
       this.audit.append({ actorId: actor.id, action: 'PromptSession', resourceType: 'Session', resourceId: session.id, decision: 'info', metadata: { promptBytes: Buffer.byteLength(prompt), attachmentIds: attachments.map((item) => item.id), runId: run.runId } })
       const result = await runtime.runPrompt({
         cwd: session.cwd,
@@ -917,6 +911,23 @@ export class PapyrusService {
     const body = await response.text()
     return body ? JSON.parse(body) : undefined
   }
+}
+
+function attachmentContentBlock(sessionId: string, attachment: Attachment): ContentBlock {
+  const uri = `papyrus://sessions/${sessionId}/attachments/${attachment.id}/${encodeURIComponent(attachment.name)}`
+  if (attachment.mediaType.startsWith('image/')) {
+    return { type: 'image', data: attachment.content.toString('base64'), mimeType: attachment.mediaType }
+  }
+  if (isTextAttachment(attachment.mediaType, attachment.name)) {
+    return { type: 'resource', resource: { uri, mimeType: attachment.mediaType, text: attachment.content.toString('utf8') }, annotations: { audience: ['assistant'], priority: 1 } }
+  }
+  return { type: 'resource', resource: { uri, mimeType: attachment.mediaType, blob: attachment.content.toString('base64') }, annotations: { audience: ['assistant'], priority: 1 } }
+}
+
+function isTextAttachment(mediaType: string, name: string): boolean {
+  return mediaType.startsWith('text/')
+    || ['application/json', 'application/xml', 'application/yaml', 'application/x-yaml', 'application/javascript'].includes(mediaType)
+    || /\.(?:md|txt|csv|tsv|json|jsonl|xml|ya?ml|js|jsx|ts|tsx|py|rs|go|java|c|cc|cpp|h|hpp|css|html|sql|sh|toml|ini|cfg|log|cob|cpy)$/i.test(name)
 }
 
 function sessionSurfaceConfig(currentValue: SessionSurface): SessionConfigOption[] {

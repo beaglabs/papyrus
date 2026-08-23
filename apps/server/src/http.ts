@@ -438,6 +438,13 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
         return oauthComplete(response)
       }
       if (url.pathname === '/api/mcp/servers' && request.method === 'GET') return json(response, 200, service.listMcpServers(principal))
+      const retryMcpServer = url.pathname.match(/^\/api\/mcp\/servers\/([^/]+)\/retry$/)
+      if (retryMcpServer && request.method === 'POST') return json(response, 200, await service.retryMcpOauth(principal, decodeURIComponent(retryMcpServer[1] as string)))
+      const deleteMcpServer = url.pathname.match(/^\/api\/mcp\/servers\/([^/]+)$/)
+      if (deleteMcpServer && request.method === 'DELETE') {
+        service.deleteMcpServer(principal, decodeURIComponent(deleteMcpServer[1] as string))
+        return json(response, 204, null)
+      }
       const mcpServerState = url.pathname.match(/^\/api\/mcp\/servers\/([^/]+)\/state$/)
       if (mcpServerState && request.method === 'POST') {
         const input = await body(request)

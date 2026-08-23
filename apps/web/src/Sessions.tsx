@@ -90,7 +90,7 @@ export function SessionHarness({ environments }: { environments: Environment[] }
     try {
       const environmentId = values.get('environment')
       if (typeof environmentId !== 'string' || !environmentId) throw new Error('Choose an environment')
-      const session = await createSession(environmentId, String(values.get('title')), 'general')
+      const session = await createSession(environmentId, String(values.get('title')))
       setSessions((current) => [session, ...current]); setSelectedId(session.id); setCreating(false); form.reset()
     } catch (cause) { showError(cause) }
   }

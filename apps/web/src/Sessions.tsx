@@ -4,7 +4,7 @@ import { cancelSession, createSession, decideApproval, deleteSession, promptSess
 import { SelectField } from './SelectField.js'
 import { acpContent, ContentMessage } from './AcpSessionContent.js'
 import { createPortal } from 'react-dom'
-import { Alert, Button, Card, Input, Textarea } from './components/ui/index.js'
+import { Alert, Button, Card, Dialog, DialogContent, DialogHeader, Input, Textarea } from './components/ui/index.js'
 
 interface ToolActivity { id: string; title: string; kind: string; status: string; sequence: number; locations: string[]; terminals: string[] }
 interface PlanItem { content: string; status: string; priority: string }
@@ -152,7 +152,7 @@ export function SessionHarness({ environments }: { environments: Environment[] }
     </aside>, historyTarget)}
     <div className="conversation-panel">
       {error && <Alert className="error">{error}<Button variant="ghost" onClick={() => setError(undefined)}>×</Button></Alert>}
-      {creating && <form className="create-session" onSubmit={create}><div><strong>New durable session</strong><Button type="button" className="icon-button" onClick={() => setCreating(false)}>×</Button></div><SelectField name="environment" label="Environment" placeholder="Choose an environment" options={environments.map((environment) => ({ value: environment.id, label: environment.name, ...(environment.description ? { detail: environment.description } : {}) }))} /><label>Session title<Input name="title" required maxLength={256} autoFocus placeholder="Describe the work" /></label><Button className="primary" disabled={!environments.length}>Create session →</Button></form>}
+      <Dialog open={creating} onOpenChange={setCreating}><DialogContent className="create-session-dialog"><form className="create-session" onSubmit={create}><DialogHeader><div><p className="eyebrow">NEW SESSION</p><strong>New durable session</strong></div><Button type="button" variant="ghost" className="icon-button" onClick={() => setCreating(false)} aria-label="Close new session dialog">×</Button></DialogHeader><SelectField name="environment" label="Environment" placeholder="Choose an environment" options={environments.map((environment) => ({ value: environment.id, label: environment.name, ...(environment.description ? { detail: environment.description } : {}) }))} /><label>Session title<Input name="title" required maxLength={256} autoFocus placeholder="Describe the work" /></label><Button className="primary" disabled={!environments.length}>Create session →</Button></form></DialogContent></Dialog>
       {!selected ? <div className="conversation-empty"><h2>Start a session.</h2><p>Choose an authorized environment, describe the work, and retain the complete history on the server.</p><Button className="primary" disabled={!environments.length} onClick={() => setCreating(true)}>New session →</Button></div> : <>
         <div className="conversation-head"><div><strong>{selected.title}</strong><span>{selected.status} · {environmentName(environments, selected.environmentId)}</span></div><div className="session-actions">{(running || selected.status === 'running') ? <Button className="danger" onClick={() => void cancel()}>Cancel run</Button> : <Button className="text-button" onClick={() => void removeSession()}>Delete</Button>}</div></div>
         <div className={`session-content ${artifactPanelOpen ? 'artifact-panel-open' : ''}`}>

@@ -364,7 +364,10 @@ nav [data-slot=button].active{border-color:var(--border);background:var(--main);
 .session-history-rail{min-height:0;flex:1;display:flex;overflow:hidden;margin:14px -2px 0}
 .session-history-rail .session-sidebar{width:100%;height:auto;min-height:0;border:0;background:transparent;color:#fff}
 .session-history-rail .session-sidebar-head{min-height:42px;padding:6px 8px 10px;border:0}
-.session-history-rail .session-sidebar-head strong{color:#999;font:700 10px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.08em}
+.session-history-rail .session-sidebar-head strong{color:#777;font:700 9px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.08em}
+.session-history-rail .new-chat-button{display:flex;align-items:center;justify-content:flex-start;gap:8px;min-height:36px;padding:7px 9px;border:0;border-radius:7px;background:transparent;color:#fff;box-shadow:none;font-size:13px}
+.session-history-rail .new-chat-button:hover{transform:none;background:#292929;box-shadow:none}
+.session-history-rail .new-chat-button span{color:#fff;font-size:18px;line-height:1}
 .session-history-rail .session-list{padding-right:4px}
 .session-history-rail .session-list [data-slot=button]{display:grid;width:100%;min-height:auto;padding:9px 10px;border:0;border-radius:6px;background:transparent;color:#ddd;box-shadow:none}
 .session-history-rail .session-list [data-slot=button]:hover{transform:none;background:#292929;box-shadow:none}
@@ -800,9 +803,7 @@ nav [data-slot=button].active{border-color:var(--border);background:var(--main);
 .new-session-composer [data-slot=textarea]{width:100%;min-height:118px;padding:10px 12px;border:0;border-radius:12px;box-shadow:none;resize:none;font-size:16px}
 .new-session-composer [data-slot=textarea]:focus-visible{outline:0}
 .new-session-controls{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;padding-top:10px;border-top:1px solid #ddd}
-.new-session-environment{display:grid;gap:5px;min-width:min(360px,70%)}
-.new-session-environment>span{color:#666;font:700 10px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.08em}
-.new-session-environment .nb-combobox-trigger{min-height:40px;padding:8px 11px;border:1px solid #999;border-radius:9px;box-shadow:none}
+.new-session-note{max-width:520px;color:#666;font:11px/1.4 ui-monospace,monospace}
 .new-session-controls>.primary{min-width:104px;border-radius:10px;box-shadow:2px 2px 0 var(--border)}
 
 /* Component-owned sidebar account menu */
@@ -831,5 +832,5 @@ nav [data-slot=button].active{border-color:var(--border);background:var(--main);
 @media(max-width:760px){
   .new-session-home{min-height:420px;padding:20px}
   .new-session-controls{align-items:stretch;flex-direction:column}
-  .new-session-environment{min-width:0;width:100%}
+  .new-session-note{max-width:none}
 }

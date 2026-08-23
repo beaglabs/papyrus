@@ -195,16 +195,34 @@ export class PapyrusService {
     this.audit.append({ actorId: actor.id, action: 'AssignResource', resourceType: 'Environment', resourceId, decision: 'info', metadata: { principalId } })
   }
 
-  createSession(actor: Principal, environmentId: string, agent: string, title: string, cwd = '/', surface: SessionSurface = 'general'): Session {
+  createSession(actor: Principal, executionTargetId: string | undefined, agent: string, title: string, cwd = '/', surface: SessionSurface = 'general'): Session {
     this.license.require('gateway')
-    this.check(actor, 'CreateSession', this.environmentResource(environmentId))
-    if (!this.db.getEnvironment(environmentId)) throw new Error('Environment not found')
+    const target = executionTargetId ? this.db.getEnvironment(executionTargetId) : this.defaultExecutionTarget(actor)
+    if (!target) throw new Error('Execution target not found')
+    this.check(actor, 'CreateSession', this.environmentResource(target.id))
     if (agent !== 'papyrus') throw new Error('Papyrus is the only supported session engine')
     if (!isAbsoluteClientPath(cwd)) throw new Error('Session cwd must be an absolute path')
     if (!SESSION_SURFACES.includes(surface)) throw new Error('Unsupported session surface')
-    const session = this.db.createSession(actor.id, environmentId, agent, title, cwd, surface)
-    this.audit.append({ actorId: actor.id, action: 'CreateSession', resourceType: 'Session', resourceId: session.id, decision: 'info', metadata: { environmentId, agent, cwd, surface } })
+    const session = this.db.createSession(actor.id, target.id, agent, title, cwd, surface)
+    this.audit.append({ actorId: actor.id, action: 'CreateSession', resourceType: 'Session', resourceId: session.id, decision: 'info', metadata: { executionTargetId: target.id, agent, cwd, surface } })
     return session
+  }
+
+  private defaultExecutionTarget(actor: Principal): Environment {
+    const settingKey = 'defaultExecutionTargetId'
+    const configuredId = this.db.getSetting(settingKey)
+    let target = configuredId ? this.db.getEnvironment(configuredId) : undefined
+    if (!target) {
+      target = this.db.createEnvironment({
+        name: 'Deployment default',
+        description: 'Internal execution target used when a session does not request an explicit enclave or runtime.',
+      })
+      this.db.setSetting(settingKey, target.id)
+    }
+    if (actor.roles.includes('User') && !this.db.isAssigned(actor.id, 'environment', target.id)) {
+      this.db.assign('user', actor.id, 'environment', target.id)
+    }
+    return target
   }
 
   listSessions(actor: Principal): Session[] {

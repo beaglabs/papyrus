@@ -152,3 +152,16 @@ pnpm build
 ---
 
 *This repository is not an authorization to operate, a cross-domain solution, or a claim of IL4/IL6 accreditation.*
+
+## Approved sources and local retrieval
+
+Papyrus exposes one authorization-scoped retrieval surface regardless of how content reaches the host:
+
+- uploads and import packages
+- existing directories (including host-mounted NFS, SMB/CIFS, SAN, Kubernetes volumes, encrypted disks, removable media, and synchronized folders)
+- approved domains and APIs
+- MCP connectors
+
+Papyrus does **not** mount remote filesystems or retain NAS credentials. Infrastructure mounts storage, then an Owner or Admin registers the existing directory and assigns the source to identities. Assignments are rechecked for every list, search, and chunk read. The agent receives `papyrus_sources_list`, `papyrus_sources_search`, and `papyrus_sources_read`; results carry the source, URI, title, chunk location, and SHA-256 citation.
+
+FTS5 is always available and is the offline baseline. Semantic retrieval is optional: set `PAPYRUS_SQLITE_VEC_EXTENSION` to a locally packaged sqlite-vec library and `PAPYRUS_SQLITE_VEC_SHA256` to its approved checksum. Papyrus verifies the binary before loading it and disables further SQLite extension loading immediately afterward. The extension is optional so disconnected deployments remain operable without a model or vector runtime.

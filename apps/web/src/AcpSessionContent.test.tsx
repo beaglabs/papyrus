@@ -13,6 +13,15 @@ describe('MarkdownText', () => {
     expect(html).toContain('href="https://example.test"')
   })
 
+  it('renders GitHub-style Markdown tables with alignment', () => {
+    const html = renderToStaticMarkup(<MarkdownText text={'| Name | Status | Count |\n| :--- | :---: | ---: |\n| Report | **Ready** | 4 |'} />)
+
+    expect(html).toContain('<table>')
+    expect(html).toContain('class="align-center"')
+    expect(html).toContain('class="align-right"')
+    expect(html).toContain('<strong>Ready</strong>')
+  })
+
   it('leaves raw HTML inert and rejects executable link schemes', () => {
     const html = renderToStaticMarkup(<MarkdownText text={'<script>alert(1)</script>\n\n[unsafe](javascript:alert(1))'} />)
 

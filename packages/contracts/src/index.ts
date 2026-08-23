@@ -152,6 +152,38 @@ export interface ResearchSource {
   capturedAt: string
 }
 
+export const APPROVED_SOURCE_KINDS = ['upload', 'directory', 'domain', 'mcp', 'package', 'api'] as const
+export type ApprovedSourceKind = (typeof APPROVED_SOURCE_KINDS)[number]
+
+export interface ApprovedSource {
+  id: string
+  name: string
+  kind: ApprovedSourceKind
+  locator: string
+  mode: 'snapshot' | 'live'
+  status: 'ready' | 'indexing' | 'error'
+  assignedUserIds: string[]
+  documentCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SourceCitation {
+  sourceId: string
+  sourceName: string
+  uri: string
+  title: string
+  location?: string
+  sha256: string
+}
+
+export interface SourceSearchResult {
+  chunkId: string
+  content: string
+  score: number
+  citation: SourceCitation
+}
+
 export interface McpServer {
   id: string
   name: string
@@ -192,6 +224,7 @@ export interface AdminOverview {
   users: Principal[]
   invitations: Invitation[]
   environments: AdminEnvironment[]
+  sources: ApprovedSource[]
   mcpServers: McpServer[]
   toolGrants: ToolGrant[]
   license: LicenseStatus

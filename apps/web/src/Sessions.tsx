@@ -224,6 +224,37 @@ function ElicitationCard({ item, onRespond }: { item: Elicitation; onRespond: (i
 function environmentName(environments: Environment[], id: string) { return environments.find((environment) => environment.id === id)?.name ?? 'Environment' }
 function formatBytes(size: number) { return size < 1024 ? `${size} B` : size < 1024 * 1024 ? `${(size / 1024).toFixed(1)} KB` : `${(size / 1024 / 1024).toFixed(1)} MB` }
 
+function ArtifactWorkspace({ artifacts, generating, open, selectedId, onOpenChange, onSelect }: { artifacts: Artifact[]; generating: boolean; open: boolean; selectedId?: string; onOpenChange: (open: boolean) => void; onSelect: (id: string) => void }) {
+  const selected = artifacts.find((artifact) => artifact.id === selectedId) ?? artifacts.at(-1)
+  if (!open) return <Button className={`artifact-popout ${generating ? 'generating' : ''}`} onClick={() => onOpenChange(true)}><span aria-hidden="true">{generating ? '◌' : '▤'}</span><span>Outputs</span>{artifacts.length > 0 && <strong>{artifacts.length}</strong>}</Button>
+  return <aside className="artifact-workspace">
+    <div className="artifact-workspace-head"><div><span>OUTPUTS</span><strong>{generating ? 'Generating…' : selected?.name ?? 'Artifacts'}</strong></div><Button variant="ghost" onClick={() => onOpenChange(false)} aria-label="Close outputs">×</Button></div>
+    {generating && <div className="artifact-generating"><span className="artifact-orbit" aria-hidden="true" /><div><strong>Building an artifact</strong><span>Structured output will render here as it arrives.</span></div><div className="artifact-skeleton"><i /><i /><i /></div></div>}
+    {artifacts.length > 0 && <div className="artifact-browser">
+      <nav aria-label="Generated artifacts">{artifacts.map((artifact) => <Button key={artifact.id} variant="ghost" className={artifact.id === selected?.id ? 'selected' : ''} onClick={() => onSelect(artifact.id)}><span>{artifactIcon(artifact)}</span><span><strong>{artifact.name}</strong><small>{artifact.mediaType} · v{artifact.version}</small></span></Button>)}</nav>
+      {selected && <div className="artifact-preview">
+        <div className="artifact-preview-meta"><span>{selected.mediaType}</span><a href={selected.downloadUrl}>Download ↓</a></div>
+        {selected.mediaType.startsWith('image/') ? <img src={selected.downloadUrl} alt={selected.name} />
+          : selected.mediaType === 'application/pdf' ? <object data={selected.downloadUrl} type="application/pdf"><a href={selected.downloadUrl}>Open {selected.name}</a></object>
+          : <iframe title={selected.name} src={selected.downloadUrl} sandbox="" />}
+      </div>}
+    </div>}
+    {!generating && artifacts.length === 0 && <div className="artifact-empty"><span>▤</span><strong>No outputs yet</strong><p>Generated files, images, structured data, and diffs will open here automatically.</p></div>}
+  </aside>
+}
+
+function artifactIcon(artifact: Artifact): string {
+  if (artifact.mediaType.startsWith('image/')) return '▧'
+  if (artifact.kind === 'diff') return 'Δ'
+  if (artifact.mediaType.includes('json') || artifact.mediaType.includes('csv')) return '⌗'
+  return '▤'
+}
+
+function isArtifactGenerationActive(events: SessionEvent[]): boolean {
+  const { tools } = projectActivity(events)
+  return tools.some((tool) => ['pending', 'in_progress'].includes(tool.status) && (tool.kind === 'edit' || /generate|write|render|export|artifact|image/i.test(tool.title)))
+}
+
 function PromptTurnFlow({ events }: { events: SessionEvent[] }) {
   let turnStart = -1
   for (let index = events.length - 1; index >= 0; index -= 1) {

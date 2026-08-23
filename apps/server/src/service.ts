@@ -480,6 +480,7 @@ export class PapyrusService {
     if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && ['127.0.0.1', '::1', 'localhost'].includes(parsed.hostname))) throw new Error('Remote MCP endpoints must use HTTPS')
     const redirectUri = `${this.config.publicOrigin}/api/mcp/oauth/callback`
     const oauth = await registerRemoteMcp(parsed.toString(), redirectUri, `Papyrus — ${input.name}`)
+    if (!oauth) await this.validateDirectMcp(parsed.toString())
     const server = this.db.addMcpServer({ ...input, oauthStatus: oauth ? 'authorization_required' : 'not_required', ...(oauth ? { oauthIssuer: oauth.issuer } : {}) })
     if (oauth) this.db.createMcpOauthPending({ state: oauth.state, serverId: server.id, actorId: actor.id, issuer: oauth.issuer, tokenEndpoint: oauth.tokenEndpoint, clientId: oauth.clientId, ...(oauth.clientSecret ? { clientSecret: this.seal(oauth.clientSecret) } : {}), verifier: this.seal(oauth.verifier), redirectUri, resource: oauth.resource })
     this.audit.append({ actorId: actor.id, action: 'AddMcpServer', resourceType: 'McpServer', resourceId: server.id, decision: 'info', metadata: { name: server.name } })
@@ -811,6 +812,18 @@ export class PapyrusService {
     if (name === 'papyrus_sources_search') return { results: this.searchApprovedSources(actor, textValue(input.query,'query'), typeof input.limit === 'number' ? input.limit : 10) }
     if (name === 'papyrus_sources_read') return this.readApprovedSource(actor,textValue(input.chunkId,'chunkId'))
     throw new Error('Unknown source tool')
+  }
+
+  private async validateDirectMcp(endpoint: string): Promise<void> {
+    const initialized = await this.forwardMcp(endpoint, {
+      jsonrpc: '2.0', id: crypto.randomUUID(), method: 'initialize',
+      params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'Papyrus', version: '0.1.0' } },
+    })
+    const result = initialized && typeof initialized === 'object' ? (initialized as { result?: { protocolVersion?: unknown; serverInfo?: unknown } }).result : undefined
+    if (!result || typeof result.protocolVersion !== 'string' || !result.serverInfo) throw new Error('Endpoint did not complete MCP initialization')
+    await this.forwardMcp(endpoint, { jsonrpc: '2.0', method: 'notifications/initialized', params: {} })
+    const tools = await this.forwardMcp(endpoint, { jsonrpc: '2.0', id: crypto.randomUUID(), method: 'tools/list', params: {} })
+    if (!tools || typeof tools !== 'object' || !Array.isArray((tools as { result?: { tools?: unknown } }).result?.tools)) throw new Error('Endpoint did not return a valid MCP tool catalog')
   }
 
   private async nativeTools(session: Session): Promise<RuntimeTool[]> {

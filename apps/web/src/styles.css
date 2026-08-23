@@ -93,6 +93,8 @@ h2 { font-size: 19px; margin-bottom: 20px; }
 .surface-workspace { flex: 1; width: 100%; min-width: 0; min-height: 0; display: grid; gap: 2px; overflow: hidden; background: #111; }
 .surface-pane { min-width: 0; min-height: 0; overflow: hidden; background: #fff; position: relative; }
 .surface-pane-label { position: absolute; inset: 0 0 auto; z-index: 2; border-bottom: 1px solid #111; background: #f5f1e8; padding: 7px 10px; color: #666; font: 10px ui-monospace, monospace; letter-spacing: .1em; }
+.general-surface { grid-template-columns: minmax(380px, 1.6fr) minmax(280px, 1fr); grid-template-rows: repeat(3, minmax(0, 1fr)); }
+.general-conversation { grid-row: 1 / 4; }.general-activity { grid-column: 2; grid-row: 1; }.general-approvals { grid-column: 2; grid-row: 2; }.general-artifacts { grid-column: 2; grid-row: 3; }
 .ide-surface { grid-template-columns: minmax(190px, .7fr) minmax(320px, 1.5fr) minmax(240px, 1fr); grid-template-rows: minmax(0, 1fr) minmax(150px, .55fr); }
 .ide-files { grid-row: 1 / 3; }.ide-editor { grid-column: 2; grid-row: 1; }.ide-results { grid-column: 2; grid-row: 2; }.ide-conversation { grid-column: 3; grid-row: 1 / 3; }
 .research-surface { grid-template-columns: minmax(360px, 1.5fr) minmax(260px, 1fr); grid-template-rows: minmax(0, 1fr) minmax(150px, .55fr); }

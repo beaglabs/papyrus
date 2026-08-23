@@ -161,38 +161,20 @@ export function SessionHarness({ environments }: { environments: Environment[] }
     <div className="conversation-panel">
       {error && <Alert className="error">{error}<Button variant="ghost" onClick={() => setError(undefined)}>×</Button></Alert>}
       {creating && <form className="create-session" onSubmit={create}><div><strong>New durable session</strong><Button type="button" className="icon-button" onClick={() => setCreating(false)}>×</Button></div><SelectField name="environment" label="Environment" placeholder="Choose an environment" options={environments.map((environment) => ({ value: environment.id, label: environment.name, ...(environment.description ? { detail: environment.description } : {}) }))} /><label>Session title<Input name="title" required maxLength={256} autoFocus placeholder="Describe the work" /></label><Button className="primary" disabled={!environments.length}>Create session →</Button></form>}
-      {!selected ? <div className="conversation-empty"><h2>Start a governed session.</h2><p>Choose an authorized environment, describe the work, and retain the complete history on the server.</p><Button className="primary" disabled={!environments.length} onClick={() => setCreating(true)}>New session →</Button></div> : <>
-        <div className="conversation-head"><div><strong>{selected.title}</strong><span>{selected.status} · {surfaceLabel(surface)} · {environmentName(environments, selected.environmentId)}</span></div><div className="session-actions"><SurfaceControl value={surface} disabled={running} onChange={changeSurface} />{(running || selected.status === 'running') ? <Button className="danger" onClick={() => void cancel()}>Cancel run</Button> : <Button className="text-button" onClick={() => void removeSession()}>Delete</Button>}</div></div>
-        <div className="session-content">
-        {tab === 'conversation' && <div className="message-region">
-          <div className="messages" ref={messagesRef} aria-live="polite" onScroll={(event) => {
-            const element = event.currentTarget
-            setFollowingLatest(element.scrollHeight - element.scrollTop - element.clientHeight < 72)
-          }}>{messages.length ? messages.map((message) => <ContentMessage message={message} key={message.id} />) : <div className="conversation-empty compact"><h2>What work should Papyrus begin?</h2><p>The runtime and tools are selected by deployment policy.</p></div>}{running && <PromptTurnFlow events={events} />}</div>
-          {!followingLatest && <Button className="jump-latest" onClick={() => { setFollowingLatest(true); messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' }) }}>Jump to latest ↓</Button>}
-        </div>}
-        {tab === 'plan' && <ActivityView plan={activity.plan} tools={[]} runs={runs} />}
-        {tab === 'activity' && <ActivityView plan={activity.plan} tools={activity.tools} runs={runs} />}
-        {tab === 'files' && <AttachmentView title="Session files" items={attachments} empty="No repository files have been attached or emitted." />}
-        {tab === 'editor' && <SurfaceEmpty title="No file selected." detail="Select a file emitted by an ACP worker or attached to this session to preview it here." />}
-        {tab === 'diff' && <ArtifactView artifacts={artifacts.filter((artifact) => artifact.kind === 'diff')} />}
-        {tab === 'terminal' && <SurfaceEmpty title="No terminal output." detail="ACP terminal updates will appear here when the assigned worker exposes terminal capability." />}
-        {tab === 'tests' && <SurfaceEmpty title="No test results." detail="Structured build and test results emitted by the worker will appear here." />}
-        {tab === 'preview' && <AttachmentView title="Documents" items={attachments} empty="Attach a PDF, Word file, solicitation, policy, or contract to begin review." />}
-        {tab === 'findings' && <SurfaceEmpty title="No document findings." detail="Findings emitted as structured ACP resources will appear here without being flattened into chat." />}
-        {tab === 'citations' && <SourceList sources={sources} />}
-        {tab === 'metadata' && <AttachmentView title="Document metadata" items={attachments} empty="No document metadata is available." />}
-        {tab === 'input' && <AttachmentView title="Input data" items={attachments} empty="Attach CSV, XML, SOAP, copybook, JSON, or another supported input." />}
-        {tab === 'schema' && <SurfaceEmpty title="No detected schema." detail="A Sieve-compatible MCP server can emit a structured schema artifact for this panel." />}
-        {tab === 'mapping' && <SurfaceEmpty title="No field mapping." detail="Source-to-target mappings will appear when emitted as structured resources." />}
-        {tab === 'transform' && <SurfaceEmpty title="No transformation steps." detail="Deterministic transformation steps emitted by the assigned data tool will appear here." />}
-        {tab === 'validation' && <SurfaceEmpty title="No validation results." detail="Validation failures and before/after samples will appear here." />}
-        {tab === 'export' && <ArtifactView artifacts={artifacts} />}
-        {tab === 'approvals' && <ApprovalView approvals={approvals} onDecision={reviewApproval} />}
-        {tab === 'sources' && <SourceList sources={sources} />}
-        {tab === 'artifacts' && <ArtifactView artifacts={artifacts} />}
+      {!selected ? <div className="conversation-empty"><h2>Start a session.</h2><p>Choose an authorized environment, describe the work, and retain the complete history on the server.</p><Button className="primary" disabled={!environments.length} onClick={() => setCreating(true)}>New session →</Button></div> : <>
+        <div className="conversation-head"><div><strong>{selected.title}</strong><span>{selected.status} · {environmentName(environments, selected.environmentId)}</span></div><div className="session-actions">{(running || selected.status === 'running') ? <Button className="danger" onClick={() => void cancel()}>Cancel run</Button> : <Button className="text-button" onClick={() => void removeSession()}>Delete</Button>}</div></div>
+        <div className={`session-content ${artifactPanelOpen ? 'artifact-panel-open' : ''}`}>
+          <div className="message-region">
+            <div className="messages" ref={messagesRef} aria-live="polite" onScroll={(event) => {
+              const element = event.currentTarget
+              setFollowingLatest(element.scrollHeight - element.scrollTop - element.clientHeight < 72)
+            }}>{messages.length ? messages.map((message) => <ContentMessage message={message} key={message.id} />) : <div className="conversation-empty compact"><h2>What should Papyrus do?</h2><p>Attach context or describe the work.</p></div>}{running && <PromptTurnFlow events={events} />}</div>
+            {!followingLatest && <Button className="jump-latest" onClick={() => { setFollowingLatest(true); messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' }) }}>Jump to latest ↓</Button>}
+          </div>
+          <ArtifactWorkspace artifacts={artifacts} generating={running && isArtifactGenerationActive(events)} open={artifactPanelOpen} selectedId={selectedArtifactId} onOpenChange={setArtifactPanelOpen} onSelect={setSelectedArtifactId} />
         </div>
         <div className="session-footer">
+        {approvals.filter((approval) => approval.status === 'pending').map((approval) => <ApprovalCard key={approval.id} approval={approval} onDecision={reviewApproval} />)}
         {elicitations.find((item) => item.status === 'pending') && <ElicitationCard item={elicitations.find((item) => item.status === 'pending')!} onRespond={async (id, response) => { await respondElicitation(selected.id, id, response); await loadContext(selected.id) }} />}
         <form className="composer" onSubmit={send}>
           {draftAttachmentIds.length > 0 && <div className="attachment-chips">{draftAttachmentIds.map((id) => { const attachment = attachments.find((item) => item.id === id); return attachment && <span key={id}><span>↧ {attachment.name} · {formatBytes(attachment.size)}</span><Button type="button" onClick={() => setDraftAttachmentIds((current) => current.filter((item) => item !== id))} aria-label={`Remove ${attachment.name}`}>×</Button></span> })}</div>}

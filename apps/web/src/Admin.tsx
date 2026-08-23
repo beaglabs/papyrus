@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { APPROVED_SOURCE_KINDS, type ApprovedSourceKind, ROLES, type AdminOverview, type Principal, type Role } from '@papyrus/contracts'
 import { addMcpServer, addUserRole, adminOverview, assignApprovedSource, cancelInvitation, createApprovedSource, createInvitation, ingestApprovedSource, revokeUserSessions, setMcpServerEnabled } from './api.js'
 import { SelectField } from './SelectField.js'
-import { Button, Card, Checkbox, Input, NativeSelect } from './components/ui/index.js'
+import { Button, Card, Checkbox, Input, NativeSelect, TabsList, TabsTrigger } from './components/ui/index.js'
 
 type AdminTab = 'deployment' | 'identity' | 'sources' | 'integrations'
 
@@ -20,7 +20,7 @@ export function AdminView({ me }: { me: Principal }) {
   const allowedRoles = me.roles.includes('Owner') ? ROLES : ROLES.filter((role) => role !== 'Owner' && role !== 'Admin')
   return <div className="admin-view">
     {error && <div className="error">{error}<Button onClick={() => setError(undefined)}>×</Button></div>}
-    <div className="admin-tabs" role="tablist">{(['deployment', 'identity', 'sources', 'integrations'] as AdminTab[]).map((item) => <Button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item}</Button>)}</div>
+    <TabsList className="admin-tabs">{(['deployment', 'identity', 'sources', 'integrations'] as AdminTab[]).map((item) => <TabsTrigger key={item} active={tab === item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item}</TabsTrigger>)}</TabsList>
     {tab === 'deployment' && <section className="admin-summary"><AdminPanel title="Deployment"><dl className="facts"><Fact label="Profile" value={data.deployment.profile} /><Fact label="Topology" value="ON-PREMISES" /><Fact label="Origin" value={data.deployment.publicOrigin} /><Fact label="Authentication" value={authenticationLabel(data.deployment.authentication)} /><Fact label="Gateway" value={yes(data.deployment.gatewayConfigured)} /></dl></AdminPanel><AdminPanel title="License"><dl className="facts"><Fact label="Required" value={yes(data.deployment.licenseRequired)} /><Fact label="Status" value={data.license.valid ? 'VALID' : 'NOT ACTIVE'} /><Fact label="Deployment" value={data.license.deploymentId.slice(0, 16)} /></dl></AdminPanel></section>}
     {tab === 'identity' && <section className="admin-summary identity-admin">
       <AdminPanel title={data.deployment.profile === 'commercial' ? 'Invite with organizational OIDC' : 'Create pending CAC/PIV identity'}>

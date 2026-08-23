@@ -11,6 +11,7 @@ export class ManagedFileRoot {
   constructor(rootPath: string) {
     if (!isAbsolute(rootPath)) throw new Error('File mount path must be absolute')
     this.root = realpathSync(rootPath)
+    if (dirname(this.root) === this.root) throw new Error('The filesystem root cannot be registered as a file mount')
     if (!statSync(this.root).isDirectory()) throw new Error('File mount path must reference a directory')
   }
 

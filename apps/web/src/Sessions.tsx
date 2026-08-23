@@ -50,7 +50,10 @@ export function SessionHarness({ environments }: { environments: Environment[] }
     if (!followingLatest) return
     const frame = requestAnimationFrame(() => messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' }))
     return () => cancelAnimationFrame(frame)
-  }, [messages, running, surface, followingLatest])
+}, [messages, running, tab, followingLatest])
+  useEffect(() => {
+    if (!tabs.includes(tab)) setTab(tabs[0] ?? 'conversation')
+  }, [surface])
 
   useEffect(() => {
     streamRef.current?.close()
@@ -117,6 +120,7 @@ export function SessionHarness({ environments }: { environments: Environment[] }
     try {
       await setSessionConfigOption(selectedId, 'papyrus.surface', nextSurface)
       setSessions((current) => current.map((session) => session.id === selectedId ? { ...session, surface: nextSurface, updatedAt: new Date().toISOString() } : session))
+setTab(SURFACE_TABS[nextSurface][0] ?? 'conversation')
     } catch (cause) { showError(cause) }
   }
 

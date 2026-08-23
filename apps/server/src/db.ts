@@ -166,8 +166,8 @@ export class PapyrusDatabase {
         ALTER TABLE invitations_v2 RENAME TO invitations;
       `)
     }
-    const sessionColumns = this.sqlite.prepare('PRAGMA table_info(sessions)').all() as Row[]
-    if (!sessionColumns.some((column) => column.name === 'cwd')) {
+    const sessionColumns2 = this.sqlite.prepare('PRAGMA table_info(sessions)').all() as Row[]
+    if (!sessionColumns2.some((column) => column.name === 'cwd')) {
       this.sqlite.exec("ALTER TABLE sessions ADD COLUMN cwd TEXT NOT NULL DEFAULT '/'")
     }
     const eventColumns = this.sqlite.prepare('PRAGMA table_info(runtime_events)').all() as Row[]

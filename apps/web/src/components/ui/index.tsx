@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom'
 import { forwardRef, useEffect, useRef, useState, type ButtonHTMLAttributes, type HTMLAttributes, type InputHTMLAttributes, type LabelHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
 
 function classes(...values:Array<string|false|null|undefined>){return values.filter(Boolean).join(' ')}
@@ -105,7 +106,7 @@ export function DropdownMenuItem({className,...props}:ButtonHTMLAttributes<HTMLB
 export function Dialog({open,onOpenChange,children}:{open:boolean;onOpenChange:(open:boolean)=>void;children:ReactNode}){
   useEffect(()=>{if(!open)return;const escape=(event:KeyboardEvent)=>{if(event.key==='Escape')onOpenChange(false)};document.addEventListener('keydown',escape);return()=>document.removeEventListener('keydown',escape)},[open,onOpenChange])
   if(!open)return null
-  return <div data-slot="dialog-overlay" onMouseDown={event=>{if(event.target===event.currentTarget)onOpenChange(false)}}><div role="dialog" aria-modal="true" data-slot="dialog">{children}</div></div>
+  return createPortal(<div data-slot="dialog-overlay" onMouseDown={event=>{if(event.target===event.currentTarget)onOpenChange(false)}}><div role="dialog" aria-modal="true" data-slot="dialog">{children}</div></div>,document.body)
 }
 export function DialogHeader({className,...props}:HTMLAttributes<HTMLDivElement>){return <div data-slot="dialog-header" className={className} {...props}/>}
 export function DialogContent({className,...props}:HTMLAttributes<HTMLDivElement>){return <div data-slot="dialog-content" className={className} {...props}/>}

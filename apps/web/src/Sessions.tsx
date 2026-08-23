@@ -84,28 +84,52 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
     streamRef.current?.close()
     setFollowingLatest(true)
     setDraftAttachmentIds([])
+    setLiveError(undefined)
     if (!selectedId) { setEvents([]); setArtifacts([]); setApprovals([]); setAttachments([]); setElicitations([]); return }
+    setEvents([])
     let active = true
+    let stream: EventSource | undefined
+    const reconcile = async () => {
+      const [history] = await Promise.all([sessionEvents(selectedId), loadContext(selectedId), loadSessions()])
+      if (!active) return
+      setEvents((current) => mergeSessionEvents(current, history))
+    }
     void Promise.all([sessionEvents(selectedId), loadContext(selectedId)]).then(([history]) => {
       if (!active) return
       setEvents(history)
       const after = history.at(-1)?.sequence ?? 0
-      const stream = new EventSource(`/api/sessions/${encodeURIComponent(selectedId)}/events/stream?after=${after}`)
+      stream = new EventSource(`/api/sessions/${encodeURIComponent(selectedId)}/events/stream?after=${after}`)
       stream.addEventListener('session_event', (message) => {
         const event = JSON.parse((message as MessageEvent<string>).data) as SessionEvent
-        setEvents((current) => current.some((item) => item.sequence === event.sequence) ? current : [...current, event])
-        const update = event.data as { sessionUpdate?: string; status?: string } | undefined
-        if (update?.sessionUpdate === 'user_message_chunk') { setPendingTurn(undefined); setRunning(true) }
-        if (event.kind === 'session') setRunning(true)
-        if (event.kind === 'complete') { setRunning(false); setPendingTurn(undefined); void loadSessions().catch(showError) }
-        if (event.kind === 'approval' || event.kind === 'elicitation' || event.kind === 'complete' || (update?.sessionUpdate === 'tool_call_update' && ['completed', 'failed'].includes(update.status ?? ''))) {
+        setEvents((current) => mergeSessionEvents(current, [event]))
+        const update = event.data as { sessionUpdate?: string; status?: string; error?: string } | undefined
+        if (update?.sessionUpdate === 'user_message_chunk' || update?.sessionUpdate === 'run_started' || event.kind === 'session') {
+          setPendingTurn(undefined)
+          setRunning(true)
+        }
+        const terminalRun = update?.sessionUpdate === 'run_completed' && ['completed', 'cancelled', 'failed', 'interrupted'].includes(update.status ?? '')
+        if (event.kind === 'complete' || terminalRun) {
+          setRunning(false)
+          setPendingTurn(undefined)
+          if (update?.status === 'failed' && update.error) setError(update.error)
+          void Promise.all([loadSessions(), loadContext(selectedId)]).catch(showError)
+        } else if (event.kind === 'approval' || event.kind === 'elicitation' || (update?.sessionUpdate === 'tool_call_update' && ['completed', 'failed'].includes(update.status ?? ''))) {
           void loadContext(selectedId).catch(showError)
         }
       })
-      stream.onerror = () => setError('Live updates were interrupted. Papyrus will retry automatically.')
+      stream.onopen = () => setLiveError(undefined)
+      stream.onerror = () => setLiveError('Live updates are reconnecting. Persisted events will be replayed automatically.')
       streamRef.current = stream
     }).catch(showError)
-    return () => { active = false; streamRef.current?.close() }
+    const restore = () => { if (document.visibilityState === 'visible') void reconcile().catch(showError) }
+    document.addEventListener('visibilitychange', restore)
+    window.addEventListener('focus', restore)
+    return () => {
+      active = false
+      stream?.close()
+      document.removeEventListener('visibilitychange', restore)
+      window.removeEventListener('focus', restore)
+    }
   }, [selectedId])
 
   const startNewSession = async (event: FormEvent<HTMLFormElement>) => {

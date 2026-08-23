@@ -106,7 +106,7 @@ function SourceAdministration({data,busy,act}:{data:AdminOverview;busy:boolean;a
       <Button className="primary" disabled={busy}>Add source</Button>
     </form>
     <p className="admin-note">Sources are assigned to identities and rechecked on every search and read. Uploads are indexed immediately; domains and APIs retain their approved locator; MCP sources bind to an existing validated connection.</p>
-    <div className="admin-list source-admin-list">{data.sources.map(source=><Card key={source.id}><div><strong>{source.name}</strong><span>{source.kind.replace(/\\b\\w/g,character=>character.toUpperCase())} · {source.mode.replace(/^./,character=>character.toUpperCase())} · {source.documentCount} documents</span><code>{source.locator}</code></div><div className="source-assignees">{data.users.map(user=><label key={user.id}><Checkbox checked={source.assignedUserIds.includes(user.id)} disabled={busy} onChange={(event)=>void act(()=>assignApprovedSource(source.id,user.id,event.target.checked))}/>{user.displayName}</label>)}</div></Card>)}</div>
+    <div className="admin-list source-admin-list">{data.sources.map(source=><Card key={source.id}><div><strong>{source.name}</strong><span>{source.kind.replace(/^./,character=>character.toUpperCase())} · {source.mode.replace(/^./,character=>character.toUpperCase())} · {source.documentCount} documents</span><code>{source.locator}</code></div><div className="source-assignees">{data.users.map(user=><label key={user.id}><Checkbox checked={source.assignedUserIds.includes(user.id)} disabled={busy} onChange={(event)=>void act(()=>assignApprovedSource(source.id,user.id,event.target.checked))}/>{user.displayName}</label>)}</div></Card>)}</div>
   </AdminPanel></section>
 }
 

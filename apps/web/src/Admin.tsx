@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { APPROVED_SOURCE_KINDS, type ApprovedSourceKind, ROLES, type AdminOverview, type Principal, type Role } from '@papyrus/contracts'
 import { addMcpServer, addUserRole, adminOverview, assignApprovedSource, cancelInvitation, createApprovedSource, createInvitation, ingestApprovedSource, revokeUserSessions, setMcpServerEnabled } from './api.js'
 import { SelectField } from './SelectField.js'
-import { Button, Checkbox, Input, NativeSelect } from './components/ui/index.js'
+import { Button, Card, Checkbox, Input, NativeSelect } from './components/ui/index.js'
 
 type AdminTab = 'deployment' | 'identity' | 'sources' | 'integrations'
 
@@ -92,7 +92,7 @@ function SourceAdministration({data,busy,act}:{data:AdminOverview;busy:boolean;a
   </AdminPanel></section>
 }
 
-function AdminPanel({ title, children }: { title: string; children: ReactNode }) { return <article className="panel admin-panel"><div className="panel-head"><h2>{title}</h2></div>{children}</article> }
+function AdminPanel({ title, children }: { title: string; children: ReactNode }) { return <Card className="panel admin-panel"><div className="panel-head"><h2>{title}</h2></div>{children}</Card> }
 function Fact({ label, value }: { label: string; value: string }) { return <div><dt>{label}</dt><dd>{value}</dd></div> }
 function yes(value: boolean) { return value ? 'CONFIGURED' : 'NOT CONFIGURED' }
 function commercialAction(profile: AdminOverview['deployment']['profile']) { return profile === 'commercial' ? 'Send invite' : 'Create identity' }

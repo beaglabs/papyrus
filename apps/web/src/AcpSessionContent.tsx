@@ -1,4 +1,5 @@
 import type { SessionEvent } from '@papyrus/contracts'
+import type { ReactNode } from 'react'
 
 export interface AcpContentItem {
   id: string
@@ -38,18 +39,90 @@ function ContentBlock({ block }: { block: Record<string, unknown> }) {
   return <div className="resource-card"><strong>Structured ACP content</strong><small>{String(block.type ?? 'unknown')}</small></div>
 }
 
-function MarkdownText({ text }: { text: string }) {
-  const parts = text.split(/```(\w+)?\n([\s\S]*?)```/g)
-  return (
-    <div className="markdown-text">
-      {parts.map((part, i) => {
-        if (i % 3 === 0) return part ? <p>{part}</p> : null
-        const lang = part
-        const code = parts[i + 1]
-        return <pre key={i}><code className={lang ? `language-${lang}` : ''}>{code}</code></pre>
-      })}
-    </div>
-  )
+export function MarkdownText({ text }: { text: string }) {
+  return <div className="markdown-text">{markdownBlocks(text)}</div>
+}
+
+function markdownBlocks(markdown: string): ReactNode[] {
+  const lines = markdown.replace(/\r\n?/g, '\n').split('\n')
+  const output: ReactNode[] = []
+  let index = 0
+  while (index < lines.length) {
+    const line = lines[index] ?? ''
+    const fence = line.match(/^\s*```([^\s`]*)\s*$/)
+    if (fence) {
+      const code: string[] = []
+      index += 1
+      while (index < lines.length && !/^\s*```\s*$/.test(lines[index] ?? '')) code.push(lines[index++] ?? '')
+      if (index < lines.length) index += 1
+      output.push(<pre key={output.length}><code className={fence[1] ? `language-${fence[1]}` : undefined}>{code.join('\n')}</code></pre>)
+      continue
+    }
+    if (!line.trim()) { index += 1; continue }
+    const heading = line.match(/^(#{1,6})\s+(.+)$/)
+    if (heading) {
+      const level = heading[1]!.length
+      const content = inlineMarkdown(heading[2]!)
+      output.push(level === 1 ? <h1 key={output.length}>{content}</h1>
+        : level === 2 ? <h2 key={output.length}>{content}</h2>
+        : level === 3 ? <h3 key={output.length}>{content}</h3>
+        : level === 4 ? <h4 key={output.length}>{content}</h4>
+        : level === 5 ? <h5 key={output.length}>{content}</h5>
+        : <h6 key={output.length}>{content}</h6>)
+      index += 1
+      continue
+    }
+    if (/^\s*([-*_])(?:\s*\1){2,}\s*$/.test(line)) { output.push(<hr key={output.length} />); index += 1; continue }
+    if (/^\s*[-*+]\s+/.test(line)) {
+      const items: ReactNode[] = []
+      while (index < lines.length && /^\s*[-*+]\s+/.test(lines[index] ?? '')) {
+        items.push(<li key={items.length}>{inlineMarkdown((lines[index] ?? '').replace(/^\s*[-*+]\s+/, ''))}</li>)
+        index += 1
+      }
+      output.push(<ul key={output.length}>{items}</ul>)
+      continue
+    }
+    if (/^\s*\d+[.)]\s+/.test(line)) {
+      const items: ReactNode[] = []
+      while (index < lines.length && /^\s*\d+[.)]\s+/.test(lines[index] ?? '')) {
+        items.push(<li key={items.length}>{inlineMarkdown((lines[index] ?? '').replace(/^\s*\d+[.)]\s+/, ''))}</li>)
+        index += 1
+      }
+      output.push(<ol key={output.length}>{items}</ol>)
+      continue
+    }
+    if (/^\s*>\s?/.test(line)) {
+      const quote: string[] = []
+      while (index < lines.length && /^\s*>\s?/.test(lines[index] ?? '')) quote.push((lines[index++] ?? '').replace(/^\s*>\s?/, ''))
+      output.push(<blockquote key={output.length}>{inlineMarkdown(quote.join(' '))}</blockquote>)
+      continue
+    }
+    const paragraph: string[] = [line]
+    index += 1
+    while (index < lines.length && (lines[index] ?? '').trim() && !/^(#{1,6})\s+|^\s*```|^\s*[-*+]\s+|^\s*\d+[.)]\s+|^\s*>\s?/.test(lines[index] ?? '')) paragraph.push(lines[index++] ?? '')
+    output.push(<p key={output.length}>{inlineMarkdown(paragraph.join('\n'))}</p>)
+  }
+  return output
+}
+
+function inlineMarkdown(text: string): ReactNode[] {
+  const nodes: ReactNode[] = []
+  const pattern = /(\[([^\]]+)\]\(([^\s)]+)(?:\s+["'][^"']*["'])?\)|`([^`]+)`|\*\*([^*]+)\*\*|__([^_]+)__|~~([^~]+)~~|\*([^*]+)\*|_([^_]+)_)/g
+  let cursor = 0
+  for (const match of text.matchAll(pattern)) {
+    const at = match.index ?? 0
+    if (at > cursor) nodes.push(text.slice(cursor, at))
+    if (match[2] && match[3]) {
+      const uri = safeUri(match[3])
+      nodes.push(uri === '#' ? match[2] : <a key={nodes.length} href={uri} target="_blank" rel="noreferrer">{match[2]}</a>)
+    } else if (match[4]) nodes.push(<code key={nodes.length}>{match[4]}</code>)
+    else if (match[5] || match[6]) nodes.push(<strong key={nodes.length}>{match[5] ?? match[6]}</strong>)
+    else if (match[7]) nodes.push(<del key={nodes.length}>{match[7]}</del>)
+    else if (match[8] || match[9]) nodes.push(<em key={nodes.length}>{match[8] ?? match[9]}</em>)
+    cursor = at + match[0].length
+  }
+  if (cursor < text.length) nodes.push(text.slice(cursor))
+  return nodes
 }
 
 function safeUri(uri: string) { return /^(https?:|\/)/.test(uri) ? uri : '#' }

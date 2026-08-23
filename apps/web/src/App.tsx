@@ -82,7 +82,7 @@ export function App() {
   return <>
     <HandlingBanner profile={state.data.health.profile} />
     <div className="shell with-handling-banner">
-      <aside>
+      <aside className="app-sidebar">
         <Logo />
         <div className="classification">{profileLabel(state.data.health.profile)}</div>
         <nav aria-label="Primary navigation">
@@ -92,6 +92,7 @@ export function App() {
           <NavButton active={view === 'sources'} onClick={() => setView('sources')}>Sources</NavButton>
           {state.data.me.roles.some((role) => role === 'Owner' || role === 'Admin') && <NavButton active={view === 'administration'} onClick={() => setView('administration')}>Administration</NavButton>}
         </nav>
+        {view === 'sessions' && <div id="session-history-rail" className="session-history-rail" />}
         <div className="runtime-status"><span className="dot good" />Policy enforcement active</div>
       </aside>
       <main>

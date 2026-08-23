@@ -1,4 +1,4 @@
-import { forwardRef, type ButtonHTMLAttributes, type HTMLAttributes, type InputHTMLAttributes, type LabelHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
+import { forwardRef, useEffect, useRef, useState, type ButtonHTMLAttributes, type HTMLAttributes, type InputHTMLAttributes, type LabelHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
 
 function classes(...values:Array<string|false|null|undefined>){return values.filter(Boolean).join(' ')}
 
@@ -63,3 +63,37 @@ export function TabsList({className,...props}:HTMLAttributes<HTMLDivElement>){
 export function TabsTrigger({active=false,className,...props}:ButtonHTMLAttributes<HTMLButtonElement>&{active?:boolean}){
   return <Button role="tab" aria-selected={active} data-slot="tabs-trigger" data-state={active?'active':'inactive'} className={className} {...props}/>
 }
+
+export interface ComboboxOption { value:string; label:string; detail?:string }
+export function Combobox({name,value,defaultValue,options,placeholder,disabled=false,onValueChange,className}:{name?:string;value?:string;defaultValue?:string;options:ComboboxOption[];placeholder:string;disabled?:boolean;onValueChange?:(value:string)=>void;className?:string}){
+  const [internal,setInternal]=useState(defaultValue??'')
+  const [open,setOpen]=useState(false)
+  const [query,setQuery]=useState('')
+  const root=useRef<HTMLDivElement>(null)
+  const selected=value??internal
+  const selectedOption=options.find(option=>option.value===selected)
+  const visible=options.filter(option=>(option.label+' '+(option.detail??'')).toLowerCase().includes(query.toLowerCase()))
+  useEffect(()=>{const close=(event:MouseEvent)=>{if(!root.current?.contains(event.target as Node))setOpen(false)};document.addEventListener('mousedown',close);return()=>document.removeEventListener('mousedown',close)},[])
+  const choose=(next:string)=>{if(value===undefined)setInternal(next);onValueChange?.(next);setOpen(false);setQuery('')}
+  return <div ref={root} data-slot="combobox" className={classes('nb-combobox',className)}>
+    {name&&<input type="hidden" name={name} value={selected}/>}
+    <Button type="button" variant="neutral" className="nb-combobox-trigger" aria-haspopup="listbox" aria-expanded={open} disabled={disabled} onClick={()=>setOpen(current=>!current)}>
+      <span>{selectedOption?.label??placeholder}</span><span aria-hidden="true">⌄</span>
+    </Button>
+    {open&&<div className="nb-combobox-popover">
+      <Input autoFocus value={query} onChange={event=>setQuery(event.target.value)} placeholder="Search…" aria-label="Filter options"/>
+      <div role="listbox">{visible.length?visible.map(option=><Button type="button" variant="ghost" role="option" aria-selected={selected===option.value} key={option.value} onClick={()=>choose(option.value)}>
+        <span>{option.label}</span>{option.detail&&<small>{option.detail}</small>}
+      </Button>):<p>No options found.</p>}</div>
+    </div>}
+  </div>
+}
+
+export function Dialog({open,onOpenChange,children}:{open:boolean;onOpenChange:(open:boolean)=>void;children:ReactNode}){
+  useEffect(()=>{if(!open)return;const escape=(event:KeyboardEvent)=>{if(event.key==='Escape')onOpenChange(false)};document.addEventListener('keydown',escape);return()=>document.removeEventListener('keydown',escape)},[open,onOpenChange])
+  if(!open)return null
+  return <div data-slot="dialog-overlay" onMouseDown={event=>{if(event.target===event.currentTarget)onOpenChange(false)}}><div role="dialog" aria-modal="true" data-slot="dialog">{children}</div></div>
+}
+export function DialogHeader({className,...props}:HTMLAttributes<HTMLDivElement>){return <div data-slot="dialog-header" className={className} {...props}/>}
+export function DialogContent({className,...props}:HTMLAttributes<HTMLDivElement>){return <div data-slot="dialog-content" className={className} {...props}/>}
+export function DialogFooter({className,...props}:HTMLAttributes<HTMLDivElement>){return <div data-slot="dialog-footer" className={className} {...props}/>}

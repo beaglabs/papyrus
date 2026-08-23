@@ -59,6 +59,19 @@ function markdownBlocks(markdown: string): ReactNode[] {
       continue
     }
     if (!line.trim()) { index += 1; continue }
+    const nextLine = lines[index + 1] ?? ''
+    if (line.includes('|') && /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(nextLine)) {
+      const headers = tableCells(line)
+      const alignments = tableCells(nextLine).map((cell) => cell.startsWith(':') && cell.endsWith(':') ? 'center' : cell.endsWith(':') ? 'right' : 'left')
+      const rows: string[][] = []
+      index += 2
+      while (index < lines.length && (lines[index] ?? '').includes('|') && (lines[index] ?? '').trim()) {
+        rows.push(tableCells(lines[index] ?? ''))
+        index += 1
+      }
+      output.push(<div className="markdown-table-scroll" key={output.length}><table><thead><tr>{headers.map((cell, cellIndex) => <th className={`align-${alignments[cellIndex] ?? 'left'}`} key={cellIndex}>{inlineMarkdown(cell)}</th>)}</tr></thead><tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{headers.map((_, cellIndex) => <td className={`align-${alignments[cellIndex] ?? 'left'}`} key={cellIndex}>{inlineMarkdown(row[cellIndex] ?? '')}</td>)}</tr>)}</tbody></table></div>)
+      continue
+    }
     const heading = line.match(/^(#{1,6})\s+(.+)$/)
     if (heading) {
       const level = heading[1]!.length
@@ -103,6 +116,11 @@ function markdownBlocks(markdown: string): ReactNode[] {
     output.push(<p key={output.length}>{inlineMarkdown(paragraph.join('\n'))}</p>)
   }
   return output
+}
+
+function tableCells(line: string): string[] {
+  const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '')
+  return trimmed.split(/(?<!\\)\|/).map((cell) => cell.trim().replaceAll('\\|', '|'))
 }
 
 function inlineMarkdown(text: string): ReactNode[] {

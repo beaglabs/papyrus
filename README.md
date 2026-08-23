@@ -24,11 +24,13 @@ Papyrus is not an agent harness and does not provide a chat or browser-session U
 - **Authorization** — deny-by-default Cedar policy with fixed Owner, Admin, User, and Auditor roles
 - **Audit** — append-only SQLite events with a SHA-256 hash chain
 - **Sessions** — user-owned runtime sessions with administrative and audit visibility
-- **MCP mediation** — environment-scoped server and tool grants through a session-bound proxy
+- **MCP mediation** — execution-target-scoped server and tool grants through a session-bound proxy
 - **Offline licensing** — deployment-bound signed licenses required in persistent mode
 - **Runtime adapter** — the current implementation uses Goose behind a replaceable ACP boundary
 
-Papyrus does not embed a browser engine or expose native browser tools. Browser and legacy web automation are supplied by an administrator-approved MCP server, assigned to an environment, and mediated through the existing Cedar browser actions. A separate reference `papyrus-browser-mcp` based on Lightpanda is planned; it is not part of the core daemon.
+Papyrus does not embed a browser engine or expose native browser tools. Browser and legacy web automation are supplied by an administrator-approved MCP server, bound to an internal execution target, and mediated through the existing Cedar browser actions. A separate reference `papyrus-browser-mcp` based on Lightpanda is planned; it is not part of the core daemon.
+
+Papyrus does not expose environments as a user-facing workspace abstraction. New conversations resolve the deployment's internal default execution target automatically; the stored target identifier remains available for future enclave, runtime, or network-boundary routing.
 
 The active daemon-first migration plan is documented in [ACP daemon stack](docs/acp-daemon-stack.md). Runtime-neutral core interfaces, local stdio supervision, remote Streamable HTTP, external client bridging, adapter profiles, and the hardened FIPS image land as separate stacked pull requests.
 

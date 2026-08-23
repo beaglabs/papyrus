@@ -1,5 +1,6 @@
-export interface SelectOption { value: string; label: string; detail?: string }
 import { NativeSelect } from './components/ui/index.js'
+
+export interface SelectOption { value: string; label: string; detail?: string }
 
 export function SelectField({ name, label, options, placeholder, disabled = false }: {
   name: string

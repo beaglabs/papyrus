@@ -164,6 +164,18 @@ export interface McpServer {
   createdAt: string
 }
 
+export interface AgentDrive {
+  id: string
+  name: string
+  readOnly: true
+  createdAt: string
+}
+
+export interface AdminAgentDrive extends AgentDrive {
+  databasePath: string
+  assignedUserIds: string[]
+}
+
 export interface ToolGrant {
   id: string
   environmentId: string
@@ -194,6 +206,7 @@ export interface AdminOverview {
   environments: AdminEnvironment[]
   mcpServers: McpServer[]
   toolGrants: ToolGrant[]
+  agentDrives: AdminAgentDrive[]
   license: LicenseStatus
 }
 

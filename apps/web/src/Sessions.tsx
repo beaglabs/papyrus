@@ -250,6 +250,37 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
   </section>
 }
 
+function mergeSessionEvents(current: SessionEvent[], incoming: SessionEvent[]): SessionEvent[] {
+  const merged = new Map(current.map((event) => [event.sequence, event]))
+  for (const event of incoming) merged.set(event.sequence, event)
+  return [...merged.values()].sort((left, right) => left.sequence - right.sequence)
+}
+
+function promptTurns(events: SessionEvent[]): PromptTurnGroup[] {
+  const turns = new Map<string, PromptTurnGroup>()
+  for (const event of events) {
+    if (!event.runId) continue
+    const turn = turns.get(event.runId) ?? { runId: event.runId, sequence: event.sequence, events: [] }
+    turn.sequence = Math.min(turn.sequence, event.sequence)
+    turn.events.push(event)
+    turns.set(event.runId, turn)
+  }
+  return [...turns.values()].map((turn) => ({ ...turn, events: [...turn.events].sort((left, right) => left.sequence - right.sequence) }))
+    .sort((left, right) => left.sequence - right.sequence)
+}
+
+function DurablePromptTurn({ turn, running }: { turn: PromptTurnGroup; running: boolean }) {
+  const messages = acpContent(turn.events)
+  const lastUser = [...messages].reverse().find((message) => message.role === 'user')?.sequence ?? -1
+  const activeThoughtId = [...messages].reverse().find((message) => message.role === 'thought' && message.sequence > lastUser)?.id
+  const lifecycle = [...turn.events].reverse().find((event) => event.kind === 'run')?.data as { sessionUpdate?: string; status?: string; error?: string } | undefined
+  return <section className="durable-prompt-turn" data-run-id={turn.runId}>
+    {messages.map((message) => <ContentMessage message={message} active={running && message.id === activeThoughtId} key={message.id} />)}
+    <PromptTurnFlow events={turn.events} running={running} submitted={false} />
+    {lifecycle?.sessionUpdate === 'run_completed' && lifecycle.status && lifecycle.status !== 'completed' && <div className={`turn-outcome ${lifecycle.status}`}><strong>{lifecycle.status}</strong>{lifecycle.error && <span>{lifecycle.error}</span>}</div>}
+  </section>
+}
+
 function pendingContent(turn: { prompt: string; attachments: Attachment[] }) {
   return {
     id: 'pending-user-turn',

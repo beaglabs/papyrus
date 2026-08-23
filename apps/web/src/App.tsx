@@ -3,9 +3,10 @@ import { api, AuthenticationRequired, EnrollmentRequired, loadShell, logout, typ
 import { SessionHarness } from './Sessions.js'
 import { SourcesView } from './Sources.js'
 import { AdminView } from './Admin.js'
+import { FilesView } from './Files.js'
 import { EnvironmentsView } from './Environments.js'
 
-type View = 'home' | 'sessions' | 'environments' | 'sources' | 'administration'
+type View = 'home' | 'sessions' | 'files' | 'environments' | 'sources' | 'administration'
 type AppState =
   | { phase: 'loading' }
   | { phase: 'signed-out'; health: Health; challenge: AuthenticationChallenge }
@@ -87,6 +88,7 @@ export function App() {
         <nav aria-label="Primary navigation">
           <NavButton active={view === 'home'} onClick={() => setView('home')}>Overview</NavButton>
           <NavButton active={view === 'sessions'} onClick={() => setView('sessions')}>Sessions</NavButton>
+          <NavButton active={view === 'files'} onClick={() => setView('files')}>Files</NavButton>
           <NavButton active={view === 'environments'} onClick={() => setView('environments')}>Environments</NavButton>
           <NavButton active={view === 'sources'} onClick={() => setView('sources')}>Sources</NavButton>
           {state.data.me.roles.some((role) => role === 'Owner' || role === 'Admin') && <NavButton active={view === 'administration'} onClick={() => setView('administration')}>Administration</NavButton>}
@@ -158,6 +160,7 @@ function AccessPending({ me }: { me: string }) {
 function ShellView({ view, data, onNavigate }: { view: View; data: ShellData; onNavigate: (view: View) => void }) {
   if (view === 'home') return <section className="grid-two wide-left"><article className="panel hero-panel"><p className="eyebrow">CONTROL PLANE READY</p><h2>Begin governed work from one durable session.</h2><p>Every prompt, runtime event, cancellation, and policy decision remains bound to your authenticated identity.</p><button className="primary" onClick={() => onNavigate('sessions')}>Open sessions →</button></article><DeploymentFacts data={data} /></section>
   if (view === 'sessions') return <SessionHarness environments={data.environments} />
+  if (view === 'files') return <FilesView />
   if (view === 'environments') return <EnvironmentsView me={data.me} items={data.environments} />
   if (view === 'sources') return <SourcesView />
   if (view === 'administration') return <AdminView me={data.me} />
@@ -170,6 +173,6 @@ function DeploymentFacts({ data }: { data: ShellData }) {
 
 function NavButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) { return <button className={active ? 'active' : ''} onClick={onClick}>{children}</button> }
 function profileLabel(profile: string) { return ({ commercial: 'COMMERCIAL', 'government-il4': 'GOVERNMENT IL4', 'government-il6': 'GOVERNMENT IL6' } as Record<string, string>)[profile] ?? profile.toUpperCase() }
-function viewTitle(view: View) { return ({ home: 'Operational overview', sessions: 'Sessions', environments: 'Environments', sources: 'Sources', administration: 'Administration' })[view] }
-function placeholder(view: View) { return ({ sessions: '', sources: '', administration: '', home: '', environments: '' })[view] }
+function viewTitle(view: View) { return ({ home: 'Operational overview', sessions: 'Sessions', files: 'Files', environments: 'Environments', sources: 'Sources', administration: 'Administration' })[view] }
+function placeholder(view: View) { return ({ sessions: '', files: '', sources: '', administration: '', home: '', environments: '' })[view] }
 function initials(name: string) { return name.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') }

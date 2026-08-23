@@ -415,3 +415,76 @@ nav [data-slot=button].active{border-color:var(--border);background:var(--main);
 [data-slot=dialog-header] h2{margin:0}[data-slot=dialog-content]>p{margin:20px 0;line-height:1.5;color:#555}
 [data-slot=dialog-footer]{display:flex;justify-content:flex-end;gap:10px;padding-top:18px;border-top:1px solid #ccc}
 .oauth-registration-dialog .facts{margin-top:18px}
+
+
+/* Approved Sources layout correction */
+.approved-sources-view {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 20px;
+}
+.source-catalog[data-slot=card],
+.source-search[data-slot=card] {
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  overflow: hidden;
+}
+.source-cards {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
+  gap: 12px;
+}
+.source-cards > [data-slot=card] {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 16px;
+}
+.source-cards > [data-slot=card] > div {
+  min-width: 0;
+  align-items: center;
+}
+.source-cards code {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.source-search form {
+  width: 100%;
+  min-width: 0;
+}
+.source-search-empty {
+  min-height: 220px;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  padding: 32px;
+  color: #666;
+  text-align: center;
+}
+.source-search-empty strong {
+  color: var(--foreground);
+  font-size: 18px;
+}
+.source-search-empty p {
+  margin: 6px 0 0;
+}
+.source-results:empty {
+  display: none;
+}
+@media (max-width: 640px) {
+  .source-search form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .source-search form [data-slot=button] {
+    width: 100%;
+  }
+}

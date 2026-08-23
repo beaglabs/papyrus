@@ -913,7 +913,7 @@ export class PapyrusService {
   }
 }
 
-function attachmentContentBlock(sessionId: string, attachment: Attachment): ContentBlock {
+function attachmentContentBlock(sessionId: string, attachment: Attachment & { content: Buffer }): ContentBlock {
   const uri = `papyrus://sessions/${sessionId}/attachments/${attachment.id}/${encodeURIComponent(attachment.name)}`
   if (attachment.mediaType.startsWith('image/')) {
     return { type: 'image', data: attachment.content.toString('base64'), mimeType: attachment.mediaType }

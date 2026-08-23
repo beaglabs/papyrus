@@ -914,7 +914,8 @@ export class PapyrusService {
   private async forwardMcp(endpoint: string, message: Record<string, unknown>, authorization: Record<string, string> = {}): Promise<unknown> {
     const response = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...authorization }, body: JSON.stringify(message), signal: AbortSignal.timeout(30_000) })
     if (!response.ok) throw new Error(`MCP server returned ${response.status}`)
-    return response.json()
+    const body = await response.text()
+    return body ? JSON.parse(body) : undefined
   }
 }
 

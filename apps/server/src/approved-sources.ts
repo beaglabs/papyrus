@@ -110,7 +110,7 @@ export class ApprovedSourceStore {
         media_type=excluded.media_type,content=excluded.content,updated_at=excluded.updated_at`)
         .run(documentId,sourceId,uri,title,sha256,mediaType,content,now)
       const old = this.db.sqlite.prepare('SELECT id FROM source_chunks WHERE document_id=?').all(documentId) as Row[]
-      for (const row of old) this.db.sqlite.prepare('DELETE FROM source_chunks_fts WHERE chunk_id=?').run(row.id)
+      for (const row of old) this.db.sqlite.prepare('DELETE FROM source_chunks_fts WHERE chunk_id=?').run(String(row.id))
       this.db.sqlite.prepare('DELETE FROM source_chunks WHERE document_id=?').run(documentId)
       for (const [ordinal, chunk] of chunkText(content).entries()) {
         const id = createHash('sha256').update(documentId+'\0'+ordinal+'\0'+chunk).digest('hex')
@@ -163,7 +163,7 @@ export class ApprovedSourceStore {
     return rows.map((row) => ({
       chunkId:String(row.chunk_id),content:String(row.content),score:1/(1+Math.abs(Number(row.rank))),
       citation:{sourceId:String(row.source_id),sourceName:String(row.source_name),uri:String(row.uri),title:String(row.title),
-        location:row.location?String(row.location):undefined,sha256:String(row.sha256)}
+        ...(row.location ? { location:String(row.location) } : {}),sha256:String(row.sha256)}
     }))
   }
 
@@ -176,7 +176,7 @@ export class ApprovedSourceStore {
       WHERE c.id=?`).get(userId,chunkId) as Row | undefined
     return row ? {chunkId:String(row.chunk_id),content:String(row.content),score:1,
       citation:{sourceId:String(row.source_id),sourceName:String(row.source_name),uri:String(row.uri),title:String(row.title),
-        location:row.location?String(row.location):undefined,sha256:String(row.sha256)}} : undefined
+        ...(row.location ? { location:String(row.location) } : {}),sha256:String(row.sha256)}} : undefined
   }
 
   private map(row: Row): ApprovedSource {

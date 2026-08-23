@@ -90,7 +90,7 @@ export class PapyrusWorker implements AgentRuntime {
     return { type: 'text', text: JSON.stringify(matches, null, 2) }
   }
 
-  private async execCodeTool(args: Record<string, unknown>): Promise<unknown> {
+  private async execCodeTool(args: Record<string, unknown>, onOutput?: (stream: 'stdout' | 'stderr', text: string) => Promise<void>): Promise<unknown> {
     const { SandboxManager } = await import('@anthropic-ai/sandbox-runtime')
     await SandboxManager.initialize({} as any)
     
@@ -108,20 +108,26 @@ export class PapyrusWorker implements AgentRuntime {
     }
     
     const wrapped = await SandboxManager.wrapWithSandbox(command, undefined, { timeoutMs } as any)
-    const result = await this.runWrappedCommand(wrapped)
+    const result = await this.runWrappedCommand(wrapped, onOutput)
     
     return { type: 'text', text: result }
   }
 
-  private async runWrappedCommand(wrappedCommand: string): Promise<string> {
+  private async runWrappedCommand(wrappedCommand: string, onOutput?: (stream: 'stdout' | 'stderr', text: string) => Promise<void>): Promise<string> {
     return new Promise((resolve, reject) => {
       const child = spawn('sh', ['-c', wrappedCommand], { timeout: 60000 })
       let stdout = '', stderr = ''
-      child.stdout.on('data', d => stdout += d.toString())
-      child.stderr.on('data', d => stderr += d.toString())
+      let outputQueue = Promise.resolve()
+      const report = (stream: 'stdout' | 'stderr', text: string) => {
+        outputQueue = outputQueue.then(async () => { await onOutput?.(stream, text) })
+      }
+      child.stdout.on('data', d => { const text = d.toString(); stdout += text; report('stdout', text) })
+      child.stderr.on('data', d => { const text = d.toString(); stderr += text; report('stderr', text) })
       child.on('close', code => {
-        if (code === 0) resolve(stdout || 'OK')
-        else reject(new Error(stderr || `Exit code ${code}`))
+        void outputQueue.then(() => {
+          if (code === 0) resolve(stdout || 'OK')
+          else reject(new Error(stderr || `Exit code ${code}`))
+        }, reject)
       })
       child.on('error', reject)
     })
@@ -311,13 +317,23 @@ export class PapyrusWorker implements AgentRuntime {
       for (const call of calls) {
         const name = call.function.name
         const args = parseArguments(call.function.arguments)
+        const toolKind = name === 'papyrus_exec_code' ? 'execute'
+          : name.includes('read') || name.includes('list') || name.includes('glob') ? 'read'
+          : name.includes('write') ? 'edit'
+          : 'other'
         await request.onEvent({
           kind: 'update',
           at: new Date().toISOString(),
-          data: { sessionUpdate: 'tool_call', toolCallId: call.id, title: name, kind: 'other', status: 'pending' },
+          data: { sessionUpdate: 'tool_call', toolCallId: call.id, title: name, kind: toolKind, status: 'pending' },
+        })
+        await request.onEvent({
+          kind: 'update',
+          at: new Date().toISOString(),
+          data: { sessionUpdate: 'tool_call_update', toolCallId: call.id, title: name, kind: toolKind, status: 'in_progress' },
         })
 
         let result: unknown
+        let liveOutput = ''
         try {
           if (name === 'papyrus_read_file') {
             result = await this.readFileTool(args)
@@ -328,7 +344,21 @@ export class PapyrusWorker implements AgentRuntime {
           } else if (name === 'papyrus_glob') {
             result = await this.globTool(args)
           } else if (name === 'papyrus_exec_code') {
-            result = await this.execCodeTool(args)
+            result = await this.execCodeTool(args, async (stream, text) => {
+              liveOutput += stream === 'stderr' ? `[stderr] ${text}` : text
+              await request.onEvent({
+                kind: 'update',
+                at: new Date().toISOString(),
+                data: {
+                  sessionUpdate: 'tool_call_update',
+                  toolCallId: call.id,
+                  title: name,
+                  kind: toolKind,
+                  status: 'in_progress',
+                  content: [{ type: 'content', content: { type: 'text', text: liveOutput } }],
+                },
+              })
+            })
           } else if (name === 'papyrus_generate') {
             result = await this.generateImageTool(args)
           } else if (name === 'papyrus_request_input') {
@@ -354,7 +384,7 @@ export class PapyrusWorker implements AgentRuntime {
               sessionUpdate: 'tool_call_update',
               toolCallId: call.id,
               title: name,
-              kind: 'other',
+              kind: toolKind,
               status: 'completed',
               content: [{ type: 'content', content: { type: 'text', text: safeJson(result) } }],
             },
@@ -368,7 +398,7 @@ export class PapyrusWorker implements AgentRuntime {
               sessionUpdate: 'tool_call_update',
               toolCallId: call.id,
               title: name,
-              kind: 'other',
+              kind: toolKind,
               status: 'failed',
               content: [{ type: 'content', content: { type: 'text', text: safeJson(result) } }],
             },

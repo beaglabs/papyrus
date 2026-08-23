@@ -1,14 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import type { Approval, Artifact, Attachment, Elicitation, Environment, Session, SessionEvent } from '@papyrus/contracts'
 import { cancelSession, createSession, decideApproval, deleteSession, promptSession, respondElicitation, resumeSession, sessionApprovals, sessionArtifacts, sessionAttachments, sessionElicitations, sessionEvents, sessionPage, uploadAttachment } from './api.js'
-import { SelectField } from './SelectField.js'
 import { acpContent, ContentBlock, ContentMessage } from './AcpSessionContent.js'
 import { createPortal } from 'react-dom'
-import { Alert, Button, Card, Dialog, DialogContent, DialogHeader, Input, Textarea } from './components/ui/index.js'
+import { Alert, Button, Card, Combobox, Input, Textarea } from './components/ui/index.js'
 
 interface ToolActivity { id: string; title: string; kind: string; status: string; sequence: number; locations: string[]; terminals: string[]; output: Array<Record<string, unknown>> }
 interface PlanItem { content: string; status: string; priority: string }
-export function SessionHarness({ environments }: { environments: Environment[] }) {
+export function SessionHarness({ environments, newSessionRequest, onActivate }: { environments: Environment[]; newSessionRequest: number; onActivate: () => void }) {
   const [sessions, setSessions] = useState<Session[]>([])
   const [nextCursor, setNextCursor] = useState<string>()
   const [selectedId, setSelectedId] = useState<string>()
@@ -24,7 +23,7 @@ export function SessionHarness({ environments }: { environments: Environment[] }
   const [loading, setLoading] = useState(true)
   const [running, setRunning] = useState(false)
   const [pendingTurn, setPendingTurn] = useState<{ prompt: string; attachments: Attachment[] }>()
-  const [creating, setCreating] = useState(false)
+  const [newEnvironmentId, setNewEnvironmentId] = useState(environments[0]?.id ?? '')
   const [error, setError] = useState<string>()
   const [uploading, setUploading] = useState(false)
   const [followingLatest, setFollowingLatest] = useState(true)
@@ -49,7 +48,21 @@ export function SessionHarness({ environments }: { environments: Environment[] }
   }
 
   useEffect(() => { void loadSessions().catch(showError).finally(() => setLoading(false)) }, [])
-  useEffect(() => { if (selected?.status === 'running') setRunning(true) }, [selectedId, selected?.status])
+  useEffect(() => {
+    if (!environments.some((environment) => environment.id === newEnvironmentId)) setNewEnvironmentId(environments[0]?.id ?? '')
+  }, [environments, newEnvironmentId])
+  useEffect(() => { if (!pendingTurn) setRunning(selected?.status === 'running') }, [selectedId, selected?.status, pendingTurn])
+  const handledNewSessionRequest = useRef(newSessionRequest)
+  useEffect(() => {
+    if (handledNewSessionRequest.current === newSessionRequest) return
+    handledNewSessionRequest.current = newSessionRequest
+    streamRef.current?.close()
+    setSelectedId(undefined)
+    setPendingTurn(undefined)
+    setRunning(false)
+    setError(undefined)
+    setDraftAttachmentIds([])
+  }, [newSessionRequest])
   useEffect(() => {
     if (!followingLatest) return
     const frame = requestAnimationFrame(() => messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' }))
@@ -70,7 +83,6 @@ export function SessionHarness({ environments }: { environments: Environment[] }
     streamRef.current?.close()
     setFollowingLatest(true)
     setDraftAttachmentIds([])
-    setPendingTurn(undefined)
     if (!selectedId) { setEvents([]); setArtifacts([]); setApprovals([]); setAttachments([]); setElicitations([]); return }
     let active = true
     void Promise.all([sessionEvents(selectedId), loadContext(selectedId)]).then(([history]) => {
@@ -95,15 +107,35 @@ export function SessionHarness({ environments }: { environments: Environment[] }
     return () => { active = false; streamRef.current?.close() }
   }, [selectedId])
 
-  const create = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault(); setError(undefined)
-    const form = event.currentTarget; const values = new FormData(form)
+  const startNewSession = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const form = event.currentTarget
+    const prompt = String(new FormData(form).get('prompt')).trim()
+    if (!prompt || running) return
+    if (!newEnvironmentId) { setError('Choose an environment'); return }
+    form.reset()
+    setPendingTurn({ prompt, attachments: [] })
+    setFollowingLatest(true)
+    setRunning(true)
+    setError(undefined)
     try {
-      const environmentId = values.get('environment')
-      if (typeof environmentId !== 'string' || !environmentId) throw new Error('Choose an environment')
-      const session = await createSession(environmentId, String(values.get('title')))
-      setSessions((current) => [session, ...current]); setSelectedId(session.id); setCreating(false); form.reset()
+      const session = await createSession(newEnvironmentId, sessionTitle(prompt))
+      setSessions((current) => [session, ...current.filter((item) => item.id !== session.id)])
+      setSelectedId(session.id)
+      await promptSession(session.id, prompt, [])
+      await Promise.all([loadSessions(), loadContext(session.id)])
     } catch (cause) { showError(cause) }
+    finally { setPendingTurn(undefined); setRunning(false) }
+  }
+
+  const beginNewSession = () => {
+    streamRef.current?.close()
+    setSelectedId(undefined)
+    setPendingTurn(undefined)
+    setRunning(false)
+    setError(undefined)
+    setDraftAttachmentIds([])
+    onActivate()
   }
 
   const send = async (event: FormEvent<HTMLFormElement>) => {
@@ -154,14 +186,13 @@ export function SessionHarness({ environments }: { environments: Environment[] }
   const historyTarget = document.getElementById('session-history-rail')
   return <section className="session-layout">
     {historyTarget && createPortal(<aside className="session-sidebar">
-      <div className="session-sidebar-head"><strong>Durable sessions</strong><Button className="icon-button" onClick={() => setCreating(true)} aria-label="Create session">＋</Button></div>
-      {loading ? <div className="empty">Loading sessions…</div> : sessions.length ? <div className="session-list">{sessions.map((session) => <Button key={session.id} className={session.id === selectedId ? 'selected' : ''} onClick={() => setSelectedId(session.id)}><strong>{session.title}</strong><span>{session.status} · {new Date(session.updatedAt).toLocaleString()}</span></Button>)}</div> : <div className="empty">No sessions yet.</div>}
+      <div className="session-sidebar-head"><strong>Durable sessions</strong><Button className="icon-button" onClick={beginNewSession} aria-label="Start a new session">＋</Button></div>
+      {loading ? <div className="empty">Loading sessions…</div> : sessions.length ? <div className="session-list">{sessions.map((session) => <Button key={session.id} className={session.id === selectedId ? 'selected' : ''} onClick={() => { setPendingTurn(undefined); setSelectedId(session.id); onActivate() }}><strong>{session.title}</strong><span>{session.status} · {new Date(session.updatedAt).toLocaleString()}</span></Button>)}</div> : <div className="empty">No sessions yet.</div>}
       {nextCursor && <Button className="secondary load-more" onClick={() => void loadSessions(nextCursor)}>Load more</Button>}
     </aside>, historyTarget)}
-    <div className="conversation-panel">
+    <div className={`conversation-panel ${selected ? '' : 'new-session-panel'}`}>
       {error && <Alert className="error">{error}<Button variant="ghost" onClick={() => setError(undefined)}>×</Button></Alert>}
-      <Dialog open={creating} onOpenChange={setCreating}><DialogContent className="create-session-dialog"><form className="create-session" onSubmit={create}><DialogHeader><div><p className="eyebrow">NEW SESSION</p><strong>New durable session</strong></div><Button type="button" variant="ghost" className="icon-button" onClick={() => setCreating(false)} aria-label="Close new session dialog">×</Button></DialogHeader><SelectField name="environment" label="Environment" placeholder="Choose an environment" options={environments.map((environment) => ({ value: environment.id, label: environment.name, ...(environment.description ? { detail: environment.description } : {}) }))} /><label>Session title<Input name="title" required maxLength={256} autoFocus placeholder="Describe the work" /></label><Button className="primary" disabled={!environments.length}>Create session →</Button></form></DialogContent></Dialog>
-      {!selected ? <div className="conversation-empty"><h2>Start a session.</h2><p>Choose an authorized environment, describe the work, and retain the complete history on the server.</p><Button className="primary" disabled={!environments.length} onClick={() => setCreating(true)}>New session →</Button></div> : <>
+      {!selected ? <div className="new-session-home"><div className="new-session-intro"><p className="eyebrow">NEW DURABLE SESSION</p><h2>What should we work on?</h2><p>Your first prompt creates the session automatically and keeps the complete governed history.</p></div><form className="new-session-composer" onSubmit={startNewSession}><Textarea name="prompt" autoFocus disabled={running} placeholder="Describe the work to perform…" onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} /><div className="new-session-controls"><div className="new-session-environment"><span>Environment</span><Combobox value={newEnvironmentId} onValueChange={setNewEnvironmentId} options={environments.map((environment) => ({ value: environment.id, label: environment.name, ...(environment.description ? { detail: environment.description } : {}) }))} placeholder="Choose an environment" disabled={!environments.length || running} /></div><Button className="primary" disabled={!newEnvironmentId || running}>{running ? 'Starting…' : 'Start →'}</Button></div></form></div> : <>
         <div className="conversation-head"><div><strong>{selected.title}</strong><span>{selected.status} · {environmentName(environments, selected.environmentId)}</span></div><div className="session-actions">{(running || selected.status === 'running') ? <Button className="danger" onClick={() => void cancel()}>Cancel run</Button> : <Button className="text-button" onClick={() => void removeSession()}>Delete</Button>}</div></div>
         <div className={`session-content ${artifactPanelOpen ? 'artifact-panel-open' : ''}`}>
           <div className="message-region">
@@ -212,6 +243,7 @@ function ElicitationCard({ item, onRespond }: { item: Elicitation; onRespond: (i
 }
 
 function environmentName(environments: Environment[], id: string) { return environments.find((environment) => environment.id === id)?.name ?? 'Environment' }
+function sessionTitle(prompt: string) { const title = prompt.replace(/\s+/g, ' ').trim(); return title.length > 72 ? `${title.slice(0, 69)}…` : title }
 function formatBytes(size: number) { return size < 1024 ? `${size} B` : size < 1024 * 1024 ? `${(size / 1024).toFixed(1)} KB` : `${(size / 1024 / 1024).toFixed(1)} MB` }
 
 function ArtifactWorkspace({ artifacts, generating, open, selectedId, onOpenChange, onSelect }: { artifacts: Artifact[]; generating: boolean; open: boolean; selectedId: string | undefined; onOpenChange: (open: boolean) => void; onSelect: (id: string) => void }) {

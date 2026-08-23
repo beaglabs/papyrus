@@ -1,4 +1,4 @@
-import type { AdminOverview, Approval, Artifact, Attachment, Elicitation, Environment, Invitation, McpServer, Principal, ResearchSource, Role, Session, SessionConfigOption, SessionEvent, SessionRun, SessionSurface } from '@papyrus/contracts'
+import type { AdminOverview, ApprovedSource, ApprovedSourceKind, SourceSearchResult, Approval, Artifact, Attachment, Elicitation, Environment, Invitation, McpServer, Principal, ResearchSource, Role, Session, SessionConfigOption, SessionEvent, SessionRun, SessionSurface } from '@papyrus/contracts'
 
 export interface Health {
   topology: 'on-premises'
@@ -216,4 +216,20 @@ export async function grantMcpServer(environmentId: string, mcpServerId: string)
 }
 export async function revokeToolGrant(grantId: string): Promise<void> {
   await api(`/api/mcp/grants/${encodeURIComponent(grantId)}`, { method: 'DELETE' })
+}
+
+export async function approvedSources(): Promise<ApprovedSource[]> {
+  return (await api<{sources: ApprovedSource[]}>('/api/sources')).sources
+}
+export async function searchApprovedSources(query: string): Promise<SourceSearchResult[]> {
+  return (await api<{results: SourceSearchResult[]}>(`/api/sources/search?q=${encodeURIComponent(query)}`)).results
+}
+export async function createApprovedSource(input: {name:string;kind:ApprovedSourceKind;locator:string;mode:'snapshot'|'live'}): Promise<ApprovedSource> {
+  return api('/api/admin/sources',{method:'POST',body:JSON.stringify(input)})
+}
+export async function assignApprovedSource(sourceId:string,userId:string,assigned:boolean): Promise<void> {
+  await api(`/api/admin/sources/${encodeURIComponent(sourceId)}/assignments/${encodeURIComponent(userId)}`,{method:'PUT',body:JSON.stringify({assigned})})
+}
+export async function ingestApprovedSource(sourceId:string,input:{uri:string;title:string;mediaType:string;content:string}): Promise<void> {
+  await api(`/api/admin/sources/${encodeURIComponent(sourceId)}/documents`,{method:'POST',body:JSON.stringify(input)})
 }

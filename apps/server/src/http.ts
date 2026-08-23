@@ -2,7 +2,7 @@ import { createServer as createHttpServer, type IncomingMessage, type Server, ty
 import { createServer as createHttpsServer } from 'node:https'
 import { readFileSync } from 'node:fs'
 import { extname, join, normalize } from 'node:path'
-import { ROLES, SESSION_SURFACES, type ApprovedSourceKind, type Role, type SessionSurface, type SignedLicense } from '@papyrus/contracts'
+import { ROLES, type ApprovedSourceKind, type Role, type SignedLicense } from '@papyrus/contracts'
 import { AuthService } from './auth.js'
 import type { ServerConfig } from './config.js'
 import { ApprovalLifecycleError, AuthorizationDenied, PapyrusService, SessionLifecycleError } from './service.js'

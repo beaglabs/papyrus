@@ -1,37 +1,26 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import type { Approval, Artifact, Attachment, Elicitation, Environment, ResearchSource, Session, SessionEvent, SessionRun, SessionSurface } from '@papyrus/contracts'
-import { cancelSession, createSession, decideApproval, deleteSession, promptSession, respondElicitation, resumeSession, sessionApprovals, sessionArtifacts, sessionAttachments, sessionElicitations, sessionEvents, sessionPage, sessionRuns, sessionSources, setSessionConfigOption, uploadAttachment } from './api.js'
-import { SourceList } from './Sources.js'
+import type { Approval, Artifact, Attachment, Elicitation, Environment, Session, SessionEvent } from '@papyrus/contracts'
+import { cancelSession, createSession, decideApproval, deleteSession, promptSession, respondElicitation, resumeSession, sessionApprovals, sessionArtifacts, sessionAttachments, sessionElicitations, sessionEvents, sessionPage, uploadAttachment } from './api.js'
 import { SelectField } from './SelectField.js'
 import { acpContent, ContentMessage } from './AcpSessionContent.js'
 import { createPortal } from 'react-dom'
-import { Alert, Button, Card, Combobox, Input, Textarea } from './components/ui/index.js'
+import { Alert, Button, Card, Dialog, DialogContent, DialogHeader, Input, Textarea } from './components/ui/index.js'
 
 interface ToolActivity { id: string; title: string; kind: string; status: string; sequence: number; locations: string[]; terminals: string[] }
 interface PlanItem { content: string; status: string; priority: string }
-type SessionTab = 'conversation' | 'plan' | 'activity' | 'approvals' | 'sources' | 'citations' | 'artifacts' | 'files' | 'editor' | 'diff' | 'terminal' | 'tests' | 'preview' | 'findings' | 'metadata' | 'input' | 'schema' | 'mapping' | 'transform' | 'validation' | 'export'
-
-const SURFACE_TABS: Record<SessionSurface, SessionTab[]> = {
-  general: ['conversation', 'plan', 'activity', 'approvals', 'artifacts'],
-  ide: ['files', 'editor', 'diff', 'terminal', 'tests', 'conversation'],
-  research: ['conversation', 'sources', 'activity', 'approvals', 'artifacts'],
-  document: ['preview', 'findings', 'citations', 'metadata', 'artifacts'],
-  data: ['input', 'schema', 'mapping', 'transform', 'validation', 'export'],
-}
-
 export function SessionHarness({ environments }: { environments: Environment[] }) {
   const [sessions, setSessions] = useState<Session[]>([])
   const [nextCursor, setNextCursor] = useState<string>()
   const [selectedId, setSelectedId] = useState<string>()
   const [events, setEvents] = useState<SessionEvent[]>([])
-  const [runs, setRuns] = useState<SessionRun[]>([])
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [approvals, setApprovals] = useState<Approval[]>([])
-  const [sources, setSources] = useState<ResearchSource[]>([])
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [elicitations, setElicitations] = useState<Elicitation[]>([])
   const [draftAttachmentIds, setDraftAttachmentIds] = useState<string[]>([])
-  const [tab, setTab] = useState<SessionTab>('conversation')
+  const [artifactPanelOpen, setArtifactPanelOpen] = useState(false)
+  const [selectedArtifactId, setSelectedArtifactId] = useState<string>()
+  const knownArtifactCount = useRef(0)
   const [loading, setLoading] = useState(true)
   const [running, setRunning] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -43,13 +32,11 @@ export function SessionHarness({ environments }: { environments: Environment[] }
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const selected = sessions.find((session) => session.id === selectedId)
   const messages = useMemo(() => acpContent(events), [events])
-  const activity = useMemo(() => projectActivity(events), [events])
-  const surface = selected?.surface ?? 'general'
-  const tabs = SURFACE_TABS[surface]
+  const artifactGenerating = useMemo(() => running && isArtifactGenerationActive(events), [events, running])
 
   const loadContext = async (sessionId: string) => {
-    const [nextRuns, nextArtifacts, nextApprovals, nextSources, nextAttachments, nextElicitations] = await Promise.all([sessionRuns(sessionId), sessionArtifacts(sessionId), sessionApprovals(sessionId), sessionSources(sessionId), sessionAttachments(sessionId), sessionElicitations(sessionId)])
-    setRuns(nextRuns); setArtifacts(nextArtifacts); setApprovals(nextApprovals); setSources(nextSources); setAttachments(nextAttachments); setElicitations(nextElicitations)
+    const [nextArtifacts, nextApprovals, nextAttachments, nextElicitations] = await Promise.all([sessionArtifacts(sessionId), sessionApprovals(sessionId), sessionAttachments(sessionId), sessionElicitations(sessionId)])
+    setArtifacts(nextArtifacts); setApprovals(nextApprovals); setAttachments(nextAttachments); setElicitations(nextElicitations)
   }
 
   const loadSessions = async (cursor?: string) => {
@@ -61,19 +48,26 @@ export function SessionHarness({ environments }: { environments: Environment[] }
 
   useEffect(() => { void loadSessions().catch(showError).finally(() => setLoading(false)) }, [])
   useEffect(() => {
-    if (tab !== 'conversation' || !followingLatest) return
+    if (!followingLatest) return
     const frame = requestAnimationFrame(() => messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' }))
     return () => cancelAnimationFrame(frame)
-  }, [messages, running, tab, followingLatest])
+  }, [messages, running, followingLatest])
   useEffect(() => {
-    if (!tabs.includes(tab)) setTab(tabs[0] ?? 'conversation')
-  }, [surface])
+    if (artifactGenerating) setArtifactPanelOpen(true)
+  }, [artifactGenerating])
+  useEffect(() => {
+    if (artifacts.length > knownArtifactCount.current) {
+      setSelectedArtifactId(artifacts.at(-1)?.id)
+      if (running) setArtifactPanelOpen(true)
+    }
+    knownArtifactCount.current = artifacts.length
+  }, [artifacts, running])
 
   useEffect(() => {
     streamRef.current?.close()
     setFollowingLatest(true)
     setDraftAttachmentIds([])
-    if (!selectedId) { setEvents([]); setRuns([]); setArtifacts([]); setApprovals([]); setSources([]); setAttachments([]); setElicitations([]); return }
+    if (!selectedId) { setEvents([]); setArtifacts([]); setApprovals([]); setAttachments([]); setElicitations([]); return }
     let active = true
     void Promise.all([sessionEvents(selectedId), loadContext(selectedId)]).then(([history]) => {
       if (!active) return
@@ -83,9 +77,9 @@ export function SessionHarness({ environments }: { environments: Environment[] }
       stream.addEventListener('session_event', (message) => {
         const event = JSON.parse((message as MessageEvent<string>).data) as SessionEvent
         setEvents((current) => current.some((item) => item.sequence === event.sequence) ? current : [...current, event])
-        if (event.kind === 'approval' || event.kind === 'elicitation') {
+        const update = event.data as { sessionUpdate?: string; status?: string } | undefined
+        if (event.kind === 'approval' || event.kind === 'elicitation' || (update?.sessionUpdate === 'tool_call_update' && ['completed', 'failed'].includes(update.status ?? ''))) {
           void loadContext(selectedId).catch(showError)
-          if ((event.data as { status?: string } | undefined)?.status === 'pending') setTab('approvals')
         }
       })
       stream.onerror = () => setError('Live updates were interrupted. Papyrus will retry automatically.')
@@ -100,8 +94,7 @@ export function SessionHarness({ environments }: { environments: Environment[] }
     try {
       const environmentId = values.get('environment')
       if (typeof environmentId !== 'string' || !environmentId) throw new Error('Choose an environment')
-      const surface = String(values.get('surface') ?? 'general') as SessionSurface
-      const session = await createSession(environmentId, String(values.get('title')), surface)
+      const session = await createSession(environmentId, String(values.get('title')))
       setSessions((current) => [session, ...current]); setSelectedId(session.id); setCreating(false); form.reset()
     } catch (cause) { showError(cause) }
   }
@@ -128,15 +121,6 @@ export function SessionHarness({ environments }: { environments: Environment[] }
   const removeSession = async () => {
     if (!selectedId || !selected || !window.confirm(`Permanently delete “${selected.title}” and its durable history?`)) return
     try { await deleteSession(selectedId); setSelectedId(undefined); await loadSessions() } catch (cause) { showError(cause) }
-  }
-
-  const changeSurface = async (nextSurface: SessionSurface) => {
-    if (!selectedId || !selected) return
-    try {
-      await setSessionConfigOption(selectedId, 'papyrus.surface', nextSurface)
-      setSessions((current) => current.map((session) => session.id === selectedId ? { ...session, surface: nextSurface, updatedAt: new Date().toISOString() } : session))
-      setTab(SURFACE_TABS[nextSurface][0] ?? 'conversation')
-    } catch (cause) { showError(cause) }
   }
 
   const addFiles = async (files: FileList | null) => {
@@ -168,39 +152,21 @@ export function SessionHarness({ environments }: { environments: Environment[] }
     </aside>, historyTarget)}
     <div className="conversation-panel">
       {error && <Alert className="error">{error}<Button variant="ghost" onClick={() => setError(undefined)}>×</Button></Alert>}
-      {creating && <form className="create-session" onSubmit={create}><div><strong>New durable session</strong><Button type="button" className="icon-button" onClick={() => setCreating(false)}>×</Button></div><SelectField name="environment" label="Environment" placeholder="Choose an environment" options={environments.map((environment) => ({ value: environment.id, label: environment.name, ...(environment.description ? { detail: environment.description } : {}) }))} /><SelectField name="surface" label="Work surface" placeholder="Choose a work surface" options={surfaceOptions()} /><label>Session title<Input name="title" required maxLength={256} autoFocus placeholder="Describe the work" /></label><Button className="primary" disabled={!environments.length}>Create session →</Button></form>}
-      {!selected ? <div className="conversation-empty"><h2>Start a governed session.</h2><p>Choose an authorized environment, describe the work, and retain the complete history on the server.</p><Button className="primary" disabled={!environments.length} onClick={() => setCreating(true)}>New session →</Button></div> : <>
-        <div className="conversation-head"><div><strong>{selected.title}</strong><span>{selected.status} · {surfaceLabel(surface)} · {environmentName(environments, selected.environmentId)}</span></div><div className="session-actions"><SurfaceControl value={surface} disabled={running} onChange={changeSurface} />{(running || selected.status === 'running') ? <Button className="danger" onClick={() => void cancel()}>Cancel run</Button> : <Button className="text-button" onClick={() => void removeSession()}>Delete</Button>}</div></div>
-        <div className="session-content">
-        {tab === 'conversation' && <div className="message-region">
-          <div className="messages" ref={messagesRef} aria-live="polite" onScroll={(event) => {
-            const element = event.currentTarget
-            setFollowingLatest(element.scrollHeight - element.scrollTop - element.clientHeight < 72)
-          }}>{messages.length ? messages.map((message) => <ContentMessage message={message} key={message.id} />) : <div className="conversation-empty compact"><h2>What work should Papyrus begin?</h2><p>The runtime and tools are selected by deployment policy.</p></div>}{running && <div className="working"><span className="dot good" />Working under policy…</div>}</div>
-          {!followingLatest && <Button className="jump-latest" onClick={() => { setFollowingLatest(true); messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' }) }}>Jump to latest ↓</Button>}
-        </div>}
-        {tab === 'plan' && <ActivityView plan={activity.plan} tools={[]} runs={runs} />}
-        {tab === 'activity' && <ActivityView plan={activity.plan} tools={activity.tools} runs={runs} />}
-        {tab === 'files' && <AttachmentView title="Session files" items={attachments} empty="No repository files have been attached or emitted." />}
-        {tab === 'editor' && <SurfaceEmpty title="No file selected." detail="Select a file emitted by an ACP worker or attached to this session to preview it here." />}
-        {tab === 'diff' && <ArtifactView artifacts={artifacts.filter((artifact) => artifact.kind === 'diff')} />}
-        {tab === 'terminal' && <SurfaceEmpty title="No terminal output." detail="ACP terminal updates will appear here when the assigned worker exposes terminal capability." />}
-        {tab === 'tests' && <SurfaceEmpty title="No test results." detail="Structured build and test results emitted by the worker will appear here." />}
-        {tab === 'preview' && <AttachmentView title="Documents" items={attachments} empty="Attach a PDF, Word file, solicitation, policy, or contract to begin review." />}
-        {tab === 'findings' && <SurfaceEmpty title="No document findings." detail="Findings emitted as structured ACP resources will appear here without being flattened into chat." />}
-        {tab === 'citations' && <SourceList sources={sources} />}
-        {tab === 'metadata' && <AttachmentView title="Document metadata" items={attachments} empty="No document metadata is available." />}
-        {tab === 'input' && <AttachmentView title="Input data" items={attachments} empty="Attach CSV, XML, SOAP, copybook, JSON, or another supported input." />}
-        {tab === 'schema' && <SurfaceEmpty title="No detected schema." detail="A Sieve-compatible MCP server can emit a structured schema artifact for this panel." />}
-        {tab === 'mapping' && <SurfaceEmpty title="No field mapping." detail="Source-to-target mappings will appear when emitted as structured resources." />}
-        {tab === 'transform' && <SurfaceEmpty title="No transformation steps." detail="Deterministic transformation steps emitted by the assigned data tool will appear here." />}
-        {tab === 'validation' && <SurfaceEmpty title="No validation results." detail="Validation failures and before/after samples will appear here." />}
-        {tab === 'export' && <ArtifactView artifacts={artifacts} />}
-        {tab === 'approvals' && <ApprovalView approvals={approvals} onDecision={reviewApproval} />}
-        {tab === 'sources' && <SourceList sources={sources} />}
-        {tab === 'artifacts' && <ArtifactView artifacts={artifacts} />}
+      <Dialog open={creating} onOpenChange={setCreating}><DialogContent className="create-session-dialog"><form className="create-session" onSubmit={create}><DialogHeader><div><p className="eyebrow">NEW SESSION</p><strong>New durable session</strong></div><Button type="button" variant="ghost" className="icon-button" onClick={() => setCreating(false)} aria-label="Close new session dialog">×</Button></DialogHeader><SelectField name="environment" label="Environment" placeholder="Choose an environment" options={environments.map((environment) => ({ value: environment.id, label: environment.name, ...(environment.description ? { detail: environment.description } : {}) }))} /><label>Session title<Input name="title" required maxLength={256} autoFocus placeholder="Describe the work" /></label><Button className="primary" disabled={!environments.length}>Create session →</Button></form></DialogContent></Dialog>
+      {!selected ? <div className="conversation-empty"><h2>Start a session.</h2><p>Choose an authorized environment, describe the work, and retain the complete history on the server.</p><Button className="primary" disabled={!environments.length} onClick={() => setCreating(true)}>New session →</Button></div> : <>
+        <div className="conversation-head"><div><strong>{selected.title}</strong><span>{selected.status} · {environmentName(environments, selected.environmentId)}</span></div><div className="session-actions">{(running || selected.status === 'running') ? <Button className="danger" onClick={() => void cancel()}>Cancel run</Button> : <Button className="text-button" onClick={() => void removeSession()}>Delete</Button>}</div></div>
+        <div className={`session-content ${artifactPanelOpen ? 'artifact-panel-open' : ''}`}>
+          <div className="message-region">
+            <div className="messages" ref={messagesRef} aria-live="polite" onScroll={(event) => {
+              const element = event.currentTarget
+              setFollowingLatest(element.scrollHeight - element.scrollTop - element.clientHeight < 72)
+            }}>{messages.length ? messages.map((message) => <ContentMessage message={message} key={message.id} />) : <div className="conversation-empty compact"><h2>What should Papyrus do?</h2><p>Attach context or describe the work.</p></div>}{running && <PromptTurnFlow events={events} />}</div>
+            {!followingLatest && <Button className="jump-latest" onClick={() => { setFollowingLatest(true); messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' }) }}>Jump to latest ↓</Button>}
+          </div>
+          <ArtifactWorkspace artifacts={artifacts} generating={artifactGenerating} open={artifactPanelOpen} selectedId={selectedArtifactId} onOpenChange={setArtifactPanelOpen} onSelect={setSelectedArtifactId} />
         </div>
         <div className="session-footer">
+        {approvals.filter((approval) => approval.status === 'pending').map((approval) => <ApprovalCard key={approval.id} approval={approval} onDecision={reviewApproval} />)}
         {elicitations.find((item) => item.status === 'pending') && <ElicitationCard item={elicitations.find((item) => item.status === 'pending')!} onRespond={async (id, response) => { await respondElicitation(selected.id, id, response); await loadContext(selected.id) }} />}
         <form className="composer" onSubmit={send}>
           {draftAttachmentIds.length > 0 && <div className="attachment-chips">{draftAttachmentIds.map((id) => { const attachment = attachments.find((item) => item.id === id); return attachment && <span key={id}><span>↧ {attachment.name} · {formatBytes(attachment.size)}</span><Button type="button" onClick={() => setDraftAttachmentIds((current) => current.filter((item) => item !== id))} aria-label={`Remove ${attachment.name}`}>×</Button></span> })}</div>}
@@ -212,28 +178,6 @@ export function SessionHarness({ environments }: { environments: Environment[] }
       </>}
     </div>
   </section>
-}
-
-function SurfaceControl({ value, disabled, onChange }: { value: SessionSurface; disabled: boolean; onChange: (surface: SessionSurface) => Promise<void> }) {
-  return <label className="surface-control"><span>Mode</span><Combobox value={value} disabled={disabled} onValueChange={(next)=>void onChange(next as SessionSurface)} options={surfaceOptions()} placeholder="Choose a mode"/></label>
-}
-
-function surfaceOptions() {
-  return [
-    { value: 'general', label: 'General use', detail: 'Conversation and governed activity' },
-    { value: 'ide', label: 'IDE', detail: 'Repository and software engineering' },
-    { value: 'research', label: 'Research', detail: 'Sources, citations, and retrieval' },
-    { value: 'document', label: 'Document', detail: 'PDF, policy, contract, and CUI review' },
-    { value: 'data', label: 'Data', detail: 'Schema, mapping, transformation, and validation' },
-  ]
-}
-function surfaceLabel(surface: SessionSurface) { return surfaceOptions().find((option) => option.value === surface)?.label ?? surface }
-function SurfaceEmpty({ title, detail }: { title: string; detail: string }) {
-  return <div className="surface-empty"><h2>{title}</h2><p>{detail}</p></div>
-}
-
-function AttachmentView({ title, items, empty }: { title: string; items: Attachment[]; empty: string }) {
-  return <div className="surface-collection"><div className="section-label">{title.toUpperCase()}</div>{items.length ? items.map((item) => <Card key={item.id}><div><strong>{item.name}</strong><span>{item.mediaType} · {formatBytes(item.size)}</span></div><span className="pill completed">input</span></Card>) : <div className="empty">{empty}</div>}</div>
 }
 
 function ElicitationCard({ item, onRespond }: { item: Elicitation; onRespond: (id: string, response: Record<string, unknown>) => Promise<void> }) {
@@ -249,6 +193,62 @@ function ElicitationCard({ item, onRespond }: { item: Elicitation; onRespond: (i
 
 function environmentName(environments: Environment[], id: string) { return environments.find((environment) => environment.id === id)?.name ?? 'Environment' }
 function formatBytes(size: number) { return size < 1024 ? `${size} B` : size < 1024 * 1024 ? `${(size / 1024).toFixed(1)} KB` : `${(size / 1024 / 1024).toFixed(1)} MB` }
+
+function ArtifactWorkspace({ artifacts, generating, open, selectedId, onOpenChange, onSelect }: { artifacts: Artifact[]; generating: boolean; open: boolean; selectedId: string | undefined; onOpenChange: (open: boolean) => void; onSelect: (id: string) => void }) {
+  const selected = artifacts.find((artifact) => artifact.id === selectedId) ?? artifacts.at(-1)
+  if (!open) return <Button className={`artifact-popout ${generating ? 'generating' : ''}`} onClick={() => onOpenChange(true)}><span aria-hidden="true">{generating ? '◌' : '▤'}</span><span>Outputs</span>{artifacts.length > 0 && <strong>{artifacts.length}</strong>}</Button>
+  return <aside className="artifact-workspace">
+    <div className="artifact-workspace-head"><div><span>OUTPUTS</span><strong>{generating ? 'Generating…' : selected?.name ?? 'Artifacts'}</strong></div><Button variant="ghost" onClick={() => onOpenChange(false)} aria-label="Close outputs">×</Button></div>
+    {generating && <div className="artifact-generating"><span className="artifact-orbit" aria-hidden="true" /><div><strong>Building an artifact</strong><span>Structured output will render here as it arrives.</span></div><div className="artifact-skeleton"><i /><i /><i /></div></div>}
+    {artifacts.length > 0 && <div className="artifact-browser">
+      <nav aria-label="Generated artifacts">{artifacts.map((artifact) => <Button key={artifact.id} variant="ghost" className={artifact.id === selected?.id ? 'selected' : ''} onClick={() => onSelect(artifact.id)}><span>{artifactIcon(artifact)}</span><span><strong>{artifact.name}</strong><small>{artifact.mediaType} · v{artifact.version}</small></span></Button>)}</nav>
+      {selected && <div className="artifact-preview">
+        <div className="artifact-preview-meta"><span>{selected.mediaType}</span><a href={selected.downloadUrl}>Download ↓</a></div>
+        {selected.mediaType.startsWith('image/') ? <img src={`${selected.downloadUrl}?preview=1`} alt={selected.name} />
+          : selected.mediaType === 'application/pdf' ? <object data={`${selected.downloadUrl}?preview=1`} type="application/pdf"><a href={selected.downloadUrl}>Open {selected.name}</a></object>
+          : <iframe title={selected.name} src={`${selected.downloadUrl}?preview=1`} sandbox="" />}
+      </div>}
+    </div>}
+    {!generating && artifacts.length === 0 && <div className="artifact-empty"><span>▤</span><strong>No outputs yet</strong><p>Generated files, images, structured data, and diffs will open here automatically.</p></div>}
+  </aside>
+}
+
+function artifactIcon(artifact: Artifact): string {
+  if (artifact.mediaType.startsWith('image/')) return '▧'
+  if (artifact.kind === 'diff') return 'Δ'
+  if (artifact.mediaType.includes('json') || artifact.mediaType.includes('csv')) return '⌗'
+  return '▤'
+}
+
+function isArtifactGenerationActive(events: SessionEvent[]): boolean {
+  const { tools } = projectActivity(events)
+  return tools.some((tool) => ['pending', 'in_progress'].includes(tool.status) && (tool.kind === 'edit' || /generate|write|render|export|artifact|image/i.test(tool.title)))
+}
+
+function PromptTurnFlow({ events }: { events: SessionEvent[] }) {
+  let turnStart = -1
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event?.kind === 'update' && event.data && typeof event.data === 'object' && (event.data as { sessionUpdate?: string }).sessionUpdate === 'user_message_chunk') {
+      turnStart = index
+      break
+    }
+  }
+  const turnEvents = turnStart >= 0 ? events.slice(turnStart + 1) : []
+  const { plan, tools } = projectActivity(turnEvents)
+  const activeTool = [...tools].reverse().find((tool) => tool.status === 'in_progress' || tool.status === 'pending')
+  const hasAgentContent = turnEvents.some((event) => event.kind === 'update' && event.data && typeof event.data === 'object' && (event.data as { sessionUpdate?: string }).sessionUpdate === 'agent_message_chunk')
+  const status = activeTool ? `Running ${activeTool.title}`
+    : tools.length && tools.every((tool) => ['completed', 'failed', 'cancelled'].includes(tool.status)) ? 'Continuing with tool results'
+    : hasAgentContent ? 'Streaming response'
+    : turnEvents.some((event) => event.kind === 'session') ? 'Model is processing'
+    : 'Starting prompt turn'
+  return <section className="prompt-turn-flow" aria-live="polite">
+    <div className="prompt-turn-status"><span className="dot good" /><strong>{status}</strong><span className="streaming-cursor" aria-hidden="true">▌</span></div>
+    {plan.length > 0 && <ol className="prompt-turn-plan">{plan.map((item, index) => <li key={`${index}-${item.content}`} className={item.status}><span className={`activity-status ${item.status}`} />{item.content}</li>)}</ol>}
+    {tools.length > 0 && <div className="prompt-turn-tools">{tools.map((tool) => <Card key={tool.id} className={`prompt-turn-tool ${tool.status}`}><span className={`tool-kind ${tool.kind}`}>{tool.kind}</span><div><strong>{tool.title}</strong><small>{tool.locations.join(' · ') || tool.id}</small></div><span className={`pill ${tool.status}`}>{tool.status.replace('_', ' ')}</span></Card>)}</div>}
+  </section>
+}
 
 function projectActivity(events: SessionEvent[]): { plan: PlanItem[]; tools: ToolActivity[] } {
   let plan: PlanItem[] = []
@@ -268,27 +268,6 @@ function projectActivity(events: SessionEvent[]): { plan: PlanItem[]; tools: Too
     }
   }
   return { plan, tools: [...tools.values()].sort((left, right) => left.sequence - right.sequence) }
-}
-
-function ActivityView({ plan, tools, runs }: { plan: PlanItem[]; tools: ToolActivity[]; runs: SessionRun[] }) {
-  return <div className="activity-view">
-    <section><div className="section-label">PLAN</div>{plan.length ? <div className="plan-list">{plan.map((item, index) => <div className="plan-item" key={`${index}-${item.content}`}><span className={`activity-status ${item.status}`} /> <strong>{item.content}</strong><small>{item.status} · {item.priority}</small></div>)}</div> : <div className="empty">The runtime has not reported a structured plan.</div>}</section>
-    <section><div className="section-label">TOOL ACTIVITY</div>{tools.length ? <div className="tool-list">{tools.map((tool) => <Card key={tool.id}><span className={`tool-kind ${tool.kind}`}>{tool.kind}</span><div><strong>{tool.title}</strong><small>{tool.locations.join(' · ') || tool.id}</small>{tool.terminals.map((terminal) => <code className="terminal-ref" key={terminal}>terminal · {terminal}</code>)}</div><span className={`pill ${tool.status}`}>{tool.status}</span></Card>)}</div> : <div className="empty">No governed tool activity yet.</div>}</section>
-    <section><div className="section-label">RUN HISTORY</div><div className="run-list">{runs.map((run) => <div key={run.id}><span className={`activity-status ${run.status}`} /><strong>{run.status}</strong><small>{new Date(run.startedAt).toLocaleString()}{run.stopReason ? ` · ${run.stopReason}` : ''}</small></div>)}</div></section>
-  </div>
-}
-
-function ArtifactView({ artifacts }: { artifacts: Artifact[] }) {
-  return <div className="artifact-view">{artifacts.length ? artifacts.map((artifact) => <Card key={artifact.id}><div className={`artifact-icon ${artifact.kind}`}>{artifact.kind === 'diff' ? 'Δ' : '↧'}</div><div><strong>{artifact.name}</strong><span>{artifact.mediaType} · version {artifact.version} · {new Date(artifact.createdAt).toLocaleString()}</span></div><a className="secondary" href={artifact.downloadUrl}>Download</a></Card>) : <div className="conversation-empty"><h2>No artifacts yet.</h2><p>Embedded resources and file results emitted by governed tools will appear here with durable versions.</p></div>}</div>
-}
-
-function ApprovalView({ approvals, onDecision }: { approvals: Approval[]; onDecision: (id: string, decision: 'approved' | 'denied', reason?: string) => Promise<void> }) {
-  const pending = approvals.filter((approval) => approval.status === 'pending')
-  const history = approvals.filter((approval) => approval.status !== 'pending')
-  return <div className="approval-view">
-    <section><div className="section-label">REQUIRES HUMAN DECISION</div>{pending.length ? <div className="approval-list">{pending.map((approval) => <ApprovalCard key={approval.id} approval={approval} onDecision={onDecision} />)}</div> : <div className="empty">No tool calls are waiting for approval.</div>}</section>
-    <section><div className="section-label">DECISION HISTORY</div>{history.length ? <div className="approval-list history">{history.map((approval) => <Card key={approval.id}><div><strong>{approval.toolTitle}</strong><span>Requested {new Date(approval.requestedAt).toLocaleString()}{approval.decidedAt ? ` · decided ${new Date(approval.decidedAt).toLocaleString()}` : ''}</span>{approval.reason && <p>{approval.reason}</p>}</div><span className={`pill ${approval.status}`}>{approval.status}</span></Card>)}</div> : <div className="empty">No approval decisions have been recorded.</div>}</section>
-  </div>
 }
 
 function ApprovalCard({ approval, onDecision }: { approval: Approval; onDecision: (id: string, decision: 'approved' | 'denied', reason?: string) => Promise<void> }) {

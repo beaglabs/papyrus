@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom'
 import { forwardRef, useEffect, useRef, useState, type ButtonHTMLAttributes, type HTMLAttributes, type InputHTMLAttributes, type LabelHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
 
 function classes(...values:Array<string|false|null|undefined>){return values.filter(Boolean).join(' ')}
@@ -89,10 +90,23 @@ export function Combobox({name,value,defaultValue,options,placeholder,disabled=f
   </div>
 }
 
+export function DropdownMenu({trigger,children,className}:{trigger:ReactNode;children:ReactNode;className?:string}){
+  const [open,setOpen]=useState(false)
+  const root=useRef<HTMLDivElement>(null)
+  useEffect(()=>{if(!open)return;const close=(event:MouseEvent)=>{if(!root.current?.contains(event.target as Node))setOpen(false)};const escape=(event:KeyboardEvent)=>{if(event.key==='Escape')setOpen(false)};document.addEventListener('mousedown',close);document.addEventListener('keydown',escape);return()=>{document.removeEventListener('mousedown',close);document.removeEventListener('keydown',escape)}},[open])
+  return <div ref={root} data-slot="dropdown-menu" className={classes('nb-dropdown-menu',className)}>
+    <Button type="button" variant="ghost" className="nb-dropdown-trigger" aria-haspopup="menu" aria-expanded={open} onClick={()=>setOpen(current=>!current)}>{trigger}</Button>
+    {open&&<div role="menu" data-slot="dropdown-menu-content" onClick={()=>setOpen(false)}>{children}</div>}
+  </div>
+}
+export function DropdownMenuLabel({className,...props}:HTMLAttributes<HTMLDivElement>){return <div data-slot="dropdown-menu-label" className={className} {...props}/>}
+export function DropdownMenuSeparator(){return <div role="separator" data-slot="dropdown-menu-separator"/>}
+export function DropdownMenuItem({className,...props}:ButtonHTMLAttributes<HTMLButtonElement>){return <button type="button" role="menuitem" data-slot="dropdown-menu-item" className={classes('nb-dropdown-item',className)} {...props}/>}
+
 export function Dialog({open,onOpenChange,children}:{open:boolean;onOpenChange:(open:boolean)=>void;children:ReactNode}){
   useEffect(()=>{if(!open)return;const escape=(event:KeyboardEvent)=>{if(event.key==='Escape')onOpenChange(false)};document.addEventListener('keydown',escape);return()=>document.removeEventListener('keydown',escape)},[open,onOpenChange])
   if(!open)return null
-  return <div data-slot="dialog-overlay" onMouseDown={event=>{if(event.target===event.currentTarget)onOpenChange(false)}}><div role="dialog" aria-modal="true" data-slot="dialog">{children}</div></div>
+  return createPortal(<div data-slot="dialog-overlay" onMouseDown={event=>{if(event.target===event.currentTarget)onOpenChange(false)}}><div role="dialog" aria-modal="true" data-slot="dialog">{children}</div></div>,document.body)
 }
 export function DialogHeader({className,...props}:HTMLAttributes<HTMLDivElement>){return <div data-slot="dialog-header" className={className} {...props}/>}
 export function DialogContent({className,...props}:HTMLAttributes<HTMLDivElement>){return <div data-slot="dialog-content" className={className} {...props}/>}

@@ -1,4 +1,4 @@
-import type { AdminOverview, ApprovedSource, ApprovedSourceKind, SourceSearchResult, Approval, Artifact, Attachment, Elicitation, Environment, Invitation, McpServer, Principal, ResearchSource, Role, Session, SessionConfigOption, SessionEvent, SessionRun, SessionSurface } from '@papyrus/contracts'
+import type { AdminOverview, ApprovedSource, ApprovedSourceKind, SourceSearchResult, Approval, Artifact, Attachment, Elicitation, Environment, Invitation, McpServer, Principal, ResearchSource, Role, Session, SessionEvent, SessionRun } from '@papyrus/contracts'
 
 export interface Health {
   topology: 'on-premises'
@@ -93,8 +93,8 @@ export async function sessionPage(cursor?: string): Promise<SessionPage> {
   return api(`/api/sessions?${query}`)
 }
 
-export async function createSession(environmentId: string, title: string, surface: SessionSurface): Promise<Session> {
-  return api('/api/sessions', { method: 'POST', body: JSON.stringify({ environmentId, title, surface }) })
+export async function createSession(environmentId: string, title: string): Promise<Session> {
+  return api('/api/sessions', { method: 'POST', body: JSON.stringify({ environmentId, title }) })
 }
 
 export async function sessionEvents(sessionId: string): Promise<SessionEvent[]> {
@@ -133,16 +133,6 @@ export async function resumeSession(sessionId: string): Promise<Session> {
 
 export async function deleteSession(sessionId: string): Promise<void> {
   await api(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE' })
-}
-
-export async function sessionConfigOptions(sessionId: string): Promise<SessionConfigOption[]> {
-  return (await api<{ configOptions: SessionConfigOption[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/config-options`)).configOptions
-}
-
-export async function setSessionConfigOption(sessionId: string, configId: 'papyrus.surface', value: SessionSurface): Promise<SessionConfigOption[]> {
-  return (await api<{ configOptions: SessionConfigOption[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/config-options`, {
-    method: 'POST', body: JSON.stringify({ configId, value }),
-  })).configOptions
 }
 
 export async function sessionRuns(sessionId: string): Promise<SessionRun[]> {

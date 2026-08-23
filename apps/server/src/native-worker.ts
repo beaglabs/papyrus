@@ -65,7 +65,7 @@ export class PapyrusWorker implements AgentRuntime {
     const content = String(args.content ?? '')
     await fs.mkdir(resolve(path, '..'), { recursive: true })
     await fs.writeFile(path, content, 'utf-8')
-    return { type: 'text', text: `Wrote ${content.length} bytes to ${path}` }
+    return { type: 'resource', resource: { uri: `file://${path}`, mimeType: mediaTypeForPath(path), text: content } }
   }
 
   private async listFilesTool(args: Record<string, unknown>): Promise<unknown> {
@@ -289,19 +289,14 @@ export class PapyrusWorker implements AgentRuntime {
 
     for (let turn = 0; turn < 32; turn += 1) {
       if (request.signal?.aborted) return { runtimeSessionId, stopReason: 'cancelled' }
-      const message = await this.complete(messages, tools, request.signal)
-      const text = typeof message.content === 'string' ? message.content : ''
-      if (text) {
+      const messageId = `agent_${runtimeSessionId}_${turn}`
+      const message = await this.complete(messages, tools, async (text) => {
         await request.onEvent({
           kind: 'update',
           at: new Date().toISOString(),
-          data: {
-            sessionUpdate: 'agent_message_chunk',
-            content: { type: 'text', text },
-            messageId: `agent_${runtimeSessionId}_${turn}`,
-          },
+          data: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text }, messageId },
         })
-      }
+      }, request.signal)
 
       const calls = message.tool_calls ?? []
       if (calls.length === 0) {
@@ -386,7 +381,7 @@ export class PapyrusWorker implements AgentRuntime {
               title: name,
               kind: toolKind,
               status: 'completed',
-              content: [{ type: 'content', content: { type: 'text', text: safeJson(result) } }],
+              content: toolUpdateContent(result),
             },
           })
         } catch (error) {
@@ -416,7 +411,7 @@ export class PapyrusWorker implements AgentRuntime {
     return { runtimeSessionId, stopReason: 'max_turn_requests' }
   }
 
-  private async complete(messages: ModelMessage[], tools: ModelTool[], signal?: AbortSignal): Promise<ModelMessage> {
+  private async complete(messages: ModelMessage[], tools: ModelTool[], onText: (text: string) => void | Promise<void>, signal?: AbortSignal): Promise<ModelMessage> {
     const endpoint = this.config.endpoint!.replace(/\/$/, '')
     const timeout = AbortSignal.timeout(this.config.promptTimeoutMs ?? 600_000)
     const combined = signal ? AbortSignal.any([signal, timeout]) : timeout
@@ -429,15 +424,60 @@ export class PapyrusWorker implements AgentRuntime {
       body: JSON.stringify({
         model: this.config.model,
         messages,
+        stream: true,
         ...(tools.length ? { tools, tool_choice: 'auto' } : {}),
       }),
       signal: combined,
     })
     if (!response.ok) throw new Error(`Model endpoint returned ${response.status}: ${(await response.text()).slice(0, 1024)}`)
-    const body = await response.json() as { choices?: Array<{ message?: ModelMessage }> }
-    const message = body.choices?.[0]?.message
-    if (!message) throw new Error('Model endpoint returned no assistant message')
-    return message
+
+    const contentType = response.headers.get('content-type') ?? ''
+    if (!contentType.includes('text/event-stream')) {
+      const body = await response.json() as { choices?: Array<{ message?: ModelMessage }> }
+      const message = body.choices?.[0]?.message
+      if (!message) throw new Error('Model endpoint returned no assistant message')
+      if (typeof message.content === 'string' && message.content) await onText(message.content)
+      return message
+    }
+    if (!response.body) throw new Error('Model endpoint returned no response stream')
+
+    let buffer = ''
+    let content = ''
+    const toolCalls = new Map<number, { id: string; type: 'function'; function: { name: string; arguments: string } }>()
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    const processLine = async (line: string) => {
+      if (!line.startsWith('data:')) return
+      const payload = line.slice(5).trim()
+      if (!payload || payload === '[DONE]') return
+      const packet = JSON.parse(payload) as { choices?: Array<{ delta?: { content?: string; tool_calls?: Array<{ index: number; id?: string; type?: 'function'; function?: { name?: string; arguments?: string } }> } }> }
+      const delta = packet.choices?.[0]?.delta
+      if (typeof delta?.content === 'string' && delta.content) {
+        content += delta.content
+        await onText(delta.content)
+      }
+      for (const part of delta?.tool_calls ?? []) {
+        const current = toolCalls.get(part.index) ?? { id: '', type: 'function' as const, function: { name: '', arguments: '' } }
+        if (part.id) current.id += part.id
+        if (part.function?.name) current.function.name += part.function.name
+        if (part.function?.arguments) current.function.arguments += part.function.arguments
+        toolCalls.set(part.index, current)
+      }
+    }
+    for (;;) {
+      const chunk = await reader.read()
+      buffer += decoder.decode(chunk.value, { stream: !chunk.done })
+      const lines = buffer.split(/\r?\n/)
+      buffer = lines.pop() ?? ''
+      for (const line of lines) await processLine(line)
+      if (chunk.done) break
+    }
+    if (buffer) await processLine(buffer)
+    return {
+      role: 'assistant',
+      content,
+      ...(toolCalls.size ? { tool_calls: [...toolCalls.entries()].sort(([left], [right]) => left - right).map(([, call]) => call) } : {}),
+    }
   }
 }
 
@@ -476,6 +516,21 @@ function promptContent(prompt: string | ContentBlock[]): string | Array<Record<s
     }
   }
   return content.length ? content : ''
+}
+
+function toolUpdateContent(result: unknown): Array<{ type: 'content'; content: unknown }> {
+  if (isRecord(result) && Array.isArray(result.content)) {
+    return result.content.map((content) => ({ type: 'content' as const, content }))
+  }
+  if (isRecord(result) && typeof result.type === 'string' && ['text', 'image', 'audio', 'resource', 'resource_link'].includes(result.type)) {
+    return [{ type: 'content', content: result }]
+  }
+  return [{ type: 'content', content: { type: 'text', text: safeJson(result) } }]
+}
+
+function mediaTypeForPath(path: string): string {
+  const extension = path.toLowerCase().split('.').at(-1)
+  return ({ md: 'text/markdown', txt: 'text/plain', json: 'application/json', csv: 'text/csv', html: 'text/html', xml: 'application/xml', js: 'text/javascript', ts: 'text/typescript', css: 'text/css' } as Record<string, string>)[extension ?? ''] ?? 'text/plain'
 }
 
 function parseArguments(value: string): Record<string, unknown> {

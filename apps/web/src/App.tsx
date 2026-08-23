@@ -4,7 +4,7 @@ import { SessionHarness } from './Sessions.js'
 import { SourcesView } from './Sources.js'
 import { AdminView } from './Admin.js'
 import { EnvironmentsView } from './Environments.js'
-import { Alert, Avatar, Badge, Button, Card, Input } from './components/ui/index.js'
+import { Alert, Avatar, Badge, Button, Card, DropdownMenu, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, Input } from './components/ui/index.js'
 
 type View = 'home' | 'sessions' | 'environments' | 'sources' | 'administration'
 type AppState =
@@ -94,12 +94,18 @@ export function App() {
         </nav>
         {view === 'sessions' && <div id="session-history-rail" className="session-history-rail" />}
         <div className="runtime-status"><span className="dot good" />Policy enforcement active</div>
+        <div className="sidebar-account">
+          <DropdownMenu trigger={<>{state.data.me.pictureUrl ? <UserAvatar name={state.data.me.displayName} pictureUrl={state.data.me.pictureUrl} /> : <UserAvatar name={state.data.me.displayName} />}<span><strong>{state.data.me.displayName}</strong><small>{state.data.me.roles.join(' · ')}</small></span><span aria-hidden="true">•••</span></>}>
+            <DropdownMenuLabel><strong>{state.data.me.displayName}</strong><span>{state.data.me.authMethod}</span></DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem disabled>Settings <small>Coming later</small></DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem className="danger-item" onClick={() => void signOut()}>Sign out</DropdownMenuItem>
+          </DropdownMenu>
+        </div>
       </aside>
       <main>
-        <header>
-          <div><p className="eyebrow">GOVERNED AGENT WORKSPACE</p><h1>{viewTitle(view)}</h1></div>
-          <div className="identity"><div><strong>{state.data.me.displayName}</strong><span>{state.data.me.roles.join(' · ')} · {state.data.me.authMethod}</span></div>{state.data.me.pictureUrl ? <UserAvatar name={state.data.me.displayName} pictureUrl={state.data.me.pictureUrl} /> : <UserAvatar name={state.data.me.displayName} />}<Button className="text-button" onClick={() => void signOut()}>Sign out</Button></div>
-        </header>
+        {view !== 'sessions' && <header><div><p className="eyebrow">GOVERNED AGENT WORKSPACE</p><h1>{viewTitle(view)}</h1></div></header>}
         <ShellView view={view} data={state.data} onNavigate={setView} />
       </main>
     </div>

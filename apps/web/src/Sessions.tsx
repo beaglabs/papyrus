@@ -7,6 +7,7 @@ import { Alert, Button, Card, Input, Textarea } from './components/ui/index.js'
 
 interface ToolActivity { id: string; title: string; kind: string; status: string; sequence: number; locations: string[]; terminals: string[]; output: Array<Record<string, unknown>> }
 interface PlanItem { content: string; status: string; priority: string }
+interface PromptTurnGroup { runId: string; sequence: number; events: SessionEvent[] }
 export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRequest: number; onActivate: () => void }) {
   const [sessions, setSessions] = useState<Session[]>([])
   const [nextCursor, setNextCursor] = useState<string>()
@@ -24,6 +25,7 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
   const [running, setRunning] = useState(false)
   const [pendingTurn, setPendingTurn] = useState<{ prompt: string; attachments: Attachment[] }>()
   const [error, setError] = useState<string>()
+  const [liveError, setLiveError] = useState<string>()
   const [uploading, setUploading] = useState(false)
   const [followingLatest, setFollowingLatest] = useState(true)
   const streamRef = useRef<EventSource | null>(null)
@@ -31,8 +33,8 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const newPromptRef = useRef<HTMLTextAreaElement | null>(null)
   const selected = sessions.find((session) => session.id === selectedId)
-  const messages = useMemo(() => acpContent(events), [events])
-  const activeThoughtId = useMemo(() => { const lastUser = [...messages].reverse().find((message) => message.role === 'user')?.sequence ?? -1; return [...messages].reverse().find((message) => message.role === 'thought' && message.sequence > lastUser)?.id }, [messages])
+  const turns = useMemo(() => promptTurns(events), [events])
+  const activeRunId = useMemo(() => [...events].reverse().find((event) => event.runId)?.runId, [events])
   const artifactGenerating = useMemo(() => running && isArtifactGenerationActive(events), [events, running])
 
   const loadContext = async (sessionId: string) => {
@@ -65,10 +67,11 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
     if (!followingLatest) return
     const frame = requestAnimationFrame(() => messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' }))
     return () => cancelAnimationFrame(frame)
-  }, [messages, running, followingLatest])
+  }, [events, running, followingLatest])
   useEffect(() => {
     if (artifactGenerating) setArtifactPanelOpen(true)
-  }, [artifactGenerating])
+    else if (artifacts.length === 0) setArtifactPanelOpen(false)
+  }, [artifactGenerating, artifacts.length])
   useEffect(() => {
     if (artifacts.length > knownArtifactCount.current) {
       setSelectedArtifactId(artifacts.at(-1)?.id)

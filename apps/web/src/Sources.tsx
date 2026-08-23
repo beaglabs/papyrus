@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import type { ApprovedSource, ResearchSource, SourceSearchResult } from '@papyrus/contracts'
 import { approvedSources, searchApprovedSources } from './api.js'
-import { Badge, Button, Card, Input } from './components/ui/index.js'
+import { Alert, Badge, Button, Card, Input } from './components/ui/index.js'
 
 export function SourcesView() {
   const [sources,setSources]=useState<ApprovedSource[]>([])
@@ -29,11 +29,11 @@ export function SourcesView() {
     </section>
     <section className="source-search">
       <form onSubmit={search}><Input name="query" aria-label="Search approved sources" placeholder="Search only the sources you can access…" /><Button className="primary" disabled={searching||!sources.length}>{searching?'Searching…':'Search'}</Button></form>
-      {error&&<div className="error">{error}</div>}
-      <div className="source-results">{results.map(result=><article key={result.chunkId}>
+      {error&&<Alert className="error">{error}</Alert>}
+      <div className="source-results">{results.map(result=><Card key={result.chunkId}>
         <p>{result.content}</p>
         <footer><strong>{result.citation.sourceName}</strong><span>{result.citation.title}{result.citation.location?' · '+result.citation.location:''}</span><code>{result.citation.sha256.slice(0,16)}</code></footer>
-      </article>)}</div>
+      </Card>)}</div>
     </section>
   </div>
 }
@@ -41,7 +41,7 @@ export function SourcesView() {
 
 export function SourceList({sources,empty}:{sources:ResearchSource[];empty?:string}){
   if(!sources.length)return <div className="conversation-empty"><h2>No research sources yet.</h2><p>{empty??'Sources emitted by the session will appear here.'}</p></div>
-  return <div className="source-view">{sources.map(source=><article key={`${source.sessionId}-${source.id}`}>
+  return <div className="source-view">{sources.map(source=><Card key={`${source.sessionId}-${source.id}`}>
     <div className="source-host">{source.host}</div>
     <div className="source-body">
       <strong>{source.title}</strong>
@@ -49,7 +49,7 @@ export function SourceList({sources,empty}:{sources:ResearchSource[];empty?:stri
       {source.preview?<pre className="source-preview">{source.preview}</pre>:source.excerpt&&<p>{source.excerpt}</p>}
       <span>Captured {new Date(source.capturedAt).toLocaleString()} · event {source.sequence}</span>
     </div>
-  </article>)}</div>
+  </Card>)}</div>
 }
 
 function safeHttpUrl(value:string):string|undefined{

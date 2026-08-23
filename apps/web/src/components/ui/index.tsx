@@ -1,10 +1,14 @@
-import { forwardRef, type ButtonHTMLAttributes, type HTMLAttributes, type InputHTMLAttributes, type LabelHTMLAttributes, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
+import { forwardRef, type ButtonHTMLAttributes, type HTMLAttributes, type InputHTMLAttributes, type LabelHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
 
 function classes(...values:Array<string|false|null|undefined>){return values.filter(Boolean).join(' ')}
 
 export type ButtonVariant='default'|'neutral'|'reverse'|'danger'|'ghost'
-export const Button=forwardRef<HTMLButtonElement,ButtonHTMLAttributes<HTMLButtonElement>&{variant?:ButtonVariant}>(
-  ({className,variant='neutral',...props},ref)=><button ref={ref} data-slot="button" data-variant={variant} className={classes('nb-button',className)} {...props}/>
+export const Button=forwardRef<HTMLButtonElement,ButtonHTMLAttributes<HTMLButtonElement>&{variant?:ButtonVariant;size?:'default'|'sm'|'icon'}>(
+  ({className,variant,size,...props},ref)=>{
+    const resolvedVariant=variant??(className?.includes('primary')?'default':className?.includes('danger')?'danger':className?.includes('text-button')?'ghost':'neutral')
+    const resolvedSize=size??(className?.includes('icon-button')?'icon':'default')
+    return <button ref={ref} data-slot="button" data-variant={resolvedVariant} data-size={resolvedSize} className={classes('nb-button',className)} {...props}/>
+  }
 )
 Button.displayName='Button'
 
@@ -46,6 +50,9 @@ export function Badge({className,...props}:HTMLAttributes<HTMLSpanElement>){
 }
 export function Alert({className,...props}:HTMLAttributes<HTMLDivElement>){
   return <div role="alert" data-slot="alert" className={classes('nb-alert',className)} {...props}/>
+}
+export function EmptyState({title,description,action,className}:{title:string;description?:string;action?:ReactNode;className?:string}){
+  return <Card className={classes('nb-empty-state',className)}><CardContent><span className="nb-empty-mark" aria-hidden="true">＋</span><h2>{title}</h2>{description&&<p>{description}</p>}{action}</CardContent></Card>
 }
 export function Avatar({className,...props}:HTMLAttributes<HTMLDivElement>){
   return <div data-slot="avatar" className={classes('nb-avatar',className)} {...props}/>

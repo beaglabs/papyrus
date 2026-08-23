@@ -4,7 +4,7 @@ import { cancelSession, createSession, decideApproval, deleteSession, promptSess
 import { SourceList } from './Sources.js'
 import { SelectField } from './SelectField.js'
 import { acpContent, ContentMessage } from './AcpSessionContent.js'
-import { Button, Input, Textarea, NativeSelect, TabsList, TabsTrigger } from './components/ui/index.js'
+import { Alert, Button, Input, Textarea, NativeSelect, TabsList, TabsTrigger, Card } from './components/ui/index.js'
 
 interface ToolActivity { id: string; title: string; kind: string; status: string; sequence: number; locations: string[]; terminals: string[] }
 interface PlanItem { content: string; status: string; priority: string }
@@ -165,7 +165,7 @@ export function SessionHarness({ environments }: { environments: Environment[] }
       {nextCursor && <Button className="secondary load-more" onClick={() => void loadSessions(nextCursor)}>Load more</Button>}
     </aside>
     <div className="conversation-panel">
-      {error && <div className="error">{error}<Button onClick={() => setError(undefined)}>×</Button></div>}
+      {error && <Alert className="error">{error}<Button variant="ghost" onClick={() => setError(undefined)}>×</Button></Alert>}
       {creating && <form className="create-session" onSubmit={create}><div><strong>New durable session</strong><Button type="button" className="icon-button" onClick={() => setCreating(false)}>×</Button></div><SelectField name="environment" label="Environment" placeholder="Choose an environment" options={environments.map((environment) => ({ value: environment.id, label: environment.name, ...(environment.description ? { detail: environment.description } : {}) }))} /><SelectField name="surface" label="Work surface" placeholder="Choose a work surface" options={surfaceOptions()} /><label>Session title<Input name="title" required maxLength={256} autoFocus placeholder="Describe the work" /></label><Button className="primary" disabled={!environments.length}>Create session →</Button></form>}
       {!selected ? <div className="conversation-empty"><h2>Start a governed session.</h2><p>Choose an authorized environment, describe the work, and retain the complete history on the server.</p><Button className="primary" disabled={!environments.length} onClick={() => setCreating(true)}>New session →</Button></div> : <>
         <div className="conversation-head"><div><strong>{selected.title}</strong><span>{selected.status} · {surfaceLabel(surface)} · {environmentName(environments, selected.environmentId)}</span></div><div className="session-actions"><SurfaceControl value={surface} disabled={running} onChange={changeSurface} /><TabsList className="session-tabs">{tabs.map((item) => <TabsTrigger key={item} active={tab === item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{tabLabel(item)}{tabCount(item, approvals, sources, artifacts)}</TabsTrigger>)}</TabsList>{(running || selected.status === 'running') ? <Button className="danger" onClick={() => void cancel()}>Cancel run</Button> : <Button className="text-button" onClick={() => void removeSession()}>Delete</Button>}</div></div>
@@ -237,7 +237,7 @@ function SurfaceEmpty({ title, detail }: { title: string; detail: string }) {
 }
 
 function AttachmentView({ title, items, empty }: { title: string; items: Attachment[]; empty: string }) {
-  return <div className="surface-collection"><div className="section-label">{title.toUpperCase()}</div>{items.length ? items.map((item) => <article key={item.id}><div><strong>{item.name}</strong><span>{item.mediaType} · {formatBytes(item.size)}</span></div><span className="pill completed">input</span></article>) : <div className="empty">{empty}</div>}</div>
+  return <div className="surface-collection"><div className="section-label">{title.toUpperCase()}</div>{items.length ? items.map((item) => <Card key={item.id}><div><strong>{item.name}</strong><span>{item.mediaType} · {formatBytes(item.size)}</span></div><span className="pill completed">input</span></Card>) : <div className="empty">{empty}</div>}</div>
 }
 
 function ElicitationCard({ item, onRespond }: { item: Elicitation; onRespond: (id: string, response: Record<string, unknown>) => Promise<void> }) {
@@ -277,13 +277,13 @@ function projectActivity(events: SessionEvent[]): { plan: PlanItem[]; tools: Too
 function ActivityView({ plan, tools, runs }: { plan: PlanItem[]; tools: ToolActivity[]; runs: SessionRun[] }) {
   return <div className="activity-view">
     <section><div className="section-label">PLAN</div>{plan.length ? <div className="plan-list">{plan.map((item, index) => <div className="plan-item" key={`${index}-${item.content}`}><span className={`activity-status ${item.status}`} /> <strong>{item.content}</strong><small>{item.status} · {item.priority}</small></div>)}</div> : <div className="empty">The runtime has not reported a structured plan.</div>}</section>
-    <section><div className="section-label">TOOL ACTIVITY</div>{tools.length ? <div className="tool-list">{tools.map((tool) => <article key={tool.id}><span className={`tool-kind ${tool.kind}`}>{tool.kind}</span><div><strong>{tool.title}</strong><small>{tool.locations.join(' · ') || tool.id}</small>{tool.terminals.map((terminal) => <code className="terminal-ref" key={terminal}>terminal · {terminal}</code>)}</div><span className={`pill ${tool.status}`}>{tool.status}</span></article>)}</div> : <div className="empty">No governed tool activity yet.</div>}</section>
+    <section><div className="section-label">TOOL ACTIVITY</div>{tools.length ? <div className="tool-list">{tools.map((tool) => <Card key={tool.id}><span className={`tool-kind ${tool.kind}`}>{tool.kind}</span><div><strong>{tool.title}</strong><small>{tool.locations.join(' · ') || tool.id}</small>{tool.terminals.map((terminal) => <code className="terminal-ref" key={terminal}>terminal · {terminal}</code>)}</div><span className={`pill ${tool.status}`}>{tool.status}</span></Card>)}</div> : <div className="empty">No governed tool activity yet.</div>}</section>
     <section><div className="section-label">RUN HISTORY</div><div className="run-list">{runs.map((run) => <div key={run.id}><span className={`activity-status ${run.status}`} /><strong>{run.status}</strong><small>{new Date(run.startedAt).toLocaleString()}{run.stopReason ? ` · ${run.stopReason}` : ''}</small></div>)}</div></section>
   </div>
 }
 
 function ArtifactView({ artifacts }: { artifacts: Artifact[] }) {
-  return <div className="artifact-view">{artifacts.length ? artifacts.map((artifact) => <article key={artifact.id}><div className={`artifact-icon ${artifact.kind}`}>{artifact.kind === 'diff' ? 'Δ' : '↧'}</div><div><strong>{artifact.name}</strong><span>{artifact.mediaType} · version {artifact.version} · {new Date(artifact.createdAt).toLocaleString()}</span></div><a className="secondary" href={artifact.downloadUrl}>Download</a></article>) : <div className="conversation-empty"><h2>No artifacts yet.</h2><p>Embedded resources and file results emitted by governed tools will appear here with durable versions.</p></div>}</div>
+  return <div className="artifact-view">{artifacts.length ? artifacts.map((artifact) => <Card key={artifact.id}><div className={`artifact-icon ${artifact.kind}`}>{artifact.kind === 'diff' ? 'Δ' : '↧'}</div><div><strong>{artifact.name}</strong><span>{artifact.mediaType} · version {artifact.version} · {new Date(artifact.createdAt).toLocaleString()}</span></div><a className="secondary" href={artifact.downloadUrl}>Download</a></Card>) : <div className="conversation-empty"><h2>No artifacts yet.</h2><p>Embedded resources and file results emitted by governed tools will appear here with durable versions.</p></div>}</div>
 }
 
 function ApprovalView({ approvals, onDecision }: { approvals: Approval[]; onDecision: (id: string, decision: 'approved' | 'denied', reason?: string) => Promise<void> }) {
@@ -291,7 +291,7 @@ function ApprovalView({ approvals, onDecision }: { approvals: Approval[]; onDeci
   const history = approvals.filter((approval) => approval.status !== 'pending')
   return <div className="approval-view">
     <section><div className="section-label">REQUIRES HUMAN DECISION</div>{pending.length ? <div className="approval-list">{pending.map((approval) => <ApprovalCard key={approval.id} approval={approval} onDecision={onDecision} />)}</div> : <div className="empty">No tool calls are waiting for approval.</div>}</section>
-    <section><div className="section-label">DECISION HISTORY</div>{history.length ? <div className="approval-list history">{history.map((approval) => <article key={approval.id}><div><strong>{approval.toolTitle}</strong><span>Requested {new Date(approval.requestedAt).toLocaleString()}{approval.decidedAt ? ` · decided ${new Date(approval.decidedAt).toLocaleString()}` : ''}</span>{approval.reason && <p>{approval.reason}</p>}</div><span className={`pill ${approval.status}`}>{approval.status}</span></article>)}</div> : <div className="empty">No approval decisions have been recorded.</div>}</section>
+    <section><div className="section-label">DECISION HISTORY</div>{history.length ? <div className="approval-list history">{history.map((approval) => <Card key={approval.id}><div><strong>{approval.toolTitle}</strong><span>Requested {new Date(approval.requestedAt).toLocaleString()}{approval.decidedAt ? ` · decided ${new Date(approval.decidedAt).toLocaleString()}` : ''}</span>{approval.reason && <p>{approval.reason}</p>}</div><span className={`pill ${approval.status}`}>{approval.status}</span></Card>)}</div> : <div className="empty">No approval decisions have been recorded.</div>}</section>
   </div>
 }
 
@@ -299,5 +299,5 @@ function ApprovalCard({ approval, onDecision }: { approval: Approval; onDecision
   const [reason, setReason] = useState('')
   const [saving, setSaving] = useState(false)
   const decide = async (decision: 'approved' | 'denied') => { setSaving(true); try { await onDecision(approval.id, decision, reason) } finally { setSaving(false) } }
-  return <article className="approval-card"><div><span className="approval-kicker">TOOL PERMISSION</span><strong>{approval.toolTitle}</strong><span>Requested {new Date(approval.requestedAt).toLocaleString()}</span></div><label>Decision rationale (optional)<Textarea value={reason} maxLength={2000} onChange={(event) => setReason(event.target.value)} placeholder="Why is this action appropriate or denied?" /></label><div className="approval-actions"><Button className="danger" disabled={saving} onClick={() => void decide('denied')}>Deny</Button><Button className="primary" disabled={saving} onClick={() => void decide('approved')}>{saving ? 'Saving…' : 'Approve'}</Button></div></article>
+  return <Card className="approval-card"><div><span className="approval-kicker">TOOL PERMISSION</span><strong>{approval.toolTitle}</strong><span>Requested {new Date(approval.requestedAt).toLocaleString()}</span></div><label>Decision rationale (optional)<Textarea value={reason} maxLength={2000} onChange={(event) => setReason(event.target.value)} placeholder="Why is this action appropriate or denied?" /></label><div className="approval-actions"><Button className="danger" disabled={saving} onClick={() => void decide('denied')}>Deny</Button><Button className="primary" disabled={saving} onClick={() => void decide('approved')}>{saving ? 'Saving…' : 'Approve'}</Button></div></Card>
 }

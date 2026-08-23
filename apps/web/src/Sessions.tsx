@@ -85,9 +85,9 @@ export function SessionHarness({ environments }: { environments: Environment[] }
       stream.addEventListener('session_event', (message) => {
         const event = JSON.parse((message as MessageEvent<string>).data) as SessionEvent
         setEvents((current) => current.some((item) => item.sequence === event.sequence) ? current : [...current, event])
-        if (event.kind === 'approval' || event.kind === 'elicitation') {
+        const update = event.data as { sessionUpdate?: string; status?: string } | undefined
+        if (event.kind === 'approval' || event.kind === 'elicitation' || (update?.sessionUpdate === 'tool_call_update' && ['completed', 'failed'].includes(update.status ?? ''))) {
           void loadContext(selectedId).catch(showError)
-          if ((event.data as { status?: string } | undefined)?.status === 'pending') setTab('approvals')
         }
       })
       stream.onerror = () => setError('Live updates were interrupted. Papyrus will retry automatically.')

@@ -98,7 +98,7 @@ export function AdminView({ me }: { me: Principal }) {
     <Dialog open={Boolean(deleteRequest)} onOpenChange={open=>{if(!open)setDeleteRequest(undefined)}}>
       {deleteRequest&&<DialogContent>
         <DialogHeader><div><p className="eyebrow">DELETE CONNECTION</p><h2>Delete {deleteRequest.name}?</h2></div></DialogHeader>
-        <p>This removes the connection, pending OAuth state, stored credentials, and every environment grant. This cannot be undone.</p>
+        <p>This removes the connection, pending OAuth state, stored credentials, and every associated tool grant. This cannot be undone.</p>
         <DialogFooter><Button variant="neutral" onClick={()=>setDeleteRequest(undefined)}>Cancel</Button><Button className="danger" disabled={busy} onClick={()=>void act(async()=>{await deleteMcpServer(deleteRequest.id);setDeleteRequest(undefined)})}>Delete connection</Button></DialogFooter>
       </DialogContent>}
     </Dialog>

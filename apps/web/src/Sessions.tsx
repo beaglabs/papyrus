@@ -176,7 +176,7 @@ export function SessionHarness({ environments }: { environments: Environment[] }
           <div className="messages" ref={messagesRef} aria-live="polite" onScroll={(event) => {
             const element = event.currentTarget
             setFollowingLatest(element.scrollHeight - element.scrollTop - element.clientHeight < 72)
-          }}>{messages.length ? messages.map((message) => <ContentMessage message={message} key={message.id} />) : <div className="conversation-empty compact"><h2>What work should Papyrus begin?</h2><p>The runtime and tools are selected by deployment policy.</p></div>}{running && <div className="working"><span className="dot good" />Working under policy…</div>}</div>
+          }}>{messages.length ? messages.map((message) => <ContentMessage message={message} key={message.id} />) : <div className="conversation-empty compact"><h2>What work should Papyrus begin?</h2><p>The runtime and tools are selected by deployment policy.</p></div>}{running && <PromptTurnFlow events={events} />}</div>
           {!followingLatest && <Button className="jump-latest" onClick={() => { setFollowingLatest(true); messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' }) }}>Jump to latest ↓</Button>}
         </div>}
         {tab === 'plan' && <ActivityView plan={activity.plan} tools={[]} runs={runs} />}
@@ -249,6 +249,31 @@ function ElicitationCard({ item, onRespond }: { item: Elicitation; onRespond: (i
 
 function environmentName(environments: Environment[], id: string) { return environments.find((environment) => environment.id === id)?.name ?? 'Environment' }
 function formatBytes(size: number) { return size < 1024 ? `${size} B` : size < 1024 * 1024 ? `${(size / 1024).toFixed(1)} KB` : `${(size / 1024 / 1024).toFixed(1)} MB` }
+
+function PromptTurnFlow({ events }: { events: SessionEvent[] }) {
+  let turnStart = -1
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event?.kind === 'update' && event.data && typeof event.data === 'object' && (event.data as { sessionUpdate?: string }).sessionUpdate === 'user_message_chunk') {
+      turnStart = index
+      break
+    }
+  }
+  const turnEvents = turnStart >= 0 ? events.slice(turnStart + 1) : []
+  const { plan, tools } = projectActivity(turnEvents)
+  const activeTool = [...tools].reverse().find((tool) => tool.status === 'in_progress' || tool.status === 'pending')
+  const hasAgentContent = turnEvents.some((event) => event.kind === 'update' && event.data && typeof event.data === 'object' && (event.data as { sessionUpdate?: string }).sessionUpdate === 'agent_message_chunk')
+  const status = activeTool ? `Running ${activeTool.title}`
+    : tools.length && tools.every((tool) => ['completed', 'failed', 'cancelled'].includes(tool.status)) ? 'Continuing with tool results'
+    : hasAgentContent ? 'Streaming response'
+    : turnEvents.some((event) => event.kind === 'session') ? 'Model is processing'
+    : 'Starting prompt turn'
+  return <section className="prompt-turn-flow" aria-live="polite">
+    <div className="prompt-turn-status"><span className="dot good" /><strong>{status}</strong><span className="streaming-cursor" aria-hidden="true">▌</span></div>
+    {plan.length > 0 && <ol className="prompt-turn-plan">{plan.map((item, index) => <li key={`${index}-${item.content}`} className={item.status}><span className={`activity-status ${item.status}`} />{item.content}</li>)}</ol>}
+    {tools.length > 0 && <div className="prompt-turn-tools">{tools.map((tool) => <Card key={tool.id} className={`prompt-turn-tool ${tool.status}`}><span className={`tool-kind ${tool.kind}`}>{tool.kind}</span><div><strong>{tool.title}</strong><small>{tool.locations.join(' · ') || tool.id}</small></div><span className={`pill ${tool.status}`}>{tool.status.replace('_', ' ')}</span></Card>)}</div>}
+  </section>
+}
 
 function projectActivity(events: SessionEvent[]): { plan: PlanItem[]; tools: ToolActivity[] } {
   let plan: PlanItem[] = []

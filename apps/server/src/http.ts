@@ -2,10 +2,9 @@ import { createServer as createHttpServer, type IncomingMessage, type Server, ty
 import { createServer as createHttpsServer } from 'node:https'
 import { readFileSync } from 'node:fs'
 import { extname, join, normalize } from 'node:path'
-import { ROLES, SESSION_SURFACES, type Role, type SessionSurface, type SignedLicense } from '@papyrus/contracts'
+import { APPROVED_SOURCE_KINDS, ROLES, SESSION_SURFACES, type ApprovedSourceKind, type Role, type SessionSurface, type SignedLicense } from '@papyrus/contracts'
 import { AuthService } from './auth.js'
 import type { ServerConfig } from './config.js'
-import { FileConflictError } from './managed-files.js'
 import { ApprovalLifecycleError, AuthorizationDenied, PapyrusService, SessionLifecycleError } from './service.js'
 
 class HttpError extends Error {
@@ -46,13 +45,13 @@ function artifactDownload(response: ServerResponse, artifact: ReturnType<Papyrus
   response.end(content)
 }
 
-async function body(request: IncomingMessage, maximum = 1_000_000): Promise<Record<string, unknown>> {
+async function body(request: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = []
   let size = 0
   for await (const chunk of request) {
     const buffer = Buffer.from(chunk)
     size += buffer.length
-    if (size > maximum) throw new HttpError(413, 'BODY_TOO_LARGE', `Request body exceeds ${Math.ceil(maximum / 1024 / 1024)} MB`)
+    if (size > 1_000_000) throw new HttpError(413, 'BODY_TOO_LARGE', 'Request body exceeds 1 MB')
     chunks.push(buffer)
   }
   if (chunks.length === 0) return {}
@@ -231,47 +230,6 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
       if (!principal) return unauthorized(response, auth)
       if (url.pathname === '/api/me' && request.method === 'GET') return json(response, 200, principal)
       if (url.pathname === '/api/admin/overview' && request.method === 'GET') return json(response, 200, service.adminOverview(principal))
-      if (url.pathname === '/api/files/mounts' && request.method === 'GET') return json(response, 200, { mounts: service.listFileMounts(principal) })
-      if (url.pathname === '/api/files' && request.method === 'GET') {
-        return json(response, 200, { files: service.listFiles(principal, identifier(url.searchParams.get('mountId'), 'mountId'), url.searchParams.get('path') ?? '/') })
-      }
-      if (url.pathname === '/api/files/content' && request.method === 'GET') {
-        return json(response, 200, service.readFile(principal, identifier(url.searchParams.get('mountId'), 'mountId'), text(url.searchParams.get('path'), 'path', 4096)))
-      }
-      if (url.pathname === '/api/files/proposals' && request.method === 'GET') return json(response, 200, { proposals: service.listFileProposals(principal) })
-      if (url.pathname === '/api/files/proposals' && request.method === 'POST') {
-        const input = await body(request, 14 * 1024 * 1024)
-        return json(response, 201, service.createFileProposal(principal, {
-          mountId: identifier(input.mountId, 'mountId'), path: text(input.path, 'path', 4096),
-          baseSha256: text(input.baseSha256, 'baseSha256', 128), contentBase64: text(input.contentBase64, 'contentBase64', 16 * 1024 * 1024),
-        }))
-      }
-      const publishProposal = url.pathname.match(/^\/api\/files\/proposals\/([^/]+)\/publish$/)
-      if (publishProposal && request.method === 'POST') return json(response, 200, service.publishFileProposal(principal, decodeURIComponent(publishProposal[1] as string)))
-      if (url.pathname === '/api/files/versions' && request.method === 'GET') {
-        return json(response, 200, { versions: service.listFileVersions(principal, identifier(url.searchParams.get('mountId'), 'mountId'), text(url.searchParams.get('path'), 'path', 4096)) })
-      }
-      const rollbackVersion = url.pathname.match(/^\/api\/files\/versions\/([^/]+)\/rollback$/)
-      if (rollbackVersion && request.method === 'POST') {
-        const input = await body(request)
-        return json(response, 200, service.rollbackFileVersion(principal, decodeURIComponent(rollbackVersion[1] as string), text(input.expectedSha256, 'expectedSha256', 128)))
-      }
-      if (url.pathname === '/api/file-mounts' && request.method === 'POST') {
-        const input = await body(request)
-        return json(response, 201, service.createFileMount(principal, { name: text(input.name, 'name'), rootPath: text(input.rootPath, 'rootPath', 4096) }))
-      }
-      if (url.pathname === '/api/file-mount-assignments' && request.method === 'POST') {
-        const input = await body(request)
-        const access = text(input.access, 'access') as 'read' | 'publish'
-        if (!['read', 'publish'].includes(access)) throw new HttpError(400, 'INVALID_INPUT', 'Unknown file access level')
-        service.assignFileMount(principal, identifier(input.mountId, 'mountId'), identifier(input.userId, 'userId'), access)
-        return json(response, 204, null)
-      }
-      const revokeFileMount = url.pathname.match(/^\/api\/file-mounts\/([^/]+)\/assignments\/([^/]+)$/)
-      if (revokeFileMount && request.method === 'DELETE') {
-        service.revokeFileMount(principal, decodeURIComponent(revokeFileMount[1] as string), decodeURIComponent(revokeFileMount[2] as string))
-        return json(response, 204, null)
-      }
       if (url.pathname === '/api/auth/logout' && request.method === 'POST') {
         auth.logout(principal.id)
         response.writeHead(204, { 'set-cookie': auth.clearSessionCookie(), 'cache-control': 'no-store' })
@@ -518,7 +476,30 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
         return json(response, 200, await service.invokeTool(principal, text(input.sessionId, 'sessionId'), text(input.mcpServerId, 'mcpServerId'), text(input.toolName, 'toolName'), input.arguments ?? {}))
       }
       if (url.pathname === '/api/activity' && request.method === 'GET') return json(response, 200, service.activity(principal))
-      if (url.pathname === '/api/sources' && request.method === 'GET') return json(response, 200, { sources: service.researchSources(principal) })
+      if (url.pathname === '/api/sources' && request.method === 'GET') return json(response, 200, { sources: service.listApprovedSources(principal) })
+      if (url.pathname === '/api/sources/search' && request.method === 'GET') return json(response, 200, { results: service.searchApprovedSources(principal, text(url.searchParams.get('q'), 'q', 512), naturalNumber(url.searchParams.get('limit'), 10, 50, 1)) })
+      const sourceChunk = url.pathname.match(/^\/api\/sources\/chunks\/([^/]+)$/)
+      if (sourceChunk && request.method === 'GET') return json(response, 200, service.readApprovedSource(principal, decodeURIComponent(sourceChunk[1] as string)))
+      if (url.pathname === '/api/admin/sources' && request.method === 'POST') {
+        const input = await body(request)
+        const kind = text(input.kind,'kind') as ApprovedSourceKind
+        if (!APPROVED_SOURCE_KINDS.includes(kind)) throw new HttpError(400,'INVALID_INPUT','Unknown source kind')
+        const mode = text(input.mode ?? 'snapshot','mode') as 'snapshot'|'live'
+        if (!['snapshot','live'].includes(mode)) throw new HttpError(400,'INVALID_INPUT','Unknown source mode')
+        return json(response,201,service.createApprovedSource(principal,{name:text(input.name,'name'),kind,locator:text(input.locator,'locator',4096),mode}))
+      }
+      const sourceAssignment = url.pathname.match(/^\/api\/admin\/sources\/([^/]+)\/assignments\/([^/]+)$/)
+      if (sourceAssignment && request.method === 'PUT') {
+        const input = await body(request)
+        service.assignApprovedSource(principal,identifier(sourceAssignment[1],'sourceId'),identifier(sourceAssignment[2],'userId'),boolean(input.assigned,'assigned'))
+        return json(response,204,null)
+      }
+      const sourceIngest = url.pathname.match(/^\/api\/admin\/sources\/([^/]+)\/documents$/)
+      if (sourceIngest && request.method === 'POST') {
+        const input = await body(request)
+        service.ingestApprovedSource(principal,identifier(sourceIngest[1],'sourceId'),{uri:text(input.uri,'uri',4096),title:text(input.title,'title',512),mediaType:text(input.mediaType ?? 'text/plain','mediaType',128),content:text(input.content,'content',900000)})
+        return json(response,204,null)
+      }
       if (url.pathname === '/api/audit' && request.method === 'GET') return json(response, 200, service.auditEvents(principal))
       if (url.pathname === '/api/audit/checkpoint' && request.method === 'GET') return json(response, 200, service.exportAuditCheckpoint(principal))
       if (url.pathname === '/api/license/activate' && request.method === 'POST') return json(response, 200, service.activateLicense(principal, await body(request) as unknown as SignedLicense))
@@ -532,8 +513,6 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
         ? error.status
         : invitationRequired
           ? 403
-        : error instanceof FileConflictError
-          ? 409
         : error instanceof AuthorizationDenied
           ? 403
           : error instanceof SessionLifecycleError
@@ -545,8 +524,6 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
         ? error.code
         : invitationRequired
           ? 'INVITATION_REQUIRED'
-        : error instanceof FileConflictError
-          ? 'FILE_CONFLICT'
         : error instanceof AuthorizationDenied
           ? 'FORBIDDEN'
           : error instanceof SessionLifecycleError

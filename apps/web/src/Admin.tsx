@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { ROLES, type AdminOverview, type FileMountAccess, type Principal, type Role } from '@papyrus/contracts'
-import { assignFileMount, createFileMount, revokeFileMountAssignment, addMcpServer, addUserRole, adminOverview, cancelInvitation, createInvitation, revokeUserSessions, setMcpServerEnabled } from './api.js'
+import { APPROVED_SOURCE_KINDS, type ApprovedSourceKind, ROLES, type AdminOverview, type Principal, type Role } from '@papyrus/contracts'
+import { addMcpServer, addUserRole, adminOverview, assignApprovedSource, cancelInvitation, createApprovedSource, createInvitation, ingestApprovedSource, revokeUserSessions, setMcpServerEnabled } from './api.js'
 import { SelectField } from './SelectField.js'
 
-type AdminTab = 'deployment' | 'identity' | 'files' | 'integrations'
+type AdminTab = 'deployment' | 'identity' | 'sources' | 'integrations'
 
 export function AdminView({ me }: { me: Principal }) {
   const [data, setData] = useState<AdminOverview>()
@@ -19,7 +19,7 @@ export function AdminView({ me }: { me: Principal }) {
   const allowedRoles = me.roles.includes('Owner') ? ROLES : ROLES.filter((role) => role !== 'Owner' && role !== 'Admin')
   return <div className="admin-view">
     {error && <div className="error">{error}<button onClick={() => setError(undefined)}>×</button></div>}
-    <div className="admin-tabs" role="tablist">{(['deployment', 'identity', 'files', 'integrations'] as AdminTab[]).map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item}</button>)}</div>
+    <div className="admin-tabs" role="tablist">{(['deployment', 'identity', 'sources', 'integrations'] as AdminTab[]).map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item}</button>)}</div>
     {tab === 'deployment' && <section className="admin-summary"><AdminPanel title="Deployment"><dl className="facts"><Fact label="Profile" value={data.deployment.profile} /><Fact label="Topology" value="ON-PREMISES" /><Fact label="Origin" value={data.deployment.publicOrigin} /><Fact label="Authentication" value={authenticationLabel(data.deployment.authentication)} /><Fact label="Gateway" value={yes(data.deployment.gatewayConfigured)} /></dl></AdminPanel><AdminPanel title="License"><dl className="facts"><Fact label="Required" value={yes(data.deployment.licenseRequired)} /><Fact label="Status" value={data.license.valid ? 'VALID' : 'NOT ACTIVE'} /><Fact label="Deployment" value={data.license.deploymentId.slice(0, 16)} /></dl></AdminPanel></section>}
     {tab === 'identity' && <section className="admin-summary identity-admin">
       <AdminPanel title={data.deployment.profile === 'commercial' ? 'Invite with organizational OIDC' : 'Create pending CAC/PIV identity'}>
@@ -67,32 +67,28 @@ export function AdminView({ me }: { me: Principal }) {
           : <form onSubmit={(event) => { event.preventDefault(); const role = new FormData(event.currentTarget).get('role'); if (typeof role === 'string' && role) void act(() => addUserRole(user.id, role as Role)) }}><SelectField name="role" label="Eligible role" placeholder="Choose a role" options={eligibleRoles.map((role) => ({ value: role, label: role }))} /><button className="secondary" disabled={busy || eligibleRoles.length === 0}>Add role</button><button type="button" className="danger" disabled={busy} onClick={() => void act(() => revokeUserSessions(user.id))}>Revoke sessions</button></form>}</article>
       })}</div></AdminPanel>
     </section>}
-    {tab === 'files' && <section className="admin-single">
-      <AdminPanel title="NAS-backed file mounts">
-        <form className="admin-form file-mount-create" onSubmit={(event) => {
-          event.preventDefault(); const form = event.currentTarget; const values = new FormData(form)
-          void act(async () => { await createFileMount(String(values.get('name')), String(values.get('rootPath'))); form.reset() })
-        }}>
-          <input name="name" required maxLength={256} placeholder="Mount name" />
-          <input name="rootPath" required maxLength={4096} placeholder="/mnt/approved-data" />
-          <button className="primary compact-button" disabled={busy}>Connect mount</button>
-        </form>
-        <p className="admin-note">Papyrus uses an existing operating-system NAS mount. Credentials remain outside Papyrus. Agents work from isolated proposals and cannot write directly to this path.</p>
-        <div className="admin-list">{data.fileMounts.map((mount) => <article key={mount.id} className="file-mount-admin"><div><strong>{mount.name}</strong><span>{mount.rootPath}</span><span>{mount.assignments.length} assigned identities</span></div>
-          <form onSubmit={(event) => { event.preventDefault(); const values = new FormData(event.currentTarget); void act(() => assignFileMount(mount.id, String(values.get('userId')), String(values.get('access')) as FileMountAccess)) }}>
-            <SelectField name="userId" label="Identity" placeholder="Choose identity" options={data.users.map((user) => ({ value: user.id, label: user.displayName }))} />
-            <SelectField name="access" label="Access" placeholder="Choose access" options={[{ value: 'read', label: 'Read only' }, { value: 'publish', label: 'Read + publish' }]} />
-            <button className="secondary compact-button" disabled={busy}>Assign</button>
-          </form>
-          {mount.assignments.length > 0 && <div className="mount-assignments">{mount.assignments.map((assignment) => {
-            const user = data.users.find((item) => item.id === assignment.userId)
-            return <span key={assignment.userId}><b>{user?.displayName ?? assignment.userId}</b> · {assignment.access}<button className="text-button" disabled={busy} onClick={() => void act(() => revokeFileMountAssignment(mount.id, assignment.userId))}>Remove</button></span>
-          })}</div>}
-        </article>)}</div>
-      </AdminPanel>
-    </section>}
+    {tab === 'sources' && <SourceAdministration data={data} busy={busy} act={act} />}
     {tab === 'integrations' && <section className="admin-single"><AdminPanel title="MCP servers"><form className="admin-form mcp-register" onSubmit={(event) => { event.preventDefault(); const form = event.currentTarget; const values = new FormData(form); setBusy(true); setError(undefined); void addMcpServer(String(values.get('name')), String(values.get('endpoint'))).then((result) => { form.reset(); if (result.authorizationUrl) window.open(result.authorizationUrl, 'papyrus-mcp-oauth', 'popup,width=720,height=820'); return load() }).catch(show).finally(() => setBusy(false)) }}><input name="name" required maxLength={256} placeholder="Server name" /><input name="endpoint" type="url" required maxLength={2048} placeholder="https://mcp.internal/rpc" /><button className="primary" disabled={busy}>{busy ? 'Discovering…' : 'Connect server'}</button></form><div className="admin-list compact">{data.mcpServers.map((server) => <article key={server.id}><div><strong>{server.name}</strong><span>{server.endpoint}</span><span>{server.oauthStatus === 'connected' ? `OAuth connected · ${server.oauthIssuer}` : server.oauthStatus === 'authorization_required' ? 'Waiting for OAuth authorization' : server.oauthStatus === 'error' ? server.oauthError : 'No OAuth challenge · direct connection'} </span></div><button className={server.enabled ? 'danger' : 'secondary'} disabled={busy || server.oauthStatus === 'authorization_required'} onClick={() => void act(() => setMcpServerEnabled(server.id, !server.enabled))}>{server.enabled ? 'Disable' : 'Enable'}</button></article>)}</div><p className="admin-note">Papyrus discovers protected-resource metadata, dynamically registers an OAuth client, and completes authorization-code + PKCE before a protected remote server becomes available.</p></AdminPanel></section>}
   </div>
+}
+
+function SourceAdministration({data,busy,act}:{data:AdminOverview;busy:boolean;act:(operation:()=>Promise<unknown>)=>Promise<void>}){
+  return <section className="admin-single approved-source-admin"><AdminPanel title="Approved sources">
+    <form className="admin-form source-register" onSubmit={(event)=>{event.preventDefault();const form=event.currentTarget;const values=new FormData(form);void act(async()=>{await createApprovedSource({name:String(values.get('name')),kind:String(values.get('kind')) as ApprovedSourceKind,locator:String(values.get('locator')),mode:String(values.get('mode')) as 'snapshot'|'live'});form.reset()})}}>
+      <input name="name" required maxLength={256} placeholder="Source name" />
+      <select name="kind" aria-label="Source type">{APPROVED_SOURCE_KINDS.map(kind=><option key={kind} value={kind}>{kind}</option>)}</select>
+      <input name="locator" required maxLength={4096} placeholder="Existing path, domain, endpoint, or package URI" />
+      <select name="mode" aria-label="Retrieval mode"><option value="snapshot">snapshot</option><option value="live">live</option></select>
+      <button className="primary" disabled={busy}>Add source</button>
+    </form>
+    <p className="admin-note">Papyrus does not mount network storage. Point directory sources at paths already mounted by the host, container, or Kubernetes deployment.</p>
+    <div className="admin-list source-admin-list">{data.sources.map(source=><article key={source.id}><div><strong>{source.name}</strong><span>{source.kind} · {source.mode} · {source.documentCount} documents</span><code>{source.locator}</code></div><div className="source-assignees">{data.users.map(user=><label key={user.id}><input type="checkbox" checked={source.assignedUserIds.includes(user.id)} disabled={busy} onChange={(event)=>void act(()=>assignApprovedSource(source.id,user.id,event.target.checked))}/>{user.displayName}</label>)}</div></article>)}</div>
+    {data.sources.length>0&&<form className="admin-form source-ingest" onSubmit={(event)=>{event.preventDefault();const form=event.currentTarget;const values=new FormData(form);const file=values.get('file');if(!(file instanceof File)||!file.size)return;void file.text().then(content=>act(async()=>{await ingestApprovedSource(String(values.get('sourceId')),{uri:'upload:///'+file.name,title:file.name,mediaType:file.type||'text/plain',content});form.reset()}))}}>
+      <select name="sourceId" aria-label="Source to index">{data.sources.map(source=><option key={source.id} value={source.id}>{source.name}</option>)}</select>
+      <input name="file" type="file" required accept=".txt,.md,.csv,.json,.xml,.yaml,.yml,.html,.log,text/*,application/json,application/xml" />
+      <button className="secondary" disabled={busy}>Index document</button>
+    </form>}
+  </AdminPanel></section>
 }
 
 function AdminPanel({ title, children }: { title: string; children: ReactNode }) { return <article className="panel admin-panel"><div className="panel-head"><h2>{title}</h2></div>{children}</article> }

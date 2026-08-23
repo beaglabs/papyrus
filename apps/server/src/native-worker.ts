@@ -372,12 +372,8 @@ export class PapyrusWorker implements AgentRuntime {
               },
             })
           } else {
-            const declared = request.tools?.find((tool) => tool.name === name)
-            if (!declared) throw new Error('Tool is not available in this session')
-            if (declared.requiresApproval !== false) {
-              const allowed = await request.authorizeTool(name)
-              if (!allowed) throw new Error('Tool request denied by policy or user approval')
-            }
+            const allowed = await request.authorizeTool(name)
+            if (!allowed) throw new Error('Tool request denied by policy or user approval')
             if (!request.invokeTool) throw new Error('Governed tool execution is unavailable')
             result = await request.invokeTool(name, args)
           }

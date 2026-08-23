@@ -2,13 +2,13 @@ import { readFileSync } from 'node:fs'
 import { Agent as HttpsAgent } from 'node:https'
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { SESSION_SURFACES } from '@papyrus/contracts'
-import type { ActivitySummary, AdminOverview, FileEntry, FileMount, FileMountAccess, FileProposal, FileVersion, Approval, Attachment, Elicitation, Environment, Invitation, InvitationIdentityKind, McpServer, Principal, ResearchSource, Role, Session, SessionConfigOption, SessionEvent, SessionRun, SessionSurface, SignedLicense } from '@papyrus/contracts'
+import type { ActivitySummary, AdminOverview, ApprovedSource, ApprovedSourceKind, Approval, Attachment, Elicitation, Environment, Invitation, InvitationIdentityKind, McpServer, Principal, ResearchSource, Role, Session, SessionConfigOption, SessionEvent, SessionRun, SessionSurface, SignedLicense, SourceSearchResult } from '@papyrus/contracts'
 import type { ContentBlock } from '@agentclientprotocol/sdk'
 import type { AgentRuntime, RuntimeEvent, RuntimeLaunchOptions, RuntimeTool } from '@papyrus/acp-runtime'
 import { connectorPolicyAction } from './catalog.js'
-import { FileConflictError, ManagedFileRoot, sha256 } from './managed-files.js'
 import { PapyrusWorker } from './native-worker.js'
 import { AuditLog } from './audit.js'
+import { ApprovedSourceStore } from './approved-sources.js'
 import { projectArtifacts, type ProjectedArtifact } from './artifacts.js'
 import { projectResearchSources } from './sources.js'
 import type { ServerConfig } from './config.js'
@@ -23,7 +23,7 @@ export class AuthorizationDenied extends Error {
 
 export class SessionLifecycleError extends Error {
   constructor(
-    readonly code: 'SESSION_NOT_FOUND' | 'SESSION_BUSY' | 'SESSION_STOPPED' | 'SESSION_CWD_MISMATCH' | 'INVALID_SESSION_MODE' | 'INVALID_CONFIG_OPTION' | 'INVALID_CONFIG_VALUE',
+    readonly code: 'SESSION_NOT_FOUND' | 'SESSION_BUSY' | 'SESSION_STOPPED' | 'SESSION_CWD_MISMATCH' | 'INVALID_SESSION_MODE',
     message: string,
   ) { super(message) }
 }
@@ -52,6 +52,7 @@ export class PapyrusService {
   readonly audit: AuditLog
   readonly policy = new PolicyEngine()
   readonly license: LicenseService
+  readonly sources: ApprovedSourceStore
   private readonly activeSessionRuns = new Map<string, ActiveSessionRun>()
   private readonly pendingApprovalResolvers = new Map<string, (approved: boolean) => void>()
   private readonly pendingElicitationResolvers = new Map<string, (response: Record<string, unknown>) => void>()
@@ -62,6 +63,7 @@ export class PapyrusService {
     private readonly runtimeFactory: RuntimeFactory = (options) => new PapyrusWorker({ ...config.model, ...(options.promptTimeoutMs === undefined ? {} : { promptTimeoutMs: options.promptTimeoutMs }) }),
   ) {
     this.audit = new AuditLog(db)
+    this.sources = new ApprovedSourceStore(db)
     this.license = new LicenseService(db, config.dataDir, config.profile, config.licenseAuthorities, config.licenseRequired)
     for (const sessionId of db.recoverInterruptedSessionRuns()) {
       this.audit.append({
@@ -437,9 +439,9 @@ export class PapyrusService {
       const result = await runtime.runPrompt({
         cwd: session.cwd,
         prompt: attachments.length ? contentBlocks : prompt,
-        tools: await this.nativeTools(session, actor),
+        tools: await this.nativeTools(session),
         invokeTool: async (name, args) => {
-          if (name.startsWith('papyrus_files_')) return this.invokeManagedFileTool(actor, session, name, args)
+          if (name.startsWith('papyrus_sources_')) return this.invokeSourceTool(actor, name, args)
           const [mcpServerId] = this.findTool(session.environmentId, name)
           if (!mcpServerId) throw new AuthorizationDenied('InvokeTool', name)
           return await this.invokeTool(actor, session.id, mcpServerId, name, args)
@@ -521,90 +523,41 @@ export class PapyrusService {
     this.audit.append({ actorId: actor.id, action: 'RevokeTool', resourceType: 'ToolGrant', resourceId: grantId, decision: 'info', metadata: {} })
   }
 
-  listFileMounts(actor: Principal): FileMount[] {
-    return this.db.listFileMountsForUser(actor.id)
+  listApprovedSources(actor: Principal): ApprovedSource[] {
+    return this.sources.listForUser(actor.id)
   }
 
-  createFileMount(actor: Principal, input: { name: string; rootPath: string }): FileMount {
-    this.check(actor, 'ManageFiles', { type: 'Deployment', id: this.license.deploymentId })
-    const managedRoot = new ManagedFileRoot(input.rootPath)
-    const mount = this.db.createFileMount(input.name, managedRoot.root, actor.id)
-    this.audit.append({ actorId: actor.id, action: 'CreateFileMount', resourceType: 'FileMount', resourceId: mount.id, decision: 'info', metadata: { name: mount.name } })
-    return { id: mount.id, name: mount.name, access: 'publish', createdAt: mount.createdAt }
+  searchApprovedSources(actor: Principal, query: string, limit = 10): SourceSearchResult[] {
+    const results = this.sources.search(actor.id, query, limit)
+    this.audit.append({ actorId: actor.id, action: 'SearchSources', resourceType: 'Source', resourceId: 'assigned', decision: 'allow', metadata: { queryHash: createHash('sha256').update(query).digest('hex'), resultCount: results.length } })
+    return results
   }
 
-  assignFileMount(actor: Principal, mountId: string, userId: string, access: FileMountAccess): void {
-    this.check(actor, 'ManageFiles', { type: 'Deployment', id: this.license.deploymentId })
-    if (!this.db.getFileMount(mountId)) throw new Error('File mount not found')
-    if (!this.db.getPrincipal(userId)) throw new Error('User not found')
-    this.db.assignFileMount(mountId, userId, access, actor.id)
-    this.audit.append({ actorId: actor.id, action: 'AssignFileMount', resourceType: 'FileMount', resourceId: mountId, decision: 'info', metadata: { userId, access } })
+  readApprovedSource(actor: Principal, chunkId: string): SourceSearchResult {
+    const result = this.sources.read(actor.id, chunkId)
+    if (!result) throw new AuthorizationDenied('ReadSource', chunkId)
+    this.audit.append({ actorId: actor.id, action: 'ReadSource', resourceType: 'Source', resourceId: result.citation.sourceId, decision: 'allow', metadata: { chunkId, sha256: result.citation.sha256 } })
+    return result
   }
 
-  revokeFileMount(actor: Principal, mountId: string, userId: string): void {
-    this.check(actor, 'ManageFiles', { type: 'Deployment', id: this.license.deploymentId })
-    if (!this.db.revokeFileMount(mountId, userId)) throw new Error('File mount assignment not found')
-    this.audit.append({ actorId: actor.id, action: 'RevokeFileMount', resourceType: 'FileMount', resourceId: mountId, decision: 'info', metadata: { userId } })
+  createApprovedSource(actor: Principal, input: { name: string; kind: ApprovedSourceKind; locator: string; mode: 'snapshot'|'live' }): ApprovedSource {
+    this.check(actor, 'ManageTools', { type: 'Deployment', id: this.license.deploymentId })
+    const source = this.sources.create(input.name, input.kind, input.locator, input.mode)
+    if (source.kind === 'directory') this.sources.refreshDirectory(source.id)
+    this.audit.append({ actorId: actor.id, action: 'CreateSource', resourceType: 'Source', resourceId: source.id, decision: 'info', metadata: { kind: source.kind, mode: source.mode } })
+    return this.sources.get(source.id)!
   }
 
-  listFiles(actor: Principal, mountId: string, path = '/'): FileEntry[] {
-    const { mount } = this.requireFileAccess(actor, mountId, 'read')
-    return new ManagedFileRoot(mount.rootPath).list(mountId, path)
+  assignApprovedSource(actor: Principal, sourceId: string, userId: string, assigned: boolean): void {
+    this.check(actor, 'AssignResources', { type: 'Deployment', id: this.license.deploymentId })
+    if (assigned) this.sources.assign(sourceId,userId); else this.sources.unassign(sourceId,userId)
+    this.audit.append({ actorId: actor.id, action: assigned ? 'AssignSource' : 'UnassignSource', resourceType: 'Source', resourceId: sourceId, decision: 'info', metadata: { userId } })
   }
 
-  readFile(actor: Principal, mountId: string, path: string): { contentBase64: string; sha256: string; modifiedAt: string } {
-    const { mount } = this.requireFileAccess(actor, mountId, 'read')
-    const result = new ManagedFileRoot(mount.rootPath).read(path)
-    this.audit.append({ actorId: actor.id, action: 'ReadFile', resourceType: 'FileMount', resourceId: mountId, decision: 'allow', metadata: { path, sha256: result.sha256 } })
-    return { contentBase64: result.content.toString('base64'), sha256: result.sha256, modifiedAt: result.modifiedAt }
-  }
-
-  createFileProposal(actor: Principal, input: { mountId: string; path: string; baseSha256: string; contentBase64: string }): FileProposal {
-    this.requireFileAccess(actor, input.mountId, 'publish')
-    const root = this.db.getFileMount(input.mountId)!
-    const current = new ManagedFileRoot(root.rootPath).read(input.path)
-    if (current.sha256 !== input.baseSha256) throw new FileConflictError(current.sha256)
-    const content = Buffer.from(input.contentBase64, 'base64')
-    const proposal = this.db.createFileProposal({ mountId: input.mountId, path: input.path, baseSha256: input.baseSha256, proposedSha256: sha256(content), content, createdBy: actor.id })
-    this.audit.append({ actorId: actor.id, action: 'ProposeFileChange', resourceType: 'FileProposal', resourceId: proposal.id, decision: 'info', metadata: { mountId: input.mountId, path: input.path, baseSha256: input.baseSha256, proposedSha256: proposal.proposedSha256 } })
-    return proposal
-  }
-
-  listFileProposals(actor: Principal): FileProposal[] {
-    return this.db.listFileProposals(actor.id)
-  }
-
-  publishFileProposal(actor: Principal, proposalId: string): FileProposal {
-    const proposal = this.db.getFileProposal(proposalId)
-    if (!proposal || proposal.createdBy !== actor.id) throw new Error('File proposal not found')
-    if (proposal.status !== 'pending') throw new Error('File proposal is no longer pending')
-    const { mount } = this.requireFileAccess(actor, proposal.mountId, 'publish')
-    try {
-      const result = new ManagedFileRoot(mount.rootPath).publish(proposal.path, proposal.baseSha256!, proposal.content)
-      this.db.createFileVersion({ mountId: proposal.mountId, path: proposal.path, sha256: sha256(result.previous), content: result.previous, operation: 'publish', actorId: actor.id })
-      this.db.setFileProposalStatus(proposal.id, 'published')
-      this.audit.append({ actorId: actor.id, action: 'PublishFileChange', resourceType: 'FileProposal', resourceId: proposal.id, decision: 'allow', metadata: { mountId: proposal.mountId, path: proposal.path, beforeSha256: proposal.baseSha256, afterSha256: proposal.proposedSha256 } })
-      return { ...proposal, status: 'published', publishedAt: new Date().toISOString() }
-    } catch (error) {
-      if (error instanceof FileConflictError) this.db.setFileProposalStatus(proposal.id, 'conflict')
-      throw error
-    }
-  }
-
-  listFileVersions(actor: Principal, mountId: string, path: string): FileVersion[] {
-    this.requireFileAccess(actor, mountId, 'read')
-    return this.db.listFileVersions(mountId, path)
-  }
-
-  rollbackFileVersion(actor: Principal, versionId: string, expectedSha256: string): FileVersion {
-    const version = this.db.getFileVersion(versionId)
-    if (!version) throw new Error('File version not found')
-    const { mount } = this.requireFileAccess(actor, version.mountId, 'publish')
-    const root = new ManagedFileRoot(mount.rootPath)
-    const result = root.restore(version.path, expectedSha256, version.content)
-    const rollback = this.db.createFileVersion({ mountId: version.mountId, path: version.path, sha256: sha256(result.previous), content: result.previous, operation: 'rollback', actorId: actor.id })
-    this.audit.append({ actorId: actor.id, action: 'RollbackFile', resourceType: 'FileVersion', resourceId: versionId, decision: 'allow', metadata: { mountId: version.mountId, path: version.path, beforeSha256: expectedSha256, restoredSha256: version.sha256, rollbackVersionId: rollback.id } })
-    return rollback
+  ingestApprovedSource(actor: Principal, sourceId: string, input: { uri: string; title: string; mediaType: string; content: string }): void {
+    this.check(actor, 'ManageTools', { type: 'Deployment', id: this.license.deploymentId })
+    this.sources.ingest(sourceId,input.uri,input.title,input.mediaType,input.content)
+    this.audit.append({ actorId: actor.id, action: 'IndexSource', resourceType: 'Source', resourceId: sourceId, decision: 'info', metadata: { uri: input.uri, bytes: Buffer.byteLength(input.content) } })
   }
 
   adminOverview(actor: Principal): AdminOverview {
@@ -622,8 +575,8 @@ export class PapyrusService {
       users: this.db.listPrincipals(),
       invitations: this.db.listInvitations(),
       environments: this.db.listEnvironments().map((environment) => ({ ...environment, assignedUserIds: this.db.assignedUserIds('environment', environment.id) })),
+      sources: this.sources.listAll(),
       mcpServers: this.db.listMcpServers(), toolGrants: this.db.listToolGrants(),
-      fileMounts: this.db.listFileMounts().map((mount) => ({ ...mount, assignments: this.db.fileMountAssignments(mount.id) })),
       license: this.license.status(),
     }
   }
@@ -839,68 +792,23 @@ export class PapyrusService {
     })
   }
 
-  private invokeManagedFileTool(actor: Principal, session: Session, name: string, args: Record<string, unknown>): unknown {
-    this.check(actor, 'PromptSession', this.sessionResource(session))
-    if (name === 'papyrus_files_list_mounts') return this.listFileMounts(actor)
-    const mountId = textValue(args.mountId, 'mountId')
-    const path = typeof args.path === 'string' ? args.path : '/'
-    if (name === 'papyrus_files_list') return this.listFiles(actor, mountId, path)
-    if (name === 'papyrus_files_read') {
-      const result = this.readFile(actor, mountId, path)
-      return { type: 'resource', resource: { uri: `papyrus://files/${mountId}${path}`, mimeType: 'application/octet-stream', blob: result.contentBase64 }, sha256: result.sha256 }
-    }
-    if (name === 'papyrus_files_propose') {
-      return this.createFileProposal(actor, { mountId, path, baseSha256: textValue(args.baseSha256, 'baseSha256'), contentBase64: textValue(args.contentBase64, 'contentBase64') })
-    }
-    throw new Error('Unknown governed file tool')
-  }
-
-  private requireFileAccess(actor: Principal, mountId: string, required: FileMountAccess): { mount: { id: string; name: string; rootPath: string; createdAt: string }; access: FileMountAccess } {
-    const assignment = this.db.listFileMountsForUser(actor.id).find((item) => item.id === mountId)
-    if (!assignment || (required === 'publish' && assignment.access !== 'publish')) {
-      this.audit.append({ actorId: actor.id, action: required === 'publish' ? 'PublishFile' : 'ReadFile', resourceType: 'FileMount', resourceId: mountId, decision: 'deny', metadata: { reason: 'mount_not_assigned', required } })
-      throw new AuthorizationDenied(required === 'publish' ? 'PublishFiles' : 'ReadFiles', mountId)
-    }
-    const mount = this.db.getFileMount(mountId)
-    if (!mount) throw new Error('File mount not found')
-    this.check(actor, required === 'publish' ? 'PublishFiles' : 'ReadFiles', { type: 'Drive', id: mountId, attrs: { assignedUsers: cedarUsers(this.db.fileMountAssignments(mountId).map((item) => item.userId)) } })
-    return { mount, access: assignment.access }
-  }
-
   /** Discovers only the tools enabled for this session's authorization environment. */
-  private async nativeTools(session: Session, actor: Principal): Promise<RuntimeTool[]> {
+  private invokeSourceTool(actor: Principal, name: string, args: unknown): unknown {
+    const input = args && typeof args === 'object' ? args as Record<string,unknown> : {}
+    if (name === 'papyrus_sources_list') return { sources: this.listApprovedSources(actor) }
+    if (name === 'papyrus_sources_search') return { results: this.searchApprovedSources(actor, textValue(input.query,'query'), typeof input.limit === 'number' ? input.limit : 10) }
+    if (name === 'papyrus_sources_read') return this.readApprovedSource(actor,textValue(input.chunkId,'chunkId'))
+    throw new Error('Unknown source tool')
+  }
+
+  private async nativeTools(session: Session): Promise<RuntimeTool[]> {
     const grantedServerIds = new Set(this.db.listToolGrants()
       .filter((grant) => grant.environmentId === session.environmentId)
       .map((grant) => grant.mcpServerId))
     const tools = new Map<string, RuntimeTool>()
-    if (this.db.listFileMountsForUser(actor.id).length) {
-      tools.set('papyrus_files_list_mounts', {
-        name: 'papyrus_files_list_mounts',
-        description: 'List NAS-backed file mounts assigned to the current identity.',
-        requiresApproval: false,
-        inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-      })
-      tools.set('papyrus_files_list', {
-        name: 'papyrus_files_list',
-        description: 'List files within an assigned NAS-backed mount.',
-        requiresApproval: false,
-        inputSchema: { type: 'object', properties: { mountId: { type: 'string' }, path: { type: 'string', default: '/' } }, required: ['mountId'], additionalProperties: false },
-      })
-      tools.set('papyrus_files_read', {
-        name: 'papyrus_files_read',
-        description: 'Read up to 10 MB from an assigned NAS-backed mount.',
-        requiresApproval: false,
-        inputSchema: { type: 'object', properties: { mountId: { type: 'string' }, path: { type: 'string' } }, required: ['mountId', 'path'], additionalProperties: false },
-      })
-      if (this.db.listFileMountsForUser(actor.id).some((mount) => mount.access === 'publish')) {
-        tools.set('papyrus_files_propose', {
-          name: 'papyrus_files_propose',
-          description: 'Create an isolated copy-on-write proposal for a file. This never writes directly to the NAS; a user must publish it.',
-          requiresApproval: false,
-          inputSchema: { type: 'object', properties: { mountId: { type: 'string' }, path: { type: 'string' }, baseSha256: { type: 'string' }, contentBase64: { type: 'string' } }, required: ['mountId', 'path', 'baseSha256', 'contentBase64'], additionalProperties: false },
-        })
-      }
-    }
+    tools.set('papyrus_sources_list', { name: 'papyrus_sources_list', description: 'List only approved sources assigned to the current identity.', inputSchema: { type: 'object', properties: {} } })
+    tools.set('papyrus_sources_search', { name: 'papyrus_sources_search', description: 'Search approved source content. Results include immutable citations and are filtered by live source assignments.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 20 } }, required: ['query'] } })
+    tools.set('papyrus_sources_read', { name: 'papyrus_sources_read', description: 'Read a cited approved-source chunk. Access is rechecked against current assignments.', inputSchema: { type: 'object', properties: { chunkId: { type: 'string' } }, required: ['chunkId'] } })
     for (const server of this.db.listMcpServers()) {
       if (!server.enabled || !grantedServerIds.has(server.id)) continue
       const response = await this.forwardMcp(server.endpoint, {

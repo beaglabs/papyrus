@@ -1,119 +1,38 @@
-import { Fragment, type ReactNode, useEffect, useState } from 'react'
-import type { ResearchSource } from '@papyrus/contracts'
-import { researchSources } from './api.js'
+import { useEffect, useState, type FormEvent } from 'react'
+import type { ApprovedSource, SourceSearchResult } from '@papyrus/contracts'
+import { approvedSources, searchApprovedSources } from './api.js'
 
 export function SourcesView() {
-  const [sources, setSources] = useState<ResearchSource[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string>()
-  useEffect(() => {
-    void researchSources().then(setSources).catch((cause) => setError(cause instanceof Error ? cause.message : 'Unable to load sources')).finally(() => setLoading(false))
-  }, [])
-  if (loading) return <div className="empty">Loading governed sources…</div>
-  if (error) return <div className="error">{error}</div>
-  return <SourceList sources={sources} empty="Browser evidence captured by your authorized sessions will appear here." />
-}
-
-export function SourceList({ sources, empty }: { sources: ResearchSource[]; empty?: string }) {
-  return <div className="source-view">{sources.length ? sources.map((source) => <article key={`${source.sessionId}-${source.id}`}>
-    <div className="source-host">{source.host}</div>
-    <div className="source-body">
-      <strong>{source.title}</strong>
-      <a href={source.url} target="_blank" rel="noreferrer">{source.url}</a>
-      {source.preview
-        ? <SourcePreview content={source.preview} mediaType={source.previewMediaType ?? 'text/plain'} />
-        : source.excerpt && <p>{source.excerpt}</p>}
-      <span>Captured {new Date(source.capturedAt).toLocaleString()} · event {source.sequence}</span>
-    </div>
-  </article>) : <div className="conversation-empty"><h2>No research sources yet.</h2><p>{empty ?? 'Sources emitted by governed browser research will appear here.'}</p></div>}</div>
-}
-
-function SourcePreview({ content, mediaType = 'text/plain' }: { content: string; mediaType?: string }) {
-  if (mediaType === 'text/markdown' || mediaType === 'text/x-markdown') {
-    return <div className="source-preview source-preview-markdown">{markdownBlocks(content)}</div>
+  const [sources,setSources]=useState<ApprovedSource[]>([])
+  const [results,setResults]=useState<SourceSearchResult[]>([])
+  const [loading,setLoading]=useState(true)
+  const [searching,setSearching]=useState(false)
+  const [error,setError]=useState<string>()
+  useEffect(()=>{void approvedSources().then(setSources).catch(show).finally(()=>setLoading(false))},[])
+  function show(cause:unknown){setError(cause instanceof Error?cause.message:'Unable to load approved sources')}
+  async function search(event:FormEvent<HTMLFormElement>){
+    event.preventDefault(); const query=String(new FormData(event.currentTarget).get('query')??'').trim()
+    if(!query)return
+    setSearching(true);setError(undefined)
+    try{setResults(await searchApprovedSources(query))}catch(cause){show(cause)}finally{setSearching(false)}
   }
-  return <pre className="source-preview">{content}</pre>
-}
-
-function markdownBlocks(markdown: string): ReactNode[] {
-  const blocks: ReactNode[] = []
-  const lines = markdown.replace(/\r\n/g, '\n').split('\n')
-  let paragraph: string[] = []
-  let code: string[] = []
-  let codeLanguage = ''
-  let inCode = false
-
-  const flushParagraph = () => {
-    if (!paragraph.length) return
-    const text = paragraph.join(' ').trim()
-    if (text) blocks.push(<p key={`p-${blocks.length}`}>{inlineMarkdown(text)}</p>)
-    paragraph = []
-  }
-  const flushCode = () => {
-    blocks.push(<pre key={`code-${blocks.length}`}><code data-language={codeLanguage || undefined}>{code.join('\n')}</code></pre>)
-    code = []
-    codeLanguage = ''
-  }
-
-  for (const line of lines) {
-    const fence = line.match(/^\s*```\s*([^\s]*)/)
-    if (fence) {
-      if (inCode) flushCode()
-      else { flushParagraph(); codeLanguage = fence[1] ?? '' }
-      inCode = !inCode
-      continue
-    }
-    if (inCode) { code.push(line); continue }
-    const heading = line.match(/^(#{1,4})\s+(.+)$/)
-    if (heading) {
-      flushParagraph()
-      const level = heading[1]!.length
-      const children = inlineMarkdown(heading[2]!)
-      blocks.push(level === 1 ? <h1 key={`h-${blocks.length}`}>{children}</h1>
-        : level === 2 ? <h2 key={`h-${blocks.length}`}>{children}</h2>
-          : level === 3 ? <h3 key={`h-${blocks.length}`}>{children}</h3>
-            : <h4 key={`h-${blocks.length}`}>{children}</h4>)
-      continue
-    }
-    if (/^\s*([-*_])\1\1+\s*$/.test(line)) { flushParagraph(); blocks.push(<hr key={`hr-${blocks.length}`} />); continue }
-    const item = line.match(/^\s*[-*+]\s+(.+)$/)
-    if (item) { flushParagraph(); blocks.push(<div className="source-preview-item" key={`li-${blocks.length}`}>• {inlineMarkdown(item[1]!)}</div>); continue }
-    if (!line.trim()) { flushParagraph(); continue }
-    if (/^\s*<\/?(?:div|p|center)(?:\s[^>]*)?>\s*$/i.test(line)) continue
-    paragraph.push(line.trim())
-  }
-  flushParagraph()
-  if (inCode || code.length) flushCode()
-  return blocks
-}
-
-function inlineMarkdown(value: string): ReactNode[] {
-  const output: ReactNode[] = []
-  const pattern = /(!?\[[^\]]*\]\([^)]+\)|\*\*[^*]+\*\*|`[^`]+`)/g
-  let cursor = 0
-  let match: RegExpExecArray | null
-  while ((match = pattern.exec(value))) {
-    if (match.index > cursor) output.push(value.slice(cursor, match.index))
-    const token = match[0]
-    const link = token.match(/^(!?)\[([^\]]*)\]\(([^)]+)\)$/)
-    if (link) {
-      const image = link[1]! === '!'
-      const label = link[2]!
-      const href = safeHttpUrl(link[3]!)
-      output.push(image
-        ? href ? <img key={match.index} src={href} alt={label} loading="lazy" /> : <span key={match.index}>{label}</span>
-        : href ? <a key={match.index} href={href} target="_blank" rel="noreferrer">{label}</a> : <span key={match.index}>{label}</span>)
-    } else if (token.startsWith('**')) output.push(<strong key={match.index}>{token.slice(2, -2)}</strong>)
-    else output.push(<code key={match.index}>{token.slice(1, -1)}</code>)
-    cursor = match.index + token.length
-  }
-  if (cursor < value.length) output.push(value.slice(cursor))
-  return output.map((node, index) => <Fragment key={index}>{node}</Fragment>)
-}
-
-function safeHttpUrl(value: string): string | undefined {
-  try {
-    const url = new URL(value)
-    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : undefined
-  } catch { return undefined }
+  if(loading)return <div className="empty">Loading approved sources…</div>
+  return <div className="approved-sources-view">
+    <section className="source-catalog">
+      <div className="section-heading"><div><p className="eyebrow">YOUR ACCESS</p><h2>Approved sources</h2></div><span>{sources.length}</span></div>
+      {sources.length?<div className="source-cards">{sources.map(source=><article key={source.id}>
+        <div><strong>{source.name}</strong><span className="source-kind">{source.kind}</span></div>
+        <code>{source.locator}</code>
+        <p>{source.documentCount} indexed {source.documentCount===1?'document':'documents'} · {source.mode}</p>
+      </article>)}</div>:<div className="conversation-empty"><h2>No sources assigned.</h2><p>An Owner or Admin can assign approved uploads, directories, domains, MCP connectors, packages, or APIs to your identity.</p></div>}
+    </section>
+    <section className="source-search">
+      <form onSubmit={search}><input name="query" aria-label="Search approved sources" placeholder="Search only the sources you can access…" /><button className="primary" disabled={searching||!sources.length}>{searching?'Searching…':'Search'}</button></form>
+      {error&&<div className="error">{error}</div>}
+      <div className="source-results">{results.map(result=><article key={result.chunkId}>
+        <p>{result.content}</p>
+        <footer><strong>{result.citation.sourceName}</strong><span>{result.citation.title}{result.citation.location?' · '+result.citation.location:''}</span><code>{result.citation.sha256.slice(0,16)}</code></footer>
+      </article>)}</div>
+    </section>
+  </div>
 }

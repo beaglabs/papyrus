@@ -24,7 +24,6 @@ Papyrus is not an agent harness and does not provide a chat or browser-session U
 - **Authorization** — deny-by-default Cedar policy with fixed Owner, Admin, User, and Auditor roles
 - **Audit** — append-only SQLite events with a SHA-256 hash chain
 - **Sessions** — user-owned runtime sessions with administrative and audit visibility
-- **Governed files** — identity-assigned NAS mounts with isolated change proposals, hash-checked publishing, version history, and rollback
 - **MCP mediation** — environment-scoped server and tool grants through a session-bound proxy
 - **Offline licensing** — deployment-bound signed licenses required in persistent mode
 - **Runtime adapter** — the current implementation uses Goose behind a replaceable ACP boundary
@@ -154,18 +153,15 @@ pnpm build
 
 *This repository is not an authorization to operate, a cross-domain solution, or a claim of IL4/IL6 accreditation.*
 
+## Approved sources and local retrieval
 
-## Governed NAS files
+Papyrus exposes one authorization-scoped retrieval surface regardless of how content reaches the host:
 
-Papyrus does not store NAS credentials or mount network shares itself. An operator mounts NFS/SMB storage on the host, then an Owner or Admin registers the canonical directory in **Administration → Files** and assigns each identity either **Read only** or **Read + publish** access.
+- uploads and import packages
+- existing directories (including host-mounted NFS, SMB/CIFS, SAN, Kubernetes volumes, encrypted disks, removable media, and synchronized folders)
+- approved domains and APIs
+- MCP connectors
 
-The **Files** workspace exposes only assigned mounts. Agent reads are confined to those roots. Changes are stored as isolated copy-on-write proposals and never write directly to the NAS. Publishing:
+Papyrus does **not** mount remote filesystems or retain NAS credentials. Infrastructure mounts storage, then an Owner or Admin registers the existing directory and assigns the source to identities. Assignments are rechecked for every list, search, and chunk read. The agent receives `papyrus_sources_list`, `papyrus_sources_search`, and `papyrus_sources_read`; results carry the source, URI, title, chunk location, and SHA-256 citation.
 
-1. verifies the current NAS SHA-256 against the proposal's base hash;
-2. preserves the previous content as a Papyrus version;
-3. writes a temporary file in the target directory and atomically renames it;
-4. records actor, mount, path, before/after hashes, and result in the append-only audit log.
-
-Rollback is a new governed write, not history deletion. It performs the same conflict check, preserves the current content, restores the selected version atomically, and appends a rollback event.
-
-Initial limitations: managed preview/publish is capped at 10 MB per file, symbolic links are excluded, and this prototype updates existing regular files only. Native NAS snapshots remain recommended for disaster recovery.
+FTS5 is always available and is the offline baseline. Semantic retrieval is optional: set `PAPYRUS_SQLITE_VEC_EXTENSION` to a locally packaged sqlite-vec library and `PAPYRUS_SQLITE_VEC_SHA256` to its approved checksum. Papyrus verifies the binary before loading it and disables further SQLite extension loading immediately afterward. The extension is optional so disconnected deployments remain operable without a model or vector runtime.

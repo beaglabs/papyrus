@@ -152,6 +152,38 @@ export interface ResearchSource {
   capturedAt: string
 }
 
+export const APPROVED_SOURCE_KINDS = ['upload', 'directory', 'domain', 'mcp', 'package', 'api'] as const
+export type ApprovedSourceKind = (typeof APPROVED_SOURCE_KINDS)[number]
+
+export interface ApprovedSource {
+  id: string
+  name: string
+  kind: ApprovedSourceKind
+  locator: string
+  mode: 'snapshot' | 'live'
+  status: 'ready' | 'indexing' | 'error'
+  assignedUserIds: string[]
+  documentCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SourceCitation {
+  sourceId: string
+  sourceName: string
+  uri: string
+  title: string
+  location?: string
+  sha256: string
+}
+
+export interface SourceSearchResult {
+  chunkId: string
+  content: string
+  score: number
+  citation: SourceCitation
+}
+
 export interface McpServer {
   id: string
   name: string
@@ -161,55 +193,6 @@ export interface McpServer {
   oauthStatus: 'not_required' | 'authorization_required' | 'connected' | 'error'
   oauthIssuer?: string
   oauthError?: string
-  createdAt: string
-}
-
-export type FileMountAccess = 'read' | 'publish'
-
-export interface FileMount {
-  id: string
-  name: string
-  access: FileMountAccess
-  createdAt: string
-}
-
-export interface AdminFileMount {
-  id: string
-  name: string
-  rootPath: string
-  assignments: Array<{ userId: string; access: FileMountAccess }>
-  createdAt: string
-}
-
-export interface FileEntry {
-  mountId: string
-  path: string
-  name: string
-  type: 'file' | 'directory'
-  size: number
-  modifiedAt: string
-  sha256?: string
-}
-
-export interface FileProposal {
-  id: string
-  mountId: string
-  path: string
-  baseSha256?: string
-  proposedSha256: string
-  status: 'pending' | 'published' | 'conflict' | 'cancelled'
-  createdBy: string
-  createdAt: string
-  publishedAt?: string
-}
-
-export interface FileVersion {
-  id: string
-  mountId: string
-  path: string
-  sha256: string
-  operation: 'publish' | 'rollback'
-  actorId: string
   createdAt: string
 }
 
@@ -241,9 +224,9 @@ export interface AdminOverview {
   users: Principal[]
   invitations: Invitation[]
   environments: AdminEnvironment[]
+  sources: ApprovedSource[]
   mcpServers: McpServer[]
   toolGrants: ToolGrant[]
-  fileMounts: AdminFileMount[]
   license: LicenseStatus
 }
 

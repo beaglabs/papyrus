@@ -2,10 +2,11 @@ import { readFileSync } from 'node:fs'
 import { Agent as HttpsAgent } from 'node:https'
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { SESSION_SURFACES } from '@papyrus/contracts'
-import type { ActivitySummary, AdminOverview, Approval, Attachment, Elicitation, Environment, Invitation, InvitationIdentityKind, McpServer, Principal, ResearchSource, Role, Session, SessionConfigOption, SessionEvent, SessionRun, SessionSurface, SignedLicense } from '@papyrus/contracts'
+import type { ActivitySummary, AgentDrive, AdminOverview, Approval, Attachment, Elicitation, Environment, Invitation, InvitationIdentityKind, McpServer, Principal, ResearchSource, Role, Session, SessionConfigOption, SessionEvent, SessionRun, SessionSurface, SignedLicense } from '@papyrus/contracts'
 import type { ContentBlock } from '@agentclientprotocol/sdk'
 import type { AgentRuntime, RuntimeEvent, RuntimeLaunchOptions, RuntimeTool } from '@papyrus/acp-runtime'
 import { connectorPolicyAction } from './catalog.js'
+import { AgentFsDriveReader } from './agentfs-drive.js'
 import { PapyrusWorker } from './native-worker.js'
 import { AuditLog } from './audit.js'
 import { projectArtifacts, type ProjectedArtifact } from './artifacts.js'
@@ -436,8 +437,9 @@ export class PapyrusService {
       const result = await runtime.runPrompt({
         cwd: session.cwd,
         prompt: attachments.length ? contentBlocks : prompt,
-        tools: await this.nativeTools(session),
+        tools: await this.nativeTools(session, actor),
         invokeTool: async (name, args) => {
+          if (name.startsWith('papyrus_agentfs_')) return this.invokeAgentDriveTool(actor, session, name, args)
           const [mcpServerId] = this.findTool(session.environmentId, name)
           if (!mcpServerId) throw new AuthorizationDenied('InvokeTool', name)
           return await this.invokeTool(actor, session.id, mcpServerId, name, args)
@@ -519,6 +521,32 @@ export class PapyrusService {
     this.audit.append({ actorId: actor.id, action: 'RevokeTool', resourceType: 'ToolGrant', resourceId: grantId, decision: 'info', metadata: {} })
   }
 
+  listAgentDrives(actor: Principal): AgentDrive[] {
+    return this.db.listAgentDrivesForUser(actor.id)
+  }
+
+  createAgentDrive(actor: Principal, input: { name: string; databasePath: string }): AgentDrive {
+    this.check(actor, 'ManageDrives', { type: 'Deployment', id: this.license.deploymentId })
+    AgentFsDriveReader.validate(input.databasePath)
+    const drive = this.db.createAgentDrive(input.name, input.databasePath, actor.id)
+    this.audit.append({ actorId: actor.id, action: 'CreateAgentDrive', resourceType: 'Drive', resourceId: drive.id, decision: 'info', metadata: { name: drive.name, readOnly: true } })
+    return drive
+  }
+
+  assignAgentDrive(actor: Principal, driveId: string, userId: string): void {
+    this.check(actor, 'ManageDrives', { type: 'Deployment', id: this.license.deploymentId })
+    if (!this.db.getAgentDrive(driveId)) throw new Error('AgentFS drive not found')
+    if (!this.db.getPrincipal(userId)) throw new Error('User not found')
+    this.db.assignAgentDrive(driveId, userId, actor.id)
+    this.audit.append({ actorId: actor.id, action: 'AssignAgentDrive', resourceType: 'Drive', resourceId: driveId, decision: 'info', metadata: { userId } })
+  }
+
+  revokeAgentDrive(actor: Principal, driveId: string, userId: string): void {
+    this.check(actor, 'ManageDrives', { type: 'Deployment', id: this.license.deploymentId })
+    if (!this.db.revokeAgentDrive(driveId, userId)) throw new Error('AgentFS drive assignment not found')
+    this.audit.append({ actorId: actor.id, action: 'RevokeAgentDrive', resourceType: 'Drive', resourceId: driveId, decision: 'info', metadata: { userId } })
+  }
+
   adminOverview(actor: Principal): AdminOverview {
     this.check(actor, 'ManageUsers', { type: 'Deployment', id: this.license.deploymentId })
     return {
@@ -535,6 +563,7 @@ export class PapyrusService {
       invitations: this.db.listInvitations(),
       environments: this.db.listEnvironments().map((environment) => ({ ...environment, assignedUserIds: this.db.assignedUserIds('environment', environment.id) })),
       mcpServers: this.db.listMcpServers(), toolGrants: this.db.listToolGrants(),
+      agentDrives: this.db.listAgentDrives().map((drive) => ({ ...drive, assignedUserIds: this.db.assignedAgentDriveUserIds(drive.id) })),
       license: this.license.status(),
     }
   }
@@ -750,12 +779,60 @@ export class PapyrusService {
     })
   }
 
+  private invokeAgentDriveTool(actor: Principal, session: Session, name: string, args: Record<string, unknown>): unknown {
+    this.check(actor, 'PromptSession', this.sessionResource(session))
+    const assigned = this.db.listAgentDrivesForUser(actor.id)
+    if (name === 'papyrus_agentfs_list_drives') return assigned
+    const driveId = textValue(args.driveId, 'driveId')
+    const drive = this.db.getAgentDrive(driveId)
+    if (!drive || !assigned.some((item) => item.id === driveId)) {
+      this.audit.append({ actorId: actor.id, action: 'ReadAgentDrive', resourceType: 'Drive', resourceId: driveId, decision: 'deny', metadata: { sessionId: session.id, reason: 'drive_not_assigned' } })
+      throw new AuthorizationDenied('ReadDrive', driveId)
+    }
+    this.check(actor, 'ReadDrive', { type: 'Drive', id: driveId, attrs: { assignedUsers: cedarUsers(this.db.assignedAgentDriveUserIds(driveId)) } })
+    const reader = new AgentFsDriveReader(drive.databasePath)
+    const path = typeof args.path === 'string' ? args.path : '/'
+    const started = Date.now()
+    try {
+      const result = name === 'papyrus_agentfs_list_files'
+        ? reader.list(path)
+        : name === 'papyrus_agentfs_read_file'
+          ? reader.read(path, args.encoding === 'base64' ? 'base64' : 'utf-8')
+          : (() => { throw new Error('Unknown AgentFS tool') })()
+      this.audit.append({ actorId: actor.id, action: 'ReadAgentDrive', resourceType: 'Drive', resourceId: driveId, decision: 'allow', metadata: { sessionId: session.id, operation: name, path, durationMs: Date.now() - started } })
+      return result
+    } catch (error) {
+      this.audit.append({ actorId: actor.id, action: 'ReadAgentDrive', resourceType: 'Drive', resourceId: driveId, decision: 'deny', metadata: { sessionId: session.id, operation: name, path, error: safeError(error), durationMs: Date.now() - started } })
+      throw error
+    }
+  }
+
   /** Discovers only the tools enabled for this session's authorization environment. */
-  private async nativeTools(session: Session): Promise<RuntimeTool[]> {
+  private async nativeTools(session: Session, actor: Principal): Promise<RuntimeTool[]> {
     const grantedServerIds = new Set(this.db.listToolGrants()
       .filter((grant) => grant.environmentId === session.environmentId)
       .map((grant) => grant.mcpServerId))
     const tools = new Map<string, RuntimeTool>()
+    if (this.db.listAgentDrivesForUser(actor.id).length) {
+      tools.set('papyrus_agentfs_list_drives', {
+        name: 'papyrus_agentfs_list_drives',
+        description: 'List read-only approved-data AgentFS drives assigned to the current identity.',
+        requiresApproval: false,
+        inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      })
+      tools.set('papyrus_agentfs_list_files', {
+        name: 'papyrus_agentfs_list_files',
+        description: 'List files in an assigned read-only AgentFS drive.',
+        requiresApproval: false,
+        inputSchema: { type: 'object', properties: { driveId: { type: 'string' }, path: { type: 'string', default: '/' } }, required: ['driveId'], additionalProperties: false },
+      })
+      tools.set('papyrus_agentfs_read_file', {
+        name: 'papyrus_agentfs_read_file',
+        description: 'Read up to 5 MB from a file in an assigned read-only AgentFS drive.',
+        requiresApproval: false,
+        inputSchema: { type: 'object', properties: { driveId: { type: 'string' }, path: { type: 'string' }, encoding: { type: 'string', enum: ['utf-8', 'base64'], default: 'utf-8' } }, required: ['driveId', 'path'], additionalProperties: false },
+      })
+    }
     for (const server of this.db.listMcpServers()) {
       if (!server.enabled || !grantedServerIds.has(server.id)) continue
       const response = await this.forwardMcp(server.endpoint, {

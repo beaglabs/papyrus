@@ -147,9 +147,12 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
       setSessions((current) => [session, ...current.filter((item) => item.id !== session.id)])
       setSelectedId(session.id)
       await promptSession(session.id, prompt, [])
-      await Promise.all([loadSessions(), loadContext(session.id)])
-    } catch (cause) { showError(cause) }
-    finally { setPendingTurn(undefined); setRunning(false) }
+      await loadSessions()
+    } catch (cause) {
+      setPendingTurn(undefined)
+      setRunning(false)
+      showError(cause)
+    }
   }
 
   const beginNewSession = () => {
@@ -173,9 +176,12 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
       if (selected?.status === 'stopped' || selected?.status === 'failed' || selected?.status === 'interrupted') await resumeSession(selectedId)
       await promptSession(selectedId, prompt, draftAttachmentIds)
       setDraftAttachmentIds([])
-      await Promise.all([loadSessions(), loadContext(selectedId)])
-    } catch (cause) { showError(cause) }
-    finally { setPendingTurn(undefined); setRunning(false) }
+      await loadSessions()
+    } catch (cause) {
+      setPendingTurn(undefined)
+      setRunning(false)
+      showError(cause)
+    }
   }
 
   const cancel = async () => {

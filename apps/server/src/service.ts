@@ -2,12 +2,13 @@ import { readFileSync } from 'node:fs'
 import { Agent as HttpsAgent } from 'node:https'
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { SESSION_SURFACES } from '@papyrus/contracts'
-import type { ActivitySummary, AdminOverview, Approval, Attachment, Elicitation, Environment, Invitation, InvitationIdentityKind, McpServer, Principal, ResearchSource, Role, Session, SessionConfigOption, SessionEvent, SessionRun, SessionSurface, SignedLicense } from '@papyrus/contracts'
+import type { ActivitySummary, AdminOverview, ApprovedSource, ApprovedSourceKind, Approval, Attachment, Elicitation, Environment, Invitation, InvitationIdentityKind, McpServer, Principal, ResearchSource, Role, Session, SessionConfigOption, SessionEvent, SessionRun, SessionSurface, SignedLicense, SourceSearchResult } from '@papyrus/contracts'
 import type { ContentBlock } from '@agentclientprotocol/sdk'
 import type { AgentRuntime, RuntimeEvent, RuntimeLaunchOptions, RuntimeTool } from '@papyrus/acp-runtime'
 import { connectorPolicyAction } from './catalog.js'
 import { PapyrusWorker } from './native-worker.js'
 import { AuditLog } from './audit.js'
+import { ApprovedSourceStore } from './approved-sources.js'
 import { projectArtifacts, type ProjectedArtifact } from './artifacts.js'
 import { projectResearchSources } from './sources.js'
 import type { ServerConfig } from './config.js'
@@ -51,6 +52,7 @@ export class PapyrusService {
   readonly audit: AuditLog
   readonly policy = new PolicyEngine()
   readonly license: LicenseService
+  readonly sources: ApprovedSourceStore
   private readonly activeSessionRuns = new Map<string, ActiveSessionRun>()
   private readonly pendingApprovalResolvers = new Map<string, (approved: boolean) => void>()
   private readonly pendingElicitationResolvers = new Map<string, (response: Record<string, unknown>) => void>()
@@ -61,6 +63,7 @@ export class PapyrusService {
     private readonly runtimeFactory: RuntimeFactory = (options) => new PapyrusWorker({ ...config.model, ...(options.promptTimeoutMs === undefined ? {} : { promptTimeoutMs: options.promptTimeoutMs }) }),
   ) {
     this.audit = new AuditLog(db)
+    this.sources = new ApprovedSourceStore(db)
     this.license = new LicenseService(db, config.dataDir, config.profile, config.licenseAuthorities, config.licenseRequired)
     for (const sessionId of db.recoverInterruptedSessionRuns()) {
       this.audit.append({
@@ -436,8 +439,9 @@ export class PapyrusService {
       const result = await runtime.runPrompt({
         cwd: session.cwd,
         prompt: attachments.length ? contentBlocks : prompt,
-        tools: await this.nativeTools(session),
+        tools: await this.nativeTools(session, actor),
         invokeTool: async (name, args) => {
+          if (name.startsWith('papyrus_sources_')) return this.invokeSourceTool(actor, name, args)
           const [mcpServerId] = this.findTool(session.environmentId, name)
           if (!mcpServerId) throw new AuthorizationDenied('InvokeTool', name)
           return await this.invokeTool(actor, session.id, mcpServerId, name, args)
@@ -519,6 +523,43 @@ export class PapyrusService {
     this.audit.append({ actorId: actor.id, action: 'RevokeTool', resourceType: 'ToolGrant', resourceId: grantId, decision: 'info', metadata: {} })
   }
 
+  listApprovedSources(actor: Principal): ApprovedSource[] {
+    return this.sources.listForUser(actor.id)
+  }
+
+  searchApprovedSources(actor: Principal, query: string, limit = 10): SourceSearchResult[] {
+    const results = this.sources.search(actor.id, query, limit)
+    this.audit.append({ actorId: actor.id, action: 'SearchSources', resourceType: 'Source', resourceId: 'assigned', decision: 'allow', metadata: { queryHash: createHash('sha256').update(query).digest('hex'), resultCount: results.length } })
+    return results
+  }
+
+  readApprovedSource(actor: Principal, chunkId: string): SourceSearchResult {
+    const result = this.sources.read(actor.id, chunkId)
+    if (!result) throw new AuthorizationDenied('ReadSource', chunkId)
+    this.audit.append({ actorId: actor.id, action: 'ReadSource', resourceType: 'Source', resourceId: result.citation.sourceId, decision: 'allow', metadata: { chunkId, sha256: result.citation.sha256 } })
+    return result
+  }
+
+  createApprovedSource(actor: Principal, input: { name: string; kind: ApprovedSourceKind; locator: string; mode: 'snapshot'|'live' }): ApprovedSource {
+    this.check(actor, 'ManageTools', { type: 'Deployment', id: this.license.deploymentId })
+    const source = this.sources.create(input.name, input.kind, input.locator, input.mode)
+    if (source.kind === 'directory') this.sources.refreshDirectory(source.id)
+    this.audit.append({ actorId: actor.id, action: 'CreateSource', resourceType: 'Source', resourceId: source.id, decision: 'info', metadata: { kind: source.kind, mode: source.mode } })
+    return this.sources.get(source.id)!
+  }
+
+  assignApprovedSource(actor: Principal, sourceId: string, userId: string, assigned: boolean): void {
+    this.check(actor, 'AssignResources', { type: 'Deployment', id: this.license.deploymentId })
+    if (assigned) this.sources.assign(sourceId,userId); else this.sources.unassign(sourceId,userId)
+    this.audit.append({ actorId: actor.id, action: assigned ? 'AssignSource' : 'UnassignSource', resourceType: 'Source', resourceId: sourceId, decision: 'info', metadata: { userId } })
+  }
+
+  ingestApprovedSource(actor: Principal, sourceId: string, input: { uri: string; title: string; mediaType: string; content: string }): void {
+    this.check(actor, 'ManageTools', { type: 'Deployment', id: this.license.deploymentId })
+    this.sources.ingest(sourceId,input.uri,input.title,input.mediaType,input.content)
+    this.audit.append({ actorId: actor.id, action: 'IndexSource', resourceType: 'Source', resourceId: sourceId, decision: 'info', metadata: { uri: input.uri, bytes: Buffer.byteLength(input.content) } })
+  }
+
   adminOverview(actor: Principal): AdminOverview {
     this.check(actor, 'ManageUsers', { type: 'Deployment', id: this.license.deploymentId })
     return {
@@ -534,6 +575,7 @@ export class PapyrusService {
       users: this.db.listPrincipals(),
       invitations: this.db.listInvitations(),
       environments: this.db.listEnvironments().map((environment) => ({ ...environment, assignedUserIds: this.db.assignedUserIds('environment', environment.id) })),
+      sources: this.sources.listAll(),
       mcpServers: this.db.listMcpServers(), toolGrants: this.db.listToolGrants(),
       license: this.license.status(),
     }
@@ -751,11 +793,22 @@ export class PapyrusService {
   }
 
   /** Discovers only the tools enabled for this session's authorization environment. */
-  private async nativeTools(session: Session): Promise<RuntimeTool[]> {
+  private invokeSourceTool(actor: Principal, name: string, args: unknown): unknown {
+    const input = args && typeof args === 'object' ? args as Record<string,unknown> : {}
+    if (name === 'papyrus_sources_list') return { sources: this.listApprovedSources(actor) }
+    if (name === 'papyrus_sources_search') return { results: this.searchApprovedSources(actor, textValue(input.query,'query'), typeof input.limit === 'number' ? input.limit : 10) }
+    if (name === 'papyrus_sources_read') return this.readApprovedSource(actor,textValue(input.chunkId,'chunkId'))
+    throw new Error('Unknown source tool')
+  }
+
+  private async nativeTools(session: Session, actor: Principal): Promise<RuntimeTool[]> {
     const grantedServerIds = new Set(this.db.listToolGrants()
       .filter((grant) => grant.environmentId === session.environmentId)
       .map((grant) => grant.mcpServerId))
     const tools = new Map<string, RuntimeTool>()
+    tools.set('papyrus_sources_list', { name: 'papyrus_sources_list', description: 'List only approved sources assigned to the current identity.', inputSchema: { type: 'object', properties: {} } })
+    tools.set('papyrus_sources_search', { name: 'papyrus_sources_search', description: 'Search approved source content. Results include immutable citations and are filtered by live source assignments.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 20 } }, required: ['query'] } })
+    tools.set('papyrus_sources_read', { name: 'papyrus_sources_read', description: 'Read a cited approved-source chunk. Access is rechecked against current assignments.', inputSchema: { type: 'object', properties: { chunkId: { type: 'string' } }, required: ['chunkId'] } })
     for (const server of this.db.listMcpServers()) {
       if (!server.enabled || !grantedServerIds.has(server.id)) continue
       const response = await this.forwardMcp(server.endpoint, {

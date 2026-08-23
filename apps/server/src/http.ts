@@ -5,6 +5,7 @@ import { extname, join, normalize } from 'node:path'
 import { ROLES, SESSION_SURFACES, type Role, type SessionSurface, type SignedLicense } from '@papyrus/contracts'
 import { AuthService } from './auth.js'
 import type { ServerConfig } from './config.js'
+import { FileConflictError } from './managed-files.js'
 import { ApprovalLifecycleError, AuthorizationDenied, PapyrusService, SessionLifecycleError } from './service.js'
 
 class HttpError extends Error {
@@ -230,6 +231,47 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
       if (!principal) return unauthorized(response, auth)
       if (url.pathname === '/api/me' && request.method === 'GET') return json(response, 200, principal)
       if (url.pathname === '/api/admin/overview' && request.method === 'GET') return json(response, 200, service.adminOverview(principal))
+      if (url.pathname === '/api/files/mounts' && request.method === 'GET') return json(response, 200, { mounts: service.listFileMounts(principal) })
+      if (url.pathname === '/api/files' && request.method === 'GET') {
+        return json(response, 200, { files: service.listFiles(principal, identifier(url.searchParams.get('mountId'), 'mountId'), url.searchParams.get('path') ?? '/') })
+      }
+      if (url.pathname === '/api/files/content' && request.method === 'GET') {
+        return json(response, 200, service.readFile(principal, identifier(url.searchParams.get('mountId'), 'mountId'), text(url.searchParams.get('path'), 'path', 4096)))
+      }
+      if (url.pathname === '/api/files/proposals' && request.method === 'GET') return json(response, 200, { proposals: service.listFileProposals(principal) })
+      if (url.pathname === '/api/files/proposals' && request.method === 'POST') {
+        const input = await body(request)
+        return json(response, 201, service.createFileProposal(principal, {
+          mountId: identifier(input.mountId, 'mountId'), path: text(input.path, 'path', 4096),
+          baseSha256: text(input.baseSha256, 'baseSha256', 128), contentBase64: text(input.contentBase64, 'contentBase64', 16 * 1024 * 1024),
+        }))
+      }
+      const publishProposal = url.pathname.match(/^\/api\/files\/proposals\/([^/]+)\/publish$/)
+      if (publishProposal && request.method === 'POST') return json(response, 200, service.publishFileProposal(principal, decodeURIComponent(publishProposal[1] as string)))
+      if (url.pathname === '/api/files/versions' && request.method === 'GET') {
+        return json(response, 200, { versions: service.listFileVersions(principal, identifier(url.searchParams.get('mountId'), 'mountId'), text(url.searchParams.get('path'), 'path', 4096)) })
+      }
+      const rollbackVersion = url.pathname.match(/^\/api\/files\/versions\/([^/]+)\/rollback$/)
+      if (rollbackVersion && request.method === 'POST') {
+        const input = await body(request)
+        return json(response, 200, service.rollbackFileVersion(principal, decodeURIComponent(rollbackVersion[1] as string), text(input.expectedSha256, 'expectedSha256', 128)))
+      }
+      if (url.pathname === '/api/file-mounts' && request.method === 'POST') {
+        const input = await body(request)
+        return json(response, 201, service.createFileMount(principal, { name: text(input.name, 'name'), rootPath: text(input.rootPath, 'rootPath', 4096) }))
+      }
+      if (url.pathname === '/api/file-mount-assignments' && request.method === 'POST') {
+        const input = await body(request)
+        const access = text(input.access, 'access') as 'read' | 'publish'
+        if (!['read', 'publish'].includes(access)) throw new HttpError(400, 'INVALID_INPUT', 'Unknown file access level')
+        service.assignFileMount(principal, identifier(input.mountId, 'mountId'), identifier(input.userId, 'userId'), access)
+        return json(response, 204, null)
+      }
+      const revokeFileMount = url.pathname.match(/^\/api\/file-mounts\/([^/]+)\/assignments\/([^/]+)$/)
+      if (revokeFileMount && request.method === 'DELETE') {
+        service.revokeFileMount(principal, decodeURIComponent(revokeFileMount[1] as string), decodeURIComponent(revokeFileMount[2] as string))
+        return json(response, 204, null)
+      }
       if (url.pathname === '/api/auth/logout' && request.method === 'POST') {
         auth.logout(principal.id)
         response.writeHead(204, { 'set-cookie': auth.clearSessionCookie(), 'cache-control': 'no-store' })
@@ -490,6 +532,8 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
         ? error.status
         : invitationRequired
           ? 403
+        : error instanceof FileConflictError
+          ? 409
         : error instanceof AuthorizationDenied
           ? 403
           : error instanceof SessionLifecycleError
@@ -501,6 +545,8 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
         ? error.code
         : invitationRequired
           ? 'INVITATION_REQUIRED'
+        : error instanceof FileConflictError
+          ? 'FILE_CONFLICT'
         : error instanceof AuthorizationDenied
           ? 'FORBIDDEN'
           : error instanceof SessionLifecycleError

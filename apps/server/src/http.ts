@@ -420,7 +420,7 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
           ? input.attachmentIds as string[] : []
         const promptText = typeof input.prompt === 'string' ? input.prompt.trim().slice(0, 100_000) : ''
         if (!promptText && attachmentIds.length === 0) throw new HttpError(400, 'INVALID_INPUT', 'prompt or attachmentIds is required')
-        const run = service.startPrompt(
+        const run = await service.startPrompt(
           principal,
           decodeURIComponent(prompt[1] as string),
           promptText,

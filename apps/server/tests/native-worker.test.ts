@@ -51,6 +51,8 @@ describe('Papyrus native worker', () => {
       const encoder = new TextEncoder()
       const stream = new ReadableStream({
         start(controller) {
+          controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"reasoning_content":"Checking the attached policy. "}}]}\n\n'))
+          controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"reasoning":{"summary":"Comparing relevant sections."}}}]}\n\n'))
           controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"Live "}}]}\n\n'))
           controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"response"}}]}\n\n'))
           controller.enqueue(encoder.encode('data: [DONE]\n\n'))
@@ -77,6 +79,11 @@ describe('Papyrus native worker', () => {
       return data.sessionUpdate === 'agent_message_chunk' ? [data.content?.text] : []
     })
     expect(chunks).toEqual(['Live ', 'response'])
+    const thoughts = events.flatMap((event) => {
+      const data = event.data as { sessionUpdate?: string; content?: { text?: string } }
+      return data.sessionUpdate === 'agent_thought_chunk' ? [data.content?.text] : []
+    })
+    expect(thoughts).toEqual(['Checking the attached policy. ', 'Comparing relevant sections.'])
   })
 
   it('routes model tool calls through Papyrus authorization and execution', async () => {

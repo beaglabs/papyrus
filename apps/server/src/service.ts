@@ -439,7 +439,7 @@ export class PapyrusService {
       const result = await runtime.runPrompt({
         cwd: session.cwd,
         prompt: attachments.length ? contentBlocks : prompt,
-        tools: await this.nativeTools(session, actor),
+        tools: await this.nativeTools(session),
         invokeTool: async (name, args) => {
           if (name.startsWith('papyrus_sources_')) return this.invokeSourceTool(actor, name, args)
           const [mcpServerId] = this.findTool(session.environmentId, name)
@@ -801,7 +801,7 @@ export class PapyrusService {
     throw new Error('Unknown source tool')
   }
 
-  private async nativeTools(session: Session, actor: Principal): Promise<RuntimeTool[]> {
+  private async nativeTools(session: Session): Promise<RuntimeTool[]> {
     const grantedServerIds = new Set(this.db.listToolGrants()
       .filter((grant) => grant.environmentId === session.environmentId)
       .map((grant) => grant.mcpServerId))

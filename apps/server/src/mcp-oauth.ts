@@ -14,13 +14,25 @@ export interface McpOAuthRegistration {
   authorizationUrl: string
 }
 
+export function normalizeMcpEndpoint(endpoint: string): string {
+  const url = secureUrl(endpoint, 'MCP endpoint')
+  if (url.hostname === 'mcp.atlassian.com' && url.pathname.replace(/\/$/, '') === '/v1/mcp') url.pathname = '/v1/mcp/authv2'
+  return url.toString()
+}
+
 export async function registerRemoteMcp(endpoint: string, redirectUri: string, clientName: string): Promise<McpOAuthRegistration | undefined> {
-  const resource = secureUrl(endpoint, 'MCP endpoint').toString()
+  const resource = normalizeMcpEndpoint(endpoint)
   const challenge = await fetch(resource, { method: 'POST', headers: { accept: 'application/json, text/event-stream', 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 'papyrus-auth-discovery', method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'papyrus', version: '0.1.0' } } }), redirect: 'manual', signal: AbortSignal.timeout(10_000) })
   if (challenge.ok) return undefined
   if (challenge.status !== 401) throw new Error(`MCP discovery failed with HTTP ${challenge.status}`)
   const metadataUrl = resourceMetadataUrl(challenge.headers.get('www-authenticate')) ?? wellKnownResource(resource)
-  const protectedResource = await json<ResourceMetadata>(metadataUrl)
+  let protectedResource: ResourceMetadata
+  try {
+    protectedResource = await json<ResourceMetadata>(metadataUrl)
+  } catch (error) {
+    const detail = error instanceof Error ? ` ${error.message}.` : ''
+    throw new Error(`MCP endpoint requires OAuth, but protected-resource metadata could not be discovered at ${metadataUrl}.${detail} Use the provider's OAuth-capable MCP endpoint.`)
+  }
   const issuer = protectedResource.authorization_servers?.[0]
   if (!issuer) throw new Error('MCP protected-resource metadata did not identify an authorization server')
   const authorization = await authorizationMetadata(issuer)

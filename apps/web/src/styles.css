@@ -737,3 +737,23 @@ nav [data-slot=button].active{border-color:var(--border);background:var(--main);
   .artifact-workspace { width: 100%; }
   .artifact-browser { grid-template-columns: 150px minmax(0, 1fr); }
 }
+
+
+/* MCP connection lifecycle */
+.mcp-server-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.mcp-server-actions [data-slot=button] {
+  width: auto;
+  white-space: nowrap;
+}
+@media (max-width: 720px) {
+  .mcp-server-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+  .mcp-server-actions [data-slot=button] { flex: 1; }
+}

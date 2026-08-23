@@ -630,6 +630,22 @@ export class PapyrusDatabase {
     this.sqlite.prepare('INSERT INTO mcp_oauth_pending VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(input.state, input.serverId, input.actorId, input.issuer, input.tokenEndpoint, input.clientId, input.clientSecret ?? null, input.verifier, input.redirectUri, input.resource, new Date().toISOString())
   }
 
+  replaceMcpOauthPending(input: { state: string; serverId: string; actorId: string; issuer: string; tokenEndpoint: string; clientId: string; clientSecret?: string; verifier: string; redirectUri: string; resource: string }): void {
+    this.transaction(() => {
+      this.sqlite.prepare('DELETE FROM mcp_oauth_pending WHERE server_id=?').run(input.serverId)
+      this.sqlite.prepare("UPDATE mcp_servers SET enabled=0,oauth_status='authorization_required',oauth_issuer=?,oauth_error=NULL,oauth_access_token=NULL,oauth_refresh_token=NULL,oauth_expires_at=NULL WHERE id=?").run(input.issuer, input.serverId)
+      this.createMcpOauthPending(input)
+    })
+  }
+
+  deleteMcpServer(id: string): boolean {
+    return this.transaction(() => {
+      this.sqlite.prepare('DELETE FROM tool_grants WHERE mcp_server_id=?').run(id)
+      this.sqlite.prepare('DELETE FROM mcp_oauth_pending WHERE server_id=?').run(id)
+      return Number(this.sqlite.prepare('DELETE FROM mcp_servers WHERE id=?').run(id).changes) > 0
+    })
+  }
+
   getMcpOauthPending(state: string): Row | undefined { return this.sqlite.prepare('SELECT * FROM mcp_oauth_pending WHERE state=?').get(state) as Row | undefined }
   finishMcpOauth(state: string, accessToken: string, refreshToken: string | undefined, expiresAt: string | undefined): McpServer | undefined {
     const pending = this.getMcpOauthPending(state); if (!pending) return undefined

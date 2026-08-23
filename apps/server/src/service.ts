@@ -15,7 +15,7 @@ import type { ServerConfig } from './config.js'
 import { PapyrusDatabase } from './db.js'
 import { LicenseService } from './license.js'
 import { callMcpTool, listMcpTools, validateMcpServer } from './mcp-client.js'
-import { exchangeMcpCode, registerRemoteMcp } from './mcp-oauth.js'
+import { exchangeMcpCode, normalizeMcpEndpoint, registerRemoteMcp } from './mcp-oauth.js'
 import { PolicyEngine, cedarUser, cedarUsers, type AuthorizationResource, type PolicyAction } from './policy.js'
 
 export class AuthorizationDenied extends Error {
@@ -482,12 +482,12 @@ export class PapyrusService {
 
   async addMcpServer(actor: Principal, input: Pick<McpServer, 'name' | 'endpoint'>): Promise<{ server: McpServer; authorizationUrl?: string }> {
     this.check(actor, 'ManageTools', { type: 'Deployment', id: this.license.deploymentId })
-    const parsed = new URL(input.endpoint)
+    const parsed = new URL(normalizeMcpEndpoint(input.endpoint))
     if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && ['127.0.0.1', '::1', 'localhost'].includes(parsed.hostname))) throw new Error('Remote MCP endpoints must use HTTPS')
     const redirectUri = `${this.config.publicOrigin}/api/mcp/oauth/callback`
     const oauth = await registerRemoteMcp(parsed.toString(), redirectUri, `Papyrus — ${input.name}`)
     if (!oauth) await validateMcpServer(parsed.toString())
-    const server = this.db.addMcpServer({ ...input, oauthStatus: oauth ? 'authorization_required' : 'not_required', ...(oauth ? { oauthIssuer: oauth.issuer } : {}) })
+    const server = this.db.addMcpServer({ ...input, endpoint: parsed.toString(), oauthStatus: oauth ? 'authorization_required' : 'not_required', ...(oauth ? { oauthIssuer: oauth.issuer } : {}) })
     if (oauth) this.db.createMcpOauthPending({ state: oauth.state, serverId: server.id, actorId: actor.id, issuer: oauth.issuer, tokenEndpoint: oauth.tokenEndpoint, clientId: oauth.clientId, ...(oauth.clientSecret ? { clientSecret: this.seal(oauth.clientSecret) } : {}), verifier: this.seal(oauth.verifier), redirectUri, resource: oauth.resource })
     this.audit.append({ actorId: actor.id, action: 'AddMcpServer', resourceType: 'McpServer', resourceId: server.id, decision: 'info', metadata: { name: server.name } })
     return { server, ...(oauth ? { authorizationUrl: oauth.authorizationUrl } : {}) }
@@ -509,6 +509,28 @@ export class PapyrusService {
   listMcpServers(actor: Principal): McpServer[] {
     this.check(actor, 'ManageTools', { type: 'Deployment', id: this.license.deploymentId })
     return this.db.listMcpServers()
+  }
+
+  async retryMcpOauth(actor: Principal, serverId: string): Promise<{ server: McpServer; authorizationUrl: string }> {
+    this.check(actor, 'ManageTools', { type: 'Deployment', id: this.license.deploymentId })
+    const existing = this.db.getMcpServer(serverId)
+    if (!existing) throw new Error('MCP server not found')
+    if (existing.oauthStatus !== 'authorization_required' && existing.oauthStatus !== 'error') throw new Error('MCP server does not require OAuth authorization')
+    const redirectUri = `${this.config.publicOrigin}/api/mcp/oauth/callback`
+    const oauth = await registerRemoteMcp(existing.endpoint, redirectUri, `Papyrus — ${existing.name}`)
+    if (!oauth) throw new Error('MCP server no longer requires OAuth; delete it and connect it again')
+    this.db.replaceMcpOauthPending({ state: oauth.state, serverId, actorId: actor.id, issuer: oauth.issuer, tokenEndpoint: oauth.tokenEndpoint, clientId: oauth.clientId, ...(oauth.clientSecret ? { clientSecret: this.seal(oauth.clientSecret) } : {}), verifier: this.seal(oauth.verifier), redirectUri, resource: oauth.resource })
+    const server = this.db.getMcpServer(serverId)
+    if (!server) throw new Error('MCP server not found')
+    this.audit.append({ actorId: actor.id, action: 'RetryMcpAuthorization', resourceType: 'McpServer', resourceId: serverId, decision: 'info', metadata: { issuer: oauth.issuer } })
+    return { server, authorizationUrl: oauth.authorizationUrl }
+  }
+
+  deleteMcpServer(actor: Principal, serverId: string): void {
+    this.check(actor, 'ManageTools', { type: 'Deployment', id: this.license.deploymentId })
+    const server = this.db.getMcpServer(serverId)
+    if (!server || !this.db.deleteMcpServer(serverId)) throw new Error('MCP server not found')
+    this.audit.append({ actorId: actor.id, action: 'DeleteMcpServer', resourceType: 'McpServer', resourceId: serverId, decision: 'info', metadata: { name: server.name, endpoint: server.endpoint } })
   }
 
   setMcpServerEnabled(actor: Principal, serverId: string, enabled: boolean): McpServer {

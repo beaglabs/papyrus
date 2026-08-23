@@ -66,6 +66,19 @@ describe('Papyrus control plane', () => {
     await expect(context.service.invokeTool(activeOther, otherSession.id, server.id, 'read_file', {})).rejects.toThrow(AuthorizationDenied)
   })
 
+  it('deletes MCP connections with pending OAuth state and environment grants', () => {
+    const context = testContext(); contexts.push(context)
+    const { owner, environment } = setup(context)
+    const server = context.db.addMcpServer({ name: 'Pending', endpoint: 'https://mcp.example/mcp', oauthStatus: 'authorization_required' })
+    context.db.grantMcpServer(environment.id, server.id)
+    context.db.createMcpOauthPending({ state: 'old-state', serverId: server.id, actorId: owner.id, issuer: 'https://auth.example', tokenEndpoint: 'https://auth.example/token', clientId: 'client', verifier: 'sealed', redirectUri: 'https://papyrus.example/api/mcp/oauth/callback', resource: server.endpoint })
+    context.service.deleteMcpServer(owner, server.id)
+    expect(context.db.getMcpServer(server.id)).toBeUndefined()
+    expect(context.db.getMcpOauthPending('old-state')).toBeUndefined()
+    expect(context.db.listToolGrants()).toEqual([])
+    expect(context.service.audit.verify()).toEqual({ valid: true })
+  })
+
   it('revokes sessions and invalidates them on role change', () => {
     const context = testContext(); contexts.push(context)
     const { owner, user } = setup(context)

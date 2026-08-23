@@ -527,8 +527,8 @@ export class PapyrusService {
 
   createFileMount(actor: Principal, input: { name: string; rootPath: string }): FileMount {
     this.check(actor, 'ManageFiles', { type: 'Deployment', id: this.license.deploymentId })
-    new ManagedFileRoot(input.rootPath)
-    const mount = this.db.createFileMount(input.name, input.rootPath, actor.id)
+    const managedRoot = new ManagedFileRoot(input.rootPath)
+    const mount = this.db.createFileMount(input.name, managedRoot.root, actor.id)
     this.audit.append({ actorId: actor.id, action: 'CreateFileMount', resourceType: 'FileMount', resourceId: mount.id, decision: 'info', metadata: { name: mount.name } })
     return { id: mount.id, name: mount.name, access: 'publish', createdAt: mount.createdAt }
   }

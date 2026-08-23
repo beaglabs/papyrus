@@ -164,16 +164,53 @@ export interface McpServer {
   createdAt: string
 }
 
-export interface AgentDrive {
+export type FileMountAccess = 'read' | 'publish'
+
+export interface FileMount {
   id: string
   name: string
-  readOnly: true
+  access: FileMountAccess
   createdAt: string
 }
 
-export interface AdminAgentDrive extends AgentDrive {
-  databasePath: string
-  assignedUserIds: string[]
+export interface AdminFileMount {
+  id: string
+  name: string
+  rootPath: string
+  assignments: Array<{ userId: string; access: FileMountAccess }>
+  createdAt: string
+}
+
+export interface FileEntry {
+  mountId: string
+  path: string
+  name: string
+  type: 'file' | 'directory'
+  size: number
+  modifiedAt: string
+  sha256?: string
+}
+
+export interface FileProposal {
+  id: string
+  mountId: string
+  path: string
+  baseSha256?: string
+  proposedSha256: string
+  status: 'pending' | 'published' | 'conflict' | 'cancelled'
+  createdBy: string
+  createdAt: string
+  publishedAt?: string
+}
+
+export interface FileVersion {
+  id: string
+  mountId: string
+  path: string
+  sha256: string
+  operation: 'publish' | 'rollback'
+  actorId: string
+  createdAt: string
 }
 
 export interface ToolGrant {
@@ -206,7 +243,7 @@ export interface AdminOverview {
   environments: AdminEnvironment[]
   mcpServers: McpServer[]
   toolGrants: ToolGrant[]
-  agentDrives: AdminAgentDrive[]
+  fileMounts: AdminFileMount[]
   license: LicenseStatus
 }
 

@@ -2,7 +2,7 @@ import { createServer as createHttpServer, type IncomingMessage, type Server, ty
 import { createServer as createHttpsServer } from 'node:https'
 import { readFileSync } from 'node:fs'
 import { extname, join, normalize } from 'node:path'
-import { APPROVED_SOURCE_KINDS, ROLES, SESSION_SURFACES, type ApprovedSourceKind, type Role, type SessionSurface, type SignedLicense } from '@papyrus/contracts'
+import { ROLES, SESSION_SURFACES, type ApprovedSourceKind, type Role, type SessionSurface, type SignedLicense } from '@papyrus/contracts'
 import { AuthService } from './auth.js'
 import type { ServerConfig } from './config.js'
 import { ApprovalLifecycleError, AuthorizationDenied, PapyrusService, SessionLifecycleError } from './service.js'
@@ -483,7 +483,7 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
       if (url.pathname === '/api/admin/sources' && request.method === 'POST') {
         const input = await body(request)
         const kind = text(input.kind,'kind') as ApprovedSourceKind
-        if (!APPROVED_SOURCE_KINDS.includes(kind)) throw new HttpError(400,'INVALID_INPUT','Unknown source kind')
+        if (!(['upload', 'domain', 'mcp', 'api'] as ApprovedSourceKind[]).includes(kind)) throw new HttpError(400,'INVALID_INPUT','Unknown source kind')
         const mode = text(input.mode ?? 'snapshot','mode') as 'snapshot'|'live'
         if (!['snapshot','live'].includes(mode)) throw new HttpError(400,'INVALID_INPUT','Unknown source mode')
         return json(response,201,service.createApprovedSource(principal,{name:text(input.name,'name'),kind,locator:text(input.locator,'locator',4096),mode}))

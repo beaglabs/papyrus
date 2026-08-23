@@ -14,6 +14,7 @@ import { projectResearchSources } from './sources.js'
 import type { ServerConfig } from './config.js'
 import { PapyrusDatabase } from './db.js'
 import { LicenseService } from './license.js'
+import { callMcpTool, listMcpTools, validateMcpServer } from './mcp-client.js'
 import { exchangeMcpCode, registerRemoteMcp } from './mcp-oauth.js'
 import { PolicyEngine, cedarUser, cedarUsers, type AuthorizationResource, type PolicyAction } from './policy.js'
 
@@ -485,7 +486,7 @@ export class PapyrusService {
     if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && ['127.0.0.1', '::1', 'localhost'].includes(parsed.hostname))) throw new Error('Remote MCP endpoints must use HTTPS')
     const redirectUri = `${this.config.publicOrigin}/api/mcp/oauth/callback`
     const oauth = await registerRemoteMcp(parsed.toString(), redirectUri, `Papyrus — ${input.name}`)
-    if (!oauth) await this.validateDirectMcp(parsed.toString())
+    if (!oauth) await validateMcpServer(parsed.toString())
     const server = this.db.addMcpServer({ ...input, oauthStatus: oauth ? 'authorization_required' : 'not_required', ...(oauth ? { oauthIssuer: oauth.issuer } : {}) })
     if (oauth) this.db.createMcpOauthPending({ state: oauth.state, serverId: server.id, actorId: actor.id, issuer: oauth.issuer, tokenEndpoint: oauth.tokenEndpoint, clientId: oauth.clientId, ...(oauth.clientSecret ? { clientSecret: this.seal(oauth.clientSecret) } : {}), verifier: this.seal(oauth.verifier), redirectUri, resource: oauth.resource })
     this.audit.append({ actorId: actor.id, action: 'AddMcpServer', resourceType: 'McpServer', resourceId: server.id, decision: 'info', metadata: { name: server.name } })
@@ -614,15 +615,14 @@ export class PapyrusService {
     const server = this.db.getMcpServer(mcpServerId)
     if (!server?.enabled) throw new Error('MCP server unavailable')
     const started = Date.now()
-    const response = await fetch(server.endpoint, {
-      method: 'POST', headers: { 'content-type': 'application/json', ...this.mcpAuthorization(server.id) },
-      body: JSON.stringify({ jsonrpc: '2.0', id: crypto.randomUUID(), method: 'tools/call', params: { name: toolName, arguments: args } }),
-      signal: AbortSignal.timeout(30_000),
-    })
-    const result = await response.json()
-    this.audit.append({ actorId: actor.id, action: 'InvokeTool', resourceType: 'Tool', resourceId: `${mcpServerId}:${toolName}`, decision: response.ok ? 'allow' : 'deny', metadata: { sessionId, durationMs: Date.now() - started, status: response.status } })
-    if (!response.ok) throw new Error(`MCP server returned ${response.status}`)
-    return result
+    try {
+      const result = await callMcpTool(server.endpoint, this.mcpAccessToken(server.id), toolName, args)
+      this.audit.append({ actorId: actor.id, action: 'InvokeTool', resourceType: 'Tool', resourceId: `${mcpServerId}:${toolName}`, decision: 'allow', metadata: { sessionId, durationMs: Date.now() - started, transport: 'mcp-typescript-sdk' } })
+      return result
+    } catch (error) {
+      this.audit.append({ actorId: actor.id, action: 'InvokeTool', resourceType: 'Tool', resourceId: `${mcpServerId}:${toolName}`, decision: 'deny', metadata: { sessionId, durationMs: Date.now() - started, transport: 'mcp-typescript-sdk', error: safeError(error) } })
+      throw error
+    }
   }
 
   async proxyMcp(token: string, sessionId: string, mcpServerId: string, message: Record<string, unknown>): Promise<unknown> {
@@ -639,7 +639,7 @@ export class PapyrusService {
     const server = this.db.getMcpServer(mcpServerId)
     if (!server?.enabled) throw new Error('MCP server unavailable')
     if (method === 'tools/list') {
-      const result = await this.forwardMcp(server.endpoint, message, this.mcpAuthorization(server.id))
+      const result = await this.forwardRuntimeMcp(server.endpoint, message, this.mcpAuthorization(server.id))
       if (result && typeof result === 'object') {
         const envelope = result as { result?: { tools?: Array<{ name?: string }> } }
         if (Array.isArray(envelope.result?.tools)) envelope.result.tools = envelope.result.tools.filter((tool) => typeof tool.name === 'string' && this.db.isToolGranted(session.environmentId, mcpServerId, tool.name))
@@ -648,7 +648,7 @@ export class PapyrusService {
       return result
     }
     if (!['initialize', 'notifications/initialized', 'ping'].includes(method)) throw new AuthorizationDenied('McpMethod', method)
-    return this.forwardMcp(server.endpoint, message, this.mcpAuthorization(server.id))
+    return this.forwardRuntimeMcp(server.endpoint, message, this.mcpAuthorization(server.id))
   }
 
   activity(actor: Principal): ActivitySummary {
@@ -819,18 +819,6 @@ export class PapyrusService {
     throw new Error('Unknown source tool')
   }
 
-  private async validateDirectMcp(endpoint: string): Promise<void> {
-    const initialized = await this.forwardMcp(endpoint, {
-      jsonrpc: '2.0', id: crypto.randomUUID(), method: 'initialize',
-      params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'Papyrus', version: '0.1.0' } },
-    })
-    const result = initialized && typeof initialized === 'object' ? (initialized as { result?: { protocolVersion?: unknown; serverInfo?: unknown } }).result : undefined
-    if (!result || typeof result.protocolVersion !== 'string' || !result.serverInfo) throw new Error('Endpoint did not complete MCP initialization')
-    await this.forwardMcp(endpoint, { jsonrpc: '2.0', method: 'notifications/initialized', params: {} })
-    const tools = await this.forwardMcp(endpoint, { jsonrpc: '2.0', id: crypto.randomUUID(), method: 'tools/list', params: {} })
-    if (!tools || typeof tools !== 'object' || !Array.isArray((tools as { result?: { tools?: unknown } }).result?.tools)) throw new Error('Endpoint did not return a valid MCP tool catalog')
-  }
-
   private async nativeTools(session: Session): Promise<RuntimeTool[]> {
     const grantedServerIds = new Set(this.db.listToolGrants()
       .filter((grant) => grant.environmentId === session.environmentId)
@@ -841,12 +829,7 @@ export class PapyrusService {
     tools.set('papyrus_sources_read', { name: 'papyrus_sources_read', description: 'Read a cited approved-source chunk. Access is rechecked against current assignments.', inputSchema: { type: 'object', properties: { chunkId: { type: 'string' } }, required: ['chunkId'] } })
     for (const server of this.db.listMcpServers()) {
       if (!server.enabled || !grantedServerIds.has(server.id)) continue
-      const response = await this.forwardMcp(server.endpoint, {
-        jsonrpc: '2.0',
-        id: crypto.randomUUID(),
-        method: 'tools/list',
-        params: {},
-      }, this.mcpAuthorization(server.id)).catch((error) => {
+      const listed = await listMcpTools(server.endpoint, this.mcpAccessToken(server.id)).catch((error) => {
         this.audit.append({
           actorId: session.ownerId,
           action: 'DiscoverTools',
@@ -855,20 +838,14 @@ export class PapyrusService {
           decision: 'deny',
           metadata: { sessionId: session.id, error: safeError(error) },
         })
-        return undefined
+        return []
       })
-      if (!response || typeof response !== 'object') continue
-      const listed = (response as { result?: { tools?: Array<{ name?: unknown; description?: unknown; inputSchema?: unknown }> } }).result?.tools
-      if (!Array.isArray(listed)) continue
       for (const tool of listed) {
-        if (typeof tool.name !== 'string' || tools.has(tool.name)) continue
-        if (!this.db.isToolGranted(session.environmentId, server.id, tool.name)) continue
+        if (tools.has(tool.name) || !this.db.isToolGranted(session.environmentId, server.id, tool.name)) continue
         tools.set(tool.name, {
           name: tool.name,
-          ...(typeof tool.description === 'string' ? { description: tool.description } : {}),
-          inputSchema: tool.inputSchema && typeof tool.inputSchema === 'object' && !Array.isArray(tool.inputSchema)
-            ? tool.inputSchema as Record<string, unknown>
-            : { type: 'object', properties: {} },
+          ...(tool.description ? { description: tool.description } : {}),
+          inputSchema: tool.inputSchema,
         })
       }
     }
@@ -901,7 +878,15 @@ export class PapyrusService {
     } catch { return false }
   }
 
-  private mcpAuthorization(serverId: string): Record<string, string> { const token = this.db.mcpAccessToken(serverId); return token ? { authorization: `Bearer ${this.open(token)}` } : {} }
+  private mcpAccessToken(serverId: string): string | undefined {
+    const token = this.db.mcpAccessToken(serverId)
+    return token ? this.open(token) : undefined
+  }
+
+  private mcpAuthorization(serverId: string): Record<string, string> {
+    const token = this.mcpAccessToken(serverId)
+    return token ? { authorization: `Bearer ${token}` } : {}
+  }
 
   private seal(value: string): string {
     const iv = randomBytes(12); const cipher = createCipheriv('aes-256-gcm', createHash('sha256').update(this.config.sessionSecret).digest(), iv)
@@ -916,7 +901,7 @@ export class PapyrusService {
     return Buffer.concat([decipher.update(Buffer.from(ciphertext, 'base64url')), decipher.final()]).toString('utf8')
   }
 
-  private async forwardMcp(endpoint: string, message: Record<string, unknown>, authorization: Record<string, string> = {}): Promise<unknown> {
+  private async forwardRuntimeMcp(endpoint: string, message: Record<string, unknown>, authorization: Record<string, string> = {}): Promise<unknown> {
     const response = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...authorization }, body: JSON.stringify(message), signal: AbortSignal.timeout(30_000) })
     if (!response.ok) throw new Error(`MCP server returned ${response.status}`)
     const body = await response.text()

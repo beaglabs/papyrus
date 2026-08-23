@@ -4,7 +4,7 @@ import { SessionHarness } from './Sessions.js'
 import { SourcesView } from './Sources.js'
 import { AdminView } from './Admin.js'
 import { EnvironmentsView } from './Environments.js'
-import { Avatar, Button, Input } from './components/ui/index.js'
+import { Alert, Avatar, Badge, Button, Card, Input } from './components/ui/index.js'
 
 type View = 'home' | 'sessions' | 'environments' | 'sources' | 'administration'
 type AppState =
@@ -64,7 +64,7 @@ export function App() {
   }, [refresh])
 
   if (state.phase === 'loading') return <main className="center"><Logo /><p className="eyebrow">OPENING GOVERNED WORKSPACE…</p></main>
-  if (state.phase === 'error') return <main className="center login"><Logo /><p className="eyebrow">PAPYRUS IS UNAVAILABLE</p><h1>Unable to open<br />the control plane.</h1><div className="error">{state.message}</div><Button className="primary" onClick={() => void refresh()}>Try again →</Button></main>
+  if (state.phase === 'error') return <main className="center login"><Logo /><p className="eyebrow">PAPYRUS IS UNAVAILABLE</p><h1>Unable to open<br />the control plane.</h1><Alert className="error">{state.message}</Alert><Button className="primary" onClick={() => void refresh()}>Try again →</Button></main>
   if (state.phase === 'signed-out') return <SignedOut health={state.health} challenge={state.challenge} />
   if (state.phase === 'enrollment-required') return <EnrollmentMissing health={state.health} />
   if (state.data.me.roles.length === 0) return <><HandlingBanner profile={state.data.health.profile} />{state.data.health.bootstrapRequired
@@ -116,7 +116,7 @@ function SignedOut({ health, challenge }: { health: Health; challenge: Authentic
       <p>Continue with your organization-managed identity. Papyrus never receives your provider password.</p>
       <div className="auth-grid">
         {oidc && <a className="primary" href={challenge.login_url}>Continue with {health.branding.organizationName} →</a>}
-        {challenge.methods.includes('mtls-proxy') && <article className="profile-card"><strong>Trusted identity gateway</strong><p>Open Papyrus through your organization’s authorized access gateway.</p></article>}
+        {challenge.methods.includes('mtls-proxy') && <Card className="profile-card"><strong>Trusted identity gateway</strong><p>Open Papyrus through your organization’s authorized access gateway.</p></Card>}
         {challenge.methods.length === 0 && <div className="error">This deployment has no configured organizational OIDC provider.</div>}
       </div>
       <Logo />
@@ -124,8 +124,8 @@ function SignedOut({ health, challenge }: { health: Health; challenge: Authentic
     </main></>
   }
   return <><HandlingBanner profile={health.profile} /><main className="center login auth-entry"><Logo /><p className="eyebrow">GOVERNED AGENT WORKSPACE</p><h1>Identity before<br />authority.</h1><p>Papyrus binds every session, tool request, and policy decision to an authenticated organizational identity.</p><div className="auth-grid">
-    <article className="profile-card"><strong>CAC/PIV authentication</strong><p>Insert your card, select its authentication certificate when prompted, then reload this page.</p><Button className="secondary" onClick={() => window.location.reload()}>Retry certificate authentication</Button></article>
-    {challenge.methods.includes('mtls-proxy') && <article className="profile-card"><strong>Trusted identity gateway</strong><p>Open Papyrus through your organization’s authorized access gateway.</p></article>}
+    <Card className="profile-card"><strong>CAC/PIV authentication</strong><p>Insert your card, select its authentication certificate when prompted, then reload this page.</p><Button className="secondary" onClick={() => window.location.reload()}>Retry certificate authentication</Button></Card>
+    {challenge.methods.includes('mtls-proxy') && <Card className="profile-card"><strong>Trusted identity gateway</strong><p>Open Papyrus through your organization’s authorized access gateway.</p></Card>}
   </div></main></>
 }
 
@@ -157,19 +157,19 @@ function AccessPending({ me }: { me: string }) {
 }
 
 function ShellView({ view, data, onNavigate }: { view: View; data: ShellData; onNavigate: (view: View) => void }) {
-  if (view === 'home') return <section className="grid-two wide-left"><article className="panel hero-panel"><p className="eyebrow">CONTROL PLANE READY</p><h2>Begin governed work from one durable session.</h2><p>Every prompt, runtime event, cancellation, and policy decision remains bound to your authenticated identity.</p><Button className="primary" onClick={() => onNavigate('sessions')}>Open sessions →</Button></article><DeploymentFacts data={data} /></section>
+  if (view === 'home') return <section className="grid-two wide-left"><Card className="panel hero-panel"><p className="eyebrow">CONTROL PLANE READY</p><h2>Begin governed work from one durable session.</h2><p>Every prompt, runtime event, cancellation, and policy decision remains bound to your authenticated identity.</p><Button className="primary" onClick={() => onNavigate('sessions')}>Open sessions →</Button></Card><DeploymentFacts data={data} /></section>
   if (view === 'sessions') return <SessionHarness environments={data.environments} />
   if (view === 'environments') return <EnvironmentsView me={data.me} items={data.environments} />
   if (view === 'sources') return <SourcesView />
   if (view === 'administration') return <AdminView me={data.me} />
-  return <article className="panel placeholder"><span>STACK PREVIEW</span><h2>{viewTitle(view)}</h2><p>{placeholder(view)}</p></article>
+  return <Card className="panel placeholder"><span>STACK PREVIEW</span><h2>{viewTitle(view)}</h2><p>{placeholder(view)}</p></Card>
 }
 
 function DeploymentFacts({ data }: { data: ShellData }) {
-  return <article className="panel"><div className="panel-head"><h2>Deployment</h2><span className="status-good">ENFORCED</span></div><dl className="facts"><div><dt>Policy</dt><dd>Cedar {data.health.cedar}</dd></div><div><dt>Topology</dt><dd>ON-PREMISES</dd></div><div><dt>Identity</dt><dd>{data.me.authMethod.toUpperCase()}</dd></div><div><dt>Environments</dt><dd>{data.environments.length}</dd></div></dl></article>
+  return <Card className="panel"><div className="panel-head"><h2>Deployment</h2><Badge className="status-good">ENFORCED</Badge></div><dl className="facts"><div><dt>Policy</dt><dd>Cedar {data.health.cedar}</dd></div><div><dt>Topology</dt><dd>ON-PREMISES</dd></div><div><dt>Identity</dt><dd>{data.me.authMethod.toUpperCase()}</dd></div><div><dt>Environments</dt><dd>{data.environments.length}</dd></div></dl></Card>
 }
 
-function NavButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) { return <Button className={active ? 'active' : ''} onClick={onClick}>{children}</Button> }
+function NavButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) { return <Button variant="ghost" className={active ? 'active' : ''} onClick={onClick}>{children}</Button> }
 function profileLabel(profile: string) { return ({ commercial: 'COMMERCIAL', 'government-il4': 'GOVERNMENT IL4', 'government-il6': 'GOVERNMENT IL6' } as Record<string, string>)[profile] ?? profile.toUpperCase() }
 function viewTitle(view: View) { return ({ home: 'Operational overview', sessions: 'Sessions', environments: 'Environments', sources: 'Sources', administration: 'Administration' })[view] }
 function placeholder(view: View) { return ({ sessions: '', sources: '', administration: '', home: '', environments: '' })[view] }

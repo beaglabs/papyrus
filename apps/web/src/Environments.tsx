@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { AdminOverview, Environment, Principal } from '@papyrus/contracts'
 import { adminOverview, assignEnvironment, createEnvironmentAdmin, grantMcpServer, revokeToolGrant } from './api.js'
 import { SelectField } from './SelectField.js'
-import { Button, Input, Card } from './components/ui/index.js'
+import { Alert, Button, Input, Card } from './components/ui/index.js'
 
 export function EnvironmentsView({ me, items }: { me: Principal; items: Environment[] }) {
   const privileged = me.roles.some((role) => role === 'Owner' || role === 'Admin')
@@ -23,7 +23,7 @@ export function EnvironmentsView({ me, items }: { me: Principal; items: Environm
   const eligibleServers = data?.mcpServers.filter((server) => server.enabled && !grantedServerIds.has(server.id)) ?? []
 
   return <div className="environment-console">
-    {error && <div className="error">{error}<Button onClick={() => setError(undefined)}>×</Button></div>}
+    {error && <Alert className="error">{error}<Button variant="ghost" onClick={() => setError(undefined)}>×</Button></Alert>}
     <aside className="environment-directory">
       <div className="session-sidebar-head"><strong>Environments</strong>{privileged && <Button className="icon-button" onClick={() => setCreating(true)} aria-label="Create environment">＋</Button>}</div>
       {environments.map((environment) => <Button key={environment.id} className={environment.id === selected?.id ? 'selected' : ''} onClick={() => setSelectedId(environment.id)}><strong>{environment.name}</strong><span>{environment.description || 'No description'}</span></Button>)}

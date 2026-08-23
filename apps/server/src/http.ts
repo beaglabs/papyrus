@@ -32,13 +32,13 @@ function oauthComplete(response: ServerResponse): void {
   response.end(body)
 }
 
-function artifactDownload(response: ServerResponse, artifact: ReturnType<PapyrusService['sessionArtifacts']>[number]): void {
+function artifactDownload(response: ServerResponse, artifact: ReturnType<PapyrusService['sessionArtifacts']>[number], inline = false): void {
   const content = artifact.encoding === 'base64' ? Buffer.from(artifact.content, 'base64') : Buffer.from(artifact.content, 'utf8')
   const filename = artifact.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 180) || 'artifact'
   response.writeHead(200, {
     'content-type': artifact.mediaType,
     'content-length': content.length,
-    'content-disposition': `attachment; filename="${filename}"`,
+    'content-disposition': `${inline ? 'inline' : 'attachment'}; filename="${filename}"`,
     'cache-control': 'no-store',
     'x-content-type-options': 'nosniff',
   })
@@ -392,7 +392,7 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
         const artifacts = service.sessionArtifacts(principal, decodeURIComponent(artifactFile[1] as string))
         const artifact = artifacts.find((candidate) => candidate.id === decodeURIComponent(artifactFile[2] as string))
         if (!artifact) throw new HttpError(404, 'ARTIFACT_NOT_FOUND', 'Artifact not found')
-        return artifactDownload(response, artifact)
+        return artifactDownload(response, artifact, url.searchParams.get('preview') === '1')
       }
       const cancelSession = url.pathname.match(/^\/api\/sessions\/([^/]+)\/cancel$/)
       if (cancelSession && request.method === 'POST') {

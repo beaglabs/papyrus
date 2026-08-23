@@ -4,10 +4,10 @@ import { POLICY_VERSION } from './audit.js'
 import { BROWSER_POLICY_ACTIONS, BROWSER_RESEARCH_ACTIONS } from './catalog.js'
 
 export const ACTIONS = [
-  'ManageUsers', 'ManageEnvironments', 'ManageTools', 'ManageDrives', 'AssignResources',
+  'ManageUsers', 'ManageEnvironments', 'ManageTools', 'ManageFiles', 'AssignResources',
   'CreateSession', 'ReadSession', 'PromptSession', 'CancelSession', 'CloseSession', 'DeleteSession', 'SetSessionConfig', 'ResumeSession', 'DecideApproval',
   'ReadAudit', 'ReadActivity',
-  'ReadEnvironment', 'ReadDrive', 'InvokeTool', 'ActivateLicense',
+  'ReadEnvironment', 'ReadFiles', 'PublishFiles', 'InvokeTool', 'ActivateLicense',
   ...BROWSER_POLICY_ACTIONS,
 ] as const
 export type PolicyAction = (typeof ACTIONS)[number]
@@ -36,7 +36,7 @@ when { principal.roles.contains("Auditor") && (${actionExpression(auditActions)}
 permit(principal, action, resource)
 when {
   principal.roles.contains("User") &&
-  (${actionExpression(['ReadEnvironment', 'ReadDrive', 'CreateSession', 'InvokeTool', ...BROWSER_RESEARCH_ACTIONS])}) &&
+  (${actionExpression(['ReadEnvironment', 'ReadFiles', 'PublishFiles', 'CreateSession', 'InvokeTool', ...BROWSER_RESEARCH_ACTIONS])}) &&
   resource has assignedUsers && resource.assignedUsers.contains(principal)
 };
 

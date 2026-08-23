@@ -425,16 +425,22 @@ export class PapyrusService {
     return resumed
   }
 
-  startPrompt(actor: Principal, sessionId: string, prompt: string, attachmentIds: string[] = []): SessionRun {
+  async startPrompt(actor: Principal, sessionId: string, prompt: string, attachmentIds: string[] = []): Promise<SessionRun> {
     let started: SessionRun | undefined
     const completion = this.prompt(actor, sessionId, prompt, {
       attachmentIds,
       onRunStarted: (run) => { started = run },
     })
+    if (!started) {
+      // Preserve authorization, lifecycle, and validation errors raised before a
+      // durable run is accepted. A successful prompt always invokes onRunStarted
+      // before its first asynchronous boundary.
+      await completion
+      throw new Error('Prompt could not be started')
+    }
     // The run belongs to the daemon, not to the browser request that submitted it.
     // prompt() persists failures and terminal state before rejecting.
     void completion.catch(() => undefined)
-    if (!started) throw new Error('Prompt could not be started')
     return started
   }
 

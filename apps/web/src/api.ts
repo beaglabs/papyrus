@@ -199,9 +199,6 @@ export async function deleteMcpServer(serverId: string): Promise<void> {
 export async function setMcpServerEnabled(serverId: string, enabled: boolean): Promise<McpServer> {
   return api(`/api/mcp/servers/${encodeURIComponent(serverId)}/state`, { method: 'POST', body: JSON.stringify({ enabled }) })
 }
-export async function grantMcpServer(environmentId: string, mcpServerId: string): Promise<void> {
-  await api('/api/mcp/environment-grants', { method: 'POST', body: JSON.stringify({ environmentId, mcpServerId }) })
-}
 export async function revokeToolGrant(grantId: string): Promise<void> {
   await api(`/api/mcp/grants/${encodeURIComponent(grantId)}`, { method: 'DELETE' })
 }

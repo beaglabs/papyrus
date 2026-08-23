@@ -30,6 +30,7 @@ export function SessionHarness({ environments, newSessionRequest, onActivate }: 
   const streamRef = useRef<EventSource | null>(null)
   const messagesRef = useRef<HTMLDivElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const newPromptRef = useRef<HTMLTextAreaElement | null>(null)
   const selected = sessions.find((session) => session.id === selectedId)
   const messages = useMemo(() => acpContent(events), [events])
   const activeThoughtId = useMemo(() => { const lastUser = [...messages].reverse().find((message) => message.role === 'user')?.sequence ?? -1; return [...messages].reverse().find((message) => message.role === 'thought' && message.sequence > lastUser)?.id }, [messages])
@@ -62,6 +63,7 @@ export function SessionHarness({ environments, newSessionRequest, onActivate }: 
     setRunning(false)
     setError(undefined)
     setDraftAttachmentIds([])
+    requestAnimationFrame(() => newPromptRef.current?.focus())
   }, [newSessionRequest])
   useEffect(() => {
     if (!followingLatest) return
@@ -136,6 +138,7 @@ export function SessionHarness({ environments, newSessionRequest, onActivate }: 
     setError(undefined)
     setDraftAttachmentIds([])
     onActivate()
+    requestAnimationFrame(() => newPromptRef.current?.focus())
   }
 
   const send = async (event: FormEvent<HTMLFormElement>) => {
@@ -192,7 +195,7 @@ export function SessionHarness({ environments, newSessionRequest, onActivate }: 
     </aside>, historyTarget)}
     <div className={`conversation-panel ${selected ? '' : 'new-session-panel'}`}>
       {error && <Alert className="error">{error}<Button variant="ghost" onClick={() => setError(undefined)}>×</Button></Alert>}
-      {!selected ? <div className="new-session-home"><div className="new-session-intro"><p className="eyebrow">NEW DURABLE SESSION</p><h2>What should we work on?</h2><p>Your first prompt creates the session automatically and keeps the complete governed history.</p></div><form className="new-session-composer" onSubmit={startNewSession}><Textarea name="prompt" autoFocus disabled={running} placeholder="Describe the work to perform…" onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} /><div className="new-session-controls"><div className="new-session-environment"><span>Environment</span><Combobox value={newEnvironmentId} onValueChange={setNewEnvironmentId} options={environments.map((environment) => ({ value: environment.id, label: environment.name, ...(environment.description ? { detail: environment.description } : {}) }))} placeholder="Choose an environment" disabled={!environments.length || running} /></div><Button className="primary" disabled={!newEnvironmentId || running}>{running ? 'Starting…' : 'Start →'}</Button></div></form></div> : <>
+      {!selected ? <div className="new-session-home"><div className="new-session-intro"><p className="eyebrow">NEW DURABLE SESSION</p><h2>What should we work on?</h2><p>Your first prompt creates the session automatically and keeps the complete governed history.</p></div><form className="new-session-composer" onSubmit={startNewSession}><Textarea ref={newPromptRef} name="prompt" disabled={running} placeholder="Describe the work to perform…" onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} /><div className="new-session-controls"><div className="new-session-environment"><span>Environment</span><Combobox value={newEnvironmentId} onValueChange={setNewEnvironmentId} options={environments.map((environment) => ({ value: environment.id, label: environment.name, ...(environment.description ? { detail: environment.description } : {}) }))} placeholder="Choose an environment" disabled={!environments.length || running} /></div><Button className="primary" disabled={!newEnvironmentId || running}>{running ? 'Starting…' : 'Start →'}</Button></div></form></div> : <>
         <div className="conversation-head"><div><strong>{selected.title}</strong><span>{selected.status} · {environmentName(environments, selected.environmentId)}</span></div><div className="session-actions">{(running || selected.status === 'running') ? <Button className="danger" onClick={() => void cancel()}>Cancel run</Button> : <Button className="text-button" onClick={() => void removeSession()}>Delete</Button>}</div></div>
         <div className={`session-content ${artifactPanelOpen ? 'artifact-panel-open' : ''}`}>
           <div className="message-region">

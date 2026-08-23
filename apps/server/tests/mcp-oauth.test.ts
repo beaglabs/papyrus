@@ -1,9 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { exchangeMcpCode, registerRemoteMcp } from '../src/mcp-oauth.js'
+import { exchangeMcpCode, normalizeMcpEndpoint, registerRemoteMcp } from '../src/mcp-oauth.js'
 
 afterEach(() => vi.unstubAllGlobals())
 
 describe('remote MCP OAuth 2.1 registration', () => {
+  it('normalizes Atlassian legacy MCP URLs to the OAuth-capable endpoint', () => {
+    expect(normalizeMcpEndpoint('https://mcp.atlassian.com/v1/mcp')).toBe('https://mcp.atlassian.com/v1/mcp/authv2')
+    expect(normalizeMcpEndpoint('https://mcp.example/mcp')).toBe('https://mcp.example/mcp')
+  })
+
   it('discovers metadata, dynamically registers, and creates a PKCE authorization request', async () => {
     const fetch = vi.fn()
       .mockResolvedValueOnce(new Response('', { status: 401, headers: { 'www-authenticate': 'Bearer resource_metadata="https://mcp.example/.well-known/oauth-protected-resource/mcp"' } }))

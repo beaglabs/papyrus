@@ -151,7 +151,7 @@ describe('Papyrus control plane', () => {
     const { owner, user, environment } = setup(context)
     context.service.assign(owner, user.id, environment.id)
     const session = context.service.createSession(user, environment.id, 'papyrus', 'Detached')
-    const run = context.service.startPrompt(user, session.id, 'keep going')
+    const run = await context.service.startPrompt(user, session.id, 'keep going')
     expect(run.status).toBe('running')
     expect(context.db.getSession(session.id)?.status).toBe('running')
     expect(context.db.listSessionEvents(session.id, 0, 100).map((event) => event.kind)).toEqual(['run', 'update'])

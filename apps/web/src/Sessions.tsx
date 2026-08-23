@@ -5,7 +5,7 @@ import { SourceList } from './Sources.js'
 import { SelectField } from './SelectField.js'
 import { acpContent, ContentMessage } from './AcpSessionContent.js'
 import { createPortal } from 'react-dom'
-import { Alert, Button, Input, Textarea, NativeSelect, TabsList, TabsTrigger, Card } from './components/ui/index.js'
+import { Alert, Button, Card, Combobox, Input, Textarea } from './components/ui/index.js'
 
 interface ToolActivity { id: string; title: string; kind: string; status: string; sequence: number; locations: string[]; terminals: string[] }
 interface PlanItem { content: string; status: string; priority: string }

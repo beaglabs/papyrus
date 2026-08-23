@@ -419,10 +419,21 @@ export class PapyrusService {
       ...(prompt ? [{ type: 'text' as const, text: prompt }] : []),
       ...attachments.map((attachment): ContentBlock => attachmentContentBlock(sessionId, attachment)),
     ]
+    const displayedBlocks: ContentBlock[] = [
+      ...(prompt ? [{ type: 'text' as const, text: prompt }] : []),
+      ...attachments.map((attachment): ContentBlock => ({
+        type: 'resource_link',
+        uri: attachmentUri(sessionId, attachment),
+        name: attachment.name,
+        title: attachment.name,
+        mimeType: attachment.mediaType,
+        size: attachment.size,
+      })),
+    ]
     const run = this.beginRun(session, actor, options.signal)
     try {
       const runtime = this.runtimeFactory({ promptTimeoutMs: this.config.promptTimeoutMs })
-      for (const content of contentBlocks) {
+      for (const content of displayedBlocks) {
         this.db.addRuntimeEvent(session.id, run.runId, 'update', new Date().toISOString(), {
           sessionUpdate: 'user_message_chunk',
           content,
@@ -913,8 +924,12 @@ export class PapyrusService {
   }
 }
 
+function attachmentUri(sessionId: string, attachment: Attachment): string {
+  return `papyrus://sessions/${sessionId}/attachments/${attachment.id}/${encodeURIComponent(attachment.name)}`
+}
+
 function attachmentContentBlock(sessionId: string, attachment: Attachment & { content: Buffer }): ContentBlock {
-  const uri = `papyrus://sessions/${sessionId}/attachments/${attachment.id}/${encodeURIComponent(attachment.name)}`
+  const uri = attachmentUri(sessionId, attachment)
   if (attachment.mediaType.startsWith('image/')) {
     return { type: 'image', data: attachment.content.toString('base64'), mimeType: attachment.mediaType }
   }

@@ -150,6 +150,82 @@ describe('session authentication', () => {
 })
 
 describe('CAC/PIV federation', () => {
+  it('uses the enrolled government profile name instead of the certificate subject', () => {
+    const ctx = testContext()
+    try {
+      const owner = ctx.db.upsertUser({ externalId: 'x509:edipi:0000000001', displayName: 'Deployment Owner', authMethod: 'mtls' })
+      ctx.db.setRole(owner.id, 'Owner')
+      ctx.db.setSetting('bootstrapComplete', 'true')
+      ctx.db.createInvitation({
+        identityKind: 'edipi',
+        identityValue: '1234567890',
+        displayName: 'James Bohrman',
+        email: 'james@beaglabs.com',
+        role: 'Member',
+        authMethod: 'mtls',
+        invitedBy: owner.id,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      })
+
+      const resolved = ctx.db.resolveAuthenticatedUser({
+        externalId: 'x509:edipi:1234567890',
+        displayName: 'BOHRMAN.JAMES.1234567890',
+        email: 'certificate-contact@example.test',
+        authMethod: 'mtls',
+      }, [{ kind: 'edipi', value: '1234567890' }])
+
+      expect(resolved.created).toBe(true)
+      expect(resolved.principal.displayName).toBe('James Bohrman')
+      expect(resolved.principal.email).toBe('james@beaglabs.com')
+    } finally { ctx.dispose() }
+  })
+
+  it('preserves the enrolled name on later CAC/PIV authentications', () => {
+    const ctx = testContext()
+    try {
+      const enrolled = ctx.db.upsertUser({
+        externalId: 'x509:edipi:1234567890',
+        displayName: 'James Bohrman',
+        email: 'james@beaglabs.com',
+        authMethod: 'mtls',
+      })
+
+      const resolved = ctx.db.resolveAuthenticatedUser({
+        externalId: enrolled.externalId,
+        displayName: 'BOHRMAN.JAMES.1234567890',
+        email: 'certificate-contact@example.test',
+        authMethod: 'mtls',
+      }, [{ kind: 'edipi', value: '1234567890' }])
+
+      expect(resolved.created).toBe(false)
+      expect(resolved.principal.displayName).toBe('James Bohrman')
+      expect(resolved.principal.email).toBe('james@beaglabs.com')
+    } finally { ctx.dispose() }
+  })
+
+  it('preserves the stored profile while migrating a legacy certificate fingerprint identity', () => {
+    const ctx = testContext()
+    try {
+      const legacy = ctx.db.upsertUser({
+        externalId: 'x509:AA:BB:CC',
+        displayName: 'James Bohrman',
+        email: 'james@beaglabs.com',
+        authMethod: 'mtls',
+      })
+      const migrated = ctx.db.migrateExternalIdentity('x509:AA:BB:CC', {
+        externalId: 'x509:edipi:1234567890',
+        displayName: 'BOHRMAN.JAMES.1234567890',
+        email: 'certificate-contact@example.test',
+        authMethod: 'mtls',
+      })
+
+      expect(migrated?.id).toBe(legacy.id)
+      expect(migrated?.externalId).toBe('x509:edipi:1234567890')
+      expect(migrated?.displayName).toBe('James Bohrman')
+      expect(migrated?.email).toBe('james@beaglabs.com')
+    } finally { ctx.dispose() }
+  })
+
   it('accepts a forwarded user certificate only from an allowlisted mTLS proxy', () => {
     const ctx = testContext()
     try {

@@ -4,7 +4,7 @@ import { SessionHarness } from './Sessions.js'
 import { SourcesView } from './Sources.js'
 import { AdminView } from './Admin.js'
 import { EnvironmentsView } from './Environments.js'
-import { Button, Input } from './components/ui/index.js'
+import { Avatar, Button, Input } from './components/ui/index.js'
 
 type View = 'home' | 'sessions' | 'environments' | 'sources' | 'administration'
 type AppState =
@@ -21,16 +21,16 @@ function Logo() {
 function OrganizationMark({ health }: { health: Health }) {
   const [failed, setFailed] = useState(false)
   const name = health.branding.organizationName
-  return <div className="organization-mark">{health.branding.logoUrl && !failed
+  return <Avatar className="organization-mark">{health.branding.logoUrl && !failed
     ? <img src={health.branding.logoUrl} alt={`${name} logo`} referrerPolicy="no-referrer" onError={() => setFailed(true)} />
-    : <span aria-hidden="true">{initials(name)}</span>}</div>
+    : <span aria-hidden="true">{initials(name)}</span>}</Avatar>
 }
 
 function UserAvatar({ name, pictureUrl }: { name: string; pictureUrl?: string }) {
   const [failed, setFailed] = useState(false)
-  return <div className="avatar">{pictureUrl && !failed
+  return <Avatar className="avatar">{pictureUrl && !failed
     ? <img src={pictureUrl} alt="" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
-    : <span aria-hidden="true">{initials(name)}</span>}</div>
+    : <span aria-hidden="true">{initials(name)}</span>}</Avatar>
 }
 
 function HandlingBanner({ profile }: { profile: string }) {

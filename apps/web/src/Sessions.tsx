@@ -32,6 +32,7 @@ export function SessionHarness({ environments }: { environments: Environment[] }
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const selected = sessions.find((session) => session.id === selectedId)
   const messages = useMemo(() => acpContent(events), [events])
+  const artifactGenerating = useMemo(() => running && isArtifactGenerationActive(events), [events, running])
 
   const loadContext = async (sessionId: string) => {
     const [nextArtifacts, nextApprovals, nextAttachments, nextElicitations] = await Promise.all([sessionArtifacts(sessionId), sessionApprovals(sessionId), sessionAttachments(sessionId), sessionElicitations(sessionId)])
@@ -51,6 +52,9 @@ export function SessionHarness({ environments }: { environments: Environment[] }
     const frame = requestAnimationFrame(() => messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' }))
     return () => cancelAnimationFrame(frame)
   }, [messages, running, followingLatest])
+  useEffect(() => {
+    if (artifactGenerating) setArtifactPanelOpen(true)
+  }, [artifactGenerating])
   useEffect(() => {
     if (artifacts.length > knownArtifactCount.current) {
       setSelectedArtifactId(artifacts.at(-1)?.id)
@@ -159,7 +163,7 @@ export function SessionHarness({ environments }: { environments: Environment[] }
             }}>{messages.length ? messages.map((message) => <ContentMessage message={message} key={message.id} />) : <div className="conversation-empty compact"><h2>What should Papyrus do?</h2><p>Attach context or describe the work.</p></div>}{running && <PromptTurnFlow events={events} />}</div>
             {!followingLatest && <Button className="jump-latest" onClick={() => { setFollowingLatest(true); messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' }) }}>Jump to latest ↓</Button>}
           </div>
-          <ArtifactWorkspace artifacts={artifacts} generating={running && isArtifactGenerationActive(events)} open={artifactPanelOpen} selectedId={selectedArtifactId} onOpenChange={setArtifactPanelOpen} onSelect={setSelectedArtifactId} />
+          <ArtifactWorkspace artifacts={artifacts} generating={artifactGenerating} open={artifactPanelOpen} selectedId={selectedArtifactId} onOpenChange={setArtifactPanelOpen} onSelect={setSelectedArtifactId} />
         </div>
         <div className="session-footer">
         {approvals.filter((approval) => approval.status === 'pending').map((approval) => <ApprovalCard key={approval.id} approval={approval} onDecision={reviewApproval} />)}

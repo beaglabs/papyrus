@@ -67,10 +67,15 @@ URLs, logs, analytics, and browser storage. The bearer session is accepted in
 ## CAC/PIV
 
 Government profiles support direct CA-validated client mTLS. Papyrus derives a renewal-stable local identity from a validated EDIPI, UPN,
-or issuer-bound organizational email, in that order. The certificate fingerprint
-is retained only as authentication evidence. Certificates without a stable
-organizational identifier fall back to fingerprint identity and therefore require
-administrative reconciliation after renewal.
+PIV UUID, FASC-N, or issuer-plus-subject selector. The certificate fingerprint is
+retained only as authentication evidence and can migrate legacy fingerprint-keyed
+accounts to a stable selector.
+
+Certificate subject and CN values are authentication metadata, not authoritative
+profile names. After a pending government identity is matched, its administratively
+enrolled display name and contact email take precedence. Later CAC/PIV logins and
+certificate renewal preserve that stored profile. The certificate CN is used only
+as a bootstrap or last-resort display fallback when no enrolled profile exists.
 
 For an external CAC/PIV identity proxy, configure:
 

@@ -264,9 +264,18 @@ export class PapyrusDatabase {
     if (!legacy) return undefined
     const collision = this.sqlite.prepare('SELECT id FROM users WHERE external_id=?').get(input.externalId) as Row | undefined
     if (collision && String(collision.id) !== String(legacy.id)) throw new Error('Stable identity is already assigned to another user')
-    this.sqlite.prepare('UPDATE users SET external_id=?,display_name=?,email=?,picture_url=?,auth_method=? WHERE id=?')
-      .run(input.externalId, input.displayName, input.email ?? null, input.pictureUrl ?? null, input.authMethod, String(legacy.id))
-    return this.getPrincipal(String(legacy.id))
+    const legacyId = String(legacy.id)
+    if (input.authMethod === 'mtls') {
+      // A certificate subject is authentication evidence, not authoritative
+      // profile data. Preserve the administratively enrolled display name
+      // while migrating fingerprint-keyed identities to stable selectors.
+      this.sqlite.prepare('UPDATE users SET external_id=?,email=COALESCE(email,?),auth_method=? WHERE id=?')
+        .run(input.externalId, input.email ?? null, input.authMethod, legacyId)
+    } else {
+      this.sqlite.prepare('UPDATE users SET external_id=?,display_name=?,email=?,picture_url=?,auth_method=? WHERE id=?')
+        .run(input.externalId, input.displayName, input.email ?? null, input.pictureUrl ?? null, input.authMethod, legacyId)
+    }
+    return this.getPrincipal(legacyId)
   }
 
   resolveAuthenticatedUser(
@@ -274,7 +283,18 @@ export class PapyrusDatabase {
     selectors: Array<{ kind: InvitationIdentityKind; value: string }>,
   ): { principal: Principal; invitation?: Invitation; created: boolean } {
     const existing = this.sqlite.prepare('SELECT id FROM users WHERE external_id=?').get(input.externalId) as Row | undefined
-    if (existing) return { principal: this.upsertUser(input), created: false }
+    if (existing) {
+      const id = String(existing.id)
+      if (input.authMethod === 'mtls') {
+        // CAC/PIV certificate subjects frequently contain identifiers and
+        // formatting intended for authentication, not a user-facing name.
+        // Keep the enrolled profile stable across certificate renewal/login.
+        this.sqlite.prepare('UPDATE users SET email=COALESCE(email,?),auth_method=? WHERE id=?')
+          .run(input.email ?? null, input.authMethod, id)
+        return { principal: this.getPrincipal(id) as Principal, created: false }
+      }
+      return { principal: this.upsertUser(input), created: false }
+    }
     if (this.getSetting('bootstrapComplete') !== 'true') return { principal: this.upsertUser(input), created: true }
     const now = new Date().toISOString()
     let pending: Row | undefined
@@ -286,8 +306,13 @@ export class PapyrusDatabase {
     if (!pending) throw new Error('INVITATION_REQUIRED')
     return this.transaction(() => {
       const id = crypto.randomUUID()
-      const displayName = input.displayName && input.displayName !== 'CAC/PIV user' ? input.displayName : String(pending.display_name)
-      const email = input.email ?? (pending.email ? String(pending.email) : undefined)
+      const certificateBacked = input.authMethod === 'mtls'
+      const displayName = certificateBacked
+        ? String(pending.display_name)
+        : input.displayName || String(pending.display_name)
+      const email = certificateBacked
+        ? (pending.email ? String(pending.email) : input.email)
+        : input.email ?? (pending.email ? String(pending.email) : undefined)
       this.sqlite.prepare('INSERT INTO users(id,external_id,display_name,email,picture_url,auth_method,created_at) VALUES(?,?,?,?,?,?,?)')
         .run(id, input.externalId, displayName, email ?? null, input.pictureUrl ?? null, input.authMethod, now)
       this.sqlite.prepare('INSERT INTO user_roles(user_id,role) VALUES(?,?)').run(id, String(pending.role))

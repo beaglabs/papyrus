@@ -2,7 +2,7 @@ import { createServer as createHttpServer, type IncomingMessage, type Server, ty
 import { createServer as createHttpsServer } from 'node:https'
 import { readFileSync } from 'node:fs'
 import { extname, join, normalize } from 'node:path'
-import { ROLES, SESSION_SURFACES, type Role, type SessionSurface, type SignedLicense } from '@papyrus/contracts'
+import { APPROVED_SOURCE_KINDS, ROLES, SESSION_SURFACES, type ApprovedSourceKind, type Role, type SessionSurface, type SignedLicense } from '@papyrus/contracts'
 import { AuthService } from './auth.js'
 import type { ServerConfig } from './config.js'
 import { ApprovalLifecycleError, AuthorizationDenied, PapyrusService, SessionLifecycleError } from './service.js'
@@ -476,7 +476,30 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
         return json(response, 200, await service.invokeTool(principal, text(input.sessionId, 'sessionId'), text(input.mcpServerId, 'mcpServerId'), text(input.toolName, 'toolName'), input.arguments ?? {}))
       }
       if (url.pathname === '/api/activity' && request.method === 'GET') return json(response, 200, service.activity(principal))
-      if (url.pathname === '/api/sources' && request.method === 'GET') return json(response, 200, { sources: service.researchSources(principal) })
+      if (url.pathname === '/api/sources' && request.method === 'GET') return json(response, 200, { sources: service.listApprovedSources(principal) })
+      if (url.pathname === '/api/sources/search' && request.method === 'GET') return json(response, 200, { results: service.searchApprovedSources(principal, text(url.searchParams.get('q'), 'q', 512), naturalNumber(url.searchParams.get('limit'), 10, 50, 1)) })
+      const sourceChunk = url.pathname.match(/^\/api\/sources\/chunks\/([^/]+)$/)
+      if (sourceChunk && request.method === 'GET') return json(response, 200, service.readApprovedSource(principal, decodeURIComponent(sourceChunk[1] as string)))
+      if (url.pathname === '/api/admin/sources' && request.method === 'POST') {
+        const input = await body(request)
+        const kind = text(input.kind,'kind') as ApprovedSourceKind
+        if (!APPROVED_SOURCE_KINDS.includes(kind)) throw new HttpError(400,'INVALID_INPUT','Unknown source kind')
+        const mode = text(input.mode ?? 'snapshot','mode') as 'snapshot'|'live'
+        if (!['snapshot','live'].includes(mode)) throw new HttpError(400,'INVALID_INPUT','Unknown source mode')
+        return json(response,201,service.createApprovedSource(principal,{name:text(input.name,'name'),kind,locator:text(input.locator,'locator',4096),mode}))
+      }
+      const sourceAssignment = url.pathname.match(/^\/api\/admin\/sources\/([^/]+)\/assignments\/([^/]+)$/)
+      if (sourceAssignment && request.method === 'PUT') {
+        const input = await body(request)
+        service.assignApprovedSource(principal,identifier(sourceAssignment[1],'sourceId'),identifier(sourceAssignment[2],'userId'),boolean(input.assigned,'assigned'))
+        return json(response,204,null)
+      }
+      const sourceIngest = url.pathname.match(/^\/api\/admin\/sources\/([^/]+)\/documents$/)
+      if (sourceIngest && request.method === 'POST') {
+        const input = await body(request)
+        service.ingestApprovedSource(principal,identifier(sourceIngest[1],'sourceId'),{uri:text(input.uri,'uri',4096),title:text(input.title,'title',512),mediaType:text(input.mediaType ?? 'text/plain','mediaType',128),content:text(input.content,'content',900000)})
+        return json(response,204,null)
+      }
       if (url.pathname === '/api/audit' && request.method === 'GET') return json(response, 200, service.auditEvents(principal))
       if (url.pathname === '/api/audit/checkpoint' && request.method === 'GET') return json(response, 200, service.exportAuditCheckpoint(principal))
       if (url.pathname === '/api/license/activate' && request.method === 'POST') return json(response, 200, service.activateLicense(principal, await body(request) as unknown as SignedLicense))

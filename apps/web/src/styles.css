@@ -415,3 +415,80 @@ nav [data-slot=button].active{border-color:var(--border);background:var(--main);
 [data-slot=dialog-header] h2{margin:0}[data-slot=dialog-content]>p{margin:20px 0;line-height:1.5;color:#555}
 [data-slot=dialog-footer]{display:flex;justify-content:flex-end;gap:10px;padding-top:18px;border-top:1px solid #ccc}
 .oauth-registration-dialog .facts{margin-top:18px}
+
+
+/* Live ACP prompt-turn lifecycle */
+.prompt-turn-flow {
+  width: min(760px, 92%);
+  display: grid;
+  gap: 10px;
+  justify-self: start;
+  padding: 2px 0 8px;
+}
+.prompt-turn-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #666;
+  font: 11px ui-monospace, monospace;
+}
+.prompt-turn-status strong {
+  color: var(--foreground);
+}
+.streaming-cursor {
+  color: #ff5f1f;
+  animation: terminal-cursor 1s steps(1) infinite;
+}
+.prompt-turn-plan {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 2px solid #aaa;
+  background: #f5f1e8;
+  list-style: none;
+  font-size: 12px;
+}
+.prompt-turn-plan li {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+.prompt-turn-plan li.completed {
+  color: #666;
+  text-decoration: line-through;
+}
+.prompt-turn-tools {
+  display: grid;
+  gap: 8px;
+}
+.prompt-turn-tool[data-slot=card] {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-width: 1px;
+  border-radius: 7px;
+  box-shadow: 2px 2px 0 #111;
+}
+.prompt-turn-tool > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.prompt-turn-tool small {
+  overflow: hidden;
+  color: #666;
+  font: 10px ui-monospace, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prompt-turn-tool.completed {
+  box-shadow: 2px 2px 0 #71df98;
+}
+.prompt-turn-tool.failed {
+  box-shadow: 2px 2px 0 #ff9fb4;
+}

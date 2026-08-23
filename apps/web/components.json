@@ -1,0 +1,19 @@
+{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "style": "new-york",
+  "rsc": false,
+  "tsx": true,
+  "tailwind": {
+    "css": "src/styles.css",
+    "baseColor": "neutral",
+    "cssVariables": true
+  },
+  "aliases": {
+    "components": "./src/components",
+    "ui": "./src/components/ui",
+    "utils": "./src/components/ui"
+  },
+  "registries": {
+    "@neobrutalism": "https://neobrutalism.dev/r/{name}.json"
+  }
+}

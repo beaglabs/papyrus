@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import type { ApprovedSource, ResearchSource, SourceSearchResult } from '@papyrus/contracts'
 import { approvedSources, searchApprovedSources } from './api.js'
+import { Badge, Button, Card, Input } from './components/ui/index.js'
 
 export function SourcesView() {
   const [sources,setSources]=useState<ApprovedSource[]>([])
@@ -20,14 +21,14 @@ export function SourcesView() {
   return <div className="approved-sources-view">
     <section className="source-catalog">
       <div className="section-heading"><div><p className="eyebrow">YOUR ACCESS</p><h2>Approved sources</h2></div><span>{sources.length}</span></div>
-      {sources.length?<div className="source-cards">{sources.map(source=><article key={source.id}>
-        <div><strong>{source.name}</strong><span className="source-kind">{source.kind}</span></div>
+      {sources.length?<div className="source-cards">{sources.map(source=><Card key={source.id}>
+        <div><strong>{source.name}</strong><Badge className="source-kind">{source.kind}</Badge></div>
         <code>{source.locator}</code>
         <p>{source.documentCount} indexed {source.documentCount===1?'document':'documents'} · {source.mode}</p>
-      </article>)}</div>:<div className="conversation-empty"><h2>No sources assigned.</h2><p>An Owner or Admin can assign approved uploads, directories, domains, MCP connectors, packages, or APIs to your identity.</p></div>}
+      </Card>)}</div>:<div className="conversation-empty"><h2>No sources assigned.</h2><p>An Owner or Admin can assign approved uploads, directories, domains, MCP connectors, packages, or APIs to your identity.</p></div>}
     </section>
     <section className="source-search">
-      <form onSubmit={search}><input name="query" aria-label="Search approved sources" placeholder="Search only the sources you can access…" /><button className="primary" disabled={searching||!sources.length}>{searching?'Searching…':'Search'}</button></form>
+      <form onSubmit={search}><Input name="query" aria-label="Search approved sources" placeholder="Search only the sources you can access…" /><Button className="primary" disabled={searching||!sources.length}>{searching?'Searching…':'Search'}</Button></form>
       {error&&<div className="error">{error}</div>}
       <div className="source-results">{results.map(result=><article key={result.chunkId}>
         <p>{result.content}</p>

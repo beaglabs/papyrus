@@ -65,7 +65,7 @@ export class PapyrusWorker implements AgentRuntime {
     const content = String(args.content ?? '')
     await fs.mkdir(resolve(path, '..'), { recursive: true })
     await fs.writeFile(path, content, 'utf-8')
-    return { type: 'text', text: `Wrote ${content.length} bytes to ${path}` }
+    return { type: 'resource', resource: { uri: `file://${path}`, mimeType: mediaTypeForPath(path), text: content } }
   }
 
   private async listFilesTool(args: Record<string, unknown>): Promise<unknown> {
@@ -381,7 +381,7 @@ export class PapyrusWorker implements AgentRuntime {
               title: name,
               kind: toolKind,
               status: 'completed',
-              content: [{ type: 'content', content: { type: 'text', text: safeJson(result) } }],
+              content: toolUpdateContent(result),
             },
           })
         } catch (error) {
@@ -516,6 +516,21 @@ function promptContent(prompt: string | ContentBlock[]): string | Array<Record<s
     }
   }
   return content.length ? content : ''
+}
+
+function toolUpdateContent(result: unknown): Array<{ type: 'content'; content: unknown }> {
+  if (isRecord(result) && Array.isArray(result.content)) {
+    return result.content.map((content) => ({ type: 'content' as const, content }))
+  }
+  if (isRecord(result) && typeof result.type === 'string' && ['text', 'image', 'audio', 'resource', 'resource_link'].includes(result.type)) {
+    return [{ type: 'content', content: result }]
+  }
+  return [{ type: 'content', content: { type: 'text', text: safeJson(result) } }]
+}
+
+function mediaTypeForPath(path: string): string {
+  const extension = path.toLowerCase().split('.').at(-1)
+  return ({ md: 'text/markdown', txt: 'text/plain', json: 'application/json', csv: 'text/csv', html: 'text/html', xml: 'application/xml', js: 'text/javascript', ts: 'text/typescript', css: 'text/css' } as Record<string, string>)[extension ?? ''] ?? 'text/plain'
 }
 
 function parseArguments(value: string): Record<string, unknown> {

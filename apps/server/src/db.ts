@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import type { AgentDrive, Approval, Attachment, Elicitation, Environment, Invitation, InvitationIdentityKind, McpServer, Principal, Role, Session, SessionEvent, SessionSurface, SessionRun, ToolGrant } from '@papyrus/contracts'
+import type { Approval, Attachment, Elicitation, Environment, Invitation, InvitationIdentityKind, McpServer, Principal, Role, Session, SessionEvent, SessionSurface, SessionRun, ToolGrant, FileMount, FileMountAccess, FileProposal, FileVersion } from '@papyrus/contracts'
 
 type Row = Record<string, unknown>
 
@@ -52,15 +52,28 @@ export class PapyrusDatabase {
         resource_type TEXT NOT NULL, resource_id TEXT NOT NULL, created_at TEXT NOT NULL,
         PRIMARY KEY (principal_type, principal_id, resource_type, resource_id)
       );
-      CREATE TABLE IF NOT EXISTS agent_drives (
-        id TEXT PRIMARY KEY, name TEXT NOT NULL, database_path TEXT NOT NULL UNIQUE,
+      CREATE TABLE IF NOT EXISTS file_mounts (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, root_path TEXT NOT NULL UNIQUE,
         created_by TEXT NOT NULL REFERENCES users(id), created_at TEXT NOT NULL
       );
-      CREATE TABLE IF NOT EXISTS agent_drive_assignments (
-        drive_id TEXT NOT NULL REFERENCES agent_drives(id) ON DELETE CASCADE,
+      CREATE TABLE IF NOT EXISTS file_mount_assignments (
+        mount_id TEXT NOT NULL REFERENCES file_mounts(id) ON DELETE CASCADE,
         user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        access TEXT NOT NULL CHECK(access IN ('read','publish')),
         assigned_by TEXT NOT NULL REFERENCES users(id), assigned_at TEXT NOT NULL,
-        PRIMARY KEY (drive_id, user_id)
+        PRIMARY KEY (mount_id, user_id)
+      );
+      CREATE TABLE IF NOT EXISTS file_proposals (
+        id TEXT PRIMARY KEY, mount_id TEXT NOT NULL REFERENCES file_mounts(id),
+        path TEXT NOT NULL, base_sha256 TEXT, proposed_sha256 TEXT NOT NULL,
+        content BLOB NOT NULL, status TEXT NOT NULL,
+        created_by TEXT NOT NULL REFERENCES users(id), created_at TEXT NOT NULL, published_at TEXT
+      );
+      CREATE TABLE IF NOT EXISTS file_versions (
+        id TEXT PRIMARY KEY, mount_id TEXT NOT NULL REFERENCES file_mounts(id),
+        path TEXT NOT NULL, sha256 TEXT NOT NULL, content BLOB NOT NULL,
+        operation TEXT NOT NULL CHECK(operation IN ('publish','rollback')),
+        actor_id TEXT NOT NULL REFERENCES users(id), created_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id),
@@ -365,41 +378,82 @@ export class PapyrusDatabase {
     return [...new Set([...direct, ...groups].map((row) => String(row.id)))]
   }
 
-  createAgentDrive(name: string, databasePath: string, createdBy: string): AgentDrive {
-    const drive: AgentDrive = { id: crypto.randomUUID(), name, readOnly: true, createdAt: new Date().toISOString() }
-    this.sqlite.prepare('INSERT INTO agent_drives(id,name,database_path,created_by,created_at) VALUES(?,?,?,?,?)')
-      .run(drive.id, name, databasePath, createdBy, drive.createdAt)
-    return drive
+  createFileMount(name: string, rootPath: string, createdBy: string): { id: string; name: string; rootPath: string; createdAt: string } {
+    const mount = { id: crypto.randomUUID(), name, rootPath, createdAt: new Date().toISOString() }
+    this.sqlite.prepare('INSERT INTO file_mounts(id,name,root_path,created_by,created_at) VALUES(?,?,?,?,?)')
+      .run(mount.id, name, rootPath, createdBy, mount.createdAt)
+    return mount
   }
 
-  getAgentDrive(id: string): (AgentDrive & { databasePath: string }) | undefined {
-    return this.sqlite.prepare('SELECT id,name,database_path databasePath,1 readOnly,created_at createdAt FROM agent_drives WHERE id=?')
-      .get(id) as unknown as (AgentDrive & { databasePath: string }) | undefined
+  getFileMount(id: string): { id: string; name: string; rootPath: string; createdAt: string } | undefined {
+    return this.sqlite.prepare('SELECT id,name,root_path rootPath,created_at createdAt FROM file_mounts WHERE id=?')
+      .get(id) as unknown as { id: string; name: string; rootPath: string; createdAt: string } | undefined
   }
 
-  listAgentDrives(): Array<AgentDrive & { databasePath: string }> {
-    return this.sqlite.prepare('SELECT id,name,database_path databasePath,1 readOnly,created_at createdAt FROM agent_drives ORDER BY name')
-      .all() as unknown as Array<AgentDrive & { databasePath: string }>
+  listFileMounts(): Array<{ id: string; name: string; rootPath: string; createdAt: string }> {
+    return this.sqlite.prepare('SELECT id,name,root_path rootPath,created_at createdAt FROM file_mounts ORDER BY name')
+      .all() as unknown as Array<{ id: string; name: string; rootPath: string; createdAt: string }>
   }
 
-  listAgentDrivesForUser(userId: string): AgentDrive[] {
-    return this.sqlite.prepare(`SELECT d.id,d.name,1 readOnly,d.created_at createdAt
-      FROM agent_drives d JOIN agent_drive_assignments a ON a.drive_id=d.id
-      WHERE a.user_id=? ORDER BY d.name`).all(userId) as unknown as AgentDrive[]
+  listFileMountsForUser(userId: string): FileMount[] {
+    return this.sqlite.prepare(`SELECT m.id,m.name,a.access,m.created_at createdAt
+      FROM file_mounts m JOIN file_mount_assignments a ON a.mount_id=m.id
+      WHERE a.user_id=? ORDER BY m.name`).all(userId) as unknown as FileMount[]
   }
 
-  assignedAgentDriveUserIds(driveId: string): string[] {
-    return (this.sqlite.prepare('SELECT user_id id FROM agent_drive_assignments WHERE drive_id=? ORDER BY assigned_at')
-      .all(driveId) as Row[]).map((row) => String(row.id))
+  fileMountAssignments(mountId: string): Array<{ userId: string; access: FileMountAccess }> {
+    return this.sqlite.prepare('SELECT user_id userId,access FROM file_mount_assignments WHERE mount_id=? ORDER BY assigned_at')
+      .all(mountId) as unknown as Array<{ userId: string; access: FileMountAccess }>
   }
 
-  assignAgentDrive(driveId: string, userId: string, assignedBy: string): void {
-    this.sqlite.prepare('INSERT OR IGNORE INTO agent_drive_assignments(drive_id,user_id,assigned_by,assigned_at) VALUES(?,?,?,?)')
-      .run(driveId, userId, assignedBy, new Date().toISOString())
+  assignFileMount(mountId: string, userId: string, access: FileMountAccess, assignedBy: string): void {
+    this.sqlite.prepare(`INSERT INTO file_mount_assignments(mount_id,user_id,access,assigned_by,assigned_at) VALUES(?,?,?,?,?)
+      ON CONFLICT(mount_id,user_id) DO UPDATE SET access=excluded.access,assigned_by=excluded.assigned_by,assigned_at=excluded.assigned_at`)
+      .run(mountId, userId, access, assignedBy, new Date().toISOString())
   }
 
-  revokeAgentDrive(driveId: string, userId: string): boolean {
-    return Number(this.sqlite.prepare('DELETE FROM agent_drive_assignments WHERE drive_id=? AND user_id=?').run(driveId, userId).changes) > 0
+  revokeFileMount(mountId: string, userId: string): boolean {
+    return Number(this.sqlite.prepare('DELETE FROM file_mount_assignments WHERE mount_id=? AND user_id=?').run(mountId, userId).changes) > 0
+  }
+
+  createFileProposal(input: { mountId: string; path: string; baseSha256?: string; proposedSha256: string; content: Buffer; createdBy: string }): FileProposal {
+    const proposal: FileProposal = { id: crypto.randomUUID(), mountId: input.mountId, path: input.path, ...(input.baseSha256 ? { baseSha256: input.baseSha256 } : {}), proposedSha256: input.proposedSha256, status: 'pending', createdBy: input.createdBy, createdAt: new Date().toISOString() }
+    this.sqlite.prepare(`INSERT INTO file_proposals(id,mount_id,path,base_sha256,proposed_sha256,content,status,created_by,created_at)
+      VALUES(?,?,?,?,?,?,'pending',?,?)`).run(proposal.id, input.mountId, input.path, input.baseSha256 ?? null, input.proposedSha256, input.content, input.createdBy, proposal.createdAt)
+    return proposal
+  }
+
+  getFileProposal(id: string): (FileProposal & { content: Buffer }) | undefined {
+    return this.sqlite.prepare(`SELECT id,mount_id mountId,path,base_sha256 baseSha256,proposed_sha256 proposedSha256,
+      content,status,created_by createdBy,created_at createdAt,published_at publishedAt FROM file_proposals WHERE id=?`).get(id) as unknown as (FileProposal & { content: Buffer }) | undefined
+  }
+
+  listFileProposals(userId: string): FileProposal[] {
+    return this.sqlite.prepare(`SELECT id,mount_id mountId,path,base_sha256 baseSha256,proposed_sha256 proposedSha256,
+      status,created_by createdBy,created_at createdAt,published_at publishedAt FROM file_proposals
+      WHERE created_by=? ORDER BY created_at DESC`).all(userId) as unknown as FileProposal[]
+  }
+
+  setFileProposalStatus(id: string, status: FileProposal['status']): void {
+    this.sqlite.prepare('UPDATE file_proposals SET status=?,published_at=CASE WHEN ?=\'published\' THEN ? ELSE published_at END WHERE id=?')
+      .run(status, status, new Date().toISOString(), id)
+  }
+
+  createFileVersion(input: { mountId: string; path: string; sha256: string; content: Buffer; operation: FileVersion['operation']; actorId: string }): FileVersion {
+    const version: FileVersion = { id: crypto.randomUUID(), mountId: input.mountId, path: input.path, sha256: input.sha256, operation: input.operation, actorId: input.actorId, createdAt: new Date().toISOString() }
+    this.sqlite.prepare('INSERT INTO file_versions(id,mount_id,path,sha256,content,operation,actor_id,created_at) VALUES(?,?,?,?,?,?,?,?)')
+      .run(version.id, input.mountId, input.path, input.sha256, input.content, input.operation, input.actorId, version.createdAt)
+    return version
+  }
+
+  getFileVersion(id: string): (FileVersion & { content: Buffer }) | undefined {
+    return this.sqlite.prepare(`SELECT id,mount_id mountId,path,sha256,content,operation,actor_id actorId,created_at createdAt
+      FROM file_versions WHERE id=?`).get(id) as unknown as (FileVersion & { content: Buffer }) | undefined
+  }
+
+  listFileVersions(mountId: string, path: string): FileVersion[] {
+    return this.sqlite.prepare(`SELECT id,mount_id mountId,path,sha256,operation,actor_id actorId,created_at createdAt
+      FROM file_versions WHERE mount_id=? AND path=? ORDER BY created_at DESC`).all(mountId, path) as unknown as FileVersion[]
   }
 
   createSession(ownerId: string, environmentId: string, agent: string, title: string, cwd = '/', surface: SessionSurface = 'general'): Session {

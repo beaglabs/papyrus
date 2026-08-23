@@ -4,6 +4,7 @@ import { SessionHarness } from './Sessions.js'
 import { SourcesView } from './Sources.js'
 import { AdminView } from './Admin.js'
 import { EnvironmentsView } from './Environments.js'
+import { Button, Input } from './components/ui/index.js'
 
 type View = 'home' | 'sessions' | 'environments' | 'sources' | 'administration'
 type AppState =
@@ -63,7 +64,7 @@ export function App() {
   }, [refresh])
 
   if (state.phase === 'loading') return <main className="center"><Logo /><p className="eyebrow">OPENING GOVERNED WORKSPACE…</p></main>
-  if (state.phase === 'error') return <main className="center login"><Logo /><p className="eyebrow">PAPYRUS IS UNAVAILABLE</p><h1>Unable to open<br />the control plane.</h1><div className="error">{state.message}</div><button className="primary" onClick={() => void refresh()}>Try again →</button></main>
+  if (state.phase === 'error') return <main className="center login"><Logo /><p className="eyebrow">PAPYRUS IS UNAVAILABLE</p><h1>Unable to open<br />the control plane.</h1><div className="error">{state.message}</div><Button className="primary" onClick={() => void refresh()}>Try again →</Button></main>
   if (state.phase === 'signed-out') return <SignedOut health={state.health} challenge={state.challenge} />
   if (state.phase === 'enrollment-required') return <EnrollmentMissing health={state.health} />
   if (state.data.me.roles.length === 0) return <><HandlingBanner profile={state.data.health.profile} />{state.data.health.bootstrapRequired
@@ -96,7 +97,7 @@ export function App() {
       <main>
         <header>
           <div><p className="eyebrow">GOVERNED AGENT WORKSPACE</p><h1>{viewTitle(view)}</h1></div>
-          <div className="identity"><div><strong>{state.data.me.displayName}</strong><span>{state.data.me.roles.join(' · ')} · {state.data.me.authMethod}</span></div>{state.data.me.pictureUrl ? <UserAvatar name={state.data.me.displayName} pictureUrl={state.data.me.pictureUrl} /> : <UserAvatar name={state.data.me.displayName} />}<button className="text-button" onClick={() => void signOut()}>Sign out</button></div>
+          <div className="identity"><div><strong>{state.data.me.displayName}</strong><span>{state.data.me.roles.join(' · ')} · {state.data.me.authMethod}</span></div>{state.data.me.pictureUrl ? <UserAvatar name={state.data.me.displayName} pictureUrl={state.data.me.pictureUrl} /> : <UserAvatar name={state.data.me.displayName} />}<Button className="text-button" onClick={() => void signOut()}>Sign out</Button></div>
         </header>
         <ShellView view={view} data={state.data} onNavigate={setView} />
       </main>
@@ -123,7 +124,7 @@ function SignedOut({ health, challenge }: { health: Health; challenge: Authentic
     </main></>
   }
   return <><HandlingBanner profile={health.profile} /><main className="center login auth-entry"><Logo /><p className="eyebrow">GOVERNED AGENT WORKSPACE</p><h1>Identity before<br />authority.</h1><p>Papyrus binds every session, tool request, and policy decision to an authenticated organizational identity.</p><div className="auth-grid">
-    <article className="profile-card"><strong>CAC/PIV authentication</strong><p>Insert your card, select its authentication certificate when prompted, then reload this page.</p><button className="secondary" onClick={() => window.location.reload()}>Retry certificate authentication</button></article>
+    <article className="profile-card"><strong>CAC/PIV authentication</strong><p>Insert your card, select its authentication certificate when prompted, then reload this page.</p><Button className="secondary" onClick={() => window.location.reload()}>Retry certificate authentication</Button></article>
     {challenge.methods.includes('mtls-proxy') && <article className="profile-card"><strong>Trusted identity gateway</strong><p>Open Papyrus through your organization’s authorized access gateway.</p></article>}
   </div></main></>
 }
@@ -137,7 +138,7 @@ function EnrollmentMissing({ health }: { health: Health }) {
     <p>{government
       ? 'Ask an Owner or Admin to create a pending CAC/PIV identity using your EDIPI, UPN, PIV UUID, FASC-N, or certificate mapping.'
       : `Ask an Owner or Admin to invite your organizational email to ${health.branding.organizationName}.`}</p>
-    <button className="secondary" onClick={() => window.location.reload()}>Try again</button>
+    <Button className="secondary" onClick={() => window.location.reload()}>Try again</Button>
   </main></>
 }
 
@@ -148,7 +149,7 @@ function Bootstrap({ me, onDone }: { me: string; onDone: () => Promise<void> }) 
     try { await api('/api/bootstrap', { method: 'POST', body: JSON.stringify({ secret: form.get('secret') }) }); await onDone() }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Bootstrap failed') }
   }
-  return <main className="center login"><Logo /><p className="eyebrow">ONE-TIME DEPLOYMENT BOOTSTRAP</p><h1>Establish the Owner.</h1><p>Signed in as {me}. Enter the installation bootstrap secret. Bootstrap closes permanently after success.</p><form className="stack" onSubmit={submit}><input name="secret" type="password" required autoComplete="off" placeholder="Bootstrap secret" /><button className="primary">Become deployment Owner →</button></form>{error && <div className="error">{error}</div>}</main>
+  return <main className="center login"><Logo /><p className="eyebrow">ONE-TIME DEPLOYMENT BOOTSTRAP</p><h1>Establish the Owner.</h1><p>Signed in as {me}. Enter the installation bootstrap secret. Bootstrap closes permanently after success.</p><form className="stack" onSubmit={submit}><Input name="secret" type="password" required autoComplete="off" placeholder="Bootstrap secret" /><Button className="primary">Become deployment Owner →</Button></form>{error && <div className="error">{error}</div>}</main>
 }
 
 function AccessPending({ me }: { me: string }) {
@@ -156,7 +157,7 @@ function AccessPending({ me }: { me: string }) {
 }
 
 function ShellView({ view, data, onNavigate }: { view: View; data: ShellData; onNavigate: (view: View) => void }) {
-  if (view === 'home') return <section className="grid-two wide-left"><article className="panel hero-panel"><p className="eyebrow">CONTROL PLANE READY</p><h2>Begin governed work from one durable session.</h2><p>Every prompt, runtime event, cancellation, and policy decision remains bound to your authenticated identity.</p><button className="primary" onClick={() => onNavigate('sessions')}>Open sessions →</button></article><DeploymentFacts data={data} /></section>
+  if (view === 'home') return <section className="grid-two wide-left"><article className="panel hero-panel"><p className="eyebrow">CONTROL PLANE READY</p><h2>Begin governed work from one durable session.</h2><p>Every prompt, runtime event, cancellation, and policy decision remains bound to your authenticated identity.</p><Button className="primary" onClick={() => onNavigate('sessions')}>Open sessions →</Button></article><DeploymentFacts data={data} /></section>
   if (view === 'sessions') return <SessionHarness environments={data.environments} />
   if (view === 'environments') return <EnvironmentsView me={data.me} items={data.environments} />
   if (view === 'sources') return <SourcesView />
@@ -168,7 +169,7 @@ function DeploymentFacts({ data }: { data: ShellData }) {
   return <article className="panel"><div className="panel-head"><h2>Deployment</h2><span className="status-good">ENFORCED</span></div><dl className="facts"><div><dt>Policy</dt><dd>Cedar {data.health.cedar}</dd></div><div><dt>Topology</dt><dd>ON-PREMISES</dd></div><div><dt>Identity</dt><dd>{data.me.authMethod.toUpperCase()}</dd></div><div><dt>Environments</dt><dd>{data.environments.length}</dd></div></dl></article>
 }
 
-function NavButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) { return <button className={active ? 'active' : ''} onClick={onClick}>{children}</button> }
+function NavButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) { return <Button className={active ? 'active' : ''} onClick={onClick}>{children}</Button> }
 function profileLabel(profile: string) { return ({ commercial: 'COMMERCIAL', 'government-il4': 'GOVERNMENT IL4', 'government-il6': 'GOVERNMENT IL6' } as Record<string, string>)[profile] ?? profile.toUpperCase() }
 function viewTitle(view: View) { return ({ home: 'Operational overview', sessions: 'Sessions', environments: 'Environments', sources: 'Sources', administration: 'Administration' })[view] }
 function placeholder(view: View) { return ({ sessions: '', sources: '', administration: '', home: '', environments: '' })[view] }

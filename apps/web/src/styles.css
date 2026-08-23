@@ -837,3 +837,14 @@ nav [data-slot=button].active{border-color:var(--border);background:var(--main);
     grid-template-columns: 150px minmax(0, 1fr);
   }
 }
+
+
+.with-handling-banner aside.artifact-workspace {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  height: 100%;
+  padding: 0;
+  border-right: 0;
+  border-bottom: 0;
+}

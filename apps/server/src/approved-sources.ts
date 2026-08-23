@@ -176,7 +176,7 @@ export class ApprovedSourceStore {
       WHERE c.id=?`).get(userId,chunkId) as Row | undefined
     return row ? {chunkId:String(row.chunk_id),content:String(row.content),score:1,
       citation:{sourceId:String(row.source_id),sourceName:String(row.source_name),uri:String(row.uri),title:String(row.title),
-        location:row.location?String(row.location):undefined,sha256:String(row.sha256)}} : undefined
+        ...(row.location ? { location:String(row.location) } : {}),sha256:String(row.sha256)}} : undefined
   }
 
   private map(row: Row): ApprovedSource {

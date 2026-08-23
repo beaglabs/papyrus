@@ -35,7 +35,7 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
   const selected = sessions.find((session) => session.id === selectedId)
   const turns = useMemo(() => promptTurns(events), [events])
   const activeRunId = useMemo(() => [...events].reverse().find((event) => event.runId)?.runId, [events])
-  const artifactGenerating = useMemo(() => running && isArtifactGenerationActive(events), [events, running])
+  const artifactGenerating = useMemo(() => running && isArtifactGenerationActive(activeRunId ? events.filter((event) => event.runId === activeRunId) : []), [activeRunId, events, running])
 
   const loadContext = async (sessionId: string) => {
     const [nextArtifacts, nextApprovals, nextAttachments, nextElicitations] = await Promise.all([sessionArtifacts(sessionId), sessionApprovals(sessionId), sessionAttachments(sessionId), sessionElicitations(sessionId)])
@@ -363,11 +363,13 @@ function PromptTurnFlow({ events, running, submitted }: { events: SessionEvent[]
   if (!running && plan.length === 0 && tools.length === 0) return null
   const activeTool = [...tools].reverse().find((tool) => tool.status === 'in_progress' || tool.status === 'pending')
   const hasModelStream = turnEvents.some((event) => event.kind === 'update' && event.data && typeof event.data === 'object' && ['agent_thought_chunk', 'agent_message_chunk'].includes(String((event.data as { sessionUpdate?: string }).sessionUpdate)))
+  const failedTool = [...tools].reverse().find((tool) => tool.status === 'failed')
   const status = activeTool ? `Running ${activeTool.title}`
     : running && hasModelStream ? 'Receiving model stream'
-    : running && submitted ? 'Starting governed turn'
+    : running && submitted ? 'Starting prompt turn'
     : running ? 'Waiting for model stream'
-    : 'Tool activity complete'
+    : failedTool ? `${failedTool.title} failed`
+    : 'Turn complete'
   return <section className="prompt-turn-flow" aria-live="polite">
     <div className="prompt-turn-status"><span className="dot good" /><strong>{status}</strong>{running && <span className="streaming-cursor" aria-hidden="true">▌</span>}</div>
     {plan.length > 0 && <ol className="prompt-turn-plan">{plan.map((item, index) => <li key={`${index}-${item.content}`} className={item.status}><span className={`activity-status ${item.status}`} />{item.content}</li>)}</ol>}

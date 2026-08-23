@@ -23,7 +23,7 @@ export class AuthorizationDenied extends Error {
 
 export class SessionLifecycleError extends Error {
   constructor(
-    readonly code: 'SESSION_NOT_FOUND' | 'SESSION_BUSY' | 'SESSION_STOPPED' | 'SESSION_CWD_MISMATCH' | 'INVALID_SESSION_MODE',
+    readonly code: 'SESSION_NOT_FOUND' | 'SESSION_BUSY' | 'SESSION_STOPPED' | 'SESSION_CWD_MISMATCH' | 'INVALID_SESSION_MODE' | 'INVALID_CONFIG_OPTION' | 'INVALID_CONFIG_VALUE',
     message: string,
   ) { super(message) }
 }

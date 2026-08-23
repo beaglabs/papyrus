@@ -38,6 +38,7 @@ export type RuntimeFactory = (options: RuntimeLaunchOptions) => AgentRuntime
 export interface SessionPromptOptions {
   signal?: AbortSignal
   onEvent?: (event: RuntimeEvent) => void | Promise<void>
+  onRunStarted?: (run: SessionRun) => void
   attachmentIds?: string[]
 }
 
@@ -424,6 +425,25 @@ export class PapyrusService {
     return resumed
   }
 
+  async startPrompt(actor: Principal, sessionId: string, prompt: string, attachmentIds: string[] = []): Promise<SessionRun> {
+    let started: SessionRun | undefined
+    const completion = this.prompt(actor, sessionId, prompt, {
+      attachmentIds,
+      onRunStarted: (run) => { started = run },
+    })
+    if (!started) {
+      // Preserve authorization, lifecycle, and validation errors raised before a
+      // durable run is accepted. A successful prompt always invokes onRunStarted
+      // before its first asynchronous boundary.
+      await completion
+      throw new Error('Prompt could not be started')
+    }
+    // The run belongs to the daemon, not to the browser request that submitted it.
+    // prompt() persists failures and terminal state before rejecting.
+    void completion.catch(() => undefined)
+    return started
+  }
+
   async prompt(actor: Principal, sessionId: string, prompt: string, options: SessionPromptOptions = {}): Promise<{ stopReason: string; events: RuntimeEvent[] }> {
     this.license.require('gateway')
     const session = this.requireSession(sessionId)
@@ -450,6 +470,11 @@ export class PapyrusService {
       })),
     ]
     const run = this.beginRun(session, actor, options.signal)
+    const persistentRun = this.db.getSessionRun(run.runId) as SessionRun
+    options.onRunStarted?.(persistentRun)
+    this.db.addRuntimeEvent(session.id, run.runId, 'run', persistentRun.startedAt, {
+      sessionUpdate: 'run_started', status: 'running', runId: run.runId,
+    })
     try {
       const runtime = this.runtimeFactory({ promptTimeoutMs: this.config.promptTimeoutMs })
       for (const content of displayedBlocks) {
@@ -480,15 +505,25 @@ export class PapyrusService {
         signal: run.controller.signal,
       })
       const cancelled = run.controller.signal.aborted || result.stopReason === 'cancelled'
-      this.db.finishSessionRun(run.runId, cancelled ? 'cancelled' : 'completed', cancelled ? 'cancelled' : result.stopReason)
+      const status = cancelled ? 'cancelled' : 'completed'
+      this.db.finishSessionRun(run.runId, status, cancelled ? 'cancelled' : result.stopReason)
+      this.db.addRuntimeEvent(session.id, run.runId, 'run', new Date().toISOString(), {
+        sessionUpdate: 'run_completed', status, runId: run.runId, stopReason: cancelled ? 'cancelled' : result.stopReason,
+      })
       return { stopReason: result.stopReason, events }
     } catch (error) {
       if (run.controller.signal.aborted) {
         this.db.finishSessionRun(run.runId, 'cancelled', 'cancelled')
+        this.db.addRuntimeEvent(session.id, run.runId, 'run', new Date().toISOString(), {
+          sessionUpdate: 'run_completed', status: 'cancelled', runId: run.runId, stopReason: 'cancelled',
+        })
         return { stopReason: 'cancelled', events }
       }
       const message = safeError(error)
       this.db.finishSessionRun(run.runId, 'failed', 'error', message)
+      this.db.addRuntimeEvent(session.id, run.runId, 'run', new Date().toISOString(), {
+        sessionUpdate: 'run_completed', status: 'failed', runId: run.runId, stopReason: 'error', error: message,
+      })
       this.audit.append({ actorId: actor.id, action: 'RuntimeFailure', resourceType: 'Session', resourceId: session.id, decision: 'info', metadata: { error: message, runId: run.runId } })
       throw error
     } finally {

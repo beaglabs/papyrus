@@ -7,6 +7,7 @@ import { Alert, Button, Card, Input, Textarea } from './components/ui/index.js'
 
 interface ToolActivity { id: string; title: string; kind: string; status: string; sequence: number; locations: string[]; terminals: string[]; output: Array<Record<string, unknown>> }
 interface PlanItem { content: string; status: string; priority: string }
+interface PromptTurnGroup { runId: string; sequence: number; events: SessionEvent[] }
 export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRequest: number; onActivate: () => void }) {
   const [sessions, setSessions] = useState<Session[]>([])
   const [nextCursor, setNextCursor] = useState<string>()
@@ -24,6 +25,7 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
   const [running, setRunning] = useState(false)
   const [pendingTurn, setPendingTurn] = useState<{ prompt: string; attachments: Attachment[] }>()
   const [error, setError] = useState<string>()
+  const [liveError, setLiveError] = useState<string>()
   const [uploading, setUploading] = useState(false)
   const [followingLatest, setFollowingLatest] = useState(true)
   const streamRef = useRef<EventSource | null>(null)
@@ -31,9 +33,9 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const newPromptRef = useRef<HTMLTextAreaElement | null>(null)
   const selected = sessions.find((session) => session.id === selectedId)
-  const messages = useMemo(() => acpContent(events), [events])
-  const activeThoughtId = useMemo(() => { const lastUser = [...messages].reverse().find((message) => message.role === 'user')?.sequence ?? -1; return [...messages].reverse().find((message) => message.role === 'thought' && message.sequence > lastUser)?.id }, [messages])
-  const artifactGenerating = useMemo(() => running && isArtifactGenerationActive(events), [events, running])
+  const turns = useMemo(() => promptTurns(events), [events])
+  const activeRunId = useMemo(() => [...events].reverse().find((event) => event.runId)?.runId, [events])
+  const artifactGenerating = useMemo(() => running && isArtifactGenerationActive(activeRunId ? events.filter((event) => event.runId === activeRunId) : []), [activeRunId, events, running])
 
   const loadContext = async (sessionId: string) => {
     const [nextArtifacts, nextApprovals, nextAttachments, nextElicitations] = await Promise.all([sessionArtifacts(sessionId), sessionApprovals(sessionId), sessionAttachments(sessionId), sessionElicitations(sessionId)])
@@ -65,10 +67,11 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
     if (!followingLatest) return
     const frame = requestAnimationFrame(() => messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' }))
     return () => cancelAnimationFrame(frame)
-  }, [messages, running, followingLatest])
+  }, [events, running, followingLatest])
   useEffect(() => {
     if (artifactGenerating) setArtifactPanelOpen(true)
-  }, [artifactGenerating])
+    else if (artifacts.length === 0) setArtifactPanelOpen(false)
+  }, [artifactGenerating, artifacts.length])
   useEffect(() => {
     if (artifacts.length > knownArtifactCount.current) {
       setSelectedArtifactId(artifacts.at(-1)?.id)
@@ -81,28 +84,52 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
     streamRef.current?.close()
     setFollowingLatest(true)
     setDraftAttachmentIds([])
+    setLiveError(undefined)
     if (!selectedId) { setEvents([]); setArtifacts([]); setApprovals([]); setAttachments([]); setElicitations([]); return }
+    setEvents([])
     let active = true
+    let stream: EventSource | undefined
+    const reconcile = async () => {
+      const [history] = await Promise.all([sessionEvents(selectedId), loadContext(selectedId), loadSessions()])
+      if (!active) return
+      setEvents((current) => mergeSessionEvents(current, history))
+    }
     void Promise.all([sessionEvents(selectedId), loadContext(selectedId)]).then(([history]) => {
       if (!active) return
       setEvents(history)
       const after = history.at(-1)?.sequence ?? 0
-      const stream = new EventSource(`/api/sessions/${encodeURIComponent(selectedId)}/events/stream?after=${after}`)
+      stream = new EventSource(`/api/sessions/${encodeURIComponent(selectedId)}/events/stream?after=${after}`)
       stream.addEventListener('session_event', (message) => {
         const event = JSON.parse((message as MessageEvent<string>).data) as SessionEvent
-        setEvents((current) => current.some((item) => item.sequence === event.sequence) ? current : [...current, event])
-        const update = event.data as { sessionUpdate?: string; status?: string } | undefined
-        if (update?.sessionUpdate === 'user_message_chunk') { setPendingTurn(undefined); setRunning(true) }
-        if (event.kind === 'session') setRunning(true)
-        if (event.kind === 'complete') { setRunning(false); setPendingTurn(undefined); void loadSessions().catch(showError) }
-        if (event.kind === 'approval' || event.kind === 'elicitation' || event.kind === 'complete' || (update?.sessionUpdate === 'tool_call_update' && ['completed', 'failed'].includes(update.status ?? ''))) {
+        setEvents((current) => mergeSessionEvents(current, [event]))
+        const update = event.data as { sessionUpdate?: string; status?: string; error?: string } | undefined
+        if (update?.sessionUpdate === 'user_message_chunk' || update?.sessionUpdate === 'run_started' || event.kind === 'session') {
+          setPendingTurn(undefined)
+          setRunning(true)
+        }
+        const terminalRun = update?.sessionUpdate === 'run_completed' && ['completed', 'cancelled', 'failed', 'interrupted'].includes(update.status ?? '')
+        if (event.kind === 'complete' || terminalRun) {
+          setRunning(false)
+          setPendingTurn(undefined)
+          if (update?.status === 'failed' && update.error) setError(update.error)
+          void Promise.all([loadSessions(), loadContext(selectedId)]).catch(showError)
+        } else if (event.kind === 'approval' || event.kind === 'elicitation' || (update?.sessionUpdate === 'tool_call_update' && ['completed', 'failed'].includes(update.status ?? ''))) {
           void loadContext(selectedId).catch(showError)
         }
       })
-      stream.onerror = () => setError('Live updates were interrupted. Papyrus will retry automatically.')
+      stream.onopen = () => setLiveError(undefined)
+      stream.onerror = () => setLiveError('Live updates are reconnecting. Persisted events will be replayed automatically.')
       streamRef.current = stream
     }).catch(showError)
-    return () => { active = false; streamRef.current?.close() }
+    const restore = () => { if (document.visibilityState === 'visible') void reconcile().catch(showError) }
+    document.addEventListener('visibilitychange', restore)
+    window.addEventListener('focus', restore)
+    return () => {
+      active = false
+      stream?.close()
+      document.removeEventListener('visibilitychange', restore)
+      window.removeEventListener('focus', restore)
+    }
   }, [selectedId])
 
   const startNewSession = async (event: FormEvent<HTMLFormElement>) => {
@@ -120,9 +147,12 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
       setSessions((current) => [session, ...current.filter((item) => item.id !== session.id)])
       setSelectedId(session.id)
       await promptSession(session.id, prompt, [])
-      await Promise.all([loadSessions(), loadContext(session.id)])
-    } catch (cause) { showError(cause) }
-    finally { setPendingTurn(undefined); setRunning(false) }
+      await loadSessions()
+    } catch (cause) {
+      setPendingTurn(undefined)
+      setRunning(false)
+      showError(cause)
+    }
   }
 
   const beginNewSession = () => {
@@ -146,9 +176,12 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
       if (selected?.status === 'stopped' || selected?.status === 'failed' || selected?.status === 'interrupted') await resumeSession(selectedId)
       await promptSession(selectedId, prompt, draftAttachmentIds)
       setDraftAttachmentIds([])
-      await Promise.all([loadSessions(), loadContext(selectedId)])
-    } catch (cause) { showError(cause) }
-    finally { setPendingTurn(undefined); setRunning(false) }
+      await loadSessions()
+    } catch (cause) {
+      setPendingTurn(undefined)
+      setRunning(false)
+      showError(cause)
+    }
   }
 
   const cancel = async () => {
@@ -189,7 +222,7 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
       {nextCursor && <Button className="secondary load-more" onClick={() => void loadSessions(nextCursor)}>Load more</Button>}
     </aside>, historyTarget)}
     <div className={`conversation-panel ${selected ? '' : 'new-session-panel'}`}>
-      {error && <Alert className="error">{error}<Button variant="ghost" onClick={() => setError(undefined)}>×</Button></Alert>}
+      {(error || liveError) && <Alert className={error ? 'error' : 'connection-notice'}>{error ?? liveError}<Button variant="ghost" onClick={() => { setError(undefined); setLiveError(undefined) }}>×</Button></Alert>}
       {!selected ? <div className="new-session-home"><div className="new-session-intro"><p className="eyebrow">NEW DURABLE SESSION</p><h2>What should we work on?</h2><p>Your first prompt creates the session automatically and keeps the complete governed history.</p></div><form className="new-session-composer" onSubmit={startNewSession}><Textarea ref={newPromptRef} name="prompt" disabled={running} placeholder="Describe the work to perform…" onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} /><div className="new-session-controls"><span className="new-session-note">Your deployment’s approved runtime and access assignments are applied automatically.</span><Button className="primary" disabled={running}>{running ? 'Starting…' : 'Start →'}</Button></div></form></div> : <>
         <div className="conversation-head"><div><strong>{selected.title}</strong><span>{selected.status}</span></div><div className="session-actions">{(running || selected.status === 'running') ? <Button className="danger" onClick={() => void cancel()}>Cancel run</Button> : <Button className="text-button" onClick={() => void removeSession()}>Delete</Button>}</div></div>
         <div className={`session-content ${artifactPanelOpen ? 'artifact-panel-open' : ''}`}>
@@ -197,7 +230,7 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
             <div className="messages" ref={messagesRef} aria-live="polite" onScroll={(event) => {
               const element = event.currentTarget
               setFollowingLatest(element.scrollHeight - element.scrollTop - element.clientHeight < 72)
-            }}>{messages.length ? messages.map((message) => <ContentMessage message={message} active={running && message.id === activeThoughtId} key={message.id} />) : !pendingTurn && <div className="conversation-empty compact"><h2>What should Papyrus do?</h2><p>Attach context or describe the work.</p></div>}{pendingTurn && <ContentMessage message={pendingContent(pendingTurn)} />}<PromptTurnFlow events={events} running={running} submitted={Boolean(pendingTurn)} />{artifacts.length > 0 && <ArtifactCards artifacts={artifacts} onOpen={(id) => { setSelectedArtifactId(id); setArtifactPanelOpen(true) }} />}</div>
+            }}>{turns.length ? turns.map((turn) => <DurablePromptTurn key={turn.runId} turn={turn} running={running && turn.runId === activeRunId} />) : !pendingTurn && <div className="conversation-empty compact"><h2>What should Papyrus do?</h2><p>Attach context or describe the work.</p></div>}{pendingTurn && <><ContentMessage message={pendingContent(pendingTurn)} /><PromptTurnFlow events={[]} running submitted /></>}{artifacts.length > 0 && <ArtifactCards artifacts={artifacts} onOpen={(id) => { setSelectedArtifactId(id); setArtifactPanelOpen(true) }} />}</div>
             {!followingLatest && <Button className="jump-latest" onClick={() => { setFollowingLatest(true); messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' }) }}>Jump to latest ↓</Button>}
           </div>
           <ArtifactWorkspace artifacts={artifacts} generating={artifactGenerating} open={artifactPanelOpen} selectedId={selectedArtifactId} onOpenChange={setArtifactPanelOpen} onSelect={setSelectedArtifactId} />
@@ -214,6 +247,37 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
         </div>
       </>}
     </div>
+  </section>
+}
+
+function mergeSessionEvents(current: SessionEvent[], incoming: SessionEvent[]): SessionEvent[] {
+  const merged = new Map(current.map((event) => [event.sequence, event]))
+  for (const event of incoming) merged.set(event.sequence, event)
+  return [...merged.values()].sort((left, right) => left.sequence - right.sequence)
+}
+
+function promptTurns(events: SessionEvent[]): PromptTurnGroup[] {
+  const turns = new Map<string, PromptTurnGroup>()
+  for (const event of events) {
+    if (!event.runId) continue
+    const turn = turns.get(event.runId) ?? { runId: event.runId, sequence: event.sequence, events: [] }
+    turn.sequence = Math.min(turn.sequence, event.sequence)
+    turn.events.push(event)
+    turns.set(event.runId, turn)
+  }
+  return [...turns.values()].map((turn) => ({ ...turn, events: [...turn.events].sort((left, right) => left.sequence - right.sequence) }))
+    .sort((left, right) => left.sequence - right.sequence)
+}
+
+function DurablePromptTurn({ turn, running }: { turn: PromptTurnGroup; running: boolean }) {
+  const messages = acpContent(turn.events)
+  const lastUser = [...messages].reverse().find((message) => message.role === 'user')?.sequence ?? -1
+  const activeThoughtId = [...messages].reverse().find((message) => message.role === 'thought' && message.sequence > lastUser)?.id
+  const lifecycle = [...turn.events].reverse().find((event) => event.kind === 'run')?.data as { sessionUpdate?: string; status?: string; error?: string } | undefined
+  return <section className="durable-prompt-turn" data-run-id={turn.runId}>
+    {messages.map((message) => <ContentMessage message={message} active={running && message.id === activeThoughtId} key={message.id} />)}
+    <PromptTurnFlow events={turn.events} running={running} submitted={false} />
+    {lifecycle?.sessionUpdate === 'run_completed' && lifecycle.status && lifecycle.status !== 'completed' && <div className={`turn-outcome ${lifecycle.status}`}><strong>{lifecycle.status}</strong>{lifecycle.error && <span>{lifecycle.error}</span>}</div>}
   </section>
 }
 
@@ -245,7 +309,7 @@ function formatBytes(size: number) { return size < 1024 ? `${size} B` : size < 1
 
 function ArtifactWorkspace({ artifacts, generating, open, selectedId, onOpenChange, onSelect }: { artifacts: Artifact[]; generating: boolean; open: boolean; selectedId: string | undefined; onOpenChange: (open: boolean) => void; onSelect: (id: string) => void }) {
   const selected = artifacts.find((artifact) => artifact.id === selectedId) ?? artifacts.at(-1)
-  if (!open) return null
+  if (!open || (!generating && artifacts.length === 0)) return null
   return <aside className="artifact-workspace" aria-label="Generated artifact preview">
     <div className="artifact-workspace-head"><div><span>ARTIFACT</span><strong>{generating ? 'Generating…' : selected?.name ?? 'Preview'}</strong></div><Button variant="ghost" onClick={() => onOpenChange(false)} aria-label="Close artifact preview">×</Button></div>
     {generating && <div className="artifact-generating"><span className="artifact-orbit" aria-hidden="true" /><div><strong>Building an artifact</strong><span>Structured output will render here as it arrives.</span></div><div className="artifact-skeleton"><i /><i /><i /></div></div>}
@@ -299,11 +363,13 @@ function PromptTurnFlow({ events, running, submitted }: { events: SessionEvent[]
   if (!running && plan.length === 0 && tools.length === 0) return null
   const activeTool = [...tools].reverse().find((tool) => tool.status === 'in_progress' || tool.status === 'pending')
   const hasModelStream = turnEvents.some((event) => event.kind === 'update' && event.data && typeof event.data === 'object' && ['agent_thought_chunk', 'agent_message_chunk'].includes(String((event.data as { sessionUpdate?: string }).sessionUpdate)))
+  const failedTool = [...tools].reverse().find((tool) => tool.status === 'failed')
   const status = activeTool ? `Running ${activeTool.title}`
     : running && hasModelStream ? 'Receiving model stream'
-    : running && submitted ? 'Starting governed turn'
+    : running && submitted ? 'Starting prompt turn'
     : running ? 'Waiting for model stream'
-    : 'Tool activity complete'
+    : failedTool ? `${failedTool.title} failed`
+    : 'Turn complete'
   return <section className="prompt-turn-flow" aria-live="polite">
     <div className="prompt-turn-status"><span className="dot good" /><strong>{status}</strong>{running && <span className="streaming-cursor" aria-hidden="true">▌</span>}</div>
     {plan.length > 0 && <ol className="prompt-turn-plan">{plan.map((item, index) => <li key={`${index}-${item.content}`} className={item.status}><span className={`activity-status ${item.status}`} />{item.content}</li>)}</ol>}
@@ -320,16 +386,25 @@ function projectActivity(events: SessionEvent[]): { plan: PlanItem[]; tools: Too
     if (update.sessionUpdate === 'plan' && Array.isArray(update.entries)) plan = update.entries
     if ((update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') && update.toolCallId) {
       const current = tools.get(update.toolCallId)
+      const locations = update.locations?.flatMap((location) => typeof location.path === 'string' ? [location.path] : []) ?? []
+      const terminals = update.content?.flatMap((content) => content.type === 'terminal' && content.terminalId ? [content.terminalId] : []) ?? []
+      const output = update.content?.flatMap((content) => content.type === 'content' && content.content && typeof content.content === 'object' && !Array.isArray(content.content) ? [content.content as Record<string, unknown>] : []) ?? []
       tools.set(update.toolCallId, {
         id: update.toolCallId, title: update.title ?? current?.title ?? 'Tool activity', kind: update.kind ?? current?.kind ?? 'other',
         status: update.status ?? current?.status ?? 'pending', sequence: current?.sequence ?? event.sequence,
-        locations: update.locations?.flatMap((location) => typeof location.path === 'string' ? [location.path] : []) ?? current?.locations ?? [],
-        terminals: update.content?.flatMap((content) => content.type === 'terminal' && content.terminalId ? [content.terminalId] : []) ?? current?.terminals ?? [],
-        output: update.content?.flatMap((content) => content.type === 'content' && content.content && typeof content.content === 'object' && !Array.isArray(content.content) ? [content.content as Record<string, unknown>] : []) ?? current?.output ?? [],
+        locations: [...new Set([...(current?.locations ?? []), ...locations])],
+        terminals: [...new Set([...(current?.terminals ?? []), ...terminals])],
+        output: mergeToolOutput(current?.output ?? [], output),
       })
     }
   }
   return { plan, tools: [...tools.values()].sort((left, right) => left.sequence - right.sequence) }
+}
+
+function mergeToolOutput(current: Array<Record<string, unknown>>, incoming: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  const merged = new Map(current.map((block) => [JSON.stringify(block), block]))
+  for (const block of incoming) merged.set(JSON.stringify(block), block)
+  return [...merged.values()]
 }
 
 function ApprovalCard({ approval, onDecision }: { approval: Approval; onDecision: (id: string, decision: 'approved' | 'denied', reason?: string) => Promise<void> }) {

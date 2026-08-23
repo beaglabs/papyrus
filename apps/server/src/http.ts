@@ -318,7 +318,7 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
       if (sessionEventStream && request.method === 'GET') {
         const lastEventId = request.headers['last-event-id']
         const after = naturalNumber(
-          url.searchParams.get('after') ?? (typeof lastEventId === 'string' ? lastEventId : null),
+          (typeof lastEventId === 'string' ? lastEventId : null) ?? url.searchParams.get('after'),
           0,
           Number.MAX_SAFE_INTEGER,
         )
@@ -420,14 +420,13 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
           ? input.attachmentIds as string[] : []
         const promptText = typeof input.prompt === 'string' ? input.prompt.trim().slice(0, 100_000) : ''
         if (!promptText && attachmentIds.length === 0) throw new HttpError(400, 'INVALID_INPUT', 'prompt or attachmentIds is required')
-        const controller = new AbortController()
-        request.once('aborted', () => controller.abort(new Error('Client disconnected')))
-        return json(response, 200, await service.prompt(
+        const run = await service.startPrompt(
           principal,
           decodeURIComponent(prompt[1] as string),
           promptText,
-          { signal: controller.signal, attachmentIds },
-        ))
+          attachmentIds,
+        )
+        return json(response, 202, { run })
       }
       if (url.pathname === '/api/mcp/servers' && request.method === 'POST') {
         const input = await body(request)

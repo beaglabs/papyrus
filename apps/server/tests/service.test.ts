@@ -123,13 +123,42 @@ describe('Papyrus control plane', () => {
       expect(result.events.map((event) => event.kind)).toEqual(['session', 'update', 'complete'])
       expect(context.db.getSession(session.id)!.status).toBe('ready')
       const events = context.db.sqlite.prepare('SELECT count(*) c FROM runtime_events WHERE session_id=?').get(session.id) as { c: number }
-      expect(events.c).toBe(4)
+      expect(events.c).toBe(6)
+      expect(context.db.listSessionEvents(session.id, 0, 100).filter((event) => event.kind === 'run').map((event) => (event.data as { sessionUpdate: string }).sessionUpdate)).toEqual(['run_started', 'run_completed'])
       expect(context.db.listSessionRuns(session.id)[0]).toMatchObject({ status: 'completed', stopReason: 'end_turn' })
       expect(context.service.audit.verify()).toEqual({ valid: true })
       expect(factory).toHaveBeenCalledTimes(1)
     } finally {
       delete process.env.PAPYRUS_SECRET_PRIMARY
     }
+  })
+
+  it('keeps an accepted prompt running independently of the submitting request', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const factory = vi.fn((_options: RuntimeLaunchOptions): AgentRuntime => ({
+      kind: 'test',
+      capabilities: { transports: ['stdio'], sessions: { cancel: true, load: false, resume: false, fork: false } },
+      health: async () => ({ available: true }),
+      runPrompt: async (request) => {
+        await request.onEvent({ kind: 'update', at: new Date().toISOString(), data: { sessionUpdate: 'agent_thought_chunk', messageId: 'thought-1', content: { type: 'text', text: 'Working' } } })
+        await gate
+        await request.onEvent({ kind: 'complete', at: new Date().toISOString(), data: { ok: true } })
+        return { runtimeSessionId: 'rt-detached', stopReason: 'end_turn' }
+      },
+    }))
+    const context = testContext(factory); contexts.push(context)
+    const { owner, user, environment } = setup(context)
+    context.service.assign(owner, user.id, environment.id)
+    const session = context.service.createSession(user, environment.id, 'papyrus', 'Detached')
+    const run = await context.service.startPrompt(user, session.id, 'keep going')
+    expect(run.status).toBe('running')
+    expect(context.db.getSession(session.id)?.status).toBe('running')
+    expect(context.db.listSessionEvents(session.id, 0, 100).map((event) => event.kind)).toEqual(['run', 'update'])
+    release()
+    await vi.waitFor(() => expect(context.db.getSessionRun(run.id)?.status).toBe('completed'))
+    const lifecycle = context.db.listSessionEvents(session.id, 0, 100).filter((event) => event.kind === 'run')
+    expect(lifecycle.map((event) => (event.data as { sessionUpdate: string }).sessionUpdate)).toEqual(['run_started', 'run_completed'])
   })
 
   it('signs and verifies an audit checkpoint', () => {

@@ -106,7 +106,7 @@ export async function sessionEvents(sessionId: string): Promise<SessionEvent[]> 
   }
 }
 
-export async function promptSession(sessionId: string, prompt: string, attachmentIds: string[] = []): Promise<{ stopReason: string }> {
+export async function promptSession(sessionId: string, prompt: string, attachmentIds: string[] = []): Promise<{ run: SessionRun }> {
   return api(`/api/sessions/${encodeURIComponent(sessionId)}/prompts`, { method: 'POST', body: JSON.stringify({ prompt, attachmentIds }) })
 }
 

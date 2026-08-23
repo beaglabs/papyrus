@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import type { Approval, Artifact, Attachment, Elicitation, Environment, ResearchSource, Session, SessionEvent, SessionRun, SessionSurface } from '@papyrus/contracts'
-import { cancelSession, createSession, decideApproval, deleteSession, promptSession, respondElicitation, resumeSession, sessionApprovals, sessionArtifacts, sessionAttachments, sessionElicitations, sessionEvents, sessionPage, sessionRuns, sessionSources, uploadAttachment } from './api.js'
+import type { Approval, Artifact, Attachment, Elicitation, Environment, Session, SessionEvent } from '@papyrus/contracts'
+import { cancelSession, createSession, decideApproval, deleteSession, promptSession, respondElicitation, resumeSession, sessionApprovals, sessionArtifacts, sessionAttachments, sessionElicitations, sessionEvents, sessionPage, uploadAttachment } from './api.js'
 import { SelectField } from './SelectField.js'
 import { acpContent, ContentMessage } from './AcpSessionContent.js'
 import { createPortal } from 'react-dom'
@@ -8,25 +8,13 @@ import { Alert, Button, Card, Combobox, Input, Textarea } from './components/ui/
 
 interface ToolActivity { id: string; title: string; kind: string; status: string; sequence: number; locations: string[]; terminals: string[] }
 interface PlanItem { content: string; status: string; priority: string }
-type SessionTab = 'conversation' | 'plan' | 'activity' | 'approvals' | 'sources' | 'citations' | 'artifacts' | 'files' | 'editor' | 'diff' | 'terminal' | 'tests' | 'preview' | 'findings' | 'metadata' | 'input' | 'schema' | 'mapping' | 'transform' | 'validation' | 'export'
-
-const SURFACE_TABS: Record<SessionSurface, SessionTab[]> = {
-  general: ['conversation', 'plan', 'activity', 'approvals', 'artifacts'],
-  ide: ['files', 'editor', 'diff', 'terminal', 'tests', 'conversation'],
-  research: ['conversation', 'sources', 'activity', 'approvals', 'artifacts'],
-  document: ['preview', 'findings', 'citations', 'metadata', 'artifacts'],
-  data: ['input', 'schema', 'mapping', 'transform', 'validation', 'export'],
-}
-
 export function SessionHarness({ environments }: { environments: Environment[] }) {
   const [sessions, setSessions] = useState<Session[]>([])
   const [nextCursor, setNextCursor] = useState<string>()
   const [selectedId, setSelectedId] = useState<string>()
   const [events, setEvents] = useState<SessionEvent[]>([])
-  const [runs, setRuns] = useState<SessionRun[]>([])
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [approvals, setApprovals] = useState<Approval[]>([])
-  const [sources, setSources] = useState<ResearchSource[]>([])
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [elicitations, setElicitations] = useState<Elicitation[]>([])
   const [draftAttachmentIds, setDraftAttachmentIds] = useState<string[]>([])
@@ -46,8 +34,8 @@ export function SessionHarness({ environments }: { environments: Environment[] }
   const messages = useMemo(() => acpContent(events), [events])
 
   const loadContext = async (sessionId: string) => {
-    const [nextRuns, nextArtifacts, nextApprovals, nextSources, nextAttachments, nextElicitations] = await Promise.all([sessionRuns(sessionId), sessionArtifacts(sessionId), sessionApprovals(sessionId), sessionSources(sessionId), sessionAttachments(sessionId), sessionElicitations(sessionId)])
-    setRuns(nextRuns); setArtifacts(nextArtifacts); setApprovals(nextApprovals); setSources(nextSources); setAttachments(nextAttachments); setElicitations(nextElicitations)
+    const [nextArtifacts, nextApprovals, nextAttachments, nextElicitations] = await Promise.all([sessionArtifacts(sessionId), sessionApprovals(sessionId), sessionAttachments(sessionId), sessionElicitations(sessionId)])
+    setArtifacts(nextArtifacts); setApprovals(nextApprovals); setAttachments(nextAttachments); setElicitations(nextElicitations)
   }
 
   const loadSessions = async (cursor?: string) => {
@@ -75,7 +63,7 @@ export function SessionHarness({ environments }: { environments: Environment[] }
     streamRef.current?.close()
     setFollowingLatest(true)
     setDraftAttachmentIds([])
-    if (!selectedId) { setEvents([]); setRuns([]); setArtifacts([]); setApprovals([]); setSources([]); setAttachments([]); setElicitations([]); return }
+    if (!selectedId) { setEvents([]); setArtifacts([]); setApprovals([]); setAttachments([]); setElicitations([]); return }
     let active = true
     void Promise.all([sessionEvents(selectedId), loadContext(selectedId)]).then(([history]) => {
       if (!active) return

@@ -848,3 +848,61 @@ nav [data-slot=button].active{border-color:var(--border);background:var(--main);
   border-right: 0;
   border-bottom: 0;
 }
+
+
+/* Full-viewport modal treatment */
+[data-slot=dialog-overlay] {
+  background: rgba(17, 17, 17, .58);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  animation: dialog-backdrop-in .16s ease-out;
+}
+[data-slot=dialog] {
+  animation: dialog-surface-in .18s ease-out;
+}
+.create-session-dialog {
+  padding: 0;
+}
+.create-session {
+  position: static;
+  inset: auto;
+  z-index: auto;
+  width: 100%;
+  display: grid;
+  gap: 16px;
+  padding: 22px;
+  border: 0;
+  box-shadow: none;
+  background: #fff;
+}
+.create-session [data-slot=dialog-header] {
+  margin-bottom: 2px;
+}
+.create-session [data-slot=dialog-header] > div {
+  display: grid;
+  gap: 3px;
+}
+.create-session [data-slot=dialog-header] .eyebrow {
+  margin: 0;
+}
+.create-session [data-slot=dialog-header] strong {
+  font-size: 22px;
+}
+.create-session [data-slot=dialog-header] .icon-button {
+  width: 34px;
+  height: 34px;
+  margin-left: auto;
+  padding: 0;
+  background: #fff;
+}
+.create-session > [data-slot=button]:last-child {
+  justify-self: end;
+}
+@keyframes dialog-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes dialog-surface-in {
+  from { opacity: 0; transform: translateY(8px) scale(.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}

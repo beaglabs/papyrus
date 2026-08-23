@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import type { Approval, Attachment, Elicitation, Environment, Invitation, InvitationIdentityKind, McpServer, Principal, Role, Session, SessionEvent, SessionSurface, SessionRun, ToolGrant } from '@papyrus/contracts'
+import type { AgentDrive, Approval, Attachment, Elicitation, Environment, Invitation, InvitationIdentityKind, McpServer, Principal, Role, Session, SessionEvent, SessionSurface, SessionRun, ToolGrant } from '@papyrus/contracts'
 
 type Row = Record<string, unknown>
 
@@ -51,6 +51,16 @@ export class PapyrusDatabase {
         principal_type TEXT NOT NULL, principal_id TEXT NOT NULL,
         resource_type TEXT NOT NULL, resource_id TEXT NOT NULL, created_at TEXT NOT NULL,
         PRIMARY KEY (principal_type, principal_id, resource_type, resource_id)
+      );
+      CREATE TABLE IF NOT EXISTS agent_drives (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, database_path TEXT NOT NULL UNIQUE,
+        created_by TEXT NOT NULL REFERENCES users(id), created_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS agent_drive_assignments (
+        drive_id TEXT NOT NULL REFERENCES agent_drives(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        assigned_by TEXT NOT NULL REFERENCES users(id), assigned_at TEXT NOT NULL,
+        PRIMARY KEY (drive_id, user_id)
       );
       CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id),
@@ -353,6 +363,43 @@ export class PapyrusDatabase {
     const groups = this.sqlite.prepare(`SELECT gm.user_id id FROM assignments a JOIN group_members gm ON gm.group_id=a.principal_id
       WHERE a.resource_type=? AND a.resource_id=? AND a.principal_type='group'`).all(resourceType, resourceId) as Row[]
     return [...new Set([...direct, ...groups].map((row) => String(row.id)))]
+  }
+
+  createAgentDrive(name: string, databasePath: string, createdBy: string): AgentDrive {
+    const drive: AgentDrive = { id: crypto.randomUUID(), name, readOnly: true, createdAt: new Date().toISOString() }
+    this.sqlite.prepare('INSERT INTO agent_drives(id,name,database_path,created_by,created_at) VALUES(?,?,?,?,?)')
+      .run(drive.id, name, databasePath, createdBy, drive.createdAt)
+    return drive
+  }
+
+  getAgentDrive(id: string): (AgentDrive & { databasePath: string }) | undefined {
+    return this.sqlite.prepare('SELECT id,name,database_path databasePath,1 readOnly,created_at createdAt FROM agent_drives WHERE id=?')
+      .get(id) as unknown as (AgentDrive & { databasePath: string }) | undefined
+  }
+
+  listAgentDrives(): Array<AgentDrive & { databasePath: string }> {
+    return this.sqlite.prepare('SELECT id,name,database_path databasePath,1 readOnly,created_at createdAt FROM agent_drives ORDER BY name')
+      .all() as unknown as Array<AgentDrive & { databasePath: string }>
+  }
+
+  listAgentDrivesForUser(userId: string): AgentDrive[] {
+    return this.sqlite.prepare(`SELECT d.id,d.name,1 readOnly,d.created_at createdAt
+      FROM agent_drives d JOIN agent_drive_assignments a ON a.drive_id=d.id
+      WHERE a.user_id=? ORDER BY d.name`).all(userId) as unknown as AgentDrive[]
+  }
+
+  assignedAgentDriveUserIds(driveId: string): string[] {
+    return (this.sqlite.prepare('SELECT user_id id FROM agent_drive_assignments WHERE drive_id=? ORDER BY assigned_at')
+      .all(driveId) as Row[]).map((row) => String(row.id))
+  }
+
+  assignAgentDrive(driveId: string, userId: string, assignedBy: string): void {
+    this.sqlite.prepare('INSERT OR IGNORE INTO agent_drive_assignments(drive_id,user_id,assigned_by,assigned_at) VALUES(?,?,?,?)')
+      .run(driveId, userId, assignedBy, new Date().toISOString())
+  }
+
+  revokeAgentDrive(driveId: string, userId: string): boolean {
+    return Number(this.sqlite.prepare('DELETE FROM agent_drive_assignments WHERE drive_id=? AND user_id=?').run(driveId, userId).changes) > 0
   }
 
   createSession(ownerId: string, environmentId: string, agent: string, title: string, cwd = '/', surface: SessionSurface = 'general'): Session {

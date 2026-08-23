@@ -190,7 +190,7 @@ function ElicitationCard({ item, onRespond }: { item: Elicitation; onRespond: (i
 function environmentName(environments: Environment[], id: string) { return environments.find((environment) => environment.id === id)?.name ?? 'Environment' }
 function formatBytes(size: number) { return size < 1024 ? `${size} B` : size < 1024 * 1024 ? `${(size / 1024).toFixed(1)} KB` : `${(size / 1024 / 1024).toFixed(1)} MB` }
 
-function ArtifactWorkspace({ artifacts, generating, open, selectedId, onOpenChange, onSelect }: { artifacts: Artifact[]; generating: boolean; open: boolean; selectedId?: string; onOpenChange: (open: boolean) => void; onSelect: (id: string) => void }) {
+function ArtifactWorkspace({ artifacts, generating, open, selectedId, onOpenChange, onSelect }: { artifacts: Artifact[]; generating: boolean; open: boolean; selectedId: string | undefined; onOpenChange: (open: boolean) => void; onSelect: (id: string) => void }) {
   const selected = artifacts.find((artifact) => artifact.id === selectedId) ?? artifacts.at(-1)
   if (!open) return <Button className={`artifact-popout ${generating ? 'generating' : ''}`} onClick={() => onOpenChange(true)}><span aria-hidden="true">{generating ? '◌' : '▤'}</span><span>Outputs</span>{artifacts.length > 0 && <strong>{artifacts.length}</strong>}</Button>
   return <aside className="artifact-workspace">

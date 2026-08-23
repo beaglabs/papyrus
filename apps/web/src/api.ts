@@ -1,4 +1,4 @@
-import type { AdminOverview, ApprovedSource, ApprovedSourceKind, SourceSearchResult, Approval, Artifact, Attachment, Elicitation, Environment, Invitation, McpServer, Principal, ResearchSource, Role, Session, SessionEvent, SessionRun } from '@papyrus/contracts'
+import type { AdminOverview, ApprovedSource, ApprovedSourceKind, SourceSearchResult, Approval, Artifact, Attachment, Elicitation, Invitation, McpServer, Principal, ResearchSource, Role, Session, SessionEvent, SessionRun } from '@papyrus/contracts'
 
 export interface Health {
   topology: 'on-premises'
@@ -22,7 +22,6 @@ export interface AuthenticationChallenge {
 export interface ShellData {
   me: Principal
   health: Health
-  environments: Environment[]
 }
 
 export class ApiError extends Error {
@@ -74,8 +73,7 @@ export async function loadShell(): Promise<ShellData> {
   }
   if (!meResponse.ok) throw new ApiError(meResponse.status, 'IDENTITY_FAILED', 'Unable to load identity')
   const me = await meResponse.json() as Principal
-  const environments = me.roles.length ? await api<Environment[]>('/api/environments') : []
-  return { me, health, environments }
+  return { me, health }
 }
 
 export async function logout(): Promise<void> {
@@ -93,8 +91,8 @@ export async function sessionPage(cursor?: string): Promise<SessionPage> {
   return api(`/api/sessions?${query}`)
 }
 
-export async function createSession(environmentId: string, title: string): Promise<Session> {
-  return api('/api/sessions', { method: 'POST', body: JSON.stringify({ environmentId, title }) })
+export async function createSession(title: string): Promise<Session> {
+  return api('/api/sessions', { method: 'POST', body: JSON.stringify({ title }) })
 }
 
 export async function sessionEvents(sessionId: string): Promise<SessionEvent[]> {
@@ -188,12 +186,6 @@ export async function addUserRole(userId: string, role: Role): Promise<Principal
 }
 export async function revokeUserSessions(userId: string): Promise<void> {
   await api(`/api/users/${encodeURIComponent(userId)}/revoke-sessions`, { method: 'POST' })
-}
-export async function createEnvironmentAdmin(name: string, description: string): Promise<Environment> {
-  return api('/api/environments', { method: 'POST', body: JSON.stringify({ name, description }) })
-}
-export async function assignEnvironment(principalId: string, environmentId: string): Promise<void> {
-  await api('/api/assignments', { method: 'POST', body: JSON.stringify({ principalId, environmentId }) })
 }
 export async function addMcpServer(name: string, endpoint: string): Promise<{ server: McpServer; authorizationUrl?: string }> {
   return api('/api/mcp/servers', { method: 'POST', body: JSON.stringify({ name, endpoint }) })

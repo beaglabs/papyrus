@@ -2,11 +2,11 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import type { Approval, Artifact, Attachment, Elicitation, Environment, Session, SessionEvent } from '@papyrus/contracts'
 import { cancelSession, createSession, decideApproval, deleteSession, promptSession, respondElicitation, resumeSession, sessionApprovals, sessionArtifacts, sessionAttachments, sessionElicitations, sessionEvents, sessionPage, uploadAttachment } from './api.js'
 import { SelectField } from './SelectField.js'
-import { acpContent, ContentMessage } from './AcpSessionContent.js'
+import { acpContent, ContentBlock, ContentMessage } from './AcpSessionContent.js'
 import { createPortal } from 'react-dom'
 import { Alert, Button, Card, Dialog, DialogContent, DialogHeader, Input, Textarea } from './components/ui/index.js'
 
-interface ToolActivity { id: string; title: string; kind: string; status: string; sequence: number; locations: string[]; terminals: string[] }
+interface ToolActivity { id: string; title: string; kind: string; status: string; sequence: number; locations: string[]; terminals: string[]; output: Array<Record<string, unknown>> }
 interface PlanItem { content: string; status: string; priority: string }
 export function SessionHarness({ environments }: { environments: Environment[] }) {
   const [sessions, setSessions] = useState<Session[]>([])
@@ -23,6 +23,7 @@ export function SessionHarness({ environments }: { environments: Environment[] }
   const knownArtifactCount = useRef(0)
   const [loading, setLoading] = useState(true)
   const [running, setRunning] = useState(false)
+  const [pendingTurn, setPendingTurn] = useState<{ prompt: string; attachments: Attachment[] }>()
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string>()
   const [uploading, setUploading] = useState(false)
@@ -32,7 +33,7 @@ export function SessionHarness({ environments }: { environments: Environment[] }
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const selected = sessions.find((session) => session.id === selectedId)
   const messages = useMemo(() => acpContent(events), [events])
-  const activeThoughtId = useMemo(() => [...messages].reverse().find((message) => message.role === 'thought')?.id, [messages])
+  const activeThoughtId = useMemo(() => { const lastUser = [...messages].reverse().find((message) => message.role === 'user')?.sequence ?? -1; return [...messages].reverse().find((message) => message.role === 'thought' && message.sequence > lastUser)?.id }, [messages])
   const artifactGenerating = useMemo(() => running && isArtifactGenerationActive(events), [events, running])
 
   const loadContext = async (sessionId: string) => {
@@ -48,6 +49,7 @@ export function SessionHarness({ environments }: { environments: Environment[] }
   }
 
   useEffect(() => { void loadSessions().catch(showError).finally(() => setLoading(false)) }, [])
+  useEffect(() => { if (selected?.status === 'running') setRunning(true) }, [selectedId, selected?.status])
   useEffect(() => {
     if (!followingLatest) return
     const frame = requestAnimationFrame(() => messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' }))
@@ -68,6 +70,7 @@ export function SessionHarness({ environments }: { environments: Environment[] }
     streamRef.current?.close()
     setFollowingLatest(true)
     setDraftAttachmentIds([])
+    setPendingTurn(undefined)
     if (!selectedId) { setEvents([]); setArtifacts([]); setApprovals([]); setAttachments([]); setElicitations([]); return }
     let active = true
     void Promise.all([sessionEvents(selectedId), loadContext(selectedId)]).then(([history]) => {
@@ -79,7 +82,10 @@ export function SessionHarness({ environments }: { environments: Environment[] }
         const event = JSON.parse((message as MessageEvent<string>).data) as SessionEvent
         setEvents((current) => current.some((item) => item.sequence === event.sequence) ? current : [...current, event])
         const update = event.data as { sessionUpdate?: string; status?: string } | undefined
-        if (event.kind === 'approval' || event.kind === 'elicitation' || (update?.sessionUpdate === 'tool_call_update' && ['completed', 'failed'].includes(update.status ?? ''))) {
+        if (update?.sessionUpdate === 'user_message_chunk') { setPendingTurn(undefined); setRunning(true) }
+        if (event.kind === 'session') setRunning(true)
+        if (event.kind === 'complete') { setRunning(false); setPendingTurn(undefined); void loadSessions().catch(showError) }
+        if (event.kind === 'approval' || event.kind === 'elicitation' || event.kind === 'complete' || (update?.sessionUpdate === 'tool_call_update' && ['completed', 'failed'].includes(update.status ?? ''))) {
           void loadContext(selectedId).catch(showError)
         }
       })
@@ -104,14 +110,15 @@ export function SessionHarness({ environments }: { environments: Environment[] }
     event.preventDefault(); if (!selectedId || running) return
     const form = event.currentTarget; const values = new FormData(form); const prompt = String(values.get('prompt')).trim()
     if (!prompt && draftAttachmentIds.length === 0) return
-    form.reset(); setRunning(true); setError(undefined)
+    const submittedAttachments = draftAttachmentIds.flatMap((id) => { const attachment = attachments.find((item) => item.id === id); return attachment ? [attachment] : [] })
+    form.reset(); setPendingTurn({ prompt, attachments: submittedAttachments }); setFollowingLatest(true); setRunning(true); setError(undefined)
     try {
       if (selected?.status === 'stopped' || selected?.status === 'failed' || selected?.status === 'interrupted') await resumeSession(selectedId)
       await promptSession(selectedId, prompt, draftAttachmentIds)
       setDraftAttachmentIds([])
       await Promise.all([loadSessions(), loadContext(selectedId)])
     } catch (cause) { showError(cause) }
-    finally { setRunning(false) }
+    finally { setPendingTurn(undefined); setRunning(false) }
   }
 
   const cancel = async () => {
@@ -161,7 +168,7 @@ export function SessionHarness({ environments }: { environments: Environment[] }
             <div className="messages" ref={messagesRef} aria-live="polite" onScroll={(event) => {
               const element = event.currentTarget
               setFollowingLatest(element.scrollHeight - element.scrollTop - element.clientHeight < 72)
-            }}>{messages.length ? messages.map((message) => <ContentMessage message={message} active={running && message.id === activeThoughtId} key={message.id} />) : <div className="conversation-empty compact"><h2>What should Papyrus do?</h2><p>Attach context or describe the work.</p></div>}<PromptTurnFlow events={events} running={running} />{artifacts.length > 0 && <ArtifactCards artifacts={artifacts} onOpen={(id) => { setSelectedArtifactId(id); setArtifactPanelOpen(true) }} />}</div>
+            }}>{messages.length ? messages.map((message) => <ContentMessage message={message} active={running && message.id === activeThoughtId} key={message.id} />) : !pendingTurn && <div className="conversation-empty compact"><h2>What should Papyrus do?</h2><p>Attach context or describe the work.</p></div>}{pendingTurn && <ContentMessage message={pendingContent(pendingTurn)} />}<PromptTurnFlow events={events} running={running} submitted={Boolean(pendingTurn)} />{artifacts.length > 0 && <ArtifactCards artifacts={artifacts} onOpen={(id) => { setSelectedArtifactId(id); setArtifactPanelOpen(true) }} />}</div>
             {!followingLatest && <Button className="jump-latest" onClick={() => { setFollowingLatest(true); messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' }) }}>Jump to latest ↓</Button>}
           </div>
           <ArtifactWorkspace artifacts={artifacts} generating={artifactGenerating} open={artifactPanelOpen} selectedId={selectedArtifactId} onOpenChange={setArtifactPanelOpen} onSelect={setSelectedArtifactId} />
@@ -179,6 +186,18 @@ export function SessionHarness({ environments }: { environments: Environment[] }
       </>}
     </div>
   </section>
+}
+
+function pendingContent(turn: { prompt: string; attachments: Attachment[] }) {
+  return {
+    id: 'pending-user-turn',
+    role: 'user' as const,
+    sequence: Number.MAX_SAFE_INTEGER,
+    blocks: [
+      ...(turn.prompt ? [{ type: 'text', text: turn.prompt }] : []),
+      ...turn.attachments.map((attachment) => ({ type: 'resource_link', uri: attachment.downloadUrl, name: attachment.name, title: attachment.name, mimeType: attachment.mediaType, size: attachment.size })),
+    ],
+  }
 }
 
 function ElicitationCard({ item, onRespond }: { item: Elicitation; onRespond: (id: string, response: Record<string, unknown>) => Promise<void> }) {
@@ -237,7 +256,7 @@ function ArtifactCards({ artifacts, onOpen }: { artifacts: Artifact[]; onOpen: (
   </section>
 }
 
-function PromptTurnFlow({ events, running }: { events: SessionEvent[]; running: boolean }) {
+function PromptTurnFlow({ events, running, submitted }: { events: SessionEvent[]; running: boolean; submitted: boolean }) {
   let turnStart = -1
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]
@@ -246,17 +265,20 @@ function PromptTurnFlow({ events, running }: { events: SessionEvent[]; running: 
       break
     }
   }
-  const turnEvents = turnStart >= 0 ? events.slice(turnStart + 1) : []
+  const turnEvents = submitted ? [] : turnStart >= 0 ? events.slice(turnStart + 1) : []
   const { plan, tools } = projectActivity(turnEvents)
-  if (plan.length === 0 && tools.length === 0) return null
+  if (!running && plan.length === 0 && tools.length === 0) return null
   const activeTool = [...tools].reverse().find((tool) => tool.status === 'in_progress' || tool.status === 'pending')
+  const hasModelStream = turnEvents.some((event) => event.kind === 'update' && event.data && typeof event.data === 'object' && ['agent_thought_chunk', 'agent_message_chunk'].includes(String((event.data as { sessionUpdate?: string }).sessionUpdate)))
   const status = activeTool ? `Running ${activeTool.title}`
-    : running ? 'Continuing with tool results'
+    : running && hasModelStream ? 'Receiving model stream'
+    : running && submitted ? 'Starting governed turn'
+    : running ? 'Waiting for model stream'
     : 'Tool activity complete'
   return <section className="prompt-turn-flow" aria-live="polite">
     <div className="prompt-turn-status"><span className="dot good" /><strong>{status}</strong>{running && <span className="streaming-cursor" aria-hidden="true">▌</span>}</div>
     {plan.length > 0 && <ol className="prompt-turn-plan">{plan.map((item, index) => <li key={`${index}-${item.content}`} className={item.status}><span className={`activity-status ${item.status}`} />{item.content}</li>)}</ol>}
-    {tools.length > 0 && <div className="prompt-turn-tools">{tools.map((tool) => <Card key={tool.id} className={`prompt-turn-tool ${tool.status}`}><span className={`tool-kind ${tool.kind}`}>{tool.kind}</span><div><strong>{tool.title}</strong><small>{tool.locations.join(' · ') || tool.id}</small></div><span className={`pill ${tool.status}`}>{tool.status.replace('_', ' ')}</span></Card>)}</div>}
+    {tools.length > 0 && <div className="prompt-turn-tools">{tools.map((tool) => <Card key={tool.id} className={`prompt-turn-tool ${tool.status}`}><span className={`tool-kind ${tool.kind}`}>{tool.kind}</span><div><strong>{tool.title}</strong><small>{tool.locations.join(' · ') || tool.id}</small>{tool.output.length > 0 && <div className="tool-live-output">{tool.output.map((block, index) => <ContentBlock key={index} block={block} />)}</div>}</div><span className={`pill ${tool.status}`}>{tool.status.replace('_', ' ')}</span></Card>)}</div>}
   </section>
 }
 
@@ -265,7 +287,7 @@ function projectActivity(events: SessionEvent[]): { plan: PlanItem[]; tools: Too
   const tools = new Map<string, ToolActivity>()
   for (const event of events) {
     if (event.kind !== 'update' || !event.data || typeof event.data !== 'object') continue
-    const update = event.data as { sessionUpdate?: string; entries?: PlanItem[]; toolCallId?: string; title?: string; kind?: string; status?: string; locations?: Array<{ path?: string }>; content?: Array<{ type?: string; terminalId?: string }> }
+    const update = event.data as { sessionUpdate?: string; entries?: PlanItem[]; toolCallId?: string; title?: string; kind?: string; status?: string; locations?: Array<{ path?: string }>; content?: Array<{ type?: string; terminalId?: string; content?: unknown }> }
     if (update.sessionUpdate === 'plan' && Array.isArray(update.entries)) plan = update.entries
     if ((update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') && update.toolCallId) {
       const current = tools.get(update.toolCallId)
@@ -274,6 +296,7 @@ function projectActivity(events: SessionEvent[]): { plan: PlanItem[]; tools: Too
         status: update.status ?? current?.status ?? 'pending', sequence: current?.sequence ?? event.sequence,
         locations: update.locations?.flatMap((location) => typeof location.path === 'string' ? [location.path] : []) ?? current?.locations ?? [],
         terminals: update.content?.flatMap((content) => content.type === 'terminal' && content.terminalId ? [content.terminalId] : []) ?? current?.terminals ?? [],
+        output: update.content?.flatMap((content) => content.type === 'content' && content.content && typeof content.content === 'object' && !Array.isArray(content.content) ? [content.content as Record<string, unknown>] : []) ?? current?.output ?? [],
       })
     }
   }

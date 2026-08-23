@@ -309,7 +309,7 @@ function formatBytes(size: number) { return size < 1024 ? `${size} B` : size < 1
 
 function ArtifactWorkspace({ artifacts, generating, open, selectedId, onOpenChange, onSelect }: { artifacts: Artifact[]; generating: boolean; open: boolean; selectedId: string | undefined; onOpenChange: (open: boolean) => void; onSelect: (id: string) => void }) {
   const selected = artifacts.find((artifact) => artifact.id === selectedId) ?? artifacts.at(-1)
-  if (!open) return null
+  if (!open || (!generating && artifacts.length === 0)) return null
   return <aside className="artifact-workspace" aria-label="Generated artifact preview">
     <div className="artifact-workspace-head"><div><span>ARTIFACT</span><strong>{generating ? 'Generating…' : selected?.name ?? 'Preview'}</strong></div><Button variant="ghost" onClick={() => onOpenChange(false)} aria-label="Close artifact preview">×</Button></div>
     {generating && <div className="artifact-generating"><span className="artifact-orbit" aria-hidden="true" /><div><strong>Building an artifact</strong><span>Structured output will render here as it arrives.</span></div><div className="artifact-skeleton"><i /><i /><i /></div></div>}

@@ -290,12 +290,22 @@ export class PapyrusWorker implements AgentRuntime {
     for (let turn = 0; turn < 32; turn += 1) {
       if (request.signal?.aborted) return { runtimeSessionId, stopReason: 'cancelled' }
       const messageId = `agent_${runtimeSessionId}_${turn}`
-      const message = await this.complete(messages, tools, async (text) => {
-        await request.onEvent({
-          kind: 'update',
-          at: new Date().toISOString(),
-          data: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text }, messageId },
-        })
+      const thoughtMessageId = `thought_${runtimeSessionId}_${turn}`
+      const message = await this.complete(messages, tools, {
+        text: async (text) => {
+          await request.onEvent({
+            kind: 'update',
+            at: new Date().toISOString(),
+            data: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text }, messageId },
+          })
+        },
+        thought: async (text) => {
+          await request.onEvent({
+            kind: 'update',
+            at: new Date().toISOString(),
+            data: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text }, messageId: thoughtMessageId },
+          })
+        },
       }, request.signal)
 
       const calls = message.tool_calls ?? []
@@ -411,7 +421,12 @@ export class PapyrusWorker implements AgentRuntime {
     return { runtimeSessionId, stopReason: 'max_turn_requests' }
   }
 
-  private async complete(messages: ModelMessage[], tools: ModelTool[], onText: (text: string) => void | Promise<void>, signal?: AbortSignal): Promise<ModelMessage> {
+  private async complete(
+    messages: ModelMessage[],
+    tools: ModelTool[],
+    onDelta: { text: (text: string) => void | Promise<void>; thought: (text: string) => void | Promise<void> },
+    signal?: AbortSignal,
+  ): Promise<ModelMessage> {
     const endpoint = this.config.endpoint!.replace(/\/$/, '')
     const timeout = AbortSignal.timeout(this.config.promptTimeoutMs ?? 600_000)
     const combined = signal ? AbortSignal.any([signal, timeout]) : timeout
@@ -436,7 +451,9 @@ export class PapyrusWorker implements AgentRuntime {
       const body = await response.json() as { choices?: Array<{ message?: ModelMessage }> }
       const message = body.choices?.[0]?.message
       if (!message) throw new Error('Model endpoint returned no assistant message')
-      if (typeof message.content === 'string' && message.content) await onText(message.content)
+      const thought = modelReasoning(message)
+      if (thought) await onDelta.thought(thought)
+      if (typeof message.content === 'string' && message.content) await onDelta.text(message.content)
       return message
     }
     if (!response.body) throw new Error('Model endpoint returned no response stream')
@@ -450,11 +467,19 @@ export class PapyrusWorker implements AgentRuntime {
       if (!line.startsWith('data:')) return
       const payload = line.slice(5).trim()
       if (!payload || payload === '[DONE]') return
-      const packet = JSON.parse(payload) as { choices?: Array<{ delta?: { content?: string; tool_calls?: Array<{ index: number; id?: string; type?: 'function'; function?: { name?: string; arguments?: string } }> } }> }
+      const packet = JSON.parse(payload) as { choices?: Array<{ delta?: {
+        content?: string
+        reasoning_content?: unknown
+        reasoning?: unknown
+        thinking?: unknown
+        tool_calls?: Array<{ index: number; id?: string; type?: 'function'; function?: { name?: string; arguments?: string } }>
+      } }> }
       const delta = packet.choices?.[0]?.delta
+      const thought = modelReasoning(delta)
+      if (thought) await onDelta.thought(thought)
       if (typeof delta?.content === 'string' && delta.content) {
         content += delta.content
-        await onText(delta.content)
+        await onDelta.text(delta.content)
       }
       for (const part of delta?.tool_calls ?? []) {
         const current = toolCalls.get(part.index) ?? { id: '', type: 'function' as const, function: { name: '', arguments: '' } }
@@ -490,6 +515,21 @@ type ModelMessage = {
   content: string | Array<Record<string, unknown>> | null
   tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>
   tool_call_id?: string
+  reasoning_content?: unknown
+  reasoning?: unknown
+  thinking?: unknown
+}
+
+function modelReasoning(value: unknown): string {
+  if (!isRecord(value)) return ''
+  if (typeof value.reasoning_content === 'string') return value.reasoning_content
+  if (typeof value.reasoning === 'string') return value.reasoning
+  if (typeof value.thinking === 'string') return value.thinking
+  if (isRecord(value.reasoning)) {
+    if (typeof value.reasoning.summary === 'string') return value.reasoning.summary
+    if (typeof value.reasoning.content === 'string') return value.reasoning.content
+  }
+  return ''
 }
 
 function modelTool(tool: RuntimeTool): ModelTool {

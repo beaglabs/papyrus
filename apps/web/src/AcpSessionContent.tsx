@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 
 export interface AcpContentItem {
   id: string
-  role: 'user' | 'agent'
+  role: 'user' | 'agent' | 'thought'
   sequence: number
   blocks: Array<Record<string, unknown>>
 }
@@ -13,7 +13,7 @@ export function acpContent(events: SessionEvent[]): AcpContentItem[] {
   for (const event of events) {
     if (event.kind !== 'update' || !record(event.data)) continue
     const kind = event.data.sessionUpdate
-    const role = kind === 'user_message_chunk' ? 'user' : kind === 'agent_message_chunk' ? 'agent' : undefined
+    const role = kind === 'user_message_chunk' ? 'user' : kind === 'agent_message_chunk' ? 'agent' : kind === 'agent_thought_chunk' ? 'thought' : undefined
     if (!role || !record(event.data.content)) continue
     const id = typeof event.data.messageId === 'string' ? event.data.messageId : `${role}_${event.sequence}`
     const current = messages.get(id) ?? { id, role, sequence: event.sequence, blocks: [] }
@@ -26,7 +26,13 @@ export function acpContent(events: SessionEvent[]): AcpContentItem[] {
   return [...messages.values()].sort((a, b) => a.sequence - b.sequence)
 }
 
-export function ContentMessage({ message }: { message: AcpContentItem }) {
+export function ContentMessage({ message, active = false }: { message: AcpContentItem; active?: boolean }) {
+  if (message.role === 'thought') {
+    return <details className="message thought" open={active}>
+      <summary><span className="thought-orbit" aria-hidden="true" /><strong>{active ? 'Thinking' : 'Thought process'}</strong></summary>
+      <div className="content-blocks">{message.blocks.map((block, index) => <ContentBlock key={index} block={block} />)}</div>
+    </details>
+  }
   return <article className={`message ${message.role}`}><span>{message.role === 'user' ? 'YOU' : 'PAPYRUS'}</span><div className="content-blocks">{message.blocks.map((block, index) => <ContentBlock key={index} block={block} />)}</div></article>
 }
 

@@ -32,6 +32,7 @@ export function SessionHarness({ environments }: { environments: Environment[] }
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const selected = sessions.find((session) => session.id === selectedId)
   const messages = useMemo(() => acpContent(events), [events])
+  const activeThoughtId = useMemo(() => [...messages].reverse().find((message) => message.role === 'thought')?.id, [messages])
   const artifactGenerating = useMemo(() => running && isArtifactGenerationActive(events), [events, running])
 
   const loadContext = async (sessionId: string) => {
@@ -160,7 +161,7 @@ export function SessionHarness({ environments }: { environments: Environment[] }
             <div className="messages" ref={messagesRef} aria-live="polite" onScroll={(event) => {
               const element = event.currentTarget
               setFollowingLatest(element.scrollHeight - element.scrollTop - element.clientHeight < 72)
-            }}>{messages.length ? messages.map((message) => <ContentMessage message={message} key={message.id} />) : <div className="conversation-empty compact"><h2>What should Papyrus do?</h2><p>Attach context or describe the work.</p></div>}{running && <PromptTurnFlow events={events} />}</div>
+            }}>{messages.length ? messages.map((message) => <ContentMessage message={message} active={running && message.id === activeThoughtId} key={message.id} />) : <div className="conversation-empty compact"><h2>What should Papyrus do?</h2><p>Attach context or describe the work.</p></div>}<PromptTurnFlow events={events} running={running} />{artifacts.length > 0 && <ArtifactCards artifacts={artifacts} onOpen={(id) => { setSelectedArtifactId(id); setArtifactPanelOpen(true) }} />}</div>
             {!followingLatest && <Button className="jump-latest" onClick={() => { setFollowingLatest(true); messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' }) }}>Jump to latest ↓</Button>}
           </div>
           <ArtifactWorkspace artifacts={artifacts} generating={artifactGenerating} open={artifactPanelOpen} selectedId={selectedArtifactId} onOpenChange={setArtifactPanelOpen} onSelect={setSelectedArtifactId} />
@@ -196,9 +197,9 @@ function formatBytes(size: number) { return size < 1024 ? `${size} B` : size < 1
 
 function ArtifactWorkspace({ artifacts, generating, open, selectedId, onOpenChange, onSelect }: { artifacts: Artifact[]; generating: boolean; open: boolean; selectedId: string | undefined; onOpenChange: (open: boolean) => void; onSelect: (id: string) => void }) {
   const selected = artifacts.find((artifact) => artifact.id === selectedId) ?? artifacts.at(-1)
-  if (!open) return <Button className={`artifact-popout ${generating ? 'generating' : ''}`} onClick={() => onOpenChange(true)}><span aria-hidden="true">{generating ? '◌' : '▤'}</span><span>Outputs</span>{artifacts.length > 0 && <strong>{artifacts.length}</strong>}</Button>
-  return <aside className="artifact-workspace">
-    <div className="artifact-workspace-head"><div><span>OUTPUTS</span><strong>{generating ? 'Generating…' : selected?.name ?? 'Artifacts'}</strong></div><Button variant="ghost" onClick={() => onOpenChange(false)} aria-label="Close outputs">×</Button></div>
+  if (!open) return null
+  return <aside className="artifact-workspace" aria-label="Generated artifact preview">
+    <div className="artifact-workspace-head"><div><span>ARTIFACT</span><strong>{generating ? 'Generating…' : selected?.name ?? 'Preview'}</strong></div><Button variant="ghost" onClick={() => onOpenChange(false)} aria-label="Close artifact preview">×</Button></div>
     {generating && <div className="artifact-generating"><span className="artifact-orbit" aria-hidden="true" /><div><strong>Building an artifact</strong><span>Structured output will render here as it arrives.</span></div><div className="artifact-skeleton"><i /><i /><i /></div></div>}
     {artifacts.length > 0 && <div className="artifact-browser">
       <nav aria-label="Generated artifacts">{artifacts.map((artifact) => <Button key={artifact.id} variant="ghost" className={artifact.id === selected?.id ? 'selected' : ''} onClick={() => onSelect(artifact.id)}><span>{artifactIcon(artifact)}</span><span><strong>{artifact.name}</strong><small>{artifact.mediaType} · v{artifact.version}</small></span></Button>)}</nav>
@@ -225,7 +226,18 @@ function isArtifactGenerationActive(events: SessionEvent[]): boolean {
   return tools.some((tool) => ['pending', 'in_progress'].includes(tool.status) && (tool.kind === 'edit' || /generate|write|render|export|artifact|image/i.test(tool.title)))
 }
 
-function PromptTurnFlow({ events }: { events: SessionEvent[] }) {
+function ArtifactCards({ artifacts, onOpen }: { artifacts: Artifact[]; onOpen: (id: string) => void }) {
+  return <section className="artifact-cards" aria-label="Generated artifacts">
+    <span>GENERATED</span>
+    <div>{artifacts.map((artifact) => <Button key={artifact.id} variant="ghost" onClick={() => onOpen(artifact.id)}>
+      <span className="artifact-card-icon">{artifactIcon(artifact)}</span>
+      <span><strong>{artifact.name}</strong><small>{artifact.mediaType} · version {artifact.version}</small></span>
+      <span aria-hidden="true">↗</span>
+    </Button>)}</div>
+  </section>
+}
+
+function PromptTurnFlow({ events, running }: { events: SessionEvent[]; running: boolean }) {
   let turnStart = -1
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]
@@ -236,15 +248,13 @@ function PromptTurnFlow({ events }: { events: SessionEvent[] }) {
   }
   const turnEvents = turnStart >= 0 ? events.slice(turnStart + 1) : []
   const { plan, tools } = projectActivity(turnEvents)
+  if (plan.length === 0 && tools.length === 0) return null
   const activeTool = [...tools].reverse().find((tool) => tool.status === 'in_progress' || tool.status === 'pending')
-  const hasAgentContent = turnEvents.some((event) => event.kind === 'update' && event.data && typeof event.data === 'object' && (event.data as { sessionUpdate?: string }).sessionUpdate === 'agent_message_chunk')
   const status = activeTool ? `Running ${activeTool.title}`
-    : tools.length && tools.every((tool) => ['completed', 'failed', 'cancelled'].includes(tool.status)) ? 'Continuing with tool results'
-    : hasAgentContent ? 'Streaming response'
-    : turnEvents.some((event) => event.kind === 'session') ? 'Model is processing'
-    : 'Starting prompt turn'
+    : running ? 'Continuing with tool results'
+    : 'Tool activity complete'
   return <section className="prompt-turn-flow" aria-live="polite">
-    <div className="prompt-turn-status"><span className="dot good" /><strong>{status}</strong><span className="streaming-cursor" aria-hidden="true">▌</span></div>
+    <div className="prompt-turn-status"><span className="dot good" /><strong>{status}</strong>{running && <span className="streaming-cursor" aria-hidden="true">▌</span>}</div>
     {plan.length > 0 && <ol className="prompt-turn-plan">{plan.map((item, index) => <li key={`${index}-${item.content}`} className={item.status}><span className={`activity-status ${item.status}`} />{item.content}</li>)}</ol>}
     {tools.length > 0 && <div className="prompt-turn-tools">{tools.map((tool) => <Card key={tool.id} className={`prompt-turn-tool ${tool.status}`}><span className={`tool-kind ${tool.kind}`}>{tool.kind}</span><div><strong>{tool.title}</strong><small>{tool.locations.join(' · ') || tool.id}</small></div><span className={`pill ${tool.status}`}>{tool.status.replace('_', ' ')}</span></Card>)}</div>}
   </section>

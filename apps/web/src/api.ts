@@ -198,6 +198,12 @@ export async function assignEnvironment(principalId: string, environmentId: stri
 export async function addMcpServer(name: string, endpoint: string): Promise<{ server: McpServer; authorizationUrl?: string }> {
   return api('/api/mcp/servers', { method: 'POST', body: JSON.stringify({ name, endpoint }) })
 }
+export async function retryMcpServer(serverId: string): Promise<{ server: McpServer; authorizationUrl: string }> {
+  return api(`/api/mcp/servers/${encodeURIComponent(serverId)}/retry`, { method: 'POST' })
+}
+export async function deleteMcpServer(serverId: string): Promise<void> {
+  await api(`/api/mcp/servers/${encodeURIComponent(serverId)}`, { method: 'DELETE' })
+}
 export async function setMcpServerEnabled(serverId: string, enabled: boolean): Promise<McpServer> {
   return api(`/api/mcp/servers/${encodeURIComponent(serverId)}/state`, { method: 'POST', body: JSON.stringify({ enabled }) })
 }

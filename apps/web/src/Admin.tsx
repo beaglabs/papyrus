@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { APPROVED_SOURCE_KINDS, type ApprovedSourceKind, ROLES, type AdminOverview, type Principal, type Role } from '@papyrus/contracts'
+import { type ApprovedSourceKind, ROLES, type AdminOverview, type Principal, type Role } from '@papyrus/contracts'
 import { addMcpServer, addUserRole, adminOverview, assignApprovedSource, cancelInvitation, createApprovedSource, createInvitation, ingestApprovedSource, revokeUserSessions, setMcpServerEnabled } from './api.js'
 import { SelectField } from './SelectField.js'
-import { Alert, Button, Card, Checkbox, Input, NativeSelect, TabsList, TabsTrigger } from './components/ui/index.js'
+import { Alert, Button, Card, Checkbox, Combobox, Input, TabsList, TabsTrigger } from './components/ui/index.js'
 
 type AdminTab = 'deployment' | 'identity' | 'sources' | 'integrations'
 
@@ -74,22 +74,36 @@ export function AdminView({ me }: { me: Principal }) {
 }
 
 function SourceAdministration({data,busy,act}:{data:AdminOverview;busy:boolean;act:(operation:()=>Promise<unknown>)=>Promise<void>}){
+  const [kind,setKind]=useState<ApprovedSourceKind>('upload')
+  const kinds=[{value:'upload',label:'Upload'},{value:'domain',label:'Domain'},{value:'mcp',label:'MCP connector'},{value:'api',label:'API'}]
+  const modes=[{value:'snapshot',label:'Snapshot'},{value:'live',label:'Live'}]
   return <section className="admin-single approved-source-admin"><AdminPanel title="Approved sources">
-    <form className="admin-form source-register" onSubmit={(event)=>{event.preventDefault();const form=event.currentTarget;const values=new FormData(form);void act(async()=>{await createApprovedSource({name:String(values.get('name')),kind:String(values.get('kind')) as ApprovedSourceKind,locator:String(values.get('locator')),mode:String(values.get('mode')) as 'snapshot'|'live'});form.reset()})}}>
+    <form className="admin-form source-register" onSubmit={(event)=>{event.preventDefault();const form=event.currentTarget;const values=new FormData(form);void act(async()=>{
+      const locator=kind==='upload'?String((values.get('file') as File)?.name??'upload'):String(values.get('locator')??'')
+      if(kind==='domain')validateApprovedDomain(locator)
+      const source=await createApprovedSource({name:String(values.get('name')),kind,locator,mode:String(values.get('mode')||'snapshot') as 'snapshot'|'live'})
+      if(kind==='upload'){const file=values.get('file');if(!(file instanceof File)||!file.size)throw new Error('Choose a file to upload');await ingestApprovedSource(source.id,{uri:'upload:///'+file.name,title:file.name,mediaType:file.type||'text/plain',content:await file.text()})}
+      form.reset();setKind('upload')
+    })}}>
       <Input name="name" required maxLength={256} placeholder="Source name" />
-      <NativeSelect name="kind" aria-label="Source type">{APPROVED_SOURCE_KINDS.map(kind=><option key={kind} value={kind}>{kind}</option>)}</NativeSelect>
-      <Input name="locator" required maxLength={4096} placeholder="Existing path, domain, endpoint, or package URI" />
-      <NativeSelect name="mode" aria-label="Retrieval mode"><option value="snapshot">snapshot</option><option value="live">live</option></NativeSelect>
+      <Combobox value={kind} onValueChange={value=>setKind(value as ApprovedSourceKind)} options={kinds} placeholder="Choose source type" />
+      {kind==='upload'&&<Input name="file" type="file" required accept=".txt,.md,.csv,.json,.xml,.yaml,.yml,.html,.log,text/*,application/json,application/xml" />}
+      {kind==='domain'&&<Input name="locator" type="url" required pattern="https://[^\\s]+" placeholder="https://docs.example.mil" />}
+      {kind==='api'&&<Input name="locator" type="url" required placeholder="https://api.example.mil/v1" />}
+      {kind==='mcp'&&<Combobox name="locator" options={data.mcpServers.filter(server=>server.enabled).map(server=>({value:server.id,label:server.name,detail:new URL(server.endpoint).hostname}))} placeholder="Choose MCP connection" />}
+      <Combobox name="mode" defaultValue="snapshot" options={modes} placeholder="Choose retrieval mode" />
       <Button className="primary" disabled={busy}>Add source</Button>
     </form>
-    <p className="admin-note">Papyrus does not mount network storage. Point directory sources at paths already mounted by the host, container, or Kubernetes deployment.</p>
-    <div className="admin-list source-admin-list">{data.sources.map(source=><Card key={source.id}><div><strong>{source.name}</strong><span>{source.kind} · {source.mode} · {source.documentCount} documents</span><code>{source.locator}</code></div><div className="source-assignees">{data.users.map(user=><label key={user.id}><Checkbox checked={source.assignedUserIds.includes(user.id)} disabled={busy} onChange={(event)=>void act(()=>assignApprovedSource(source.id,user.id,event.target.checked))}/>{user.displayName}</label>)}</div></Card>)}</div>
-    {data.sources.length>0&&<form className="admin-form source-ingest" onSubmit={(event)=>{event.preventDefault();const form=event.currentTarget;const values=new FormData(form);const file=values.get('file');if(!(file instanceof File)||!file.size)return;void file.text().then(content=>act(async()=>{await ingestApprovedSource(String(values.get('sourceId')),{uri:'upload:///'+file.name,title:file.name,mediaType:file.type||'text/plain',content});form.reset()}))}}>
-      <NativeSelect name="sourceId" aria-label="Source to index">{data.sources.map(source=><option key={source.id} value={source.id}>{source.name}</option>)}</NativeSelect>
-      <Input name="file" type="file" required accept=".txt,.md,.csv,.json,.xml,.yaml,.yml,.html,.log,text/*,application/json,application/xml" />
-      <Button className="secondary" disabled={busy}>Index document</Button>
-    </form>}
+    <p className="admin-note">Sources are assigned to identities and rechecked on every search and read. Uploads are indexed immediately; domains and APIs retain their approved locator; MCP sources bind to an existing validated connection.</p>
+    <div className="admin-list source-admin-list">{data.sources.map(source=><Card key={source.id}><div><strong>{source.name}</strong><span>{source.kind.replace(/\\b\\w/g,character=>character.toUpperCase())} · {source.mode.replace(/^./,character=>character.toUpperCase())} · {source.documentCount} documents</span><code>{source.locator}</code></div><div className="source-assignees">{data.users.map(user=><label key={user.id}><Checkbox checked={source.assignedUserIds.includes(user.id)} disabled={busy} onChange={(event)=>void act(()=>assignApprovedSource(source.id,user.id,event.target.checked))}/>{user.displayName}</label>)}</div></Card>)}</div>
   </AdminPanel></section>
+}
+
+function validateApprovedDomain(value:string){
+  let url:URL
+  try{url=new URL(value)}catch{throw new Error('Enter a valid HTTPS domain')}
+  if(url.protocol!=='https:'||!url.hostname||url.username||url.password||url.port)throw new Error('Domain sources must use a credential-free HTTPS origin')
+  if(url.pathname!=='/'||url.search||url.hash)throw new Error('Enter a domain origin without a path, query, or fragment')
 }
 
 function AdminPanel({ title, children }: { title: string; children: ReactNode }) { return <Card className="panel admin-panel"><div className="panel-head"><h2>{title}</h2></div>{children}</Card> }

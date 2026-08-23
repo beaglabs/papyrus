@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { APPROVED_SOURCE_KINDS, type ApprovedSourceKind, ROLES, type AdminOverview, type Principal, type Role } from '@papyrus/contracts'
 import { addMcpServer, addUserRole, adminOverview, assignApprovedSource, cancelInvitation, createApprovedSource, createInvitation, ingestApprovedSource, revokeUserSessions, setMcpServerEnabled } from './api.js'
 import { SelectField } from './SelectField.js'
-import { Button, Input, NativeSelect } from './components/ui/index.js'
+import { Button, Checkbox, Input, NativeSelect } from './components/ui/index.js'
 
 type AdminTab = 'deployment' | 'identity' | 'sources' | 'integrations'
 
@@ -83,7 +83,7 @@ function SourceAdministration({data,busy,act}:{data:AdminOverview;busy:boolean;a
       <Button className="primary" disabled={busy}>Add source</Button>
     </form>
     <p className="admin-note">Papyrus does not mount network storage. Point directory sources at paths already mounted by the host, container, or Kubernetes deployment.</p>
-    <div className="admin-list source-admin-list">{data.sources.map(source=><article key={source.id}><div><strong>{source.name}</strong><span>{source.kind} · {source.mode} · {source.documentCount} documents</span><code>{source.locator}</code></div><div className="source-assignees">{data.users.map(user=><label key={user.id}><Input type="checkbox" checked={source.assignedUserIds.includes(user.id)} disabled={busy} onChange={(event)=>void act(()=>assignApprovedSource(source.id,user.id,event.target.checked))}/>{user.displayName}</label>)}</div></article>)}</div>
+    <div className="admin-list source-admin-list">{data.sources.map(source=><article key={source.id}><div><strong>{source.name}</strong><span>{source.kind} · {source.mode} · {source.documentCount} documents</span><code>{source.locator}</code></div><div className="source-assignees">{data.users.map(user=><label key={user.id}><Checkbox checked={source.assignedUserIds.includes(user.id)} disabled={busy} onChange={(event)=>void act(()=>assignApprovedSource(source.id,user.id,event.target.checked))}/>{user.displayName}</label>)}</div></article>)}</div>
     {data.sources.length>0&&<form className="admin-form source-ingest" onSubmit={(event)=>{event.preventDefault();const form=event.currentTarget;const values=new FormData(form);const file=values.get('file');if(!(file instanceof File)||!file.size)return;void file.text().then(content=>act(async()=>{await ingestApprovedSource(String(values.get('sourceId')),{uri:'upload:///'+file.name,title:file.name,mediaType:file.type||'text/plain',content});form.reset()}))}}>
       <NativeSelect name="sourceId" aria-label="Source to index">{data.sources.map(source=><option key={source.id} value={source.id}>{source.name}</option>)}</NativeSelect>
       <Input name="file" type="file" required accept=".txt,.md,.csv,.json,.xml,.yaml,.yml,.html,.log,text/*,application/json,application/xml" />

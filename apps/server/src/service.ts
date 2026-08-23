@@ -219,7 +219,9 @@ export class PapyrusService {
       })
       this.db.setSetting(settingKey, target.id)
     }
-    if (!this.db.isAssigned(actor.id, 'environment', target.id)) this.db.assign('user', actor.id, 'environment', target.id)
+    if (actor.roles.includes('User') && !this.db.isAssigned(actor.id, 'environment', target.id)) {
+      this.db.assign('user', actor.id, 'environment', target.id)
+    }
     return target
   }
 

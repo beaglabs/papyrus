@@ -478,7 +478,8 @@ export class PapyrusWorker implements AgentRuntime {
       content,
       ...(toolCalls.size ? { tool_calls: [...toolCalls.entries()].sort(([left], [right]) => left - right).map(([, call]) => call) } : {}),
     }
-  }}
+  }
+}
 
 type ModelTool = {
   type: 'function'

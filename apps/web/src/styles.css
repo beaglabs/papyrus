@@ -126,6 +126,15 @@ h2 { font-size: 19px; margin-bottom: 20px; }
 .message.user { min-width: min(180px, 70vw); justify-self: end; border: 2px solid #111; background: #82c9ff; box-shadow: 3px 3px 0 #111; padding: 11px 14px 12px; }
 .message.agent { justify-self: start; }
 .working { display: flex; gap: 8px; align-items: center; color: #666; font: 11px ui-monospace, monospace; }
+.turn-starting { display: flex; gap: 8px; align-items: center; color: #666; font: 11px ui-monospace, monospace; }
+.live-tool-call { width: min(760px, 92%); justify-self: start; border: 2px solid #111; background: #f5f1e8; box-shadow: 3px 3px 0 #111; overflow: hidden; }
+.live-tool-call.in_progress { border-color: #111; }.live-tool-call.completed { box-shadow: 3px 3px 0 #71df98; }.live-tool-call.failed { box-shadow: 3px 3px 0 #ff9fb4; }
+.live-tool-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 12px; }
+.live-tool-head > div { min-width: 0; display: grid; gap: 3px; }.live-tool-head small { overflow-wrap: anywhere; color: #666; font: 10px ui-monospace, monospace; text-transform: uppercase; }
+.terminal-identity { display: flex; flex-wrap: wrap; gap: 6px; border-top: 1px solid #999; padding: 7px 10px; background: #fff; }.terminal-identity code { font: 10px ui-monospace, monospace; }
+.live-terminal-output { max-height: 280px; margin: 0; overflow: auto; border-top: 2px solid #111; background: #171717; color: #d8f5df; padding: 12px 14px; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, monospace; }
+.live-tool-call.in_progress .live-terminal-output::after { content: '▌'; color: #71df98; animation: terminal-cursor 1s steps(1) infinite; }
+@keyframes terminal-cursor { 50% { opacity: 0; } }
 .jump-latest { position: absolute; right: 22px; bottom: 16px; z-index: 2; border: 1px solid #111; background: #fff; padding: 8px 11px; box-shadow: 2px 2px 0 #111; cursor: pointer; font: 10px ui-monospace, monospace; }
 .composer { flex: 0 0 auto; position: relative; z-index: 2; min-width: 0; border-top: 2px solid #111; padding: 14px 16px; background: #f5f1e8; }
 .elicitation-card { flex: 0 0 auto; display: grid; grid-template-columns: minmax(180px, 1fr) minmax(220px, 1fr) auto; align-items: end; gap: 12px; border-top: 2px solid #111; background: #fff2bd; padding: 14px 16px; }.elicitation-card > div:first-child, .elicitation-card label { display: grid; gap: 5px; }.elicitation-card span, .elicitation-card small { color: #666; font: 9px ui-monospace, monospace; }.elicitation-card input { min-width: 0; border: 2px solid #111; padding: 9px; }.elicitation-card > div:last-child { display: flex; gap: 8px; }

@@ -5,7 +5,7 @@ import { SourceList } from './Sources.js'
 import { SelectField } from './SelectField.js'
 import { acpContent, ContentMessage, type AcpContentItem } from './AcpSessionContent.js'
 
-interface ToolActivity { id: string; title: string; kind: string; status: string; sequence: number; locations: string[]; terminals: string[] }
+interface ToolActivity { id: string; title: string; kind: string; status: string; sequence: number; locations: string[]; terminals: string[]; output: string }
 interface PlanItem { content: string; status: string; priority: string }
 export function SessionHarness({ environments }: { environments: Environment[] }) {
   const [sessions, setSessions] = useState<Session[]>([])
@@ -200,7 +200,7 @@ function SessionSurfaceWorkspace({
   sources: ResearchSource[]
   onDecision: (id: string, decision: 'approved' | 'denied', reason?: string) => Promise<void>
 }) {
-  const conversation = <ConversationSurface messages={messages} messagesRef={messagesRef} followingLatest={followingLatest} setFollowingLatest={setFollowingLatest} running={running} />
+  const conversation = <ConversationSurface messages={messages} tools={activity.tools} messagesRef={messagesRef} followingLatest={followingLatest} setFollowingLatest={setFollowingLatest} running={running} />
 
   if (surface === 'general') return <div className="surface-workspace general-surface">
     <section className="surface-pane general-conversation">{conversation}</section>
@@ -234,20 +234,44 @@ function SessionSurfaceWorkspace({
   </div>
 }
 
-function ConversationSurface({ messages, messagesRef, followingLatest, setFollowingLatest, running }: {
+function ConversationSurface({ messages, tools, messagesRef, followingLatest, setFollowingLatest, running }: {
   messages: AcpContentItem[]
+  tools: ToolActivity[]
   messagesRef: RefObject<HTMLDivElement | null>
   followingLatest: boolean
   setFollowingLatest: (value: boolean) => void
   running: boolean
 }) {
+  const transcript: Array<({ itemType: 'message' } & AcpContentItem) | ({ itemType: 'tool' } & ToolActivity)> = [
+    ...messages.map((message) => ({ ...message, itemType: 'message' as const })),
+    ...tools.map((tool) => ({ ...tool, itemType: 'tool' as const })),
+  ].sort((left, right) => left.sequence - right.sequence)
+  const activeTool = tools.some((tool) => tool.status === 'pending' || tool.status === 'in_progress')
+
   return <div className="message-region">
     <div className="messages" ref={messagesRef} aria-live="polite" onScroll={(event) => {
       const element = event.currentTarget
       setFollowingLatest(element.scrollHeight - element.scrollTop - element.clientHeight < 72)
-    }}>{messages.length ? messages.map((message) => <ContentMessage message={message} key={message.id} />) : <div className="conversation-empty compact"><h2>What work should Papyrus begin?</h2><p>The runtime and tools are selected by deployment policy.</p></div>}{running && <div className="working"><span className="dot good" />Working under policy…</div>}</div>
+    }}>{transcript.length ? transcript.map((item) => item.itemType === 'message'
+      ? <ContentMessage message={item} key={`message-${item.id}`} />
+      : <LiveToolCall tool={item} key={`tool-${item.id}`} />)
+      : <div className="conversation-empty compact"><h2>What work should Papyrus begin?</h2><p>The runtime and tools are selected by deployment policy.</p></div>}
+      {running && !activeTool && <div className="turn-starting"><span className="dot good" />Awaiting the next ACP update…</div>}
+    </div>
     {!followingLatest && <button className="jump-latest" onClick={() => { setFollowingLatest(true); messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' }) }}>Jump to latest ↓</button>}
   </div>
+}
+
+function LiveToolCall({ tool }: { tool: ToolActivity }) {
+  return <article className={`live-tool-call ${tool.status}`}>
+    <div className="live-tool-head">
+      <span className={`tool-kind ${tool.kind}`}>{tool.kind}</span>
+      <div><strong>{tool.title}</strong><small>{tool.status.replace('_', ' ')}{tool.locations.length ? ` · ${tool.locations.join(' · ')}` : ''}</small></div>
+      <span className={`pill ${tool.status}`}>{tool.status.replace('_', ' ')}</span>
+    </div>
+    {tool.terminals.length > 0 && <div className="terminal-identity">{tool.terminals.map((terminal) => <code key={terminal}>{terminal}</code>)}</div>}
+    {tool.output && <pre className="live-terminal-output"><code>{tool.output}</code></pre>}
+  </article>
 }
 
 
@@ -292,7 +316,7 @@ function projectActivity(events: SessionEvent[]): { plan: PlanItem[]; tools: Too
   const tools = new Map<string, ToolActivity>()
   for (const event of events) {
     if (event.kind !== 'update' || !event.data || typeof event.data !== 'object') continue
-    const update = event.data as { sessionUpdate?: string; entries?: PlanItem[]; toolCallId?: string; title?: string; kind?: string; status?: string; locations?: Array<{ path?: string }>; content?: Array<{ type?: string; terminalId?: string }> }
+    const update = event.data as { sessionUpdate?: string; entries?: PlanItem[]; toolCallId?: string; title?: string; kind?: string; status?: string; locations?: Array<{ path?: string }>; content?: Array<{ type?: string; terminalId?: string; content?: { type?: string; text?: string } }> }
     if (update.sessionUpdate === 'plan' && Array.isArray(update.entries)) plan = update.entries
     if ((update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') && update.toolCallId) {
       const current = tools.get(update.toolCallId)
@@ -301,6 +325,7 @@ function projectActivity(events: SessionEvent[]): { plan: PlanItem[]; tools: Too
         status: update.status ?? current?.status ?? 'pending', sequence: current?.sequence ?? event.sequence,
         locations: update.locations?.flatMap((location) => typeof location.path === 'string' ? [location.path] : []) ?? current?.locations ?? [],
         terminals: update.content?.flatMap((content) => content.type === 'terminal' && content.terminalId ? [content.terminalId] : []) ?? current?.terminals ?? [],
+        output: update.content?.flatMap((item) => item.type === 'content' && item.content?.type === 'text' && typeof item.content.text === 'string' ? [item.content.text] : []).join('\n') || current?.output || '',
       })
     }
   }

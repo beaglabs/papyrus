@@ -526,6 +526,19 @@ nav [data-slot=button].active{border-color:var(--border);background:var(--main);
 }
 .message.thought[open] .thought-orbit { animation: artifact-spin 1s linear infinite; }
 
+.durable-prompt-turn {
+  display: grid;
+  gap: 14px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid #e2ddd3;
+}
+.durable-prompt-turn:last-of-type { border-bottom: 0; }
+.turn-outcome { width: min(760px, 92%); display: grid; gap: 3px; padding: 9px 11px; border-left: 3px solid #888; background: #f5f1e8; color: #555; font: 11px ui-monospace, monospace; }
+.turn-outcome.failed { border-left-color: #ff5f1f; background: #fff0f3; }
+.turn-outcome.cancelled,.turn-outcome.interrupted { border-left-color: #d8a82f; background: #fff8dc; }
+.turn-outcome strong { text-transform: capitalize; }
+.connection-notice { background: #fff8dc; }
+
 .prompt-turn-flow {
   width: min(760px, 92%);
   display: grid;
@@ -612,18 +625,18 @@ nav [data-slot=button].active{border-color:var(--border);background:var(--main);
 .artifact-card-icon { font-size: 20px; text-align: center; }
 
 .artifact-workspace {
-  position: absolute;
+  position: relative;
   z-index: 6;
-  inset: 0 0 0 auto;
-  width: min(620px, 58%);
+  width: min(520px, 48%);
   height: 100%;
+  flex: 0 0 min(520px, 48%);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-left: 2px solid #111;
+  border-left: 1px solid #aaa;
   background: #f5f1e8;
   color: #111;
-  box-shadow: -12px 0 28px rgba(17,17,17,.12);
+  box-shadow: none;
   animation: artifact-panel-in .22s ease-out;
 }
 .artifact-workspace-head {
@@ -737,7 +750,7 @@ nav [data-slot=button].active{border-color:var(--border);background:var(--main);
 @keyframes artifact-spin { to { transform: rotate(360deg); } }
 @keyframes artifact-shimmer { to { background-position: -200% 0; } }
 @media (max-width: 800px) {
-  .artifact-workspace { width: 100%; }
+  .artifact-workspace { position: absolute; inset: 0 0 0 auto; width: min(520px, 94%); flex-basis: auto; box-shadow: -10px 0 24px rgba(17,17,17,.14); }
   .artifact-browser { grid-template-columns: 150px minmax(0, 1fr); }
 }
 

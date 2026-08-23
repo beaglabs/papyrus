@@ -25,6 +25,17 @@ describe('Papyrus control plane', () => {
     expect(context.service.audit.verify()).toEqual({ valid: true })
   })
 
+  it('creates a session against an internal default execution target', () => {
+    const context = testContext(); contexts.push(context)
+    const { user, environment } = setup(context)
+    const session = context.service.createSession(user, undefined, 'papyrus', 'Automatic target')
+    const target = context.db.getEnvironment(session.environmentId)
+    expect(target).toMatchObject({ name: 'Deployment default' })
+    expect(session.environmentId).not.toBe(environment.id)
+    expect(context.db.isAssigned(user.id, 'environment', session.environmentId)).toBe(true)
+    expect(context.service.audit.verify()).toEqual({ valid: true })
+  })
+
   it('prevents an Admin from assigning privileged roles', () => {
     const context = testContext(); contexts.push(context)
     const admin = context.db.upsertUser({ externalId: 'oidc:issuer:admin', displayName: 'Admin', authMethod: 'oidc' })

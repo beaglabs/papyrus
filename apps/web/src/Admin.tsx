@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { type ApprovedSourceKind, ROLES, type AdminOverview, type Principal, type Role } from '@papyrus/contracts'
 import { addMcpServer, addUserRole, adminOverview, assignApprovedSource, cancelInvitation, createApprovedSource, createInvitation, ingestApprovedSource, revokeUserSessions, setMcpServerEnabled } from './api.js'
 import { SelectField } from './SelectField.js'
-import { Alert, Button, Card, Checkbox, Combobox, Input, TabsList, TabsTrigger } from './components/ui/index.js'
+import { Alert, Button, Card, Checkbox, Combobox, Dialog, DialogContent, DialogFooter, DialogHeader, Input, TabsList, TabsTrigger } from './components/ui/index.js'
 
 type AdminTab = 'deployment' | 'identity' | 'sources' | 'integrations'
 
@@ -11,6 +11,7 @@ export function AdminView({ me }: { me: Principal }) {
   const [tab, setTab] = useState<AdminTab>('deployment')
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
+  const [oauthRequest,setOauthRequest]=useState<{authorizationUrl:string;name:string;endpoint:string;issuer?:string}>()
   const load = useCallback(async () => { setData(await adminOverview()) }, [])
   useEffect(() => { void load().catch(show) }, [load])
   useEffect(() => { const connected = (event: MessageEvent) => { if (event.origin === window.location.origin && event.data?.type === 'papyrus:mcp-connected') void load() }; window.addEventListener('message', connected); return () => window.removeEventListener('message', connected) }, [load])
@@ -69,9 +70,19 @@ export function AdminView({ me }: { me: Principal }) {
       })}</div></AdminPanel>
     </section>}
     {tab === 'sources' && <SourceAdministration data={data} busy={busy} act={act} />}
-    {tab === 'integrations' && <section className="admin-single"><AdminPanel title="MCP servers"><form className="admin-form mcp-register" onSubmit={(event) => { event.preventDefault(); const form = event.currentTarget; const values = new FormData(form); setBusy(true); setError(undefined); void addMcpServer(String(values.get('name')), String(values.get('endpoint'))).then((result) => { form.reset(); if (result.authorizationUrl) window.open(result.authorizationUrl, 'papyrus-mcp-oauth', 'popup,width=720,height=820'); return load() }).catch(show).finally(() => setBusy(false)) }}><Input name="name" required maxLength={256} placeholder="Server name" /><Input name="endpoint" type="url" required maxLength={2048} placeholder="https://mcp.internal/rpc" /><Button className="primary" disabled={busy}>{busy ? 'Discovering…' : 'Connect server'}</Button></form><div className="admin-list compact">{data.mcpServers.map((server) => <Card key={server.id}><div><strong>{server.name}</strong><span>{server.endpoint}</span><span>{server.oauthStatus === 'connected' ? `OAuth connected · ${server.oauthIssuer}` : server.oauthStatus === 'authorization_required' ? 'Waiting for OAuth authorization' : server.oauthStatus === 'error' ? server.oauthError : 'No OAuth challenge · direct connection'} </span></div><Button className={server.enabled ? 'danger' : 'secondary'} disabled={busy || server.oauthStatus === 'authorization_required'} onClick={() => void act(() => setMcpServerEnabled(server.id, !server.enabled))}>{server.enabled ? 'Disable' : 'Enable'}</Button></Card>)}</div><p className="admin-note">Papyrus discovers protected-resource metadata, dynamically registers an OAuth client, and completes authorization-code + PKCE before a protected remote server becomes available.</p></AdminPanel></section>}
+    {tab === 'integrations' && <section className="admin-single"><AdminPanel title="MCP servers"><form className="admin-form mcp-register" onSubmit={(event) => { event.preventDefault(); const form = event.currentTarget; const values = new FormData(form); setBusy(true); setError(undefined); void addMcpServer(String(values.get('name')), String(values.get('endpoint'))).then((result) => { form.reset(); if (result.authorizationUrl) setOauthRequest({authorizationUrl:result.authorizationUrl,name:result.server.name,endpoint:result.server.endpoint,issuer:result.server.oauthIssuer}); return load() }).catch(show).finally(() => setBusy(false)) }}><Input name="name" required maxLength={256} placeholder="Server name" /><Input name="endpoint" type="url" required maxLength={2048} placeholder="https://mcp.internal/rpc" /><Button className="primary" disabled={busy}>{busy ? 'Discovering…' : 'Connect server'}</Button></form><div className="admin-list compact">{data.mcpServers.map((server) => <Card key={server.id}><div><strong>{server.name}</strong><span>{server.endpoint}</span><span>{server.oauthStatus === 'connected' ? `OAuth connected · ${server.oauthIssuer}` : server.oauthStatus === 'authorization_required' ? 'Waiting for OAuth authorization' : server.oauthStatus === 'error' ? server.oauthError : 'No OAuth challenge · direct connection'} </span></div><Button className={server.enabled ? 'danger' : 'secondary'} disabled={busy || server.oauthStatus === 'authorization_required'} onClick={() => void act(() => setMcpServerEnabled(server.id, !server.enabled))}>{server.enabled ? 'Disable' : 'Enable'}</Button></Card>)}</div><p className="admin-note">Papyrus discovers protected-resource metadata, dynamically registers an OAuth client, and completes authorization-code + PKCE before a protected remote server becomes available.</p></AdminPanel></section>}
+    <Dialog open={Boolean(oauthRequest)} onOpenChange={open=>{if(!open)setOauthRequest(undefined)}}>
+      {oauthRequest&&<DialogContent className="oauth-registration-dialog">
+        <DialogHeader><img src={connectionLogo(oauthRequest.endpoint)} alt="Connection logo" referrerPolicy="no-referrer"/><div><p className="eyebrow">DYNAMIC CLIENT REGISTRATION</p><h2>Authorize {oauthRequest.name}</h2></div></DialogHeader>
+        <dl className="facts"><Fact label="Resource" value={oauthRequest.endpoint}/><Fact label="Authorization server" value={oauthRequest.issuer??new URL(oauthRequest.authorizationUrl).origin}/><Fact label="Flow" value="Authorization code + PKCE"/><Fact label="Redirect" value="Papyrus MCP OAuth callback"/></dl>
+        <p>Papyrus validated the protected-resource metadata and prepared a dynamic client registration request. Continue to the authorization server to approve the connection.</p>
+        <DialogFooter><Button variant="neutral" onClick={()=>setOauthRequest(undefined)}>Cancel</Button><Button onClick={()=>{window.open(oauthRequest.authorizationUrl,'papyrus-mcp-oauth','popup,width=720,height=820');setOauthRequest(undefined)}}>Continue to authorization →</Button></DialogFooter>
+      </DialogContent>}
+    </Dialog>
   </div>
 }
+
+function connectionLogo(endpoint:string){const hostname=new URL(endpoint).hostname;return `https://img.logo.dev/${hostname}?token=pk_PJhuwvcfSPKKCJJxJcElsQ`}
 
 function SourceAdministration({data,busy,act}:{data:AdminOverview;busy:boolean;act:(operation:()=>Promise<unknown>)=>Promise<void>}){
   const [kind,setKind]=useState<ApprovedSourceKind>('upload')

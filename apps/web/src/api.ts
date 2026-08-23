@@ -1,4 +1,4 @@
-import type { AdminOverview, FileEntry, FileMount, FileMountAccess, FileProposal, FileVersion, Approval, Artifact, Attachment, Elicitation, Environment, Invitation, McpServer, Principal, ResearchSource, Role, Session, SessionConfigOption, SessionEvent, SessionRun, SessionSurface } from '@papyrus/contracts'
+import type { AdminOverview, Approval, Artifact, Attachment, Elicitation, Environment, Invitation, McpServer, Principal, ResearchSource, Role, Session, SessionConfigOption, SessionEvent, SessionRun, SessionSurface } from '@papyrus/contracts'
 
 export interface Health {
   topology: 'on-premises'
@@ -216,42 +216,4 @@ export async function grantMcpServer(environmentId: string, mcpServerId: string)
 }
 export async function revokeToolGrant(grantId: string): Promise<void> {
   await api(`/api/mcp/grants/${encodeURIComponent(grantId)}`, { method: 'DELETE' })
-}
-
-
-export async function fileMounts(): Promise<FileMount[]> {
-  return (await api<{ mounts: FileMount[] }>('/api/files/mounts')).mounts
-}
-export async function listManagedFiles(mountId: string, path = '/'): Promise<FileEntry[]> {
-  const query = new URLSearchParams({ mountId, path })
-  return (await api<{ files: FileEntry[] }>(`/api/files?${query}`)).files
-}
-export async function readManagedFile(mountId: string, path: string): Promise<{ contentBase64: string; sha256: string; modifiedAt: string }> {
-  const query = new URLSearchParams({ mountId, path })
-  return api(`/api/files/content?${query}`)
-}
-export async function fileProposals(): Promise<FileProposal[]> {
-  return (await api<{ proposals: FileProposal[] }>('/api/files/proposals')).proposals
-}
-export async function proposeFileChange(mountId: string, path: string, baseSha256: string, contentBase64: string): Promise<FileProposal> {
-  return api('/api/files/proposals', { method: 'POST', body: JSON.stringify({ mountId, path, baseSha256, contentBase64 }) })
-}
-export async function publishFileProposal(proposalId: string): Promise<FileProposal> {
-  return api(`/api/files/proposals/${encodeURIComponent(proposalId)}/publish`, { method: 'POST' })
-}
-export async function fileVersions(mountId: string, path: string): Promise<FileVersion[]> {
-  const query = new URLSearchParams({ mountId, path })
-  return (await api<{ versions: FileVersion[] }>(`/api/files/versions?${query}`)).versions
-}
-export async function rollbackFileVersion(versionId: string, expectedSha256: string): Promise<FileVersion> {
-  return api(`/api/files/versions/${encodeURIComponent(versionId)}/rollback`, { method: 'POST', body: JSON.stringify({ expectedSha256 }) })
-}
-export async function createFileMount(name: string, rootPath: string): Promise<FileMount> {
-  return api('/api/file-mounts', { method: 'POST', body: JSON.stringify({ name, rootPath }) })
-}
-export async function assignFileMount(mountId: string, userId: string, access: FileMountAccess): Promise<void> {
-  await api('/api/file-mount-assignments', { method: 'POST', body: JSON.stringify({ mountId, userId, access }) })
-}
-export async function revokeFileMountAssignment(mountId: string, userId: string): Promise<void> {
-  await api(`/api/file-mounts/${encodeURIComponent(mountId)}/assignments/${encodeURIComponent(userId)}`, { method: 'DELETE' })
 }

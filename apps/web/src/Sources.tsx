@@ -19,22 +19,22 @@ export function SourcesView() {
   }
   if(loading)return <div className="empty">Loading approved sources…</div>
   return <div className="approved-sources-view">
-    <section className="source-catalog">
+    <Card className="source-catalog">
       <div className="section-heading"><div><p className="eyebrow">YOUR ACCESS</p><h2>Approved sources</h2></div><span>{sources.length}</span></div>
       {sources.length?<div className="source-cards">{sources.map(source=><Card key={source.id}>
         <div><strong>{source.name}</strong><Badge className="source-kind">{source.kind}</Badge></div>
         <code>{source.locator}</code>
         <p>{source.documentCount} indexed {source.documentCount===1?'document':'documents'} · {source.mode}</p>
       </Card>)}</div>:<div className="conversation-empty"><h2>No sources assigned.</h2><p>An Owner or Admin can assign approved uploads, directories, domains, MCP connectors, packages, or APIs to your identity.</p></div>}
-    </section>
-    <section className="source-search">
+    </Card>
+    <Card className="source-search">
       <form onSubmit={search}><Input name="query" aria-label="Search approved sources" placeholder="Search only the sources you can access…" /><Button className="primary" disabled={searching||!sources.length}>{searching?'Searching…':'Search'}</Button></form>
       {error&&<Alert className="error">{error}</Alert>}
       <div className="source-results">{results.map(result=><Card key={result.chunkId}>
         <p>{result.content}</p>
         <footer><strong>{result.citation.sourceName}</strong><span>{result.citation.title}{result.citation.location?' · '+result.citation.location:''}</span><code>{result.citation.sha256.slice(0,16)}</code></footer>
       </Card>)}</div>
-    </section>
+    </Card>
   </div>
 }
 

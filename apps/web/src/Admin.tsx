@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { ROLES, type AdminOverview, type Principal, type Role } from '@papyrus/contracts'
-import { addMcpServer, addUserRole, adminOverview, cancelInvitation, createInvitation, revokeUserSessions, setMcpServerEnabled } from './api.js'
+import { ROLES, type AdminOverview, type FileMountAccess, type Principal, type Role } from '@papyrus/contracts'
+import { assignFileMount, createFileMount, revokeFileMountAssignment, addMcpServer, addUserRole, adminOverview, cancelInvitation, createInvitation, revokeUserSessions, setMcpServerEnabled } from './api.js'
 import { SelectField } from './SelectField.js'
 
-type AdminTab = 'deployment' | 'identity' | 'integrations'
+type AdminTab = 'deployment' | 'identity' | 'files' | 'integrations'
 
 export function AdminView({ me }: { me: Principal }) {
   const [data, setData] = useState<AdminOverview>()
@@ -19,7 +19,7 @@ export function AdminView({ me }: { me: Principal }) {
   const allowedRoles = me.roles.includes('Owner') ? ROLES : ROLES.filter((role) => role !== 'Owner' && role !== 'Admin')
   return <div className="admin-view">
     {error && <div className="error">{error}<button onClick={() => setError(undefined)}>×</button></div>}
-    <div className="admin-tabs" role="tablist">{(['deployment', 'identity', 'integrations'] as AdminTab[]).map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item}</button>)}</div>
+    <div className="admin-tabs" role="tablist">{(['deployment', 'identity', 'files', 'integrations'] as AdminTab[]).map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item}</button>)}</div>
     {tab === 'deployment' && <section className="admin-summary"><AdminPanel title="Deployment"><dl className="facts"><Fact label="Profile" value={data.deployment.profile} /><Fact label="Topology" value="ON-PREMISES" /><Fact label="Origin" value={data.deployment.publicOrigin} /><Fact label="Authentication" value={authenticationLabel(data.deployment.authentication)} /><Fact label="Gateway" value={yes(data.deployment.gatewayConfigured)} /></dl></AdminPanel><AdminPanel title="License"><dl className="facts"><Fact label="Required" value={yes(data.deployment.licenseRequired)} /><Fact label="Status" value={data.license.valid ? 'VALID' : 'NOT ACTIVE'} /><Fact label="Deployment" value={data.license.deploymentId.slice(0, 16)} /></dl></AdminPanel></section>}
     {tab === 'identity' && <section className="admin-summary identity-admin">
       <AdminPanel title={data.deployment.profile === 'commercial' ? 'Invite with organizational OIDC' : 'Create pending CAC/PIV identity'}>
@@ -66,6 +66,30 @@ export function AdminView({ me }: { me: Principal }) {
           ? <span className="status-good">{isSelf ? 'CURRENT IDENTITY' : 'PROTECTED IDENTITY'}</span>
           : <form onSubmit={(event) => { event.preventDefault(); const role = new FormData(event.currentTarget).get('role'); if (typeof role === 'string' && role) void act(() => addUserRole(user.id, role as Role)) }}><SelectField name="role" label="Eligible role" placeholder="Choose a role" options={eligibleRoles.map((role) => ({ value: role, label: role }))} /><button className="secondary" disabled={busy || eligibleRoles.length === 0}>Add role</button><button type="button" className="danger" disabled={busy} onClick={() => void act(() => revokeUserSessions(user.id))}>Revoke sessions</button></form>}</article>
       })}</div></AdminPanel>
+    </section>}
+    {tab === 'files' && <section className="admin-single">
+      <AdminPanel title="NAS-backed file mounts">
+        <form className="admin-form file-mount-create" onSubmit={(event) => {
+          event.preventDefault(); const form = event.currentTarget; const values = new FormData(form)
+          void act(async () => { await createFileMount(String(values.get('name')), String(values.get('rootPath'))); form.reset() })
+        }}>
+          <input name="name" required maxLength={256} placeholder="Mount name" />
+          <input name="rootPath" required maxLength={4096} placeholder="/mnt/approved-data" />
+          <button className="primary compact-button" disabled={busy}>Connect mount</button>
+        </form>
+        <p className="admin-note">Papyrus uses an existing operating-system NAS mount. Credentials remain outside Papyrus. Agents work from isolated proposals and cannot write directly to this path.</p>
+        <div className="admin-list">{data.fileMounts.map((mount) => <article key={mount.id} className="file-mount-admin"><div><strong>{mount.name}</strong><span>{mount.rootPath}</span><span>{mount.assignments.length} assigned identities</span></div>
+          <form onSubmit={(event) => { event.preventDefault(); const values = new FormData(event.currentTarget); void act(() => assignFileMount(mount.id, String(values.get('userId')), String(values.get('access')) as FileMountAccess)) }}>
+            <SelectField name="userId" label="Identity" placeholder="Choose identity" options={data.users.map((user) => ({ value: user.id, label: user.displayName }))} />
+            <SelectField name="access" label="Access" placeholder="Choose access" options={[{ value: 'read', label: 'Read only' }, { value: 'publish', label: 'Read + publish' }]} />
+            <button className="secondary compact-button" disabled={busy}>Assign</button>
+          </form>
+          {mount.assignments.length > 0 && <div className="mount-assignments">{mount.assignments.map((assignment) => {
+            const user = data.users.find((item) => item.id === assignment.userId)
+            return <span key={assignment.userId}><b>{user?.displayName ?? assignment.userId}</b> · {assignment.access}<button className="text-button" disabled={busy} onClick={() => void act(() => revokeFileMountAssignment(mount.id, assignment.userId))}>Remove</button></span>
+          })}</div>}
+        </article>)}</div>
+      </AdminPanel>
     </section>}
     {tab === 'integrations' && <section className="admin-single"><AdminPanel title="MCP servers"><form className="admin-form mcp-register" onSubmit={(event) => { event.preventDefault(); const form = event.currentTarget; const values = new FormData(form); setBusy(true); setError(undefined); void addMcpServer(String(values.get('name')), String(values.get('endpoint'))).then((result) => { form.reset(); if (result.authorizationUrl) window.open(result.authorizationUrl, 'papyrus-mcp-oauth', 'popup,width=720,height=820'); return load() }).catch(show).finally(() => setBusy(false)) }}><input name="name" required maxLength={256} placeholder="Server name" /><input name="endpoint" type="url" required maxLength={2048} placeholder="https://mcp.internal/rpc" /><button className="primary" disabled={busy}>{busy ? 'Discovering…' : 'Connect server'}</button></form><div className="admin-list compact">{data.mcpServers.map((server) => <article key={server.id}><div><strong>{server.name}</strong><span>{server.endpoint}</span><span>{server.oauthStatus === 'connected' ? `OAuth connected · ${server.oauthIssuer}` : server.oauthStatus === 'authorization_required' ? 'Waiting for OAuth authorization' : server.oauthStatus === 'error' ? server.oauthError : 'No OAuth challenge · direct connection'} </span></div><button className={server.enabled ? 'danger' : 'secondary'} disabled={busy || server.oauthStatus === 'authorization_required'} onClick={() => void act(() => setMcpServerEnabled(server.id, !server.enabled))}>{server.enabled ? 'Disable' : 'Enable'}</button></article>)}</div><p className="admin-note">Papyrus discovers protected-resource metadata, dynamically registers an OAuth client, and completes authorization-code + PKCE before a protected remote server becomes available.</p></AdminPanel></section>}
   </div>

@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import type { ApprovedSource, ResearchSource, SourceSearchResult } from '@papyrus/contracts'
 import { approvedSources, searchApprovedSources } from './api.js'
+import { Button, Input } from './components/ui/index.js'
 
 export function SourcesView() {
   const [sources,setSources]=useState<ApprovedSource[]>([])
@@ -27,7 +28,7 @@ export function SourcesView() {
       </article>)}</div>:<div className="conversation-empty"><h2>No sources assigned.</h2><p>An Owner or Admin can assign approved uploads, directories, domains, MCP connectors, packages, or APIs to your identity.</p></div>}
     </section>
     <section className="source-search">
-      <form onSubmit={search}><input name="query" aria-label="Search approved sources" placeholder="Search only the sources you can access…" /><button className="primary" disabled={searching||!sources.length}>{searching?'Searching…':'Search'}</button></form>
+      <form onSubmit={search}><Input name="query" aria-label="Search approved sources" placeholder="Search only the sources you can access…" /><Button className="primary" disabled={searching||!sources.length}>{searching?'Searching…':'Search'}</Button></form>
       {error&&<div className="error">{error}</div>}
       <div className="source-results">{results.map(result=><article key={result.chunkId}>
         <p>{result.content}</p>

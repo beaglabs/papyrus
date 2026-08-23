@@ -480,6 +480,7 @@ export class PapyrusService {
     if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && ['127.0.0.1', '::1', 'localhost'].includes(parsed.hostname))) throw new Error('Remote MCP endpoints must use HTTPS')
     const redirectUri = `${this.config.publicOrigin}/api/mcp/oauth/callback`
     const oauth = await registerRemoteMcp(parsed.toString(), redirectUri, `Papyrus — ${input.name}`)
+    if (!oauth) await this.validateDirectMcp(parsed.toString())
     const server = this.db.addMcpServer({ ...input, oauthStatus: oauth ? 'authorization_required' : 'not_required', ...(oauth ? { oauthIssuer: oauth.issuer } : {}) })
     if (oauth) this.db.createMcpOauthPending({ state: oauth.state, serverId: server.id, actorId: actor.id, issuer: oauth.issuer, tokenEndpoint: oauth.tokenEndpoint, clientId: oauth.clientId, ...(oauth.clientSecret ? { clientSecret: this.seal(oauth.clientSecret) } : {}), verifier: this.seal(oauth.verifier), redirectUri, resource: oauth.resource })
     this.audit.append({ actorId: actor.id, action: 'AddMcpServer', resourceType: 'McpServer', resourceId: server.id, decision: 'info', metadata: { name: server.name } })
@@ -542,8 +543,20 @@ export class PapyrusService {
 
   createApprovedSource(actor: Principal, input: { name: string; kind: ApprovedSourceKind; locator: string; mode: 'snapshot'|'live' }): ApprovedSource {
     this.check(actor, 'ManageTools', { type: 'Deployment', id: this.license.deploymentId })
+    if (!['upload','domain','mcp','api'].includes(input.kind)) throw new Error('Unsupported approved source type')
+    if (input.kind === 'domain') {
+      const domain = new URL(input.locator)
+      if (domain.protocol !== 'https:' || domain.username || domain.password || domain.port || domain.pathname !== '/' || domain.search || domain.hash) throw new Error('Domain sources must be credential-free HTTPS origins')
+    }
+    if (input.kind === 'api') {
+      const endpoint = new URL(input.locator)
+      if (endpoint.protocol !== 'https:' && !(endpoint.protocol === 'http:' && ['127.0.0.1','::1','localhost'].includes(endpoint.hostname))) throw new Error('API sources must use HTTPS')
+    }
+    if (input.kind === 'mcp') {
+      const server = this.db.getMcpServer(input.locator)
+      if (!server?.enabled || server.oauthStatus === 'authorization_required' || server.oauthStatus === 'error') throw new Error('Choose an enabled, validated MCP connection')
+    }
     const source = this.sources.create(input.name, input.kind, input.locator, input.mode)
-    if (source.kind === 'directory') this.sources.refreshDirectory(source.id)
     this.audit.append({ actorId: actor.id, action: 'CreateSource', resourceType: 'Source', resourceId: source.id, decision: 'info', metadata: { kind: source.kind, mode: source.mode } })
     return this.sources.get(source.id)!
   }
@@ -801,6 +814,18 @@ export class PapyrusService {
     throw new Error('Unknown source tool')
   }
 
+  private async validateDirectMcp(endpoint: string): Promise<void> {
+    const initialized = await this.forwardMcp(endpoint, {
+      jsonrpc: '2.0', id: crypto.randomUUID(), method: 'initialize',
+      params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'Papyrus', version: '0.1.0' } },
+    })
+    const result = initialized && typeof initialized === 'object' ? (initialized as { result?: { protocolVersion?: unknown; serverInfo?: unknown } }).result : undefined
+    if (!result || typeof result.protocolVersion !== 'string' || !result.serverInfo) throw new Error('Endpoint did not complete MCP initialization')
+    await this.forwardMcp(endpoint, { jsonrpc: '2.0', method: 'notifications/initialized', params: {} })
+    const tools = await this.forwardMcp(endpoint, { jsonrpc: '2.0', id: crypto.randomUUID(), method: 'tools/list', params: {} })
+    if (!tools || typeof tools !== 'object' || !Array.isArray((tools as { result?: { tools?: unknown } }).result?.tools)) throw new Error('Endpoint did not return a valid MCP tool catalog')
+  }
+
   private async nativeTools(session: Session): Promise<RuntimeTool[]> {
     const grantedServerIds = new Set(this.db.listToolGrants()
       .filter((grant) => grant.environmentId === session.environmentId)
@@ -889,7 +914,8 @@ export class PapyrusService {
   private async forwardMcp(endpoint: string, message: Record<string, unknown>, authorization: Record<string, string> = {}): Promise<unknown> {
     const response = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...authorization }, body: JSON.stringify(message), signal: AbortSignal.timeout(30_000) })
     if (!response.ok) throw new Error(`MCP server returned ${response.status}`)
-    return response.json()
+    const body = await response.text()
+    return body ? JSON.parse(body) : undefined
   }
 }
 

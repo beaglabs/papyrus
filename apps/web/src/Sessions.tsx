@@ -4,7 +4,8 @@ import { cancelSession, createSession, decideApproval, deleteSession, promptSess
 import { SourceList } from './Sources.js'
 import { SelectField } from './SelectField.js'
 import { acpContent, ContentMessage } from './AcpSessionContent.js'
-import { Alert, Button, Input, Textarea, NativeSelect, TabsList, TabsTrigger, Card } from './components/ui/index.js'
+import { createPortal } from 'react-dom'
+import { Alert, Button, Card, Combobox, Input, Textarea } from './components/ui/index.js'
 
 interface ToolActivity { id: string; title: string; kind: string; status: string; sequence: number; locations: string[]; terminals: string[] }
 interface PlanItem { content: string; status: string; priority: string }
@@ -158,17 +159,18 @@ export function SessionHarness({ environments }: { environments: Environment[] }
 
   function showError(cause: unknown) { setError(cause instanceof Error ? cause.message : 'Session request failed') }
 
+  const historyTarget = document.getElementById('session-history-rail')
   return <section className="session-layout">
-    <aside className="session-sidebar">
+    {historyTarget && createPortal(<aside className="session-sidebar">
       <div className="session-sidebar-head"><strong>Durable sessions</strong><Button className="icon-button" onClick={() => setCreating(true)} aria-label="Create session">＋</Button></div>
       {loading ? <div className="empty">Loading sessions…</div> : sessions.length ? <div className="session-list">{sessions.map((session) => <Button key={session.id} className={session.id === selectedId ? 'selected' : ''} onClick={() => setSelectedId(session.id)}><strong>{session.title}</strong><span>{session.status} · {new Date(session.updatedAt).toLocaleString()}</span></Button>)}</div> : <div className="empty">No sessions yet.</div>}
       {nextCursor && <Button className="secondary load-more" onClick={() => void loadSessions(nextCursor)}>Load more</Button>}
-    </aside>
+    </aside>, historyTarget)}
     <div className="conversation-panel">
       {error && <Alert className="error">{error}<Button variant="ghost" onClick={() => setError(undefined)}>×</Button></Alert>}
       {creating && <form className="create-session" onSubmit={create}><div><strong>New durable session</strong><Button type="button" className="icon-button" onClick={() => setCreating(false)}>×</Button></div><SelectField name="environment" label="Environment" placeholder="Choose an environment" options={environments.map((environment) => ({ value: environment.id, label: environment.name, ...(environment.description ? { detail: environment.description } : {}) }))} /><SelectField name="surface" label="Work surface" placeholder="Choose a work surface" options={surfaceOptions()} /><label>Session title<Input name="title" required maxLength={256} autoFocus placeholder="Describe the work" /></label><Button className="primary" disabled={!environments.length}>Create session →</Button></form>}
       {!selected ? <div className="conversation-empty"><h2>Start a governed session.</h2><p>Choose an authorized environment, describe the work, and retain the complete history on the server.</p><Button className="primary" disabled={!environments.length} onClick={() => setCreating(true)}>New session →</Button></div> : <>
-        <div className="conversation-head"><div><strong>{selected.title}</strong><span>{selected.status} · {surfaceLabel(surface)} · {environmentName(environments, selected.environmentId)}</span></div><div className="session-actions"><SurfaceControl value={surface} disabled={running} onChange={changeSurface} /><TabsList className="session-tabs">{tabs.map((item) => <TabsTrigger key={item} active={tab === item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{tabLabel(item)}{tabCount(item, approvals, sources, artifacts)}</TabsTrigger>)}</TabsList>{(running || selected.status === 'running') ? <Button className="danger" onClick={() => void cancel()}>Cancel run</Button> : <Button className="text-button" onClick={() => void removeSession()}>Delete</Button>}</div></div>
+        <div className="conversation-head"><div><strong>{selected.title}</strong><span>{selected.status} · {surfaceLabel(surface)} · {environmentName(environments, selected.environmentId)}</span></div><div className="session-actions"><SurfaceControl value={surface} disabled={running} onChange={changeSurface} />{(running || selected.status === 'running') ? <Button className="danger" onClick={() => void cancel()}>Cancel run</Button> : <Button className="text-button" onClick={() => void removeSession()}>Delete</Button>}</div></div>
         <div className="session-content">
         {tab === 'conversation' && <div className="message-region">
           <div className="messages" ref={messagesRef} aria-live="polite" onScroll={(event) => {
@@ -213,7 +215,7 @@ export function SessionHarness({ environments }: { environments: Environment[] }
 }
 
 function SurfaceControl({ value, disabled, onChange }: { value: SessionSurface; disabled: boolean; onChange: (surface: SessionSurface) => Promise<void> }) {
-  return <label className="surface-control"><span>Surface</span><NativeSelect value={value} disabled={disabled} onChange={(event) => void onChange(event.target.value as SessionSurface)}>{surfaceOptions().map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</NativeSelect></label>
+  return <label className="surface-control"><span>Mode</span><Combobox value={value} disabled={disabled} onValueChange={(next)=>void onChange(next as SessionSurface)} options={surfaceOptions()} placeholder="Choose a mode"/></label>
 }
 
 function surfaceOptions() {
@@ -226,12 +228,6 @@ function surfaceOptions() {
   ]
 }
 function surfaceLabel(surface: SessionSurface) { return surfaceOptions().find((option) => option.value === surface)?.label ?? surface }
-function tabLabel(tab: SessionTab) { return ({ ide: 'IDE', diff: 'Diff', terminal: 'Terminal', tests: 'Tests' } as Record<string, string>)[tab] ?? tab }
-function tabCount(tab: SessionTab, approvals: Approval[], sources: ResearchSource[], artifacts: Artifact[]) {
-  const count = tab === 'approvals' ? approvals.filter((item) => item.status === 'pending').length : tab === 'sources' || tab === 'citations' ? sources.length : tab === 'artifacts' || tab === 'export' ? artifacts.length : 0
-  return count ? ` ${count}` : ''
-}
-
 function SurfaceEmpty({ title, detail }: { title: string; detail: string }) {
   return <div className="surface-empty"><h2>{title}</h2><p>{detail}</p></div>
 }

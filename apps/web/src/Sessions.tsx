@@ -386,16 +386,25 @@ function projectActivity(events: SessionEvent[]): { plan: PlanItem[]; tools: Too
     if (update.sessionUpdate === 'plan' && Array.isArray(update.entries)) plan = update.entries
     if ((update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') && update.toolCallId) {
       const current = tools.get(update.toolCallId)
+      const locations = update.locations?.flatMap((location) => typeof location.path === 'string' ? [location.path] : []) ?? []
+      const terminals = update.content?.flatMap((content) => content.type === 'terminal' && content.terminalId ? [content.terminalId] : []) ?? []
+      const output = update.content?.flatMap((content) => content.type === 'content' && content.content && typeof content.content === 'object' && !Array.isArray(content.content) ? [content.content as Record<string, unknown>] : []) ?? []
       tools.set(update.toolCallId, {
         id: update.toolCallId, title: update.title ?? current?.title ?? 'Tool activity', kind: update.kind ?? current?.kind ?? 'other',
         status: update.status ?? current?.status ?? 'pending', sequence: current?.sequence ?? event.sequence,
-        locations: update.locations?.flatMap((location) => typeof location.path === 'string' ? [location.path] : []) ?? current?.locations ?? [],
-        terminals: update.content?.flatMap((content) => content.type === 'terminal' && content.terminalId ? [content.terminalId] : []) ?? current?.terminals ?? [],
-        output: update.content?.flatMap((content) => content.type === 'content' && content.content && typeof content.content === 'object' && !Array.isArray(content.content) ? [content.content as Record<string, unknown>] : []) ?? current?.output ?? [],
+        locations: [...new Set([...(current?.locations ?? []), ...locations])],
+        terminals: [...new Set([...(current?.terminals ?? []), ...terminals])],
+        output: mergeToolOutput(current?.output ?? [], output),
       })
     }
   }
   return { plan, tools: [...tools.values()].sort((left, right) => left.sequence - right.sequence) }
+}
+
+function mergeToolOutput(current: Array<Record<string, unknown>>, incoming: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  const merged = new Map(current.map((block) => [JSON.stringify(block), block]))
+  for (const block of incoming) merged.set(JSON.stringify(block), block)
+  return [...merged.values()]
 }
 
 function ApprovalCard({ approval, onDecision }: { approval: Approval; onDecision: (id: string, decision: 'approved' | 'denied', reason?: string) => Promise<void> }) {

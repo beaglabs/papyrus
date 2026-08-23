@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import type { ApprovedSource, SourceSearchResult } from '@papyrus/contracts'
+import type { ApprovedSource, ResearchSource, SourceSearchResult } from '@papyrus/contracts'
 import { approvedSources, searchApprovedSources } from './api.js'
 
 export function SourcesView() {
@@ -35,4 +35,22 @@ export function SourcesView() {
       </article>)}</div>
     </section>
   </div>
+}
+
+
+export function SourceList({sources,empty}:{sources:ResearchSource[];empty?:string}){
+  if(!sources.length)return <div className="conversation-empty"><h2>No research sources yet.</h2><p>{empty??'Sources emitted by the session will appear here.'}</p></div>
+  return <div className="source-view">{sources.map(source=><article key={`${source.sessionId}-${source.id}`}>
+    <div className="source-host">{source.host}</div>
+    <div className="source-body">
+      <strong>{source.title}</strong>
+      <a href={safeHttpUrl(source.url)} target="_blank" rel="noreferrer">{source.url}</a>
+      {source.preview?<pre className="source-preview">{source.preview}</pre>:source.excerpt&&<p>{source.excerpt}</p>}
+      <span>Captured {new Date(source.capturedAt).toLocaleString()} · event {source.sequence}</span>
+    </div>
+  </article>)}</div>
+}
+
+function safeHttpUrl(value:string):string|undefined{
+  try{const url=new URL(value);return url.protocol==='http:'||url.protocol==='https:'?url.href:undefined}catch{return undefined}
 }

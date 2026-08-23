@@ -70,7 +70,16 @@ describe('Papyrus native worker', () => {
     expect(invokeTool).toHaveBeenCalledWith('lookup', { query: 'policy' })
     expect(events).toContainEqual(expect.objectContaining({
       kind: 'update',
+      data: expect.objectContaining({ sessionUpdate: 'tool_call_update', status: 'in_progress' }),
+    }))
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: 'update',
       data: expect.objectContaining({ sessionUpdate: 'tool_call_update', status: 'completed' }),
     }))
+    const toolStates = events.flatMap((event) => {
+      const data = event.data as { sessionUpdate?: string; status?: string }
+      return data.sessionUpdate === 'tool_call' || data.sessionUpdate === 'tool_call_update' ? [data.status] : []
+    })
+    expect(toolStates).toEqual(['pending', 'in_progress', 'completed'])
   })
 })

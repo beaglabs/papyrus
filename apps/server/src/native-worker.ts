@@ -291,6 +291,7 @@ export class PapyrusWorker implements AgentRuntime {
       if (request.signal?.aborted) return { runtimeSessionId, stopReason: 'cancelled' }
       const messageId = `agent_${runtimeSessionId}_${turn}`
       const thoughtMessageId = `thought_${runtimeSessionId}_${turn}`
+      const announcedToolCalls = new Set<string>()
       const message = await this.complete(messages, tools, {
         text: async (text) => {
           await request.onEvent({
@@ -304,6 +305,15 @@ export class PapyrusWorker implements AgentRuntime {
             kind: 'update',
             at: new Date().toISOString(),
             data: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text }, messageId: thoughtMessageId },
+          })
+        },
+        toolCall: async (call) => {
+          if (!call.id || !call.function.name || announcedToolCalls.has(call.id)) return
+          announcedToolCalls.add(call.id)
+          await request.onEvent({
+            kind: 'update',
+            at: new Date().toISOString(),
+            data: { sessionUpdate: 'tool_call', toolCallId: call.id, title: call.function.name, kind: toolKindFor(call.function.name), status: 'pending' },
           })
         },
       }, request.signal)
@@ -322,15 +332,15 @@ export class PapyrusWorker implements AgentRuntime {
       for (const call of calls) {
         const name = call.function.name
         const args = parseArguments(call.function.arguments)
-        const toolKind = name === 'papyrus_exec_code' ? 'execute'
-          : name.includes('read') || name.includes('list') || name.includes('glob') ? 'read'
-          : name.includes('write') ? 'edit'
-          : 'other'
-        await request.onEvent({
-          kind: 'update',
-          at: new Date().toISOString(),
-          data: { sessionUpdate: 'tool_call', toolCallId: call.id, title: name, kind: toolKind, status: 'pending' },
-        })
+        const toolKind = toolKindFor(name)
+        if (!announcedToolCalls.has(call.id)) {
+          announcedToolCalls.add(call.id)
+          await request.onEvent({
+            kind: 'update',
+            at: new Date().toISOString(),
+            data: { sessionUpdate: 'tool_call', toolCallId: call.id, title: name, kind: toolKind, status: 'pending' },
+          })
+        }
         await request.onEvent({
           kind: 'update',
           at: new Date().toISOString(),
@@ -424,7 +434,11 @@ export class PapyrusWorker implements AgentRuntime {
   private async complete(
     messages: ModelMessage[],
     tools: ModelTool[],
-    onDelta: { text: (text: string) => void | Promise<void>; thought: (text: string) => void | Promise<void> },
+    onDelta: {
+      text: (text: string) => void | Promise<void>
+      thought: (text: string) => void | Promise<void>
+      toolCall: (call: { id: string; type: 'function'; function: { name: string; arguments: string } }) => void | Promise<void>
+    },
     signal?: AbortSignal,
   ): Promise<ModelMessage> {
     const endpoint = this.config.endpoint!.replace(/\/$/, '')
@@ -487,6 +501,7 @@ export class PapyrusWorker implements AgentRuntime {
         if (part.function?.name) current.function.name += part.function.name
         if (part.function?.arguments) current.function.arguments += part.function.arguments
         toolCalls.set(part.index, current)
+        await onDelta.toolCall({ id: current.id, type: 'function', function: { ...current.function } })
       }
     }
     for (;;) {
@@ -522,14 +537,23 @@ type ModelMessage = {
 
 function modelReasoning(value: unknown): string {
   if (!isRecord(value)) return ''
-  if (typeof value.reasoning_content === 'string') return value.reasoning_content
-  if (typeof value.reasoning === 'string') return value.reasoning
-  if (typeof value.thinking === 'string') return value.thinking
-  if (isRecord(value.reasoning)) {
-    if (typeof value.reasoning.summary === 'string') return value.reasoning.summary
-    if (typeof value.reasoning.content === 'string') return value.reasoning.content
-  }
-  return ''
+  return reasoningText(value.reasoning_content) || reasoningText(value.reasoning) || reasoningText(value.thinking)
+}
+
+function reasoningText(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) return value.map(reasoningText).join('')
+  if (!isRecord(value)) return ''
+  if (typeof value.text === 'string') return value.text
+  if (typeof value.summary === 'string') return value.summary
+  return reasoningText(value.content)
+}
+
+function toolKindFor(name: string): string {
+  return name === 'papyrus_exec_code' ? 'execute'
+    : name.includes('read') || name.includes('list') || name.includes('glob') ? 'read'
+    : name.includes('write') ? 'edit'
+    : 'other'
 }
 
 function modelTool(tool: RuntimeTool): ModelTool {

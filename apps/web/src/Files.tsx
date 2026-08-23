@@ -73,7 +73,7 @@ export function FilesView() {
     } catch (cause) { show(cause) } finally { setBusy(false) }
   }
 
-  const pending = useMemo(() => proposals.filter((item) => item.status === 'pending' && item.mountId === mountId && item.path === selected?.path), [proposals, mountId])
+  const pending = useMemo(() => proposals.filter((item) => item.status === 'pending' && item.mountId === mountId && item.path === selected?.path), [proposals, mountId, selected?.path])
 
   if (!mounts.length) return <article className="panel files-empty"><div className="panel-head"><h2>Files</h2><span>0 MOUNTS</span></div><div className="empty">No file mounts are assigned to your identity.</div></article>
 

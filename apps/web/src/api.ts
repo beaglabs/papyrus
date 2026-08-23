@@ -93,8 +93,8 @@ export async function sessionPage(cursor?: string): Promise<SessionPage> {
   return api(`/api/sessions?${query}`)
 }
 
-export async function createSession(environmentId: string, title: string, surface: SessionSurface): Promise<Session> {
-  return api('/api/sessions', { method: 'POST', body: JSON.stringify({ environmentId, title, surface }) })
+export async function createSession(environmentId: string, title: string): Promise<Session> {
+  return api('/api/sessions', { method: 'POST', body: JSON.stringify({ environmentId, title }) })
 }
 
 export async function sessionEvents(sessionId: string): Promise<SessionEvent[]> {

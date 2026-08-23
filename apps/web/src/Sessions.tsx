@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import type { Approval, Artifact, Attachment, Elicitation, Environment, ResearchSource, Session, SessionEvent, SessionRun, SessionSurface } from '@papyrus/contracts'
-import { cancelSession, createSession, decideApproval, deleteSession, promptSession, respondElicitation, resumeSession, sessionApprovals, sessionArtifacts, sessionAttachments, sessionElicitations, sessionEvents, sessionPage, sessionRuns, sessionSources, setSessionConfigOption, uploadAttachment } from './api.js'
-import { SourceList } from './Sources.js'
+import { cancelSession, createSession, decideApproval, deleteSession, promptSession, respondElicitation, resumeSession, sessionApprovals, sessionArtifacts, sessionAttachments, sessionElicitations, sessionEvents, sessionPage, sessionRuns, sessionSources, uploadAttachment } from './api.js'
 import { SelectField } from './SelectField.js'
 import { acpContent, ContentMessage } from './AcpSessionContent.js'
 import { createPortal } from 'react-dom'
@@ -31,7 +30,9 @@ export function SessionHarness({ environments }: { environments: Environment[] }
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [elicitations, setElicitations] = useState<Elicitation[]>([])
   const [draftAttachmentIds, setDraftAttachmentIds] = useState<string[]>([])
-  const [tab, setTab] = useState<SessionTab>('conversation')
+  const [artifactPanelOpen, setArtifactPanelOpen] = useState(false)
+  const [selectedArtifactId, setSelectedArtifactId] = useState<string>()
+  const knownArtifactCount = useRef(0)
   const [loading, setLoading] = useState(true)
   const [running, setRunning] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -43,9 +44,6 @@ export function SessionHarness({ environments }: { environments: Environment[] }
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const selected = sessions.find((session) => session.id === selectedId)
   const messages = useMemo(() => acpContent(events), [events])
-  const activity = useMemo(() => projectActivity(events), [events])
-  const surface = selected?.surface ?? 'general'
-  const tabs = SURFACE_TABS[surface]
 
   const loadContext = async (sessionId: string) => {
     const [nextRuns, nextArtifacts, nextApprovals, nextSources, nextAttachments, nextElicitations] = await Promise.all([sessionRuns(sessionId), sessionArtifacts(sessionId), sessionApprovals(sessionId), sessionSources(sessionId), sessionAttachments(sessionId), sessionElicitations(sessionId)])
@@ -61,13 +59,17 @@ export function SessionHarness({ environments }: { environments: Environment[] }
 
   useEffect(() => { void loadSessions().catch(showError).finally(() => setLoading(false)) }, [])
   useEffect(() => {
-    if (tab !== 'conversation' || !followingLatest) return
+    if (!followingLatest) return
     const frame = requestAnimationFrame(() => messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' }))
     return () => cancelAnimationFrame(frame)
-  }, [messages, running, tab, followingLatest])
+  }, [messages, running, followingLatest])
   useEffect(() => {
-    if (!tabs.includes(tab)) setTab(tabs[0] ?? 'conversation')
-  }, [surface])
+    if (artifacts.length > knownArtifactCount.current) {
+      setSelectedArtifactId(artifacts.at(-1)?.id)
+      if (running) setArtifactPanelOpen(true)
+    }
+    knownArtifactCount.current = artifacts.length
+  }, [artifacts, running])
 
   useEffect(() => {
     streamRef.current?.close()
@@ -100,8 +102,7 @@ export function SessionHarness({ environments }: { environments: Environment[] }
     try {
       const environmentId = values.get('environment')
       if (typeof environmentId !== 'string' || !environmentId) throw new Error('Choose an environment')
-      const surface = String(values.get('surface') ?? 'general') as SessionSurface
-      const session = await createSession(environmentId, String(values.get('title')), surface)
+      const session = await createSession(environmentId, String(values.get('title')), 'general')
       setSessions((current) => [session, ...current]); setSelectedId(session.id); setCreating(false); form.reset()
     } catch (cause) { showError(cause) }
   }
@@ -128,15 +129,6 @@ export function SessionHarness({ environments }: { environments: Environment[] }
   const removeSession = async () => {
     if (!selectedId || !selected || !window.confirm(`Permanently delete “${selected.title}” and its durable history?`)) return
     try { await deleteSession(selectedId); setSelectedId(undefined); await loadSessions() } catch (cause) { showError(cause) }
-  }
-
-  const changeSurface = async (nextSurface: SessionSurface) => {
-    if (!selectedId || !selected) return
-    try {
-      await setSessionConfigOption(selectedId, 'papyrus.surface', nextSurface)
-      setSessions((current) => current.map((session) => session.id === selectedId ? { ...session, surface: nextSurface, updatedAt: new Date().toISOString() } : session))
-      setTab(SURFACE_TABS[nextSurface][0] ?? 'conversation')
-    } catch (cause) { showError(cause) }
   }
 
   const addFiles = async (files: FileList | null) => {
@@ -168,7 +160,7 @@ export function SessionHarness({ environments }: { environments: Environment[] }
     </aside>, historyTarget)}
     <div className="conversation-panel">
       {error && <Alert className="error">{error}<Button variant="ghost" onClick={() => setError(undefined)}>×</Button></Alert>}
-      {creating && <form className="create-session" onSubmit={create}><div><strong>New durable session</strong><Button type="button" className="icon-button" onClick={() => setCreating(false)}>×</Button></div><SelectField name="environment" label="Environment" placeholder="Choose an environment" options={environments.map((environment) => ({ value: environment.id, label: environment.name, ...(environment.description ? { detail: environment.description } : {}) }))} /><SelectField name="surface" label="Work surface" placeholder="Choose a work surface" options={surfaceOptions()} /><label>Session title<Input name="title" required maxLength={256} autoFocus placeholder="Describe the work" /></label><Button className="primary" disabled={!environments.length}>Create session →</Button></form>}
+      {creating && <form className="create-session" onSubmit={create}><div><strong>New durable session</strong><Button type="button" className="icon-button" onClick={() => setCreating(false)}>×</Button></div><SelectField name="environment" label="Environment" placeholder="Choose an environment" options={environments.map((environment) => ({ value: environment.id, label: environment.name, ...(environment.description ? { detail: environment.description } : {}) }))} /><label>Session title<Input name="title" required maxLength={256} autoFocus placeholder="Describe the work" /></label><Button className="primary" disabled={!environments.length}>Create session →</Button></form>}
       {!selected ? <div className="conversation-empty"><h2>Start a governed session.</h2><p>Choose an authorized environment, describe the work, and retain the complete history on the server.</p><Button className="primary" disabled={!environments.length} onClick={() => setCreating(true)}>New session →</Button></div> : <>
         <div className="conversation-head"><div><strong>{selected.title}</strong><span>{selected.status} · {surfaceLabel(surface)} · {environmentName(environments, selected.environmentId)}</span></div><div className="session-actions"><SurfaceControl value={surface} disabled={running} onChange={changeSurface} />{(running || selected.status === 'running') ? <Button className="danger" onClick={() => void cancel()}>Cancel run</Button> : <Button className="text-button" onClick={() => void removeSession()}>Delete</Button>}</div></div>
         <div className="session-content">

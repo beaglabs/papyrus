@@ -46,13 +46,13 @@ function artifactDownload(response: ServerResponse, artifact: ReturnType<Papyrus
   response.end(content)
 }
 
-async function body(request: IncomingMessage): Promise<Record<string, unknown>> {
+async function body(request: IncomingMessage, maximum = 1_000_000): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = []
   let size = 0
   for await (const chunk of request) {
     const buffer = Buffer.from(chunk)
     size += buffer.length
-    if (size > 1_000_000) throw new HttpError(413, 'BODY_TOO_LARGE', 'Request body exceeds 1 MB')
+    if (size > maximum) throw new HttpError(413, 'BODY_TOO_LARGE', `Request body exceeds ${Math.ceil(maximum / 1024 / 1024)} MB`)
     chunks.push(buffer)
   }
   if (chunks.length === 0) return {}
@@ -240,7 +240,7 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
       }
       if (url.pathname === '/api/files/proposals' && request.method === 'GET') return json(response, 200, { proposals: service.listFileProposals(principal) })
       if (url.pathname === '/api/files/proposals' && request.method === 'POST') {
-        const input = await body(request)
+        const input = await body(request, 14 * 1024 * 1024)
         return json(response, 201, service.createFileProposal(principal, {
           mountId: identifier(input.mountId, 'mountId'), path: text(input.path, 'path', 4096),
           baseSha256: text(input.baseSha256, 'baseSha256', 128), contentBase64: text(input.contentBase64, 'contentBase64', 16 * 1024 * 1024),

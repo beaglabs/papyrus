@@ -31,6 +31,7 @@ export interface RuntimeEvent {
 export interface RuntimeTool {
   name: string
   description?: string
+  requiresApproval?: boolean
   inputSchema: Record<string, unknown>
 }
 

@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import type { ApprovedSource, ResearchSource, SourceSearchResult } from '@papyrus/contracts'
 import { approvedSources, searchApprovedSources } from './api.js'
-import { Badge, Button, Card, Input } from './components/ui/index.js'
+import { Alert, Badge, Button, Card, Input } from './components/ui/index.js'
 
 export function SourcesView() {
   const [sources,setSources]=useState<ApprovedSource[]>([])
@@ -29,7 +29,7 @@ export function SourcesView() {
     </section>
     <section className="source-search">
       <form onSubmit={search}><Input name="query" aria-label="Search approved sources" placeholder="Search only the sources you can access…" /><Button className="primary" disabled={searching||!sources.length}>{searching?'Searching…':'Search'}</Button></form>
-      {error&&<div className="error">{error}</div>}
+      {error&&<Alert className="error">{error}</Alert>}
       <div className="source-results">{results.map(result=><Card key={result.chunkId}>
         <p>{result.content}</p>
         <footer><strong>{result.citation.sourceName}</strong><span>{result.citation.title}{result.citation.location?' · '+result.citation.location:''}</span><code>{result.citation.sha256.slice(0,16)}</code></footer>

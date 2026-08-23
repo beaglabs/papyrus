@@ -689,6 +689,7 @@ nav [data-slot=button].active{border-color:var(--border);background:var(--main);
   border-bottom: 1px solid #ccc;
   border-radius: 0;
   box-shadow: none;
+  color: #111;
   text-align: left;
 }
 .artifact-browser > nav [data-slot=button].selected {

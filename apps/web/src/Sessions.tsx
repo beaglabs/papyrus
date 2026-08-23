@@ -202,7 +202,12 @@ function SessionSurfaceWorkspace({
 }) {
   const conversation = <ConversationSurface messages={messages} messagesRef={messagesRef} followingLatest={followingLatest} setFollowingLatest={setFollowingLatest} running={running} />
 
-  if (surface === 'general') return conversation
+  if (surface === 'general') return <div className="surface-workspace general-surface">
+    <section className="surface-pane general-conversation">{conversation}</section>
+    <section className="surface-pane general-activity"><ActivityView plan={activity.plan} tools={activity.tools} runs={runs} /></section>
+    <section className="surface-pane general-approvals"><ApprovalView approvals={approvals} onDecision={onDecision} /></section>
+    <section className="surface-pane general-artifacts"><ArtifactView artifacts={artifacts} /></section>
+  </div>
   if (surface === 'ide') return <div className="surface-workspace ide-surface">
     <section className="surface-pane ide-files"><AttachmentView title="Session files" items={attachments} empty="No repository files have been attached or emitted." /></section>
     <section className="surface-pane ide-editor"><SurfaceEmpty title="No file selected." detail="Select a file emitted by an ACP worker or attached to this session to preview it here." /></section>

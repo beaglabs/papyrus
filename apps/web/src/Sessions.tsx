@@ -204,9 +204,9 @@ function ArtifactWorkspace({ artifacts, generating, open, selectedId, onOpenChan
       <nav aria-label="Generated artifacts">{artifacts.map((artifact) => <Button key={artifact.id} variant="ghost" className={artifact.id === selected?.id ? 'selected' : ''} onClick={() => onSelect(artifact.id)}><span>{artifactIcon(artifact)}</span><span><strong>{artifact.name}</strong><small>{artifact.mediaType} · v{artifact.version}</small></span></Button>)}</nav>
       {selected && <div className="artifact-preview">
         <div className="artifact-preview-meta"><span>{selected.mediaType}</span><a href={selected.downloadUrl}>Download ↓</a></div>
-        {selected.mediaType.startsWith('image/') ? <img src={selected.downloadUrl} alt={selected.name} />
-          : selected.mediaType === 'application/pdf' ? <object data={selected.downloadUrl} type="application/pdf"><a href={selected.downloadUrl}>Open {selected.name}</a></object>
-          : <iframe title={selected.name} src={selected.downloadUrl} sandbox="" />}
+        {selected.mediaType.startsWith('image/') ? <img src={`${selected.downloadUrl}?preview=1`} alt={selected.name} />
+          : selected.mediaType === 'application/pdf' ? <object data={`${selected.downloadUrl}?preview=1`} type="application/pdf"><a href={selected.downloadUrl}>Open {selected.name}</a></object>
+          : <iframe title={selected.name} src={`${selected.downloadUrl}?preview=1`} sandbox="" />}
       </div>}
     </div>}
     {!generating && artifacts.length === 0 && <div className="artifact-empty"><span>▤</span><strong>No outputs yet</strong><p>Generated files, images, structured data, and diffs will open here automatically.</p></div>}

@@ -53,6 +53,7 @@ export class MastraAgentWorker implements AgentRuntime {
     const threadId = request.sessionId ?? runtimeSessionId
     const resourceId = request.resourceId ?? threadId
     await this.workspaces.stagePrompt(threadId, request.prompt)
+    const artifactBaseline = await this.workspaces.snapshotArtifacts?.(threadId) ?? new Map<string, number>()
     const message = promptToMessage(request.prompt)
     const requestContext = new RequestContext()
     requestContext.set('cwd', cwd)
@@ -79,6 +80,28 @@ export class MastraAgentWorker implements AgentRuntime {
     })
 
     const browserCalls = new Set<string>()
+    let artifactsEmitted = false
+    const complete = async (stopReason: string): Promise<RuntimePromptResult> => {
+      if (!artifactsEmitted) {
+        artifactsEmitted = true
+        const artifacts = await this.workspaces.artifactsSince?.(threadId, artifactBaseline) ?? []
+        for (const artifact of artifacts) {
+          await request.onEvent({
+            kind: 'update', at: new Date().toISOString(),
+            data: {
+              sessionUpdate: 'tool_call_update', toolCallId: `artifact_${runtimeSessionId}_${artifact.path}`,
+              title: artifact.path, kind: 'edit', status: 'completed',
+              content: [{ type: 'content', content: { type: 'resource', resource: {
+                uri: `papyrus://sessions/${threadId}/artifacts/${encodeURIComponent(artifact.path)}`,
+                mimeType: artifact.mediaType, blob: artifact.data,
+              } } }],
+            },
+          })
+        }
+      }
+      await request.onEvent({ kind: 'complete', at: new Date().toISOString(), data: { stopReason } })
+      return { runtimeSessionId, stopReason }
+    }
     for await (const chunk of stream.fullStream as AsyncIterable<{ type: string; payload?: unknown }>) {
       if (request.signal?.aborted) break
       switch (chunk.type) {
@@ -134,8 +157,13 @@ export class MastraAgentWorker implements AgentRuntime {
         case 'finish': {
           const payload = chunk.payload as { finishReason?: string }
           const stopReason = normalizeStopReason(payload.finishReason)
-          await request.onEvent({ kind: 'complete', at: new Date().toISOString(), data: { stopReason } })
-          return { runtimeSessionId, stopReason }
+          return await complete(stopReason)
+        }
+        case 'step-finish': {
+          const payload = chunk.payload as { finishReason?: string }
+          const stopReason = normalizeStopReason(payload.finishReason)
+          if (stopReason !== 'tool_use') return await complete(stopReason)
+          break
         }
         case 'error': {
           const payload = chunk.payload as { error?: unknown }
@@ -144,8 +172,7 @@ export class MastraAgentWorker implements AgentRuntime {
       }
     }
 
-    await request.onEvent({ kind: 'complete', at: new Date().toISOString(), data: { stopReason: 'end_turn' } })
-    return { runtimeSessionId, stopReason: 'end_turn' }
+    return await complete('end_turn')
   }
 }
 

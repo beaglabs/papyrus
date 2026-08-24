@@ -1,22 +1,18 @@
-import { dirname } from 'node:path'
-import { mkdirSync } from 'node:fs'
-import { pathToFileURL } from 'node:url'
-import { Hono } from 'hono'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { Agent } from '@mastra/core/agent'
 import { Mastra } from '@mastra/core/mastra'
-import { MastraServer as HonoMastraServer } from '@mastra/hono'
 import { Memory } from '@mastra/memory'
-import { AuthService } from '../auth.js'
 import { ServerConfig } from '../config.js'
 import { PapyrusDatabase } from '../db.js'
-import { PapyrusMastraAuthProvider } from './auth-provider.js'
+import { fastembed } from '@mastra/fastembed'
+import { LibSQLVector } from '@mastra/libsql'
 import { createMastraStorage } from './storage.js'
 import { buildStaticAgentTools } from './tools.js'
+import { PapyrusWorkspaceManager } from './workspace.js'
 
 export interface PapyrusMastraBundle {
   mastra: Mastra
-  hono: Hono
+  workspaces: PapyrusWorkspaceManager
 }
 
 // Wires the Mastra runtime, memory-backed agent, and Hono adapter together.
@@ -24,8 +20,7 @@ export interface PapyrusMastraBundle {
 // existing session lifecycle, authorization, audit, and MCP tool surface in
 // PapyrusService stay intact — the Mastra instance only owns the model turn
 // loop and its thread/memory storage.
-export function createPapyrusMastra(config: ServerConfig, _db: PapyrusDatabase, auth: AuthService): PapyrusMastraBundle {
-  const authProvider = new PapyrusMastraAuthProvider(auth)
+export function createPapyrusMastra(config: ServerConfig, _db: PapyrusDatabase): PapyrusMastraBundle {
   const storage = createMastraStorage(config.databasePath)
 
   const model = config.model
@@ -40,8 +35,19 @@ export function createPapyrusMastra(config: ServerConfig, _db: PapyrusDatabase, 
 
   const memory = new Memory({
     storage: storage as never,
-    options: { lastMessages: 20, semanticRecall: false },
+    vector: new LibSQLVector({ id: 'papyrus-memory-vector', url: `file:${config.databasePath}` }),
+    embedder: fastembed,
+    options: {
+      lastMessages: 30,
+      semanticRecall: { topK: 5, messageRange: { before: 2, after: 1 }, scope: 'resource' },
+      workingMemory: {
+        enabled: true,
+        scope: 'resource',
+        template: '# Papyrus working memory\n\n## User preferences\n\n## Decisions and constraints\n\n## Active work\n\n## Useful facts',
+      },
+    },
   })
+  const workspaces = new PapyrusWorkspaceManager(config)
 
   const papyrusAgent = new Agent({
     id: 'papyrus',
@@ -50,19 +56,18 @@ export function createPapyrusMastra(config: ServerConfig, _db: PapyrusDatabase, 
     model: mastraModel,
     tools: buildStaticAgentTools(),
     memory,
+    workspace: async ({ requestContext }) => {
+      const sessionId = requestContext.get('sessionId')
+      return typeof sessionId === 'string' ? await workspaces.forSession(sessionId) : undefined
+    },
+    goal: { judge: mastraModel, maxRuns: 12 },
   })
 
   const mastra = new Mastra({
     storage,
     agents: { papyrus: papyrusAgent },
-    server: { auth: authProvider },
   })
-
-  const honoApp = new Hono()
-  const server = new HonoMastraServer({ app: honoApp, mastra, prefix: '/api/agents' })
-  void server.init()
-
-  return { mastra, hono: (server as unknown as { app: Hono }).app }
+  return { mastra, workspaces }
 }
 
 export { MastraAgentWorker } from './worker.js'

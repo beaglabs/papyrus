@@ -2,7 +2,7 @@ import { once } from 'node:events'
 import type { AddressInfo } from 'node:net'
 import type { AgentRuntime } from '@papyrus/acp-runtime'
 import type { Approval } from '@papyrus/contracts'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createPapyrusServer } from '../src/http.js'
 import { testContext } from './helpers.js'
 
@@ -65,7 +65,8 @@ describe('durable human approval HTTP API', () => {
       })
       expect(decision.status).toBe(200)
       expect(await decision.json()).toMatchObject({ status: 'approved', decidedBy: activeUser.id, reason: 'Mission need verified' })
-      expect((await prompt).status).toBe(200)
+      expect((await prompt).status).toBe(202)
+      await vi.waitFor(() => expect(ctx.db.listSessionRuns(session.id)[0]?.status).toBe('completed'))
 
       const repeated = await request(`/api/sessions/${session.id}/approvals/${pending.id}/decision`, {
         method: 'POST', body: JSON.stringify({ decision: 'denied' }),

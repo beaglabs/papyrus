@@ -1,6 +1,28 @@
 import { createTool } from '@mastra/core/tools'
 import { z } from 'zod'
 
+const elicitationFieldSchema = z.object({
+  name: z.string().regex(/^[A-Za-z][A-Za-z0-9_]*$/).describe('Stable field key, such as pageSize or recipientEmail'),
+  label: z.string().min(1).describe('Short user-facing field label'),
+  description: z.string().min(1).describe('Why this exact value is required to continue'),
+  type: z.enum(['string', 'number', 'integer']).default('string'),
+})
+
+export type ElicitationField = z.infer<typeof elicitationFieldSchema>
+
+export function requestedFieldSchema(fields: ElicitationField[]) {
+  return {
+    type: 'object',
+    properties: Object.fromEntries(fields.map((field) => [field.name, {
+      type: field.type,
+      title: field.label,
+      description: field.description,
+    }])),
+    required: fields.map((field) => field.name),
+    additionalProperties: false,
+  }
+}
+
 // Non-workspace tools. Files, commands, search, skills, LSP, and browser access
 // come from the session-scoped Mastra Workspace.
 export function buildStaticAgentTools() {
@@ -56,9 +78,10 @@ export function buildStaticAgentTools() {
   // chunk; the user's response is delivered back via `useChat`'s resume path.
   const requestInput = createTool({
     id: 'papyrus_request_input',
-    description: 'Request structured input from the authenticated user when required to continue. Pauses execution until the user responds.',
+    description: 'Request one or more concrete, field-level values that are strictly required to continue. Do not use this for broad or open-ended requests, preferences that can be inferred, confirmation that you can perform a task, or optional details. Use reasonable defaults and begin work when the request is broadly scoped (for example, "create a PDF").',
     inputSchema: z.object({
-      message: z.string().describe('Message shown to the user explaining what is needed'),
+      message: z.string().min(1).describe('Brief explanation of why these exact fields block progress'),
+      fields: z.array(elicitationFieldSchema).min(1).max(3).describe('Only the missing fields whose values are required to continue'),
     }),
     suspendSchema: z.object({
       message: z.string(),
@@ -66,10 +89,10 @@ export function buildStaticAgentTools() {
     resumeSchema: z.object({
       response: z.record(z.string(), z.unknown()),
     }),
-    execute: async ({ message }, context) => {
+    execute: async ({ message, fields }, context) => {
       const elicit = context?.requestContext?.get('elicit') as ((request: Record<string, unknown>) => Promise<Record<string, unknown>>) | undefined
       if (!elicit) throw new Error('Interactive input is unavailable')
-      return await elicit({ message, requestedSchema: { type: 'object', properties: { response: { type: 'string', title: 'Response' } }, required: ['response'] } })
+      return await elicit({ message, requestedSchema: requestedFieldSchema(fields) })
     },
   })
 

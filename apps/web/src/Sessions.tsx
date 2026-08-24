@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import type { Approval, Artifact, Attachment, Elicitation, Session, SessionEvent } from '@papyrus/contracts'
-import { cancelSession, createSession, decideApproval, deleteSession, promptSession, respondElicitation, resumeSession, sessionApprovals, sessionArtifacts, sessionAttachments, sessionElicitations, sessionEvents, sessionPage, uploadAttachment } from './api.js'
+import { cancelSession, clearSessionGoal, createSession, decideApproval, deleteSession, promptSession, respondElicitation, resumeSession, sendBrowserInput, sessionApprovals, sessionArtifacts, sessionAttachments, sessionElicitations, sessionEvents, sessionGoal, sessionPage, setSessionGoal, uploadAttachment, type MastraGoal } from './api.js'
 import { acpContent, ContentBlock, ContentMessage } from './AcpSessionContent.js'
 import { createPortal } from 'react-dom'
 import { Alert, Button, Card, Input, Textarea } from './components/ui/index.js'
@@ -19,6 +19,9 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
   const [elicitations, setElicitations] = useState<Elicitation[]>([])
   const [draftAttachmentIds, setDraftAttachmentIds] = useState<string[]>([])
   const [artifactPanelOpen, setArtifactPanelOpen] = useState(false)
+  const [browserPanelOpen, setBrowserPanelOpen] = useState(false)
+  const [goalPanelOpen, setGoalPanelOpen] = useState(false)
+  const [goal, setGoal] = useState<MastraGoal | null>(null)
   const [selectedArtifactId, setSelectedArtifactId] = useState<string>()
   const knownArtifactCount = useRef(0)
   const [loading, setLoading] = useState(true)
@@ -38,8 +41,9 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
   const artifactGenerating = useMemo(() => running && isArtifactGenerationActive(activeRunId ? events.filter((event) => event.runId === activeRunId) : []), [activeRunId, events, running])
 
   const loadContext = async (sessionId: string) => {
-    const [nextArtifacts, nextApprovals, nextAttachments, nextElicitations] = await Promise.all([sessionArtifacts(sessionId), sessionApprovals(sessionId), sessionAttachments(sessionId), sessionElicitations(sessionId)])
+    const [nextArtifacts, nextApprovals, nextAttachments, nextElicitations, nextGoal] = await Promise.all([sessionArtifacts(sessionId), sessionApprovals(sessionId), sessionAttachments(sessionId), sessionElicitations(sessionId), sessionGoal(sessionId)])
     setArtifacts(nextArtifacts); setApprovals(nextApprovals); setAttachments(nextAttachments); setElicitations(nextElicitations)
+    setGoal(nextGoal)
   }
 
   const loadSessions = async (cursor?: string) => {
@@ -61,6 +65,8 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
     setRunning(false)
     setError(undefined)
     setDraftAttachmentIds([])
+    setBrowserPanelOpen(false)
+    setGoalPanelOpen(false)
     requestAnimationFrame(() => newPromptRef.current?.focus())
   }, [newSessionRequest])
   useEffect(() => {
@@ -224,8 +230,9 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
     <div className={`conversation-panel ${selected ? '' : 'new-session-panel'}`}>
       {(error || liveError) && <Alert className={error ? 'error' : 'connection-notice'}>{error ?? liveError}<Button variant="ghost" onClick={() => { setError(undefined); setLiveError(undefined) }}>×</Button></Alert>}
       {!selected ? <div className="new-session-home"><div className="new-session-intro"><p className="eyebrow">NEW DURABLE SESSION</p><h2>What should we work on?</h2><p>Your first prompt creates the session automatically and keeps the complete governed history.</p></div><form className="new-session-composer" onSubmit={startNewSession}><Textarea ref={newPromptRef} name="prompt" disabled={running} placeholder="Describe the work to perform…" onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} /><div className="new-session-controls"><span className="new-session-note">Your deployment’s approved runtime and access assignments are applied automatically.</span><Button className="primary" disabled={running}>{running ? 'Starting…' : 'Start →'}</Button></div></form></div> : <>
-        <div className="conversation-head"><div><strong>{selected.title}</strong><span>{selected.status}</span></div><div className="session-actions">{(running || selected.status === 'running') ? <Button className="danger" onClick={() => void cancel()}>Cancel run</Button> : <Button className="text-button" onClick={() => void removeSession()}>Delete</Button>}</div></div>
-        <div className={`session-content ${artifactPanelOpen ? 'artifact-panel-open' : ''}`}>
+        <div className="conversation-head"><div><strong>{selected.title}</strong><span>{selected.status}{goal?.objective ? ' · goal active' : ''}</span></div><div className="session-actions"><Button variant="ghost" onClick={() => setGoalPanelOpen((open) => !open)}>Goal</Button><Button variant="ghost" onClick={() => { setBrowserPanelOpen((open) => !open); setArtifactPanelOpen(false) }}>Browser</Button>{(running || selected.status === 'running') ? <Button className="danger" onClick={() => void cancel()}>Cancel run</Button> : <Button className="text-button" onClick={() => void removeSession()}>Delete</Button>}</div></div>
+        {goalPanelOpen && <GoalEditor sessionId={selected.id} goal={goal} onChange={setGoal} onClose={() => setGoalPanelOpen(false)} />}
+        <div className={`session-content ${artifactPanelOpen ? 'artifact-panel-open' : ''} ${browserPanelOpen ? 'browser-panel-open' : ''}`}>
           <div className="message-region">
             <div className="messages" ref={messagesRef} aria-live="polite" onScroll={(event) => {
               const element = event.currentTarget
@@ -234,6 +241,7 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
             {!followingLatest && <Button className="jump-latest" onClick={() => { setFollowingLatest(true); messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' }) }}>Jump to latest ↓</Button>}
           </div>
           <ArtifactWorkspace artifacts={artifacts} generating={artifactGenerating} open={artifactPanelOpen} selectedId={selectedArtifactId} onOpenChange={setArtifactPanelOpen} onSelect={setSelectedArtifactId} />
+          {browserPanelOpen && <BrowserWorkspace sessionId={selected.id} onClose={() => setBrowserPanelOpen(false)} onError={showError} />}
         </div>
         <div className="session-footer">
         {approvals.filter((approval) => approval.status === 'pending').map((approval) => <ApprovalCard key={approval.id} approval={approval} onDecision={reviewApproval} />)}
@@ -248,6 +256,51 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
       </>}
     </div>
   </section>
+}
+
+function GoalEditor({ sessionId, goal, onChange, onClose }: { sessionId: string; goal: MastraGoal | null; onChange: (goal: MastraGoal | null) => void; onClose: () => void }) {
+  const [objective, setObjective] = useState(goal?.objective ?? '')
+  const [saving, setSaving] = useState(false)
+  useEffect(() => setObjective(goal?.objective ?? ''), [goal?.objective])
+  const save = async (event: FormEvent) => {
+    event.preventDefault(); if (!objective.trim()) return
+    setSaving(true)
+    try { onChange(await setSessionGoal(sessionId, objective.trim())); onClose() } finally { setSaving(false) }
+  }
+  return <form className="goal-editor" onSubmit={save}><div><span>MASTRA GOAL</span><strong>Durable objective for this thread</strong></div><Textarea value={objective} onChange={(event) => setObjective(event.currentTarget.value)} placeholder="Define the outcome Papyrus should keep working toward…" maxLength={4000} /><div><small>The Mastra judge checks progress across turns.</small>{goal && <Button type="button" variant="ghost" disabled={saving} onClick={() => void clearSessionGoal(sessionId).then(() => { onChange(null); onClose() })}>Clear</Button>}<Button className="primary" disabled={saving || !objective.trim()}>{saving ? 'Saving…' : 'Save goal'}</Button></div></form>
+}
+
+function BrowserWorkspace({ sessionId, onClose, onError }: { sessionId: string; onClose: () => void; onError: (error: unknown) => void }) {
+  const [frame, setFrame] = useState<{ data: string; viewport?: { width: number; height: number } }>()
+  const [url, setUrl] = useState('Launching session browser…')
+  const [connected, setConnected] = useState(false)
+  const surfaceRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const source = new EventSource(`/api/sessions/${encodeURIComponent(sessionId)}/browser/stream`)
+    source.onopen = () => setConnected(true)
+    source.addEventListener('frame', (message) => setFrame(JSON.parse((message as MessageEvent<string>).data)))
+    source.addEventListener('url', (message) => {
+      const next = JSON.parse((message as MessageEvent<string>).data) as string | { url?: string }
+      setUrl(typeof next === 'string' ? next : next.url ?? '')
+    })
+    source.addEventListener('browser_error', (message) => onError(new Error((JSON.parse((message as MessageEvent<string>).data) as { error: string }).error)))
+    source.onerror = () => setConnected(false)
+    return () => source.close()
+  }, [sessionId])
+  const mouse = async (event: React.MouseEvent<HTMLImageElement>) => {
+    if (!frame?.viewport) return
+    const rect = event.currentTarget.getBoundingClientRect()
+    const x = (event.clientX - rect.left) * frame.viewport.width / rect.width
+    const y = (event.clientY - rect.top) * frame.viewport.height / rect.height
+    await sendBrowserInput(sessionId, { kind: 'mouse', event: { type: 'mousePressed', x, y, button: 'left', clickCount: 1 } })
+    await sendBrowserInput(sessionId, { kind: 'mouse', event: { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 } })
+  }
+  const keyboard = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!event.key || event.metaKey || event.ctrlKey || event.altKey) return
+    event.preventDefault()
+    void sendBrowserInput(sessionId, { kind: 'keyboard', event: { type: 'keyDown', key: event.key, code: event.code, text: event.key.length === 1 ? event.key : undefined } }).catch(onError)
+  }
+  return <aside className="browser-workspace" aria-label="Session browser"><header><div><span className={connected ? 'browser-connected' : ''}>{connected ? 'LIVE' : 'CONNECTING'}</span><strong>Browser</strong></div><Button variant="ghost" onClick={onClose}>×</Button></header><div className="browser-url" title={url}>{url}</div><div className="browser-surface" ref={surfaceRef} tabIndex={0} onKeyDown={keyboard}>{frame ? <img src={`data:image/jpeg;base64,${frame.data}`} alt="Live browser viewport" onClick={(event) => void mouse(event).catch(onError)} draggable={false} /> : <div className="browser-loading"><span /><strong>Starting browser-use</strong><small>The isolated browser will appear here.</small></div>}</div><footer>Click to interact · focus the viewport to type · isolated to this session</footer></aside>
 }
 
 function mergeSessionEvents(current: SessionEvent[], incoming: SessionEvent[]): SessionEvent[] {

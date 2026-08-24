@@ -1,6 +1,6 @@
 import type { SessionEvent } from '@papyrus/contracts'
 import type { ReactNode } from 'react'
-import { Message, MessageContent, MessageStreaming } from '@mastra/react'
+import { Message, MessageContent, MessageStreaming } from '@mastra/react/ui'
 import { McpUiResource } from './McpUi'
 
 export interface AcpContentItem {

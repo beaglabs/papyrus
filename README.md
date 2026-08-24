@@ -13,9 +13,7 @@
 
 ---
 
-Papyrus is an ACP access and control daemon. It places authentication, Cedar authorization, session ownership, audit, and MCP mediation between approved agent clients and supervised ACP runtimes.
-
-Papyrus is not an agent harness and does not provide a chat or browser-session UI. Clients such as Zed, Chrome ACP, or a customer application remain responsible for user interaction. The existing web assets are limited to administrative and operational functions.
+Papyrus is a governed Mastra agent harness with an ACP-compatible gateway. It places authentication, Cedar authorization, session ownership, audit, approved-source retrieval, and MCP mediation around Mastra's durable agent runtime.
 
 ## Current capabilities
 
@@ -26,9 +24,11 @@ Papyrus is not an agent harness and does not provide a chat or browser-session U
 - **Sessions** — user-owned runtime sessions with administrative and audit visibility
 - **MCP mediation** — execution-target-scoped server and tool grants through a session-bound proxy
 - **Offline licensing** — deployment-bound signed licenses required in persistent mode
-- **Runtime adapter** — the current implementation uses Goose behind a replaceable ACP boundary
+- **Mastra harness** — persistent goals, working memory, semantic recall, attachments, skills, workspace search, LSP, and sandboxed execution
+- **Live browser** — thread-isolated BrowserViewer sessions controlled by the `browser-use` CLI and streamed into the session UI
+- **Runtime adapter** — Mastra is the sole in-process engine; ACP remains an external compatibility and durable-event projection boundary
 
-Papyrus does not embed a browser engine or expose native browser tools. Browser and legacy web automation are supplied by an administrator-approved MCP server, bound to an internal execution target, and mediated through the existing Cedar browser actions. A separate reference `papyrus-browser-mcp` based on Lightpanda is planned; it is not part of the core daemon.
+Mastra workspaces are isolated per Papyrus session. Files, search indexes, language-server state, skills, and browser contexts never share a session namespace. Organization sources and MCP tools continue to pass through Papyrus' live assignment checks and durable approval flow.
 
 Papyrus does not expose environments as a user-facing workspace abstraction. New conversations resolve the deployment's internal default execution target automatically; the stored target identifier remains available for future enclave, runtime, or network-boundary routing.
 
@@ -38,13 +38,15 @@ The active daemon-first migration plan is documented in [ACP daemon stack](docs/
 
 - Node.js 24+
 - pnpm 11.22.0
-- A configured ACP runtime; Goose remains the current adapter until the runtime-neutral layer lands
+- Python 3.11+ with the `browser-use` CLI and a Chromium/Chrome executable for browser sessions
 - An approved customer model endpoint
 
 ## Local development (commercial profile)
 
 ```bash
 pnpm install --frozen-lockfile
+python3 -m pip install -r apps/server/requirements-browser.txt
+browser-use install
 pnpm build
 
 export PAPYRUS_MODE=local
@@ -58,6 +60,10 @@ export PAPYRUS_LICENSE_REQUIRED=false
 export PAPYRUS_MODEL_ENDPOINT=https://openrouter.ai/api
 export PAPYRUS_MODEL=liquid/lfm-2.5-2.6b:free
 export PAPYRUS_MODEL_API_KEY=your-openrouter-key
+
+# Optional browser overrides
+# export PAPYRUS_BROWSER_EXECUTABLE=/usr/bin/chromium
+# export PAPYRUS_BROWSER_HEADLESS=false
 
 # Optional: ACP gateway for Goose/ACP clients
 export PAPYRUS_GATEWAY_ENABLED=true

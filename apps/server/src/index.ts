@@ -1,5 +1,3 @@
-import { IncomingMessage, ServerResponse } from 'node:http'
-import { Readable } from 'node:stream'
 import { AuthService } from './auth.js'
 import { loadConfig } from './config.js'
 import { PapyrusDatabase } from './db.js'
@@ -11,14 +9,9 @@ import { PapyrusService } from './service.js'
 const config = loadConfig()
 const database = new PapyrusDatabase(config.databasePath)
 const auth = new AuthService(config, database)
-const { mastra, hono: mastraApp } = createPapyrusMastra(config, database, auth)
-const service = new PapyrusService(database, config, mastra)
+const { mastra, workspaces } = createPapyrusMastra(config, database)
+const service = new PapyrusService(database, config, mastra, workspaces)
 const server = createPapyrusServer(config, service, auth)
-server.on('request', (req, res) => {
-  if (!req.url?.startsWith('/api/agents/')) return
-  const honoReq = toHonoRequest(req)
-  Promise.resolve(mastraApp.fetch(honoReq)).then((response) => forwardResponse(res, response))
-})
 const gateway = config.gateway ? createGatewayServer(config, service, auth) : undefined
 
 server.listen(config.port, config.host, () => {
@@ -52,25 +45,4 @@ async function shutdown(): Promise<void> {
 
 function closeServer(target: typeof server): Promise<void> {
   return new Promise((resolve) => target.close(() => resolve()))
-}
-
-function toHonoRequest(req: IncomingMessage): Request {
-  const url = req.url ?? '/'
-  const protocol = (req.socket as { encrypted?: boolean }).encrypted ? 'https' : 'http'
-  const host = req.headers.host ?? 'localhost'
-  const headers = new Headers()
-  for (const [key, value] of Object.entries(req.headers)) {
-    if (Array.isArray(value)) for (const v of value) headers.append(key, v)
-    else if (typeof value === 'string') headers.set(key, value)
-  }
-  return new Request(`${protocol}://${host}${url}`, { method: req.method ?? 'GET', headers })
-}
-
-function forwardResponse(res: ServerResponse, response: Response): Promise<void> | void {
-  response.headers.forEach((value, key) => res.setHeader(key, value))
-  res.statusCode = response.status
-  if (!response.body) { res.end(); return }
-  const node = Readable.fromWeb(response.body as unknown as import('node:stream/web').ReadableStream)
-  node.pipe(res)
-  return
 }

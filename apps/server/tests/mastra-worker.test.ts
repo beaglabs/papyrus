@@ -39,4 +39,25 @@ describe('Mastra agent runtime', () => {
     expect(message).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'file', filename: 'policy.md', mediaType: 'text/markdown' })]))
     expect(events).toContainEqual(expect.objectContaining({ kind: 'update', data: expect.objectContaining({ sessionUpdate: 'agent_message_chunk' }) }))
   })
+
+  it('projects browser-use execution as durable inline surface state', async () => {
+    const worker = new MastraAgentWorker(
+      { getAgent: () => ({ stream: async () => stream([
+        { type: 'tool-call', payload: { toolCallId: 'browser-1', toolName: 'mastra_workspace_execute_command', args: { command: 'browser-use open https://example.test' } } },
+        { type: 'tool-result', payload: { toolCallId: 'browser-1', toolName: 'mastra_workspace_execute_command', result: 'done' } },
+        { type: 'finish', payload: { finishReason: 'stop' } },
+      ]) }) } as never,
+      { model: { endpoint: 'http://model.test/v1', model: 'test' } } as never,
+      { stagePrompt: async () => undefined } as never,
+    )
+    const events: Array<{ kind: string; data: unknown }> = []
+    await worker.runPrompt({
+      sessionId: '11111111-1111-4111-8111-111111111111', cwd: '/', prompt: 'Browse',
+      authorizeTool: async () => false, onEvent: (event) => { events.push(event) },
+    })
+    expect(events.map((item) => item.data)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sessionUpdate: 'browser_state', status: 'active' }),
+      expect.objectContaining({ sessionUpdate: 'browser_state', status: 'completed' }),
+    ]))
+  })
 })

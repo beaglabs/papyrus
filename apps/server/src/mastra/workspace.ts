@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
 import type { ContentBlock } from '@agentclientprotocol/sdk'
 import { BrowserViewer } from '@mastra/browser-viewer'
@@ -69,6 +69,41 @@ export class PapyrusWorkspaceManager {
     }
   }
 
+  async snapshotArtifacts(sessionId: string): Promise<Map<string, number>> {
+    const files = await this.workspaceFiles(sessionId)
+    return new Map(files.map((file) => [file.path, file.modified]))
+  }
+
+  async artifactsSince(sessionId: string, baseline: Map<string, number>): Promise<Array<{ path: string; mediaType: string; data: string }>> {
+    const files = await this.workspaceFiles(sessionId)
+    const changed = files.filter((file) => baseline.get(file.path) !== file.modified && file.size <= 10 * 1024 * 1024)
+    return await Promise.all(changed.map(async (file) => ({
+      path: file.path,
+      mediaType: mediaTypeFor(file.path),
+      data: (await readFile(file.absolute)).toString('base64'),
+    })))
+  }
+
+  private async workspaceFiles(sessionId: string): Promise<Array<{ path: string; absolute: string; modified: number; size: number }>> {
+    await this.forSession(sessionId)
+    const root = join(this.root, sessionId)
+    const files: Array<{ path: string; absolute: string; modified: number; size: number }> = []
+    const visit = async (directory: string, prefix = ''): Promise<void> => {
+      for (const entry of await readdir(directory, { withFileTypes: true })) {
+        if (!prefix && (entry.name === 'attachments' || entry.name === 'skills' || entry.name.startsWith('.'))) continue
+        const path = prefix ? `${prefix}/${entry.name}` : entry.name
+        const absolute = join(directory, entry.name)
+        if (entry.isDirectory()) await visit(absolute, path)
+        else if (entry.isFile()) {
+          const metadata = await stat(absolute)
+          files.push({ path, absolute, modified: metadata.mtimeMs, size: metadata.size })
+        }
+      }
+    }
+    await visit(root)
+    return files
+  }
+
   private async create(sessionId: string): Promise<Workspace> {
     const root = join(this.root, sessionId)
     await mkdir(join(root, 'skills', 'papyrus-session'), { recursive: true })
@@ -124,4 +159,12 @@ function extensionFor(mediaType: string): string {
     : mediaType.startsWith('image/') ? mediaType.split('/')[1] ?? 'img'
     : mediaType.startsWith('audio/') ? mediaType.split('/')[1] ?? 'audio'
     : 'bin'
+}
+
+function mediaTypeFor(path: string): string {
+  const extension = path.toLowerCase().split('.').at(-1)
+  return ({
+    pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
+    svg: 'image/svg+xml', json: 'application/json', csv: 'text/csv', html: 'text/html', md: 'text/markdown', txt: 'text/plain',
+  } as Record<string, string>)[extension ?? ''] ?? 'application/octet-stream'
 }

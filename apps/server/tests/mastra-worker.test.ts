@@ -60,4 +60,34 @@ describe('Mastra agent runtime', () => {
       expect.objectContaining({ sessionUpdate: 'browser_state', status: 'completed' }),
     ]))
   })
+
+  it('completes on a terminal step and promotes generated workspace files to artifacts', async () => {
+    const worker = new MastraAgentWorker(
+      { getAgent: () => ({ stream: async () => stream([
+        { type: 'tool-call', payload: { toolCallId: 'pdf-1', toolName: 'mastra_workspace_execute_command', args: { command: 'python build.py' } } },
+        { type: 'tool-result', payload: { toolCallId: 'pdf-1', toolName: 'mastra_workspace_execute_command', result: 'PDF built' } },
+        { type: 'step-finish', payload: { finishReason: 'stop' } },
+      ]) }) } as never,
+      { model: { endpoint: 'http://model.test/v1', model: 'test' } } as never,
+      {
+        stagePrompt: async () => undefined,
+        snapshotArtifacts: async () => new Map(),
+        artifactsSince: async () => [{ path: 'sample-document.pdf', mediaType: 'application/pdf', data: 'JVBERg==' }],
+      } as never,
+    )
+    const events: Array<{ kind: string; data: unknown }> = []
+    const result = await worker.runPrompt({
+      sessionId: '11111111-1111-4111-8111-111111111111', cwd: '/', prompt: 'Generate a PDF',
+      authorizeTool: async () => false, onEvent: (event) => { events.push(event) },
+    })
+    expect(result.stopReason).toBe('stop')
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: 'update',
+      data: expect.objectContaining({
+        sessionUpdate: 'tool_call_update', title: 'sample-document.pdf',
+        content: [expect.objectContaining({ content: expect.objectContaining({ type: 'resource', resource: expect.objectContaining({ mimeType: 'application/pdf' }) }) })],
+      }),
+    }))
+    expect(events.at(-1)).toMatchObject({ kind: 'complete', data: { stopReason: 'stop' } })
+  })
 })

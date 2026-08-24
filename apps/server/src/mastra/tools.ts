@@ -4,6 +4,20 @@ import { z } from 'zod'
 // Non-workspace tools. Files, commands, search, skills, LSP, and browser access
 // come from the session-scoped Mastra Workspace.
 export function buildStaticAgentTools() {
+  const setGoal = createTool({
+    id: 'papyrus_set_goal',
+    description: 'Create or update the durable objective for this session when the user asks for ongoing, multi-step, or outcome-oriented work. The objective is evaluated across turns.',
+    inputSchema: z.object({
+      objective: z.string().min(1).max(4000).describe('A concise outcome-oriented objective'),
+    }),
+    execute: async ({ objective }, context) => {
+      const updateGoal = context?.requestContext?.get('setGoal') as ((objective: string) => Promise<unknown>) | undefined
+      if (!updateGoal) throw new Error('Mastra goals are unavailable for this session')
+      await updateGoal(objective)
+      return { type: 'text', text: `Session goal set: ${objective}` }
+    },
+  })
+
   const generateImage = createTool({
     id: 'papyrus_generate',
     description: 'Generate an image from a text prompt. Returns image as base64-encoded PNG. Only works when the upstream provider exposes an OpenAI-compatible /images/generations endpoint.',
@@ -60,6 +74,7 @@ export function buildStaticAgentTools() {
   })
 
   return {
+    papyrus_set_goal: setGoal,
     papyrus_generate: generateImage,
     papyrus_request_input: requestInput,
   }

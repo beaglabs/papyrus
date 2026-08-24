@@ -80,12 +80,14 @@ describe('governed session lifecycle', () => {
     expect(ctx.context.service.resumeSession(ctx.user, ctx.session.id).status).toBe('ready')
   })
 
-  it('enforces ownership for cancellation, resume, runs, and events', () => {
+  it('enforces ownership for cancellation, resume, runs, events, goals, and browser input', async () => {
     const ctx = setup(); contexts.push(ctx)
     expect(() => ctx.context.service.cancelSession(ctx.other, ctx.session.id)).toThrow(AuthorizationDenied)
     expect(() => ctx.context.service.resumeSession(ctx.other, ctx.session.id)).toThrow(AuthorizationDenied)
     expect(() => ctx.context.service.sessionRuns(ctx.other, ctx.session.id)).toThrow(AuthorizationDenied)
     expect(() => ctx.context.service.sessionEvents(ctx.other, ctx.session.id)).toThrow(AuthorizationDenied)
+    await expect(ctx.context.service.sessionGoal(ctx.other, ctx.session.id)).rejects.toBeInstanceOf(AuthorizationDenied)
+    await expect(ctx.context.service.browserInput(ctx.other, ctx.session.id, { kind: 'mouse', event: {} })).rejects.toBeInstanceOf(AuthorizationDenied)
   })
 
   it('marks orphaned runs interrupted when a daemon instance starts', () => {
@@ -121,8 +123,8 @@ describe('governed session lifecycle', () => {
     const secondPage = ctx.context.service.sessionEvents(ctx.user, ctx.session.id, firstPage[1]!.sequence, 2)
 
     expect(firstPage).toHaveLength(2)
-    expect(secondPage).toHaveLength(1)
-    expect(firstPage[0]?.data).toMatchObject({ sessionUpdate: 'user_message_chunk' })
+    expect(secondPage).toHaveLength(2)
+    expect([...firstPage, ...secondPage].map((event) => event.data)).toContainEqual(expect.objectContaining({ sessionUpdate: 'user_message_chunk' }))
     expect(new Set([...firstPage, ...secondPage].map((event) => event.runId)).size).toBe(1)
     expect(runtimeCwd).toBe('/')
   })

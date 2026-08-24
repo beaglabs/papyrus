@@ -16,7 +16,11 @@ function context(mode: 'local' | 'persistent') {
     licenseRequired: false, licenseAuthorities: {},
   }
   const db = new PapyrusDatabase(':memory:')
-  const service = new PapyrusService(db, config)
+  const service = new PapyrusService(db, config, () => ({
+    kind: 'test', capabilities: { transports: ['streamable-http'], sessions: { cancel: true, load: true, resume: true, fork: false } },
+    health: async () => ({ available: true }),
+    runPrompt: async () => ({ runtimeSessionId: 'test', stopReason: 'end_turn' }),
+  }))
   return { config, db, service, dispose: () => { db.close(); rmSync(dataDir, { recursive: true, force: true }) } }
 }
 

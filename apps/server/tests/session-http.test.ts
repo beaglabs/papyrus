@@ -1,7 +1,7 @@
 import { once } from 'node:events'
 import type { AddressInfo } from 'node:net'
 import type { AgentRuntime } from '@papyrus/acp-runtime'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createPapyrusServer } from '../src/http.js'
 import { testContext } from './helpers.js'
 
@@ -71,10 +71,11 @@ describe('governed session HTTP API', () => {
       const prompt = await fetch(`${origin}/api/sessions/${session.id}/prompts`, {
         method: 'POST', headers: { authorization, 'content-type': 'application/json' }, body: JSON.stringify({ prompt: 'Summarize it', attachmentIds: [attachment.id] }),
       })
-      expect(prompt.status).toBe(200)
+      expect(prompt.status).toBe(202)
+      await vi.waitFor(() => expect(receivedPrompt).toBeDefined())
       expect(receivedPrompt).toMatchObject([
         { type: 'text', text: 'Summarize it' },
-        { type: 'resource', resource: { mimeType: 'text/plain', blob: Buffer.from('governed context').toString('base64') } },
+        { type: 'resource', resource: { mimeType: 'text/plain', text: 'governed context' } },
       ])
       const downloaded = await fetch(`${origin}${attachment.downloadUrl}`, { headers: { authorization } })
       expect(await downloaded.text()).toBe('governed context')
@@ -110,7 +111,8 @@ describe('governed session HTTP API', () => {
         method: 'POST',
         body: JSON.stringify({ prompt: 'hello' }),
       })
-      expect(prompted.status).toBe(200)
+      expect(prompted.status).toBe(202)
+      await vi.waitFor(() => expect(ctx.db.listSessionRuns(session.id)[0]?.status).toBe('completed'))
 
       const events = await request(`/api/sessions/${session.id}/events?after=0&limit=1`)
       expect(events.status).toBe(200)
@@ -130,7 +132,7 @@ describe('governed session HTTP API', () => {
       const sources = await request(`/api/sessions/${session.id}/sources`)
       expect(await sources.json()).toMatchObject({ sources: [{ sessionId: session.id, url: 'https://example.mil/guidance', host: 'example.mil' }] })
       const allSources = await request('/api/sources')
-      expect((await allSources.json() as { sources: unknown[] }).sources).toHaveLength(1)
+      expect((await allSources.json() as { sources: unknown[] }).sources).toHaveLength(0)
 
       expect((await request(`/api/sessions/${session.id}/close`, { method: 'POST' })).status).toBe(200)
       const blocked = await request(`/api/sessions/${session.id}/prompt`, {

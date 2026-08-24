@@ -35,6 +35,10 @@ export interface RuntimeTool {
 }
 
 export interface RuntimePromptRequest {
+  /** Stable Papyrus identifiers used as the Mastra thread/resource boundary. */
+  sessionId?: string
+  resourceId?: string
+  runId?: string
   cwd: string
   prompt: string | acp.ContentBlock[]
   environment?: Record<string, string>

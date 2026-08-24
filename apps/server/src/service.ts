@@ -6,8 +6,10 @@ import type { ActivitySummary, AdminOverview, ApprovedSource, ApprovedSourceKind
 import type { ContentBlock } from '@agentclientprotocol/sdk'
 import type { AgentRuntime, RuntimeEvent, RuntimeLaunchOptions, RuntimeTool } from '@papyrus/acp-runtime'
 import { connectorPolicyAction } from './catalog.js'
-import type { Mastra } from '@mastra/core/mastra'
+import { Mastra } from '@mastra/core/mastra'
 import { MastraAgentWorker } from './mastra/worker.js'
+import { createPapyrusMastra } from './mastra/server.js'
+import type { PapyrusWorkspaceManager } from './mastra/workspace.js'
 import { AuditLog } from './audit.js'
 import { ApprovedSourceStore } from './approved-sources.js'
 import { projectArtifacts, type ProjectedArtifact } from './artifacts.js'
@@ -59,13 +61,26 @@ export class PapyrusService {
   private readonly activeSessionRuns = new Map<string, ActiveSessionRun>()
   private readonly pendingApprovalResolvers = new Map<string, (approved: boolean) => void>()
   private readonly pendingElicitationResolvers = new Map<string, (response: Record<string, unknown>) => void>()
+  private readonly mastra: Mastra
+  private readonly workspaces: PapyrusWorkspaceManager | undefined
+  private readonly runtimeFactory: RuntimeFactory
 
   constructor(
     readonly db: PapyrusDatabase,
     private readonly config: ServerConfig,
-    private readonly mastra: Mastra,
-    private readonly runtimeFactory: RuntimeFactory = (options) => new MastraAgentWorker(this.mastra, this.config),
+    mastraOrRuntimeFactory?: Mastra | RuntimeFactory,
+    workspaces?: PapyrusWorkspaceManager,
+    runtimeFactory?: RuntimeFactory,
   ) {
+    const bundle = typeof mastraOrRuntimeFactory === 'function'
+      ? { mastra: new Mastra(), workspaces: undefined }
+      : !mastraOrRuntimeFactory ? createPapyrusMastra(config, db)
+      : { mastra: mastraOrRuntimeFactory, workspaces: workspaces ?? createPapyrusMastra(config, db).workspaces }
+    this.mastra = bundle.mastra
+    this.workspaces = bundle.workspaces
+    this.runtimeFactory = typeof mastraOrRuntimeFactory === 'function'
+      ? mastraOrRuntimeFactory
+      : runtimeFactory ?? (() => new MastraAgentWorker(this.mastra, this.config, requireWorkspaces(this.workspaces)))
     this.audit = new AuditLog(db)
     this.sources = new ApprovedSourceStore(db)
     this.license = new LicenseService(db, config.dataDir, config.profile, config.licenseAuthorities, config.licenseRequired)
@@ -236,6 +251,48 @@ export class PapyrusService {
     const session = this.requireSession(sessionId)
     this.check(actor, 'ReadSession', this.sessionResource(session))
     return session
+  }
+
+  async sessionGoal(actor: Principal, sessionId: string): Promise<unknown> {
+    this.getSession(actor, sessionId)
+    const agent = this.mastra.getAgent('papyrus')
+    return await agent.getObjective({ threadId: sessionId })
+  }
+
+  async setSessionGoal(actor: Principal, sessionId: string, objective: string): Promise<unknown> {
+    const session = this.requireSession(sessionId)
+    this.check(actor, 'PromptSession', this.sessionResource(session))
+    const agent = this.mastra.getAgent('papyrus')
+    const result = await agent.setObjective(objective, { threadId: sessionId, resourceId: actor.id })
+    this.audit.append({ actorId: actor.id, action: 'SetSessionGoal', resourceType: 'Session', resourceId: sessionId, decision: 'info', metadata: { objectiveBytes: Buffer.byteLength(objective) } })
+    return result
+  }
+
+  async clearSessionGoal(actor: Principal, sessionId: string): Promise<void> {
+    const session = this.requireSession(sessionId)
+    this.check(actor, 'PromptSession', this.sessionResource(session))
+    const agent = this.mastra.getAgent('papyrus')
+    await agent.clearObjective({ threadId: sessionId })
+    this.audit.append({ actorId: actor.id, action: 'ClearSessionGoal', resourceType: 'Session', resourceId: sessionId, decision: 'info', metadata: {} })
+  }
+
+  async browserStream(actor: Principal, sessionId: string): Promise<Awaited<ReturnType<PapyrusWorkspaceManager['browser']['startScreencast']>>> {
+    this.getSession(actor, sessionId)
+    const workspaces = requireWorkspaces(this.workspaces)
+    await workspaces.forSession(sessionId)
+    if (!workspaces.browser.isBrowserRunning(sessionId)) await workspaces.browser.launch(sessionId)
+    return await workspaces.browser.startScreencast({ threadId: sessionId, format: 'jpeg', quality: 72, maxWidth: 1440, maxHeight: 900 })
+  }
+
+  async browserInput(actor: Principal, sessionId: string, input: Record<string, unknown>): Promise<void> {
+    const session = this.requireSession(sessionId)
+    this.check(actor, 'PromptSession', this.sessionResource(session))
+    const workspaces = requireWorkspaces(this.workspaces)
+    await workspaces.forSession(sessionId)
+    if (input.kind === 'mouse') await workspaces.browser.injectMouseEvent(input.event as never, sessionId)
+    else if (input.kind === 'keyboard') await workspaces.browser.injectKeyboardEvent(input.event as never, sessionId)
+    else throw new Error('Unsupported browser input')
+    this.audit.append({ actorId: actor.id, action: 'BrowserInput', resourceType: 'Session', resourceId: sessionId, decision: 'info', metadata: { kind: input.kind } })
   }
 
   defaultGatewayAgent(): string { return 'papyrus' }
@@ -488,6 +545,9 @@ export class PapyrusService {
       }
       this.audit.append({ actorId: actor.id, action: 'PromptSession', resourceType: 'Session', resourceId: session.id, decision: 'info', metadata: { promptBytes: Buffer.byteLength(prompt), attachmentIds: attachments.map((item) => item.id), runId: run.runId } })
       const result = await runtime.runPrompt({
+        sessionId: session.id,
+        resourceId: actor.id,
+        runId: run.runId,
         cwd: session.cwd,
         prompt: attachments.length ? contentBlocks : prompt,
         tools: await this.nativeTools(session),
@@ -991,6 +1051,11 @@ export class PapyrusService {
 
 function attachmentUri(sessionId: string, attachment: Attachment): string {
   return `papyrus://sessions/${sessionId}/attachments/${attachment.id}/${encodeURIComponent(attachment.name)}`
+}
+
+function requireWorkspaces(workspaces: PapyrusWorkspaceManager | undefined): PapyrusWorkspaceManager {
+  if (!workspaces) throw new Error('Mastra session workspaces are unavailable for this runtime')
+  return workspaces
 }
 
 function attachmentContentBlock(sessionId: string, attachment: Attachment & { content: Buffer }): ContentBlock {

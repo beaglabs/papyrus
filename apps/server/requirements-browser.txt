@@ -1,0 +1,2 @@
+# BrowserViewer 0.2.2 uses the browser-use CLI and its CDP handoff.
+browser-use[cli]==0.13.8

@@ -161,6 +161,35 @@ function streamSessionEvents(
   })
 }
 
+async function streamBrowser(
+  request: IncomingMessage,
+  response: ServerResponse,
+  service: PapyrusService,
+  principal: ReturnType<AuthService['authenticate']> & {},
+  sessionId: string,
+): Promise<void> {
+  // browserStream authorizes before headers are committed.
+  const stream = await service.browserStream(principal, sessionId)
+  response.writeHead(200, {
+    'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store',
+    connection: 'keep-alive', 'x-accel-buffering': 'no', 'x-content-type-options': 'nosniff',
+  })
+  const send = (event: string, data: unknown) => response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+  const onFrame = (frame: unknown) => send('frame', frame)
+  const onUrl = (value: unknown) => send('url', value)
+  const onError = (error: unknown) => send('browser_error', { error: error instanceof Error ? error.message : String(error) })
+  stream.on('frame', onFrame)
+  stream.on('url', onUrl)
+  stream.on('error', onError)
+  response.write(': connected\n\n')
+  const heartbeat = setInterval(() => response.write(': heartbeat\n\n'), 15_000)
+  request.once('close', () => {
+    clearInterval(heartbeat)
+    void stream.stop()
+    if (!response.writableEnded) response.end()
+  })
+}
+
 export function createPapyrusServer(config: ServerConfig, service: PapyrusService, auth: AuthService): Server {
   const handler = async (request: IncomingMessage, response: ServerResponse) => {
     const requestId = crypto.randomUUID()
@@ -327,6 +356,23 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
       const sessionRuns = url.pathname.match(/^\/api\/sessions\/([^/]+)\/runs$/)
       if (sessionRuns && request.method === 'GET') {
         return json(response, 200, { runs: service.sessionRuns(principal, decodeURIComponent(sessionRuns[1] as string)) })
+      }
+      const sessionGoal = url.pathname.match(/^\/api\/sessions\/([^/]+)\/goal$/)
+      if (sessionGoal && request.method === 'GET') return json(response, 200, { goal: await service.sessionGoal(principal, decodeURIComponent(sessionGoal[1] as string)) })
+      if (sessionGoal && request.method === 'PUT') {
+        const input = await body(request)
+        return json(response, 200, { goal: await service.setSessionGoal(principal, decodeURIComponent(sessionGoal[1] as string), text(input.objective, 'objective', 4_000)) })
+      }
+      if (sessionGoal && request.method === 'DELETE') {
+        await service.clearSessionGoal(principal, decodeURIComponent(sessionGoal[1] as string))
+        return json(response, 204, null)
+      }
+      const sessionBrowserStream = url.pathname.match(/^\/api\/sessions\/([^/]+)\/browser\/stream$/)
+      if (sessionBrowserStream && request.method === 'GET') return await streamBrowser(request, response, service, principal, decodeURIComponent(sessionBrowserStream[1] as string))
+      const sessionBrowserInput = url.pathname.match(/^\/api\/sessions\/([^/]+)\/browser\/input$/)
+      if (sessionBrowserInput && request.method === 'POST') {
+        await service.browserInput(principal, decodeURIComponent(sessionBrowserInput[1] as string), await body(request))
+        return json(response, 204, null)
       }
       const sessionArtifacts = url.pathname.match(/^\/api\/sessions\/([^/]+)\/artifacts$/)
       if (sessionArtifacts && request.method === 'GET') {

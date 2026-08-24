@@ -154,7 +154,7 @@ describe('Papyrus control plane', () => {
     const run = await context.service.startPrompt(user, session.id, 'keep going')
     expect(run.status).toBe('running')
     expect(context.db.getSession(session.id)?.status).toBe('running')
-    expect(context.db.listSessionEvents(session.id, 0, 100).map((event) => event.kind)).toEqual(['run', 'update'])
+    expect(context.db.listSessionEvents(session.id, 0, 100).map((event) => event.kind)).toEqual(['run', 'update', 'update'])
     release()
     await vi.waitFor(() => expect(context.db.getSessionRun(run.id)?.status).toBe('completed'))
     const lifecycle = context.db.listSessionEvents(session.id, 0, 100).filter((event) => event.kind === 'run')

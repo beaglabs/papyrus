@@ -1,5 +1,6 @@
 import type { SessionEvent } from '@papyrus/contracts'
 import type { ReactNode } from 'react'
+import { Message, MessageContent, MessageStreaming } from '@mastra/react/ui'
 import { McpUiResource } from './McpUi'
 
 export interface AcpContentItem {
@@ -34,7 +35,7 @@ export function ContentMessage({ message, active = false }: { message: AcpConten
       <div className="content-blocks">{message.blocks.map((block, index) => <ContentBlock key={index} block={block} />)}</div>
     </details>
   }
-  return <article className={`message ${message.role}`}><span>{message.role === 'user' ? 'YOU' : 'PAPYRUS'}</span><div className="content-blocks">{message.blocks.map((block, index) => <ContentBlock key={index} block={block} />)}</div></article>
+  return <Message position={message.role === 'user' ? 'right' : 'left'} className={`message ${message.role}`}><span>{message.role === 'user' ? 'YOU' : 'PAPYRUS'}</span><MessageContent className="content-blocks" isStreaming={active}>{message.blocks.map((block, index) => <ContentBlock key={index} block={block} />)}{active && <MessageStreaming />}</MessageContent></Message>
 }
 
 export function ContentBlock({ block }: { block: Record<string, unknown> }) {

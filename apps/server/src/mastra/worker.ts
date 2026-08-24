@@ -62,6 +62,7 @@ export class MastraAgentWorker implements AgentRuntime {
     if (request.invokeTool) requestContext.set('invokeTool', request.invokeTool)
     if (request.authorizeTool) requestContext.set('authorizeTool', request.authorizeTool)
     if (request.elicit) requestContext.set('elicit', request.elicit)
+    if (request.setGoal) requestContext.set('setGoal', request.setGoal)
 
     const sessionTools = buildSessionToolset((request.tools ?? []).map((tool) => ({
       name: tool.name,
@@ -77,6 +78,7 @@ export class MastraAgentWorker implements AgentRuntime {
       toolsets: Object.keys(sessionTools).length ? { session: sessionTools } : undefined,
     })
 
+    const browserCalls = new Set<string>()
     for await (const chunk of stream.fullStream as AsyncIterable<{ type: string; payload?: unknown }>) {
       if (request.signal?.aborted) break
       switch (chunk.type) {
@@ -101,8 +103,12 @@ export class MastraAgentWorker implements AgentRuntime {
           break
         }
         case 'tool-call': {
-          const call = chunk.payload as { toolCallId?: string; toolName?: string }
+          const call = chunk.payload as { toolCallId?: string; toolName?: string; args?: unknown; input?: unknown }
           if (!call.toolCallId || !call.toolName) break
+          if (isBrowserCall(call.toolName, call.args ?? call.input)) {
+            browserCalls.add(call.toolCallId)
+            await request.onEvent({ kind: 'update', at: new Date().toISOString(), data: { sessionUpdate: 'browser_state', status: 'active', toolCallId: call.toolCallId } })
+          }
           await request.onEvent({
             kind: 'update', at: new Date().toISOString(),
             data: { sessionUpdate: 'tool_call', toolCallId: call.toolCallId, title: call.toolName, kind: toolKindFor(call.toolName), status: 'pending' },
@@ -120,6 +126,9 @@ export class MastraAgentWorker implements AgentRuntime {
               content: toolUpdateContent(result.result),
             },
           })
+          if (browserCalls.delete(result.toolCallId)) {
+            await request.onEvent({ kind: 'update', at: new Date().toISOString(), data: { sessionUpdate: 'browser_state', status: 'completed', toolCallId: result.toolCallId } })
+          }
           break
         }
         case 'finish': {
@@ -160,6 +169,13 @@ function toolKindFor(name: string): string {
     : name.includes('read') || name.includes('list') || name.includes('glob') ? 'read'
     : name.includes('write') ? 'edit'
     : 'other'
+}
+
+function isBrowserCall(toolName: string, input: unknown): boolean {
+  if (/browser/i.test(toolName)) return true
+  if (toolName !== 'mastra_workspace_execute_command') return false
+  try { return /\bbrowser-use\b/i.test(JSON.stringify(input)) }
+  catch { return false }
 }
 
 function normalizeStopReason(reason: string | undefined): string {

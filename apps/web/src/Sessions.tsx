@@ -38,6 +38,7 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
   const selected = sessions.find((session) => session.id === selectedId)
   const turns = useMemo(() => promptTurns(events), [events])
   const activeRunId = useMemo(() => [...events].reverse().find((event) => event.runId)?.runId, [events])
+  const browserState = useMemo(() => latestBrowserState(events), [events])
   const artifactGenerating = useMemo(() => running && isArtifactGenerationActive(activeRunId ? events.filter((event) => event.runId === activeRunId) : []), [activeRunId, events, running])
 
   const loadContext = async (sessionId: string) => {
@@ -79,6 +80,12 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
     else if (artifacts.length === 0) setArtifactPanelOpen(false)
   }, [artifactGenerating, artifacts.length])
   useEffect(() => {
+    if (browserState === 'active') {
+      setBrowserPanelOpen(true)
+      setArtifactPanelOpen(false)
+    } else if (browserState === 'completed') setBrowserPanelOpen(false)
+  }, [browserState])
+  useEffect(() => {
     if (artifacts.length > knownArtifactCount.current) {
       setSelectedArtifactId(artifacts.at(-1)?.id)
       if (running) setArtifactPanelOpen(true)
@@ -99,10 +106,15 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
       const [history] = await Promise.all([sessionEvents(selectedId), loadContext(selectedId), loadSessions()])
       if (!active) return
       setEvents((current) => mergeSessionEvents(current, history))
+      if (hasAcceptedTurn(history)) setPendingTurn(undefined)
     }
     void Promise.all([sessionEvents(selectedId), loadContext(selectedId)]).then(([history]) => {
       if (!active) return
       setEvents(history)
+      if (hasAcceptedTurn(history)) {
+        setPendingTurn(undefined)
+        setRunning(!hasTerminalRun(history))
+      }
       const after = history.at(-1)?.sequence ?? 0
       stream = new EventSource(`/api/sessions/${encodeURIComponent(selectedId)}/events/stream?after=${after}`)
       stream.addEventListener('session_event', (message) => {
@@ -230,18 +242,23 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
     <div className={`conversation-panel ${selected ? '' : 'new-session-panel'}`}>
       {(error || liveError) && <Alert className={error ? 'error' : 'connection-notice'}>{error ?? liveError}<Button variant="ghost" onClick={() => { setError(undefined); setLiveError(undefined) }}>×</Button></Alert>}
       {!selected ? <div className="new-session-home"><div className="new-session-intro"><p className="eyebrow">NEW DURABLE SESSION</p><h2>What should we work on?</h2><p>Your first prompt creates the session automatically and keeps the complete governed history.</p></div><form className="new-session-composer" onSubmit={startNewSession}><Textarea ref={newPromptRef} name="prompt" disabled={running} placeholder="Describe the work to perform…" onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} /><div className="new-session-controls"><span className="new-session-note">Your deployment’s approved runtime and access assignments are applied automatically.</span><Button className="primary" disabled={running}>{running ? 'Starting…' : 'Start →'}</Button></div></form></div> : <>
-        <div className="conversation-head"><div><strong>{selected.title}</strong><span>{selected.status}{goal?.objective ? ' · goal active' : ''}</span></div><div className="session-actions"><Button variant="ghost" onClick={() => setGoalPanelOpen((open) => !open)}>Goal</Button><Button variant="ghost" onClick={() => { setBrowserPanelOpen((open) => !open); setArtifactPanelOpen(false) }}>Browser</Button>{(running || selected.status === 'running') ? <Button className="danger" onClick={() => void cancel()}>Cancel run</Button> : <Button className="text-button" onClick={() => void removeSession()}>Delete</Button>}</div></div>
-        {goalPanelOpen && <GoalEditor sessionId={selected.id} goal={goal} onChange={setGoal} onClose={() => setGoalPanelOpen(false)} />}
-        <div className={`session-content ${artifactPanelOpen ? 'artifact-panel-open' : ''} ${browserPanelOpen ? 'browser-panel-open' : ''}`}>
+        <div className="conversation-head"><div><strong>{selected.title}</strong><span>{selected.status}{goal?.objective ? ' · goal active' : ''}</span></div><div className="session-actions">{(running || selected.status === 'running') ? <Button className="danger" onClick={() => void cancel()}>Cancel run</Button> : <Button className="text-button" onClick={() => void removeSession()}>Delete</Button>}</div></div>
+        <div className={`session-content ${artifactPanelOpen ? 'artifact-panel-open' : ''}`}>
           <div className="message-region">
             <div className="messages" ref={messagesRef} aria-live="polite" onScroll={(event) => {
               const element = event.currentTarget
               setFollowingLatest(element.scrollHeight - element.scrollTop - element.clientHeight < 72)
-            }}>{turns.length ? turns.map((turn) => <DurablePromptTurn key={turn.runId} turn={turn} running={running && turn.runId === activeRunId} />) : !pendingTurn && <div className="conversation-empty compact"><h2>What should Papyrus do?</h2><p>Attach context or describe the work.</p></div>}{pendingTurn && <><ContentMessage message={pendingContent(pendingTurn)} /><PromptTurnFlow events={[]} running submitted /></>}{artifacts.length > 0 && <ArtifactCards artifacts={artifacts} onOpen={(id) => { setSelectedArtifactId(id); setArtifactPanelOpen(true) }} />}</div>
+            }}>
+              {turns.length ? turns.map((turn) => <DurablePromptTurn key={turn.runId} turn={turn} running={running && turn.runId === activeRunId} />) : !pendingTurn && !goalPanelOpen && <div className="conversation-empty compact"><h2>What should Papyrus do?</h2><p>Attach context or describe the work.</p></div>}
+              {pendingTurn && <><ContentMessage message={pendingContent(pendingTurn)} /><PromptTurnFlow events={[]} running submitted /></>}
+              {(goal || goalPanelOpen) && <InlineGoal sessionId={selected.id} goal={goal} editing={goalPanelOpen} running={running} onChange={setGoal} onEditingChange={setGoalPanelOpen} />}
+              {browserPanelOpen && <InlineBrowser sessionId={selected.id} onClose={() => setBrowserPanelOpen(false)} onError={showError} />}
+              {!browserPanelOpen && browserState === 'completed' && <InlineBrowserResult onExpand={() => setBrowserPanelOpen(true)} />}
+              {artifacts.length > 0 && <ArtifactCards artifacts={artifacts} onOpen={(id) => { setSelectedArtifactId(id); setArtifactPanelOpen(true) }} />}
+            </div>
             {!followingLatest && <Button className="jump-latest" onClick={() => { setFollowingLatest(true); messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' }) }}>Jump to latest ↓</Button>}
           </div>
           <ArtifactWorkspace artifacts={artifacts} generating={artifactGenerating} open={artifactPanelOpen} selectedId={selectedArtifactId} onOpenChange={setArtifactPanelOpen} onSelect={setSelectedArtifactId} />
-          {browserPanelOpen && <BrowserWorkspace sessionId={selected.id} onClose={() => setBrowserPanelOpen(false)} onError={showError} />}
         </div>
         <div className="session-footer">
         {approvals.filter((approval) => approval.status === 'pending').map((approval) => <ApprovalCard key={approval.id} approval={approval} onDecision={reviewApproval} />)}
@@ -250,12 +267,22 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
           {draftAttachmentIds.length > 0 && <div className="attachment-chips">{draftAttachmentIds.map((id) => { const attachment = attachments.find((item) => item.id === id); return attachment && <span key={id}><span>↧ {attachment.name} · {formatBytes(attachment.size)}</span><Button type="button" onClick={() => setDraftAttachmentIds((current) => current.filter((item) => item !== id))} aria-label={`Remove ${attachment.name}`}>×</Button></span> })}</div>}
           <Textarea name="prompt" disabled={running} placeholder={draftAttachmentIds.length ? 'Add instructions for these files…' : 'Describe the work to perform…'} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} />
           <Input ref={fileInputRef} className="visually-hidden" type="file" multiple accept="text/*,image/*,.pdf,.json,.xml,.zip,.docx,.xlsx,.pptx" onChange={(event) => void addFiles(event.currentTarget.files)} />
-          <div><span>Enter to submit · Shift+Enter for a new line · 10 MB per file</span><div className="composer-actions"><Button type="button" className="attach-button" disabled={running || uploading} onClick={() => fileInputRef.current?.click()}>{uploading ? 'Uploading…' : 'Attach files'}</Button><Button className="primary" disabled={running || uploading}>{running ? 'Running…' : 'Send →'}</Button></div></div>
+          <div><span>Enter to submit · Shift+Enter for a new line · 10 MB per file</span><div className="composer-actions"><Button type="button" variant="ghost" disabled={running} onClick={() => setGoalPanelOpen((open) => !open)}>{goal?.objective ? 'Edit goal' : 'Set goal'}</Button><Button type="button" className="attach-button" disabled={running || uploading} onClick={() => fileInputRef.current?.click()}>{uploading ? 'Uploading…' : 'Attach files'}</Button><Button className="primary" disabled={running || uploading}>{running ? 'Running…' : 'Send →'}</Button></div></div>
         </form>
         </div>
       </>}
     </div>
   </section>
+}
+
+function InlineGoal({ sessionId, goal, editing, running, onChange, onEditingChange }: { sessionId: string; goal: MastraGoal | null; editing: boolean; running: boolean; onChange: (goal: MastraGoal | null) => void; onEditingChange: (editing: boolean) => void }) {
+  if (!editing && goal) return <section className={`inline-goal goal-summary ${running ? 'is-evaluating' : ''}`}>
+    <div className="inline-surface-heading"><span className="goal-orbit" aria-hidden="true" /><div><small>MASTRA GOAL</small><strong>{running ? 'Evaluating progress' : String(goal.status ?? 'Active objective')}</strong></div><Button variant="ghost" onClick={() => onEditingChange(true)}>Edit</Button></div>
+    <p>{goal.objective}</p>
+    <div className="goal-progress" aria-hidden="true"><i /></div>
+  </section>
+  if (!editing) return null
+  return <GoalEditor sessionId={sessionId} goal={goal} onChange={onChange} onClose={() => onEditingChange(false)} />
 }
 
 function GoalEditor({ sessionId, goal, onChange, onClose }: { sessionId: string; goal: MastraGoal | null; onChange: (goal: MastraGoal | null) => void; onClose: () => void }) {
@@ -267,10 +294,10 @@ function GoalEditor({ sessionId, goal, onChange, onClose }: { sessionId: string;
     setSaving(true)
     try { onChange(await setSessionGoal(sessionId, objective.trim())); onClose() } finally { setSaving(false) }
   }
-  return <form className="goal-editor" onSubmit={save}><div><span>MASTRA GOAL</span><strong>Durable objective for this thread</strong></div><Textarea value={objective} onChange={(event) => setObjective(event.currentTarget.value)} placeholder="Define the outcome Papyrus should keep working toward…" maxLength={4000} /><div><small>The Mastra judge checks progress across turns.</small>{goal && <Button type="button" variant="ghost" disabled={saving} onClick={() => void clearSessionGoal(sessionId).then(() => { onChange(null); onClose() })}>Clear</Button>}<Button className="primary" disabled={saving || !objective.trim()}>{saving ? 'Saving…' : 'Save goal'}</Button></div></form>
+  return <form className="inline-goal goal-editor" onSubmit={save}><div className="inline-surface-heading"><span className="goal-orbit" aria-hidden="true" /><div><small>MASTRA GOAL</small><strong>Durable objective for this thread</strong></div><Button type="button" variant="ghost" onClick={onClose}>×</Button></div><Textarea value={objective} onChange={(event) => setObjective(event.currentTarget.value)} placeholder="Define the outcome Papyrus should keep working toward…" maxLength={4000} /><div className="inline-goal-actions"><small>The Mastra judge checks progress across turns.</small>{goal && <Button type="button" variant="ghost" disabled={saving} onClick={() => void clearSessionGoal(sessionId).then(() => { onChange(null); onClose() })}>Clear</Button>}<Button className="primary" disabled={saving || !objective.trim()}>{saving ? 'Saving…' : 'Save goal'}</Button></div></form>
 }
 
-function BrowserWorkspace({ sessionId, onClose, onError }: { sessionId: string; onClose: () => void; onError: (error: unknown) => void }) {
+function InlineBrowser({ sessionId, onClose, onError }: { sessionId: string; onClose: () => void; onError: (error: unknown) => void }) {
   const [frame, setFrame] = useState<{ data: string; viewport?: { width: number; height: number } }>()
   const [url, setUrl] = useState('Launching session browser…')
   const [connected, setConnected] = useState(false)
@@ -300,13 +327,39 @@ function BrowserWorkspace({ sessionId, onClose, onError }: { sessionId: string; 
     event.preventDefault()
     void sendBrowserInput(sessionId, { kind: 'keyboard', event: { type: 'keyDown', key: event.key, code: event.code, text: event.key.length === 1 ? event.key : undefined } }).catch(onError)
   }
-  return <aside className="browser-workspace" aria-label="Session browser"><header><div><span className={connected ? 'browser-connected' : ''}>{connected ? 'LIVE' : 'CONNECTING'}</span><strong>Browser</strong></div><Button variant="ghost" onClick={onClose}>×</Button></header><div className="browser-url" title={url}>{url}</div><div className="browser-surface" ref={surfaceRef} tabIndex={0} onKeyDown={keyboard}>{frame ? <img src={`data:image/jpeg;base64,${frame.data}`} alt="Live browser viewport" onClick={(event) => void mouse(event).catch(onError)} draggable={false} /> : <div className="browser-loading"><span /><strong>Starting browser-use</strong><small>The isolated browser will appear here.</small></div>}</div><footer>Click to interact · focus the viewport to type · isolated to this session</footer></aside>
+  return <section className="inline-browser" aria-label="Session browser"><header className="inline-surface-heading"><span className={`browser-live-dot ${connected ? 'is-live' : ''}`} aria-hidden="true" /><div><small>{connected ? 'LIVE SESSION BROWSER' : 'CONNECTING'}</small><strong>Browser Use</strong></div><Button variant="ghost" onClick={onClose}>×</Button></header><div className="browser-url" title={url}>{url}</div><div className="browser-frame-shell"><div className="browser-surface" ref={surfaceRef} tabIndex={0} onKeyDown={keyboard}>{frame ? <img src={`data:image/jpeg;base64,${frame.data}`} alt="Live browser viewport" onClick={(event) => void mouse(event).catch(onError)} draggable={false} /> : <div className="browser-loading"><span /><strong>Starting browser-use</strong><small>The isolated browser will appear here.</small></div>}</div></div><footer>Click to interact · focus the viewport to type · isolated to this session</footer></section>
+}
+
+function InlineBrowserResult({ onExpand }: { onExpand: () => void }) {
+  return <section className="inline-browser-result"><span className="browser-live-dot is-complete" aria-hidden="true" /><div><small>BROWSER TASK</small><strong>Interactive browsing completed</strong></div><Button variant="ghost" onClick={onExpand}>Reopen session</Button></section>
 }
 
 function mergeSessionEvents(current: SessionEvent[], incoming: SessionEvent[]): SessionEvent[] {
   const merged = new Map(current.map((event) => [event.sequence, event]))
   for (const event of incoming) merged.set(event.sequence, event)
   return [...merged.values()].sort((left, right) => left.sequence - right.sequence)
+}
+
+export function hasAcceptedTurn(events: SessionEvent[]): boolean {
+  return events.some((event) => {
+    const update = event.data as { sessionUpdate?: string } | undefined
+    return update?.sessionUpdate === 'run_started' || update?.sessionUpdate === 'user_message_chunk'
+  })
+}
+
+function hasTerminalRun(events: SessionEvent[]): boolean {
+  return events.some((event) => {
+    const update = event.data as { sessionUpdate?: string; status?: string } | undefined
+    return update?.sessionUpdate === 'run_completed' && ['completed', 'cancelled', 'failed', 'interrupted'].includes(update.status ?? '')
+  })
+}
+
+export function latestBrowserState(events: SessionEvent[]): 'active' | 'completed' | undefined {
+  for (const event of [...events].reverse()) {
+    const update = event.data as { sessionUpdate?: string; status?: string } | undefined
+    if (update?.sessionUpdate === 'browser_state' && (update.status === 'active' || update.status === 'completed')) return update.status
+  }
+  return undefined
 }
 
 function promptTurns(events: SessionEvent[]): PromptTurnGroup[] {

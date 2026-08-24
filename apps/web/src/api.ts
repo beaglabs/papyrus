@@ -137,6 +137,20 @@ export async function sessionRuns(sessionId: string): Promise<SessionRun[]> {
   return (await api<{ runs: SessionRun[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/runs`)).runs
 }
 
+export interface MastraGoal { objective?: string; status?: string; completed?: boolean; [key: string]: unknown }
+export async function sessionGoal(sessionId: string): Promise<MastraGoal | null> {
+  return (await api<{ goal: MastraGoal | null }>(`/api/sessions/${encodeURIComponent(sessionId)}/goal`)).goal
+}
+export async function setSessionGoal(sessionId: string, objective: string): Promise<MastraGoal> {
+  return (await api<{ goal: MastraGoal }>(`/api/sessions/${encodeURIComponent(sessionId)}/goal`, { method: 'PUT', body: JSON.stringify({ objective }) })).goal
+}
+export async function clearSessionGoal(sessionId: string): Promise<void> {
+  await api(`/api/sessions/${encodeURIComponent(sessionId)}/goal`, { method: 'DELETE' })
+}
+export async function sendBrowserInput(sessionId: string, input: Record<string, unknown>): Promise<void> {
+  await api(`/api/sessions/${encodeURIComponent(sessionId)}/browser/input`, { method: 'POST', body: JSON.stringify(input) })
+}
+
 export async function sessionArtifacts(sessionId: string): Promise<Artifact[]> {
   return (await api<{ artifacts: Artifact[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/artifacts`)).artifacts
 }

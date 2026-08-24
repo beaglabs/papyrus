@@ -46,6 +46,7 @@ export interface RuntimePromptRequest {
   invokeTool?: (name: string, args: Record<string, unknown>) => Promise<unknown>
   authorizeTool: (title: string) => Promise<boolean>
   elicit?: (request: Record<string, unknown>) => Promise<Record<string, unknown>>
+  setGoal?: (objective: string) => Promise<unknown>
   onEvent: (event: RuntimeEvent) => void | Promise<void>
   signal?: AbortSignal
 }

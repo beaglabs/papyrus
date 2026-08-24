@@ -559,6 +559,7 @@ export class PapyrusService {
         },
         authorizeTool: async (title) => this.requestToolApproval(actor, session, run.runId, title, run.controller.signal),
         elicit: async (request) => this.requestElicitation(session, run.runId, request, run.controller.signal),
+        setGoal: async (objective) => await this.setSessionGoal(actor, session.id, objective),
         onEvent: async (event) => {
           events.push(event)
           this.db.addRuntimeEvent(session.id, run.runId, event.kind, event.at, event.data)

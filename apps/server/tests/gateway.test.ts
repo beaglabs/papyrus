@@ -91,7 +91,7 @@ describe('ACP server agent', () => {
       expect(result.stopReason).toBe('end_turn')
       expect(updates).toContainEqual(expect.objectContaining({ sessionUpdate: 'agent_message_chunk' }))
       expect(ctx.context.db.listSessionRuns(session.sessionId)[0]?.status).toBe('completed')
-      expect(ctx.context.db.listSessionEvents(session.sessionId).map((event) => event.kind)).toEqual(['update', 'update'])
+      expect(ctx.context.db.listSessionEvents(session.sessionId).map((event) => event.kind)).toEqual(['run', 'update', 'update', 'run'])
       expect(runtimeFactory).toHaveBeenCalledTimes(1)
     } finally { ctx.context.dispose() }
   })

@@ -1,111 +1,9 @@
 import { createTool } from '@mastra/core/tools'
 import { z } from 'zod'
-import { promises as fs } from 'node:fs'
-import { resolve, relative, isAbsolute } from 'node:path'
-import { spawn } from 'node:child_process'
 
-// Built-in agent tools that don't require approval. Session-scoped state
-// (cwd, model config) flows through `requestContext`, populated per-prompt by
-// the MastraAgentWorker. The agent can call these freely; the runtime loop
-// surfaces them in the stream and invokes `execute` synchronously.
+// Non-workspace tools. Files, commands, search, skills, LSP, and browser access
+// come from the session-scoped Mastra Workspace.
 export function buildStaticAgentTools() {
-  const readFile = createTool({
-    id: 'papyrus_read_file',
-    description: 'Read a file from the workspace. Returns file content as a resource.',
-    inputSchema: z.object({
-      path: z.string().describe('Path to file (relative to workspace root or absolute)'),
-      encoding: z.enum(['utf-8', 'base64']).default('utf-8'),
-    }),
-    execute: async ({ path, encoding }, context) => {
-      const cwd = String(context?.requestContext?.get('cwd') ?? process.cwd())
-      const absolute = resolvePath(cwd, path)
-      const content = await fs.readFile(absolute, encoding as BufferEncoding)
-      const mimeType = absolute.endsWith('.py') ? 'text/x-python'
-        : absolute.endsWith('.js') || absolute.endsWith('.ts') ? 'text/javascript'
-        : absolute.endsWith('.json') ? 'application/json'
-        : absolute.endsWith('.md') ? 'text/markdown'
-        : 'text/plain'
-      return { type: 'resource', resource: { uri: `file://${absolute}`, mimeType, text: content } }
-    },
-  })
-
-  const writeFile = createTool({
-    id: 'papyrus_write_file',
-    description: 'Write content to a file in the workspace. Creates parent directories if needed.',
-    inputSchema: z.object({
-      path: z.string().describe('Path to file (relative to workspace root or absolute)'),
-      content: z.string().describe('File content to write'),
-    }),
-    execute: async ({ path, content }, context) => {
-      const cwd = String(context?.requestContext?.get('cwd') ?? process.cwd())
-      const absolute = resolvePath(cwd, path)
-      await fs.mkdir(resolve(absolute, '..'), { recursive: true })
-      await fs.writeFile(absolute, content, 'utf-8')
-      return { type: 'resource', resource: { uri: `file://${absolute}`, mimeType: 'text/plain', text: content } }
-    },
-  })
-
-  const listFiles = createTool({
-    id: 'papyrus_list_files',
-    description: 'List files and directories in a workspace path.',
-    inputSchema: z.object({
-      path: z.string().default('.').describe('Directory path (relative to workspace root)'),
-    }),
-    execute: async ({ path }, context) => {
-      const cwd = String(context?.requestContext?.get('cwd') ?? process.cwd())
-      const dir = resolvePath(cwd, path)
-      const entries = await fs.readdir(dir, { withFileTypes: true })
-      const items = entries.map((e) => ({
-        name: e.name, type: e.isDirectory() ? 'directory' : e.isFile() ? 'file' : 'other',
-        path: relative(cwd, resolve(dir, e.name)),
-      }))
-      return { type: 'text', text: JSON.stringify(items, null, 2) }
-    },
-  })
-
-  const glob = createTool({
-    id: 'papyrus_glob',
-    description: 'Find files matching a glob pattern in the workspace.',
-    inputSchema: z.object({
-      pattern: z.string().describe('Glob pattern (e.g., "**/*.ts", "src/**/*.py")'),
-    }),
-    execute: async ({ pattern }, context) => {
-      const cwd = String(context?.requestContext?.get('cwd') ?? process.cwd())
-      const matches: string[] = []
-      for await (const match of fs.glob(pattern, { cwd })) {
-        matches.push(resolve(cwd, match))
-      }
-      return { type: 'text', text: JSON.stringify(matches, null, 2) }
-    },
-  })
-
-  const execCode = createTool({
-    id: 'papyrus_exec_code',
-    description: 'Execute code in a secure sandbox (Python, JavaScript, TypeScript). Returns stdout, stderr, and any generated files/images as resources.',
-    inputSchema: z.object({
-      code: z.string().describe('Code to execute'),
-      language: z.enum(['python', 'javascript', 'typescript']).default('python'),
-      timeoutMs: z.number().default(30000),
-    }),
-    execute: async ({ code, language, timeoutMs }) => {
-      const { SandboxManager } = await import('@anthropic-ai/sandbox-runtime')
-      await SandboxManager.initialize({} as never)
-      const cmd = language === 'python' ? `python3 -c ${JSON.stringify(code)}`
-        : language === 'javascript' || language === 'typescript' ? `node -e ${JSON.stringify(code)}`
-        : (() => { throw new Error(`Unsupported language: ${language}`) })()
-      const wrapped = await SandboxManager.wrapWithSandbox(cmd, undefined, { timeoutMs } as never)
-      const result = await new Promise<string>((resolve, reject) => {
-        const child = spawn('sh', ['-c', wrapped], { timeout: 60000 })
-        let stdout = '', stderr = ''
-        child.stdout.on('data', (d) => { stdout += d.toString() })
-        child.stderr.on('data', (d) => { stderr += d.toString() })
-        child.on('close', (code) => { if (code === 0) resolve(stdout || 'OK'); else reject(new Error(stderr || `Exit code ${code}`)) })
-        child.on('error', reject)
-      })
-      return { type: 'text', text: result }
-    },
-  })
-
   const generateImage = createTool({
     id: 'papyrus_generate',
     description: 'Generate an image from a text prompt. Returns image as base64-encoded PNG. Only works when the upstream provider exposes an OpenAI-compatible /images/generations endpoint.',
@@ -155,27 +53,21 @@ export function buildStaticAgentTools() {
       response: z.record(z.string(), z.unknown()),
     }),
     execute: async ({ message }, context) => {
-      const agent = context?.agent
-      if (!agent?.suspend) throw new Error('Interactive input is unavailable')
-      return await agent.suspend({ message })
+      const elicit = context?.requestContext?.get('elicit') as ((request: Record<string, unknown>) => Promise<Record<string, unknown>>) | undefined
+      if (!elicit) throw new Error('Interactive input is unavailable')
+      return await elicit({ message, requestedSchema: { type: 'object', properties: { response: { type: 'string', title: 'Response' } }, required: ['response'] } })
     },
   })
 
   return {
-    papyrus_read_file: readFile,
-    papyrus_write_file: writeFile,
-    papyrus_list_files: listFiles,
-    papyrus_glob: glob,
-    papyrus_exec_code: execCode,
     papyrus_generate: generateImage,
     papyrus_request_input: requestInput,
   }
 }
 
 // Build the per-session toolset. These tools route through PapyrusService's
-// MCP and source dispatchers and require explicit user approval before each
-// invocation. The runtime loop surfaces approval requests as `tool-call-approval`
-// chunks; `useChat.approveToolCall` resumes execution.
+// MCP and source dispatchers. Every invocation is approved through Papyrus'
+// durable approval lifecycle before the governed callback executes it.
 export function buildSessionToolset(
   toolDefs: Array<{ name: string; description: string; inputSchema: Record<string, unknown> }>,
 ) {
@@ -185,19 +77,14 @@ export function buildSessionToolset(
       id: def.name,
       description: def.description,
       inputSchema: z.record(z.string(), z.unknown()),
-      requireApproval: true,
       execute: async (args, context) => {
         const invoke = context?.requestContext?.get('invokeTool') as ((name: string, args: Record<string, unknown>) => Promise<unknown>) | undefined
+        const authorize = context?.requestContext?.get('authorizeTool') as ((title: string) => Promise<boolean>) | undefined
         if (!invoke) throw new Error('Governed tool execution is unavailable')
+        if (!authorize || !await authorize(def.name)) throw new Error(`User denied ${def.name}`)
         return await invoke(def.name, args as Record<string, unknown>)
       },
     }) as never
   }
   return tools
-}
-
-function resolvePath(cwd: string, requestedPath: string): string {
-  const absolute = isAbsolute(requestedPath) ? requestedPath : resolve(cwd, requestedPath)
-  if (!absolute.startsWith(resolve(cwd))) throw new Error('Path traversal not allowed')
-  return absolute
 }

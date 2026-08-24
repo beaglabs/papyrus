@@ -1,5 +1,6 @@
 import type { SessionEvent } from '@papyrus/contracts'
 import type { ReactNode } from 'react'
+import { McpUiResource } from './McpUi'
 
 export interface AcpContentItem {
   id: string
@@ -40,7 +41,11 @@ export function ContentBlock({ block }: { block: Record<string, unknown> }) {
   if (block.type === 'text') return <MarkdownText text={String(block.text ?? '')} />
   if (block.type === 'image' && typeof block.data === 'string' && typeof block.mimeType === 'string') return <img className="message-image" src={`data:${block.mimeType};base64,${block.data}`} alt="Agent-provided visual" />
   if (block.type === 'resource_link' && typeof block.uri === 'string') return <a className="resource-card" href={safeUri(block.uri)}><strong>{String(block.title ?? block.name ?? 'Resource')}</strong><small>{String(block.mimeType ?? block.uri)}</small></a>
-  if (block.type === 'resource' && record(block.resource)) return <div className="resource-card"><strong>{fileName(String(block.resource.uri ?? 'Embedded resource'))}</strong><small>{String(block.resource.mimeType ?? 'embedded context')}</small></div>
+  if (block.type === 'resource' && record(block.resource)) {
+    const rendered = McpUiResource({ resource: block.resource as Record<string, unknown> })
+    if (rendered) return rendered
+    return <div className="resource-card"><strong>{fileName(String(block.resource.uri ?? 'Embedded resource'))}</strong><small>{String(block.resource.mimeType ?? 'embedded context')}</small></div>
+  }
   if (block.type === 'audio') return <div className="resource-card"><strong>Audio content</strong><small>{String(block.mimeType ?? 'audio')}</small></div>
   return <div className="resource-card"><strong>Structured ACP content</strong><small>{String(block.type ?? 'unknown')}</small></div>
 }

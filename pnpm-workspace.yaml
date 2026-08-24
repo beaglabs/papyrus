@@ -2,4 +2,7 @@ packages:
   - "apps/*"
   - "packages/*"
 allowBuilds:
+  '@mongodb-js/zstd': true
   esbuild: true
+  node-liblzma: true
+  onnxruntime-node: true

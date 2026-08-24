@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="400" height="400">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1a2a6c"/>
+      <stop offset="50%" stop-color="#b21f1f"/>
+      <stop offset="100%" stop-color="#fdbb2d"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="400" height="400" fill="url(#bg)"/>
+
+  <!-- Sun -->
+  <circle cx="200" cy="160" r="70" fill="#ffd54f"/>
+
+  <!-- Mountains -->
+  <polygon points="0,360 90,220 180,360" fill="#2d3a4a"/>
+  <polygon points="120,360 240,180 360,360" fill="#1d2735"/>
+  <polygon points="260,360 340,240 400,360" fill="#2d3a4a"/>
+
+  <!-- Reflection / ground -->
+  <polygon points="0,340 90,300 180,340 240,280 360,340 400,320 400,400 0,400" fill="#0f1520"/>
+
+  <!-- Stars -->
+  <circle cx="50" cy="50" r="2" fill="white"/>
+  <circle cx="120" cy="30" r="2" fill="white"/>
+  <circle cx="330" cy="70" r="2" fill="white"/>
+  <circle cx="360" cy="120" r="2" fill="white"/>
+  <circle cx="40" cy="140" r="2" fill="white"/>
+
+  <!-- Birds -->
+  <path d="M120 120 Q128 112 136 120 Q144 112 152 120" fill="none" stroke="white" stroke-width="2"/>
+  <path d="M160 100 Q166 94 172 100 Q178 94 184 100" fill="none" stroke="white" stroke-width="2"/>
+</svg>

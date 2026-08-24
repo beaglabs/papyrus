@@ -1,17 +1,20 @@
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
+import Database from 'libsql'
 import type { Approval, Attachment, Elicitation, Environment, Invitation, InvitationIdentityKind, McpServer, Principal, Role, Session, SessionEvent, SessionSurface, SessionRun, ToolGrant } from '@papyrus/contracts'
 
 type Row = Record<string, unknown>
+type SqliteDatabase = InstanceType<typeof Database>
 
 export class PapyrusDatabase {
-  readonly sqlite: DatabaseSync
+  readonly sqlite: SqliteDatabase
 
   constructor(path: string) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
-    this.sqlite = new DatabaseSync(path)
-    this.sqlite.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;')
+    this.sqlite = new Database(path)
+    this.sqlite.pragma('foreign_keys = ON')
+    this.sqlite.pragma('journal_mode = WAL')
+    this.sqlite.pragma('synchronous = FULL')
     this.migrate()
   }
 

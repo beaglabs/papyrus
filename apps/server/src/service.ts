@@ -6,7 +6,8 @@ import type { ActivitySummary, AdminOverview, ApprovedSource, ApprovedSourceKind
 import type { ContentBlock } from '@agentclientprotocol/sdk'
 import type { AgentRuntime, RuntimeEvent, RuntimeLaunchOptions, RuntimeTool } from '@papyrus/acp-runtime'
 import { connectorPolicyAction } from './catalog.js'
-import { PapyrusWorker } from './native-worker.js'
+import type { Mastra } from '@mastra/core/mastra'
+import { MastraAgentWorker } from './mastra/worker.js'
 import { AuditLog } from './audit.js'
 import { ApprovedSourceStore } from './approved-sources.js'
 import { projectArtifacts, type ProjectedArtifact } from './artifacts.js'
@@ -62,7 +63,8 @@ export class PapyrusService {
   constructor(
     readonly db: PapyrusDatabase,
     private readonly config: ServerConfig,
-    private readonly runtimeFactory: RuntimeFactory = (options) => new PapyrusWorker({ ...config.model, ...(options.promptTimeoutMs === undefined ? {} : { promptTimeoutMs: options.promptTimeoutMs }) }),
+    private readonly mastra: Mastra,
+    private readonly runtimeFactory: RuntimeFactory = (options) => new MastraAgentWorker(this.mastra, this.config),
   ) {
     this.audit = new AuditLog(db)
     this.sources = new ApprovedSourceStore(db)

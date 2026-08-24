@@ -49,12 +49,10 @@ export class ApprovedSourceStore {
     const actual = createHash('sha256').update(readFileSync(extension)).digest('hex')
     if (actual !== expected) throw new Error('sqlite-vec extension checksum mismatch')
     try {
-      this.db.sqlite.enableLoadExtension(true)
+      // libsql permits loadExtension directly; no enableLoadExtension gate.
       this.db.sqlite.loadExtension(extension)
-      this.db.sqlite.enableLoadExtension(false)
       return true
     } catch (error) {
-      this.db.sqlite.enableLoadExtension(false)
       throw error
     }
   }

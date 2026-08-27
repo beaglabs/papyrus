@@ -6,6 +6,11 @@ import { Agent } from '@mastra/core/agent'
 import { createTool } from '@mastra/core/tools'
 import type { ChunkType, StepFinishPayload } from '@mastra/core/stream'
 import { z } from 'zod'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { LocalFilesystem, LocalSandbox, Workspace } from '@mastra/core/workspace'
+import { testContext } from './helpers.js'
 import { wrapModelForCloudflare } from '../src/mastra/cloudflare-model.js'
 import { MastraAgentWorker } from '../src/mastra/worker.js'
 
@@ -37,7 +42,7 @@ describe('Cloudflare model compatibility', () => {
 
   // Validate the serialized HTTP payload, not just the input to the SDK.
   // Qwen rejects any system message whose index is not zero, even adjacent ones.
-  function provider(options: { toolTurn?: boolean; failContinuation?: boolean } = {}) {
+  function provider(options: { toolTurn?: boolean; failContinuation?: boolean; toolName?: string; input?: Record<string, unknown> } = {}) {
     const fetch = vi.fn<typeof globalThis.fetch>(async (_url, init) => {
       const body = JSON.parse(String(init?.body))
       if (body.messages.some((message: { role: string }, index: number) => message.role === 'system' && index !== 0)) {
@@ -50,7 +55,7 @@ describe('Cloudflare model compatibility', () => {
         }
         const chunks = options.toolTurn && !hasToolResult ? [
           { choices: [{ index: 0, delta: { role: 'assistant', content: 'Let me inspect the workspace.' }, finish_reason: null }] },
-          { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'read-1', type: 'function', function: { name: 'read_file', arguments: '{"path":"notes.md"}' } }] }, finish_reason: null }] },
+          { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'read-1', type: 'function', function: { name: options.toolName ?? 'read_file', arguments: JSON.stringify(options.input ?? { path: 'notes.md' }) } }] }, finish_reason: null }] },
           { choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] },
         ] : [
           { choices: [{ index: 0, delta: { role: 'assistant', content: 'Done' }, finish_reason: null }] },
@@ -153,7 +158,7 @@ describe('Cloudflare model compatibility', () => {
       { stagePrompt: async () => undefined } as never,
     )
     const events: Array<{ kind: string; data: unknown }> = []
-    const result = worker.runPrompt({ prompt: 'Inspect the workspace', onEvent: (event) => { events.push(event) } })
+    const result = worker.runPrompt({ prompt: 'Inspect the workspace', checkToolExecution: async () => {}, onEvent: (event) => { events.push(event) } })
     if (failContinuation) {
       await expect(result).rejects.toThrow('Continuation request failed')
       expect(events.some((event) => event.kind === 'complete')).toBe(false)
@@ -189,7 +194,7 @@ describe('Cloudflare model compatibility', () => {
     })
     const worker = new MastraAgentWorker({ getAgent: () => agent } as never, { model: { endpoint: 'http://model.test/v1', model: model.modelId } } as never, { stagePrompt: async () => undefined } as never)
     const updates: Array<Record<string, any>> = []
-    const result = worker.runPrompt({ prompt: 'Read notes', onEvent: (event) => {
+    const result = worker.runPrompt({ prompt: 'Read notes', checkToolExecution: async () => {}, onEvent: (event) => {
       const update = event.data as Record<string, any>
       updates.push(update)
       if (update._meta?.papyrus?.outputDelta) outputReceived()
@@ -201,6 +206,64 @@ describe('Cloudflare model compatibility', () => {
     } finally { release() }
     await expect(result).resolves.toMatchObject({ stopReason: 'stop' })
     expect(updates).toContainEqual(expect.objectContaining({ toolCallId: 'read-1', status: 'completed' }))
+  })
+
+  it.each([
+    { name: 'mastra_workspace_execute_command', input: { command: 'printf should-not-run' }, missing: false, allowed: false },
+    { name: 'mastra_workspace_read_file', input: { path: 'notes.md' }, missing: false, allowed: false },
+    { name: 'mastra_workspace_execute_command', input: { command: 'printf should-not-run' }, missing: true, allowed: false },
+    { name: 'mastra_workspace_execute_command', input: { command: 'printf allowed' }, missing: false, allowed: true },
+    { name: 'mastra_workspace_read_file', input: { path: 'notes.md' }, missing: false, allowed: true },
+  ])('gates real native $name before execution (missing=$missing, allowed=$allowed)', async ({ name, input, missing, allowed }) => {
+    const ctx = testContext(() => ({ kind: 'test' }) as never)
+    const owner = ctx.db.upsertUser({ externalId: 'owner', displayName: 'Owner', authMethod: 'oidc' })
+    ctx.db.setRole(owner.id, 'Owner')
+    const principal = ctx.db.getPrincipal(owner.id)!
+    const environment = ctx.service.createEnvironment(principal, { name: 'Test', description: '' })
+    const session = ctx.service.createSession(principal, environment.id, 'papyrus', 'Test')
+    ctx.service.assign(principal, owner.id, environment.id)
+    ctx.db.sqlite.prepare('DELETE FROM user_roles WHERE user_id=?').run(owner.id)
+    ctx.db.setRole(owner.id, 'User')
+    const other = ctx.db.upsertUser({ externalId: 'other', displayName: 'Other', authMethod: 'oidc' })
+    ctx.db.setRole(other.id, 'User')
+    const root = mkdtempSync(join(tmpdir(), 'papyrus-hook-'))
+    writeFileSync(join(root, 'notes.md'), 'private-session-content')
+    const filesystem = new LocalFilesystem({ basePath: root, contained: true })
+    // This fixture never executes a host command: the side-effect boundary is
+    // a spy. The separate native sandbox suite tests real OS isolation.
+    const sandbox = new LocalSandbox({ workingDirectory: root })
+    const execute = vi.spyOn(sandbox, 'executeCommand').mockResolvedValue({ exitCode: 0, stdout: 'should-not-run', stderr: '', success: true } as never)
+    const read = vi.spyOn(filesystem, 'readFile')
+    const workspace = new Workspace({ filesystem, sandbox })
+    const { model } = provider({ toolTurn: true, toolName: name, input })
+    const agent = new Agent({ id: 'native-denied', name: 'native-denied', instructions: 'Use the tool', model: wrapModelForCloudflare(model), workspace })
+    const worker = new MastraAgentWorker({ getAgent: () => agent } as never, { model: { endpoint: 'http://model.test/v1', model: 'test' } } as never, { stagePrompt: async () => {} } as never)
+    const actor = ctx.db.getPrincipal(allowed ? owner.id : other.id)!
+    const check = vi.fn(async (tool: string) => ctx.service.checkToolExecution(actor, session.id, tool))
+    const events: Array<{ data: unknown }> = []
+    try {
+      await worker.runPrompt({ sessionId: session.id, prompt: 'Run it', ...(missing ? {} : { checkToolExecution: check }), onEvent: (event) => { events.push(event) } })
+      expect(execute).toHaveBeenCalledTimes(allowed && name === 'mastra_workspace_execute_command' ? 1 : 0)
+      expect(read).toHaveBeenCalledTimes(allowed && name === 'mastra_workspace_read_file' ? 1 : 0)
+      if (!missing) {
+        expect(check).toHaveBeenCalledWith(name)
+        expect(ctx.service.audit.list()).toContainEqual(expect.objectContaining({ actorId: actor.id, decision: allowed ? 'allow' : 'deny' }))
+      }
+      expect(events).toContainEqual(expect.objectContaining({ data: expect.objectContaining({ toolCallId: 'read-1', status: allowed ? 'completed' : 'failed' }) }))
+    } finally { await workspace.destroy(); ctx.dispose(); rmSync(root, { recursive: true, force: true }) }
+  })
+
+  it('gates run-level MCP tools before approval and invocation', async () => {
+    const { model } = provider({ toolTurn: true, toolName: 'browser_submit', input: {} })
+    const agent = new Agent({ id: 'mcp-gate', name: 'mcp-gate', instructions: 'Use tools', model })
+    const worker = new MastraAgentWorker({ getAgent: () => agent } as never, { model: { endpoint: 'http://model.test/v1', model: 'test' } } as never, { stagePrompt: async () => {} } as never)
+    const invoke = vi.fn(async () => 'submitted')
+    const approve = vi.fn(async () => true)
+    const check = vi.fn(async () => { throw new Error('Cedar denied BrowserSubmit') })
+    await worker.runPrompt({ prompt: 'Submit', tools: [{ name: 'browser_submit', inputSchema: {} }], invokeTool: invoke, authorizeTool: approve, checkToolExecution: check, onEvent: () => {} })
+    expect(check).toHaveBeenCalledWith('browser_submit')
+    expect(approve).not.toHaveBeenCalled()
+    expect(invoke).not.toHaveBeenCalled()
   })
 })
 
@@ -243,6 +306,29 @@ describe('Mastra agent runtime', () => {
     const { result, events } = runChunks([chunk, finishChunk('finish', 'stop')])
     await result
     expect(events).toContainEqual(expect.objectContaining({ data: expect.objectContaining({ toolCallId: 't', status: 'failed' }) }))
+  })
+
+  it.each(['tool-error', 'tool-result'] as const)('never reports a denied browser action as completed (%s)', async (type) => {
+    const call = { toolCallId: 'browser-denied', toolName: 'papyrus_browser_navigate' }
+    const { result, events } = runChunks([
+      { type: 'tool-call', payload: call },
+      { type, payload: { ...call, error: new Error('Denied'), result: 'Denied', isError: true } },
+      finishChunk('finish', 'stop'),
+    ])
+    await result
+    const browser = events.map((event) => event.data as Record<string, unknown>).filter((event) => event.sessionUpdate === 'browser_state')
+    expect(browser.map((event) => event.status)).toEqual(['active', 'failed'])
+  })
+
+  it('does not infer browser success from shell command text', async () => {
+    const call = { toolCallId: 'shell-browser', toolName: 'mastra_workspace_execute_command' }
+    const { result, events } = runChunks([
+      { type: 'tool-call', payload: { ...call, args: { command: 'browser-use open https://example.test' } } },
+      { type: 'tool-result', payload: { ...call, result: 'not installed' } },
+      finishChunk('finish', 'stop'),
+    ])
+    await result
+    expect(events.some((event) => (event.data as Record<string, unknown>).sessionUpdate === 'browser_state')).toBe(false)
   })
 
   it('does not complete on continuing, unknown, or terminal-looking step events', async () => {
@@ -332,11 +418,11 @@ describe('Mastra agent runtime', () => {
     expect(events).toContainEqual(expect.objectContaining({ kind: 'update', data: expect.objectContaining({ sessionUpdate: 'agent_message_chunk' }) }))
   })
 
-  it('projects browser-use execution as durable inline surface state', async () => {
+  it('projects brokered browser execution as durable inline surface state', async () => {
     const worker = new MastraAgentWorker(
       { getAgent: () => ({ stream: async () => stream([
-        { type: 'tool-call', payload: { toolCallId: 'browser-1', toolName: 'mastra_workspace_execute_command', args: { command: 'browser-use open https://example.test' } } },
-        { type: 'tool-result', payload: { toolCallId: 'browser-1', toolName: 'mastra_workspace_execute_command', result: 'done' } },
+        { type: 'tool-call', payload: { toolCallId: 'browser-1', toolName: 'papyrus_browser_navigate', args: { url: 'https://example.test' } } },
+        { type: 'tool-result', payload: { toolCallId: 'browser-1', toolName: 'papyrus_browser_navigate', result: 'done' } },
         finishChunk('finish', 'stop'),
       ]) }) } as never,
       { model: { endpoint: 'http://model.test/v1', model: 'test' } } as never,

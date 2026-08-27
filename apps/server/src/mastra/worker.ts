@@ -65,6 +65,7 @@ export class MastraAgentWorker implements AgentRuntime {
     if (request.authorizeTool) requestContext.set('authorizeTool', request.authorizeTool)
     if (request.elicit) requestContext.set('elicit', request.elicit)
     if (request.setGoal) requestContext.set('setGoal', request.setGoal)
+    if (request.browse) requestContext.set('browse', request.browse)
 
     const sessionTools = buildSessionToolset((request.tools ?? []).map((tool) => ({
       name: tool.name,
@@ -78,6 +79,14 @@ export class MastraAgentWorker implements AgentRuntime {
       threadId, resourceId, maxSteps: 32,
       requestContext, abortSignal: request.signal,
       toolsets: Object.keys(sessionTools).length ? { session: sessionTools } : undefined,
+      hooks: {
+        beforeToolCall: async ({ toolName }: { toolName: string }) => {
+          if (!request.checkToolExecution) throw new Error('Tool execution authorization is unavailable')
+          request.signal?.throwIfAborted()
+          await request.checkToolExecution(toolName)
+          request.signal?.throwIfAborted()
+        },
+      },
     })
 
     const browserCalls = new Set<string>()
@@ -99,6 +108,8 @@ export class MastraAgentWorker implements AgentRuntime {
       for (const [id, tool] of toolStates) {
         if (tool.status === 'pending' || tool.status === 'in_progress') await updateTool(id, { status: 'failed', content: toolUpdateContent(message) })
       }
+      for (const id of browserCalls) await request.onEvent({ kind: 'update', at: new Date().toISOString(), data: { sessionUpdate: 'browser_state', status: 'failed', toolCallId: id } })
+      browserCalls.clear()
     }
     let artifactsEmitted = false
     const complete = async (stopReason: string): Promise<RuntimePromptResult> => {
@@ -157,7 +168,7 @@ export class MastraAgentWorker implements AgentRuntime {
           case 'tool-call': {
             const call = chunk.payload as { toolCallId?: string; toolName?: string; args?: unknown; input?: unknown }
             if (!call.toolCallId || !call.toolName) break
-            if (isBrowserCall(call.toolName, call.args ?? call.input)) {
+            if (isBrowserCall(call.toolName)) {
               browserCalls.add(call.toolCallId)
               await request.onEvent({ kind: 'update', at: new Date().toISOString(), data: { sessionUpdate: 'browser_state', status: 'active', toolCallId: call.toolCallId } })
             }
@@ -192,6 +203,7 @@ export class MastraAgentWorker implements AgentRuntime {
               ...(error.toolName ? { title: error.toolName, kind: toolKindFor(error.toolName) } : {}),
               status: 'failed', content: toolUpdateContent(streamError(error.error).message),
             })
+            if (error.toolCallId && browserCalls.delete(error.toolCallId)) await request.onEvent({ kind: 'update', at: new Date().toISOString(), data: { sessionUpdate: 'browser_state', status: 'failed', toolCallId: error.toolCallId } })
             break
           }
           case 'tool-result': {
@@ -202,7 +214,7 @@ export class MastraAgentWorker implements AgentRuntime {
               status: result.isError ? 'failed' : 'completed', content: toolUpdateContent(result.result),
             })
             if (browserCalls.delete(result.toolCallId)) {
-              await request.onEvent({ kind: 'update', at: new Date().toISOString(), data: { sessionUpdate: 'browser_state', status: 'completed', toolCallId: result.toolCallId } })
+              await request.onEvent({ kind: 'update', at: new Date().toISOString(), data: { sessionUpdate: 'browser_state', status: toolStates.get(result.toolCallId)?.status === 'failed' ? 'failed' : 'completed', toolCallId: result.toolCallId } })
             }
             break
           }
@@ -255,11 +267,10 @@ function toolKindFor(name: string): string {
     : 'other'
 }
 
-function isBrowserCall(toolName: string, input: unknown): boolean {
-  if (/browser/i.test(toolName)) return true
-  if (toolName !== 'mastra_workspace_execute_command') return false
-  try { return /\bbrowser-use\b/i.test(JSON.stringify(input)) }
-  catch { return false }
+function isBrowserCall(toolName: string): boolean {
+  // Only the broker controls the inline viewer. MCP browsers may live on a
+  // different host, and shell text must not claim a browser was controlled.
+  return toolName === 'papyrus_browser_navigate' || toolName === 'papyrus_browser_read'
 }
 
 function normalizeStopReason(reason: string): string {

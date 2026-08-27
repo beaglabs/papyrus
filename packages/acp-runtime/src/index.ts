@@ -45,6 +45,9 @@ export interface RuntimePromptRequest {
   tools?: RuntimeTool[]
   invokeTool?: (name: string, args: Record<string, unknown>) => Promise<unknown>
   authorizeTool: (title: string) => Promise<boolean>
+  /** Fail-closed execution gate for every tool, including Mastra built-ins. */
+  checkToolExecution?: (name: string) => Promise<void>
+  browse?: (operation: 'navigate' | 'read', url?: string) => Promise<unknown>
   elicit?: (request: Record<string, unknown>) => Promise<Record<string, unknown>>
   setGoal?: (objective: string) => Promise<unknown>
   onEvent: (event: RuntimeEvent) => void | Promise<void>

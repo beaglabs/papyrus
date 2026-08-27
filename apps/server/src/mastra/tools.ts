@@ -26,6 +26,26 @@ export function requestedFieldSchema(fields: ElicitationField[]) {
 // Non-workspace tools. Files, commands, search, skills, LSP, and browser access
 // come from the session-scoped Mastra Workspace.
 export function buildStaticAgentTools() {
+  const browserNavigate = createTool({
+    id: 'papyrus_browser_navigate',
+    description: 'Navigate the session browser. Requires privileged browser permissions; restricted users must use assigned browser MCP tools.',
+    inputSchema: z.object({ url: z.string().url() }),
+    execute: async ({ url }, context) => {
+      const browse = context?.requestContext?.get('browse') as ((op: 'navigate', url: string) => Promise<unknown>) | undefined
+      if (!browse) throw new Error('Governed browser access is unavailable')
+      return await browse('navigate', url)
+    },
+  })
+  const browserRead = createTool({
+    id: 'papyrus_browser_read',
+    description: 'Read text from the session browser through Papyrus authorization.',
+    inputSchema: z.object({}),
+    execute: async (_args, context) => {
+      const browse = context?.requestContext?.get('browse') as ((op: 'read') => Promise<unknown>) | undefined
+      if (!browse) throw new Error('Governed browser access is unavailable')
+      return await browse('read')
+    },
+  })
   const setGoal = createTool({
     id: 'papyrus_set_goal',
     description: 'Create or update the durable objective for this session when the user asks for ongoing, multi-step, or outcome-oriented work. The objective is evaluated across turns.',
@@ -97,6 +117,8 @@ export function buildStaticAgentTools() {
   })
 
   return {
+    papyrus_browser_navigate: browserNavigate,
+    papyrus_browser_read: browserRead,
     papyrus_set_goal: setGoal,
     papyrus_generate: generateImage,
     papyrus_request_input: requestInput,

@@ -1,9 +1,10 @@
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, stat, writeFile } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
 import type { ContentBlock } from '@agentclientprotocol/sdk'
-import { BrowserViewer } from '@mastra/browser-viewer'
 import { LocalFilesystem, LocalSandbox, Workspace, WORKSPACE_TOOLS } from '@mastra/core/workspace'
 import type { ServerConfig } from '../config.js'
+import { PapyrusBrowser } from './browser.js'
+import { bubblewrapArgs, detectCommandIsolation, sandboxEnvironment, seatbeltProfile } from './sandbox.js'
 
 const SESSION_SKILL = `---
 name: papyrus-session
@@ -15,26 +16,26 @@ description: Work safely inside the current governed Papyrus session.
 - Keep generated and edited files inside this workspace.
 - Read a file before overwriting it and preserve unrelated content.
 - Use workspace search for uploaded files and workspace notes.
-- Use LSP inspection for code navigation and diagnostics.
-- Use the browser-use CLI for web tasks. It connects to the session-scoped browser exposed by Mastra.
+- Commands are offline and isolated. Host files, network access, and browser CDP are unavailable.
+- Use papyrus_browser_navigate/read for privileged browser tasks, or assigned MCP browser tools for restricted access. Browser CLIs cannot connect from the shell.
 - Approved organization sources and MCP integrations are available only through the papyrus_* tools. Never try to bypass their approval or authorization result.
 `
 
 export class PapyrusWorkspaceManager {
-  readonly browser: BrowserViewer
+  readonly browser: PapyrusBrowser
   private readonly workspaces = new Map<string, Promise<Workspace>>()
   private readonly root: string
   private readonly isolation: 'none' | 'bwrap' | 'seatbelt'
 
   constructor(private readonly config: ServerConfig) {
     this.root = resolve(config.dataDir, 'workspaces')
-    this.browser = new BrowserViewer({
+    this.browser = new PapyrusBrowser({
       cli: 'browser-use',
       scope: 'thread',
       headless: process.env.PAPYRUS_BROWSER_HEADLESS !== 'false',
       ...(process.env.PAPYRUS_BROWSER_EXECUTABLE ? { executablePath: process.env.PAPYRUS_BROWSER_EXECUTABLE } : {}),
     })
-    const detected = LocalSandbox.detectIsolation()
+    const detected = detectCommandIsolation()
     if (!detected.available && config.mode === 'persistent') {
       throw new Error(`Mastra sandbox isolation is required in persistent mode: ${detected.message}`)
     }
@@ -75,12 +76,15 @@ export class PapyrusWorkspaceManager {
   }
 
   async artifactsSince(sessionId: string, baseline: Map<string, number>): Promise<Array<{ path: string; mediaType: string; data: string }>> {
+    const workspace = await this.forSession(sessionId)
     const files = await this.workspaceFiles(sessionId)
     const changed = files.filter((file) => baseline.get(file.path) !== file.modified && file.size <= 10 * 1024 * 1024)
     return await Promise.all(changed.map(async (file) => ({
       path: file.path,
       mediaType: mediaTypeFor(file.path),
-      data: (await readFile(file.absolute)).toString('base64'),
+      // Use the same contained filesystem as the tools, including symlink
+      // checks; artifact promotion must not be a host-file read backdoor.
+      data: Buffer.from(await workspace.filesystem!.readFile(file.path)).toString('base64'),
     })))
   }
 
@@ -108,34 +112,41 @@ export class PapyrusWorkspaceManager {
     const root = join(this.root, sessionId)
     await mkdir(join(root, 'skills', 'papyrus-session'), { recursive: true })
     await mkdir(join(root, 'attachments'), { recursive: true })
+    await mkdir(join(root, '.tmp'), { recursive: true })
     await writeFile(join(root, 'skills', 'papyrus-session', 'SKILL.md'), SESSION_SKILL, { flag: 'w' })
+    // Profiles must not be writable from the session sandbox.
+    const profilePath = join(this.root, `${sessionId}.sb`)
+    if (this.isolation === 'seatbelt') await writeFile(profilePath, seatbeltProfile(root), { mode: 0o600 })
     const workspace = new Workspace({
       id: `papyrus-${sessionId}`,
       name: `Papyrus session ${sessionId}`,
       filesystem: new LocalFilesystem({ basePath: root, contained: true }),
-      sandbox: new LocalSandbox({
+      // Local mode may still use contained file tools without an OS backend;
+      // it must never silently fall back to unsandboxed command execution.
+      ...(this.isolation === 'none' ? {} : { sandbox: new LocalSandbox({
         workingDirectory: root,
         isolation: this.isolation,
-        ...(this.isolation === 'none' ? {} : { nativeSandbox: {
-          // browser-use connects to BrowserViewer over its session-scoped CDP
-          // endpoint and the browser itself needs outbound access.
-          allowNetwork: true,
+        env: sandboxEnvironment(root),
+        nativeSandbox: {
+          allowNetwork: false,
           allowSystemBinaries: true,
           readWritePaths: [root],
-        } }),
-      }),
-      browser: this.browser,
+          ...(this.isolation === 'seatbelt' ? { seatbeltProfilePath: profilePath } : { bwrapArgs: bubblewrapArgs(root) }),
+        },
+      }) }),
       bm25: true,
       searchIndexName: `papyrus_ws_${sessionId.replaceAll('-', '_')}`,
       autoIndexPaths: ['attachments'],
       skills: ['skills'],
-      lsp: { root },
+      // Mastra launches LSP servers on the host, outside LocalSandbox. Keep
+      // them disabled until they can share the command isolation boundary.
       tools: {
         enabled: true,
         requireApproval: false,
         [WORKSPACE_TOOLS.FILESYSTEM.WRITE_FILE]: { requireReadBeforeWrite: true },
         [WORKSPACE_TOOLS.FILESYSTEM.DELETE]: { enabled: false },
         [WORKSPACE_TOOLS.SEARCH.INDEX]: { enabled: false },
+        [WORKSPACE_TOOLS.LSP.LSP_INSPECT]: { enabled: false },
       },
     })
     await workspace.init()

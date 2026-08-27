@@ -15,6 +15,11 @@ describe('fixed Cedar policy', () => {
     const environment = { type: 'Environment' as const, id: 'w', attrs: { assignedUsers: cedarUsers(['alice']) } }
     expect(policy.authorize(principal('alice', ['User']), 'CreateSession', environment).allowed).toBe(true)
     expect(policy.authorize(principal('mallory', ['User']), 'CreateSession', environment).allowed).toBe(false)
+    for (const action of ['WorkspaceRead', 'WorkspaceWrite', 'WorkspaceExecute', 'GenerateImage'] as const) {
+      expect(policy.authorize(principal('alice', ['User']), action, environment).allowed).toBe(true)
+      expect(policy.authorize(principal('mallory', ['User']), action, environment).allowed).toBe(false)
+      expect(policy.authorize(principal('auditor', ['Auditor']), action, environment).allowed).toBe(false)
+    }
   })
 
   it('enforces session ownership', () => {

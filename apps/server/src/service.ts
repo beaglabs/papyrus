@@ -5,7 +5,8 @@ import { SESSION_SURFACES } from '@papyrus/contracts'
 import type { ActivitySummary, AdminOverview, ApprovedSource, ApprovedSourceKind, Approval, Attachment, Elicitation, Environment, Invitation, InvitationIdentityKind, McpServer, Principal, ResearchSource, Role, Session, SessionConfigOption, SessionEvent, SessionRun, SessionSurface, SignedLicense, SourceSearchResult } from '@papyrus/contracts'
 import type { ContentBlock } from '@agentclientprotocol/sdk'
 import type { AgentRuntime, RuntimeEvent, RuntimeLaunchOptions, RuntimeTool } from '@papyrus/acp-runtime'
-import { connectorPolicyAction } from './catalog.js'
+import { BROWSER_POLICY_ACTIONS, connectorPolicyAction } from './catalog.js'
+import { runtimeToolAction } from './mastra/authorization.js'
 import { Mastra } from '@mastra/core/mastra'
 import { MastraAgentWorker } from './mastra/worker.js'
 import { createPapyrusMastra } from './mastra/server.js'
@@ -277,22 +278,81 @@ export class PapyrusService {
   }
 
   async browserStream(actor: Principal, sessionId: string): Promise<Awaited<ReturnType<PapyrusWorkspaceManager['browser']['startScreencast']>>> {
-    this.getSession(actor, sessionId)
+    this.checkNativeBrowser(actor, sessionId)
     const workspaces = requireWorkspaces(this.workspaces)
     await workspaces.forSession(sessionId)
+    this.checkNativeBrowser(actor, sessionId)
     if (!workspaces.browser.isBrowserRunning(sessionId)) await workspaces.browser.launch(sessionId)
+    this.checkNativeBrowser(actor, sessionId)
     return await workspaces.browser.startScreencast({ threadId: sessionId, format: 'jpeg', quality: 72, maxWidth: 1440, maxHeight: 900 })
   }
 
   async browserInput(actor: Principal, sessionId: string, input: Record<string, unknown>): Promise<void> {
-    const session = this.requireSession(sessionId)
-    this.check(actor, 'PromptSession', this.sessionResource(session))
+    this.checkNativeBrowser(actor, sessionId)
     const workspaces = requireWorkspaces(this.workspaces)
     await workspaces.forSession(sessionId)
+    this.checkNativeBrowser(actor, sessionId)
     if (input.kind === 'mouse') await workspaces.browser.injectMouseEvent(input.event as never, sessionId)
     else if (input.kind === 'keyboard') await workspaces.browser.injectKeyboardEvent(input.event as never, sessionId)
     else throw new Error('Unsupported browser input')
     this.audit.append({ actorId: actor.id, action: 'BrowserInput', resourceType: 'Session', resourceId: sessionId, decision: 'info', metadata: { kind: input.kind } })
+  }
+
+  // BrowserViewer exposes an unrestricted browser: page scripts and raw input
+  // can submit, download, or use credentials. Do not label this a read-only
+  // capability. Restricted Users use separately governed MCP browser tools.
+  private checkNativeBrowser(actor: Principal, sessionId: string): void {
+    actor = this.liveActor(actor)
+    const session = this.requireSession(sessionId)
+    this.check(actor, 'PromptSession', this.sessionResource(session))
+    this.check(actor, 'ReadEnvironment', this.environmentResource(session.environmentId))
+    const resource = this.runtimeToolResource(session, 'native-browser')
+    for (const action of BROWSER_POLICY_ACTIONS) this.check(actor, action, resource)
+  }
+
+  async browse(actor: Principal, sessionId: string, operation: 'navigate' | 'read', url?: string): Promise<unknown> {
+    this.checkNativeBrowser(actor, sessionId)
+    if (operation !== 'navigate' && operation !== 'read') throw new Error('Unsupported browser operation')
+    const browser = requireWorkspaces(this.workspaces).browser
+    if (operation === 'navigate') {
+      const parsed = new URL(url ?? '')
+      if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) throw new Error('Browser navigation requires an HTTP(S) URL without credentials')
+      await browser.navigate(sessionId, parsed.href)
+    }
+    // Recheck after asynchronous navigation before returning browser content.
+    this.checkNativeBrowser(actor, sessionId)
+    return await browser.readPage(sessionId)
+  }
+
+  private liveActor(actor: Principal): Principal {
+    const current = this.db.getPrincipal(actor.id)
+    if (!current) {
+      this.audit.append({ actorId: actor.id, action: 'InvokeTool', resourceType: 'Deployment', resourceId: 'identity', decision: 'deny', metadata: { reason: 'Identity no longer exists' } })
+      throw new AuthorizationDenied('InvokeTool', actor.id)
+    }
+    return current
+  }
+
+  private runtimeToolResource(session: Session, name: string): AuthorizationResource {
+    return { type: 'Tool', id: `${session.id}:${name}`, attrs: { assignedUsers: cedarUsers(this.db.assignedUserIds('environment', session.environmentId)) } }
+  }
+
+  /** Called by Mastra's execution hook, not by its post-execution stream. */
+  checkToolExecution(actor: Principal, sessionId: string, name: string): void {
+    actor = this.liveActor(actor)
+    const session = this.requireSession(sessionId)
+    this.check(actor, 'PromptSession', this.sessionResource(session))
+    this.check(actor, 'ReadEnvironment', this.environmentResource(session.environmentId))
+    const action = runtimeToolAction(name)
+    if (action) {
+      this.check(actor, action, this.runtimeToolResource(session, name))
+      if (name === 'papyrus_browser_navigate' || name === 'papyrus_browser_read') this.checkNativeBrowser(actor, sessionId)
+      this.audit.append({ actorId: actor.id, action: 'InvokeTool', resourceType: 'Tool', resourceId: `${sessionId}:${name}`, decision: 'allow', metadata: { sessionId, toolName: name, policyAction: action, transport: 'mastra-builtin' } })
+      return
+    }
+    if (this.isToolCallAllowed(actor, session, name)) return
+    this.audit.append({ actorId: actor.id, action: 'InvokeTool', resourceType: 'Tool', resourceId: `${sessionId}:${name}`, decision: 'deny', metadata: { sessionId, reason: 'Tool is unknown or not granted' } })
+    throw new AuthorizationDenied('InvokeTool', name)
   }
 
   defaultGatewayAgent(): string { return 'papyrus' }
@@ -505,8 +565,10 @@ export class PapyrusService {
 
   async prompt(actor: Principal, sessionId: string, prompt: string, options: SessionPromptOptions = {}): Promise<{ stopReason: string; events: RuntimeEvent[] }> {
     this.license.require('gateway')
+    actor = this.liveActor(actor)
     const session = this.requireSession(sessionId)
     this.check(actor, 'PromptSession', this.sessionResource(session))
+    this.check(actor, 'ReadEnvironment', this.environmentResource(session.environmentId))
     const events: RuntimeEvent[] = []
     const attachments = [...new Set(options.attachmentIds ?? [])].map((id) => {
       const attachment = this.db.getAttachment(id)
@@ -552,12 +614,20 @@ export class PapyrusService {
         prompt: attachments.length ? contentBlocks : prompt,
         tools: await this.nativeTools(session),
         invokeTool: async (name, args) => {
+          // Approval can wait arbitrarily long; recheck revocations afterward.
+          run.controller.signal.throwIfAborted()
+          this.checkToolExecution(actor, session.id, name)
           if (name.startsWith('papyrus_sources_')) return this.invokeSourceTool(actor, name, args)
           const [mcpServerId] = this.findTool(session.environmentId, name)
           if (!mcpServerId) throw new AuthorizationDenied('InvokeTool', name)
           return await this.invokeTool(actor, session.id, mcpServerId, name, args)
         },
         authorizeTool: async (title) => this.requestToolApproval(actor, session, run.runId, title, run.controller.signal),
+        checkToolExecution: async (name) => {
+          run.controller.signal.throwIfAborted()
+          this.checkToolExecution(actor, session.id, name)
+        },
+        browse: async (operation, url) => this.browse(actor, session.id, operation, url),
         elicit: async (request) => this.requestElicitation(session, run.runId, request, run.controller.signal),
         setGoal: async (objective) => await this.setSessionGoal(actor, session.id, objective),
         onEvent: async (event) => {
@@ -742,6 +812,7 @@ export class PapyrusService {
   }
 
   async invokeTool(actor: Principal, sessionId: string, mcpServerId: string, toolName: string, args: unknown): Promise<unknown> {
+    actor = this.liveActor(actor)
     const session = this.db.getSession(sessionId)
     if (!session) throw new Error('Session not found')
     this.check(actor, 'PromptSession', this.sessionResource(session))
@@ -891,10 +962,16 @@ export class PapyrusService {
 
   /** Authorizes a tool call against the environment's registered MCP sources. */
   isToolCallAllowed(actor: Principal, session: Session, toolTitle: string): boolean {
-    const [mcpServerId, toolName] = this.findTool(session.environmentId, toolTitle)
-    if (!mcpServerId || !toolName) return false
     try {
+      actor = this.liveActor(actor)
       this.check(actor, 'PromptSession', this.sessionResource(session))
+      this.check(actor, 'ReadEnvironment', this.environmentResource(session.environmentId))
+      if (['papyrus_sources_list', 'papyrus_sources_search', 'papyrus_sources_read'].includes(toolTitle)) {
+        this.check(actor, 'InvokeTool', this.runtimeToolResource(session, toolTitle))
+        return true // Individual source assignments are rechecked by invokeSourceTool.
+      }
+      const [mcpServerId, toolName] = this.findTool(session.environmentId, toolTitle)
+      if (!mcpServerId || !toolName) return false
       const resource = { type: 'Tool' as const, id: `${mcpServerId}:${toolName}`, attrs: { assignedUsers: cedarUsers(this.db.assignedUserIds('environment', session.environmentId)) } }
       this.check(actor, 'InvokeTool', resource)
       const connectorAction = connectorPolicyAction(toolName)
@@ -953,6 +1030,7 @@ export class PapyrusService {
 
   /** Discovers only the tools enabled for this session's authorization environment. */
   private invokeSourceTool(actor: Principal, name: string, args: unknown): unknown {
+    actor = this.liveActor(actor)
     const input = args && typeof args === 'object' ? args as Record<string,unknown> : {}
     if (name === 'papyrus_sources_list') return { sources: this.listApprovedSources(actor) }
     if (name === 'papyrus_sources_search') return { results: this.searchApprovedSources(actor, textValue(input.query,'query'), typeof input.limit === 'number' ? input.limit : 10) }

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import type { AuditEvent } from '@papyrus/contracts'
 import type { PapyrusDatabase } from './db.js'
 
-export const POLICY_VERSION = 'papyrus-fixed-v1'
+export const POLICY_VERSION = 'papyrus-fixed-v2'
 const GENESIS_HASH = '0'.repeat(64)
 
 function canonical(value: unknown): string {

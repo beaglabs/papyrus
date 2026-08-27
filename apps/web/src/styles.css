@@ -546,6 +546,11 @@ nav [data-slot=button].active{border-color:var(--border);background:var(--main);
   justify-self: start;
 }
 .prompt-turn-status {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 8px 0;
+  background: #fff;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -562,6 +567,7 @@ nav [data-slot=button].active{border-color:var(--border);background:var(--main);
   list-style: none;
   font-size: 12px;
 }
+.prompt-turn-status .dot.bad { background: #ff9fb4; }
 .prompt-turn-plan li {
   display: grid;
   grid-template-columns: 10px minmax(0, 1fr);
@@ -581,6 +587,7 @@ nav [data-slot=button].active{border-color:var(--border);background:var(--main);
   box-shadow: 2px 2px 0 #111;
 }
 .prompt-turn-tool > div { min-width: 0; display: grid; gap: 2px; }
+.prompt-turn-tool strong { overflow-wrap: anywhere; }
 .prompt-turn-tool small {
   overflow: hidden;
   color: #666;
@@ -590,6 +597,18 @@ nav [data-slot=button].active{border-color:var(--border);background:var(--main);
 }
 .prompt-turn-tool.completed { box-shadow: 2px 2px 0 #71df98; }
 .prompt-turn-tool.failed { box-shadow: 2px 2px 0 #ff9fb4; }
+.prompt-turn-tool.in_progress, .prompt-turn-tool.pending { border-color: #d95319; box-shadow: 2px 2px 0 #ff5f1f; }
+.prompt-turn-tool .pill { display: inline-flex; align-items: center; gap: 6px; }
+.prompt-turn-tool .pill.in_progress, .prompt-turn-tool .pill.pending { background: #fff0e6; }
+.tool-spinner { display: inline-block; flex: 0 0 auto; width: 12px; height: 12px; border: 2px solid #e9c4ad; border-top-color: #c44812; border-radius: 50%; animation: artifact-spin .8s linear infinite; }
+.tool-running-hint { margin-top: 5px; color: #9c3810; font: 11px ui-monospace, monospace; }
+.tool-stream-output { padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, monospace; }
+.tool-stderr { color: #ffb6ad; }
+@media (prefers-reduced-motion: reduce) { .tool-spinner { animation: none; } }
+@media (max-width: 600px) {
+  .prompt-turn-tool[data-slot=card] { grid-template-columns: minmax(0, 1fr) auto; }
+  .prompt-turn-tool > .tool-kind { display: none; }
+}
 .streaming-cursor { color: var(--main); animation: terminal-cursor 1s steps(1) infinite; }
 
 .artifact-cards {
@@ -626,6 +645,7 @@ nav [data-slot=button].active{border-color:var(--border);background:var(--main);
 
 .artifact-workspace {
   position: relative;
+  top: auto;
   z-index: 6;
   width: min(520px, 48%);
   height: 100%;
@@ -633,12 +653,15 @@ nav [data-slot=button].active{border-color:var(--border);background:var(--main);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  padding: 0;
+  border-right: 0;
   border-left: 1px solid #aaa;
   background: #f5f1e8;
   color: #111;
   box-shadow: none;
   animation: artifact-panel-in .22s ease-out;
 }
+.with-handling-banner .artifact-workspace { top: auto; height: 100%; }
 .artifact-workspace-head {
   min-height: 62px;
   display: flex;
@@ -682,41 +705,8 @@ nav [data-slot=button].active{border-color:var(--border);background:var(--main);
 }
 .artifact-skeleton i:nth-child(2) { width: 82%; }
 .artifact-skeleton i:nth-child(3) { width: 60%; }
-.artifact-browser {
-  min-height: 0;
-  flex: 1;
-  display: grid;
-  grid-template-columns: 190px minmax(0, 1fr);
-}
-.artifact-browser > nav {
-  min-height: 0;
-  display: block;
-  overflow-y: auto;
-  border-right: 1px solid #aaa;
-  background: #ece8df;
-}
-.artifact-browser > nav [data-slot=button] {
-  width: 100%;
-  display: grid;
-  grid-template-columns: 24px minmax(0, 1fr);
-  gap: 8px;
-  padding: 11px;
-  border: 0;
-  border-bottom: 1px solid #ccc;
-  border-radius: 0;
-  box-shadow: none;
-  color: #111;
-  text-align: left;
-}
-.artifact-browser > nav [data-slot=button].selected {
-  background: #fff;
-  box-shadow: inset 3px 0 0 var(--main);
-}
-.artifact-browser > nav [data-slot=button] > span:last-child { min-width: 0; display: grid; gap: 3px; }
-.artifact-browser > nav strong,
-.artifact-browser > nav small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.artifact-browser > nav small { color: #777; font: 8px ui-monospace, monospace; }
 .artifact-preview {
+  flex: 1;
   min-width: 0;
   min-height: 0;
   display: grid;
@@ -751,7 +741,6 @@ nav [data-slot=button].active{border-color:var(--border);background:var(--main);
 @keyframes artifact-shimmer { to { background-position: -200% 0; } }
 @media (max-width: 800px) {
   .artifact-workspace { position: absolute; inset: 0 0 0 auto; width: min(520px, 94%); flex-basis: auto; box-shadow: -10px 0 24px rgba(17,17,17,.14); }
-  .artifact-browser { grid-template-columns: 150px minmax(0, 1fr); }
 }
 
 

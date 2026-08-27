@@ -5,7 +5,7 @@ import { acpContent, ContentBlock, ContentMessage } from './AcpSessionContent.js
 import { createPortal } from 'react-dom'
 import { Alert, Button, Card, Input, Textarea } from './components/ui/index.js'
 
-interface ToolActivity { id: string; title: string; kind: string; status: string; sequence: number; locations: string[]; terminals: string[]; output: Array<Record<string, unknown>> }
+interface ToolActivity { id: string; title: string; kind: string; status: string; sequence: number; locations: string[]; terminals: string[]; output: Array<Record<string, unknown>>; stdout: string; stderr: string; exitCode?: number }
 interface PlanItem { content: string; status: string; priority: string }
 interface PromptTurnGroup { runId: string; sequence: number; events: SessionEvent[] }
 export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRequest: number; onActivate: () => void }) {
@@ -25,7 +25,7 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
   const [selectedArtifactId, setSelectedArtifactId] = useState<string>()
   const knownArtifactCount = useRef(0)
   const [loading, setLoading] = useState(true)
-  const [running, setRunning] = useState(false)
+  const [runPending, setRunning] = useState(false)
   const [pendingTurn, setPendingTurn] = useState<{ prompt: string; attachments: Attachment[] }>()
   const [error, setError] = useState<string>()
   const [liveError, setLiveError] = useState<string>()
@@ -36,6 +36,7 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const newPromptRef = useRef<HTMLTextAreaElement | null>(null)
   const selected = sessions.find((session) => session.id === selectedId)
+  const running = Boolean(pendingTurn) || (latestRunRunning(events.filter((event) => event.sessionId === selectedId)) ?? runPending)
   const turns = useMemo(() => promptTurns(events), [events])
   const activeRunId = useMemo(() => [...events].reverse().find((event) => event.runId)?.runId, [events])
   const browserState = useMemo(() => latestBrowserState(events), [events])
@@ -242,7 +243,7 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
     <div className={`conversation-panel ${selected ? '' : 'new-session-panel'}`}>
       {(error || liveError) && <Alert className={error ? 'error' : 'connection-notice'}>{error ?? liveError}<Button variant="ghost" onClick={() => { setError(undefined); setLiveError(undefined) }}>×</Button></Alert>}
       {!selected ? <div className="new-session-home"><div className="new-session-intro"><p className="eyebrow">NEW DURABLE SESSION</p><h2>What should we work on?</h2><p>Your first prompt creates the session automatically and keeps the complete governed history.</p></div><form className="new-session-composer" onSubmit={startNewSession}><Textarea ref={newPromptRef} name="prompt" disabled={running} placeholder="Describe the work to perform…" onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} /><div className="new-session-controls"><span className="new-session-note">Your deployment’s approved runtime and access assignments are applied automatically.</span><Button className="primary" disabled={running}>{running ? 'Starting…' : 'Start →'}</Button></div></form></div> : <>
-        <div className="conversation-head"><div><strong>{selected.title}</strong><span>{selected.status}{goal?.objective ? ' · goal active' : ''}</span></div><div className="session-actions">{(running || selected.status === 'running') ? <Button className="danger" onClick={() => void cancel()}>Cancel run</Button> : <Button className="text-button" onClick={() => void removeSession()}>Delete</Button>}</div></div>
+        <div className="conversation-head"><div><strong>{selected.title}</strong><span>{running ? 'running' : selected.status === 'running' ? 'ready' : selected.status}{goal?.objective ? ' · goal active' : ''}</span></div><div className="session-actions">{running ? <Button className="danger" onClick={() => void cancel()}>Cancel run</Button> : <Button className="text-button" onClick={() => void removeSession()}>Delete</Button>}</div></div>
         <div className={`session-content ${artifactPanelOpen ? 'artifact-panel-open' : ''}`}>
           <div className="message-region">
             <div className="messages" ref={messagesRef} aria-live="polite" onScroll={(event) => {
@@ -258,7 +259,7 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
             </div>
             {!followingLatest && <Button className="jump-latest" onClick={() => { setFollowingLatest(true); messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' }) }}>Jump to latest ↓</Button>}
           </div>
-          <ArtifactWorkspace artifacts={artifacts} generating={artifactGenerating} open={artifactPanelOpen} selectedId={selectedArtifactId} onOpenChange={setArtifactPanelOpen} onSelect={setSelectedArtifactId} />
+          <ArtifactWorkspace artifacts={artifacts} generating={artifactGenerating} open={artifactPanelOpen} selectedId={selectedArtifactId} onOpenChange={setArtifactPanelOpen} />
         </div>
         <div className="session-footer">
         {approvals.filter((approval) => approval.status === 'pending').map((approval) => <ApprovalCard key={approval.id} approval={approval} onDecision={reviewApproval} />)}
@@ -348,10 +349,19 @@ export function hasAcceptedTurn(events: SessionEvent[]): boolean {
 }
 
 function hasTerminalRun(events: SessionEvent[]): boolean {
-  return events.some((event) => {
+  return latestRunRunning(events) === false
+}
+
+export function latestRunRunning(events: SessionEvent[]): boolean | undefined {
+  const latestRunId = [...events].reverse().find((event) => event.runId)?.runId
+  if (!latestRunId) return undefined
+  for (const event of [...events].reverse()) {
+    if (event.runId !== latestRunId) continue
     const update = event.data as { sessionUpdate?: string; status?: string } | undefined
-    return update?.sessionUpdate === 'run_completed' && ['completed', 'cancelled', 'failed', 'interrupted'].includes(update.status ?? '')
-  })
+    if (event.kind === 'complete' || (update?.sessionUpdate === 'run_completed' && ['completed', 'cancelled', 'failed', 'interrupted'].includes(update.status ?? ''))) return false
+    if (update?.sessionUpdate === 'run_started' || update?.sessionUpdate === 'user_message_chunk' || event.kind === 'session') return true
+  }
+  return undefined
 }
 
 export function latestBrowserState(events: SessionEvent[]): 'active' | 'completed' | undefined {
@@ -413,21 +423,18 @@ function ElicitationCard({ item, onRespond }: { item: Elicitation; onRespond: (i
 function sessionTitle(prompt: string) { const title = prompt.replace(/\s+/g, ' ').trim(); return title.length > 72 ? `${title.slice(0, 69)}…` : title }
 function formatBytes(size: number) { return size < 1024 ? `${size} B` : size < 1024 * 1024 ? `${(size / 1024).toFixed(1)} KB` : `${(size / 1024 / 1024).toFixed(1)} MB` }
 
-function ArtifactWorkspace({ artifacts, generating, open, selectedId, onOpenChange, onSelect }: { artifacts: Artifact[]; generating: boolean; open: boolean; selectedId: string | undefined; onOpenChange: (open: boolean) => void; onSelect: (id: string) => void }) {
+export function ArtifactWorkspace({ artifacts, generating, open, selectedId, onOpenChange }: { artifacts: Artifact[]; generating: boolean; open: boolean; selectedId: string | undefined; onOpenChange: (open: boolean) => void }) {
   const selected = artifacts.find((artifact) => artifact.id === selectedId) ?? artifacts.at(-1)
   if (!open || (!generating && artifacts.length === 0)) return null
   return <aside className="artifact-workspace" aria-label="Generated artifact preview">
-    <div className="artifact-workspace-head"><div><span>ARTIFACT</span><strong>{generating ? 'Generating…' : selected?.name ?? 'Preview'}</strong></div><Button variant="ghost" onClick={() => onOpenChange(false)} aria-label="Close artifact preview">×</Button></div>
-    {generating && <div className="artifact-generating"><span className="artifact-orbit" aria-hidden="true" /><div><strong>Building an artifact</strong><span>Structured output will render here as it arrives.</span></div><div className="artifact-skeleton"><i /><i /><i /></div></div>}
-    {artifacts.length > 0 && <div className="artifact-browser">
-      <nav aria-label="Generated artifacts">{artifacts.map((artifact) => <Button key={artifact.id} variant="ghost" className={artifact.id === selected?.id ? 'selected' : ''} onClick={() => onSelect(artifact.id)}><span>{artifactIcon(artifact)}</span><span><strong>{artifact.name}</strong><small>{artifact.mediaType} · v{artifact.version}</small></span></Button>)}</nav>
+    <div className="artifact-workspace-head"><div><span>ARTIFACT</span><strong>{selected?.name ?? (generating ? 'Generating…' : 'Preview')}</strong></div><Button variant="ghost" onClick={() => onOpenChange(false)} aria-label="Close artifact preview">×</Button></div>
+    {generating && !selected && <div className="artifact-generating"><span className="artifact-orbit" aria-hidden="true" /><div><strong>Building an artifact</strong><span>Structured output will render here as it arrives.</span></div><div className="artifact-skeleton"><i /><i /><i /></div></div>}
       {selected && <div className="artifact-preview">
         <div className="artifact-preview-meta"><span>{selected.mediaType}</span><a href={selected.downloadUrl}>Download ↓</a></div>
         {selected.mediaType.startsWith('image/') ? <img src={`${selected.downloadUrl}?preview=1`} alt={selected.name} />
           : selected.mediaType === 'application/pdf' ? <object data={`${selected.downloadUrl}?preview=1`} type="application/pdf"><a href={selected.downloadUrl}>Open {selected.name}</a></object>
           : <iframe title={selected.name} src={`${selected.downloadUrl}?preview=1`} sandbox="" />}
       </div>}
-    </div>}
     {!generating && artifacts.length === 0 && <div className="artifact-empty"><span>▤</span><strong>No outputs yet</strong><p>Generated files, images, structured data, and diffs will open here automatically.</p></div>}
   </aside>
 }
@@ -455,7 +462,7 @@ function ArtifactCards({ artifacts, onOpen }: { artifacts: Artifact[]; onOpen: (
   </section>
 }
 
-function PromptTurnFlow({ events, running, submitted }: { events: SessionEvent[]; running: boolean; submitted: boolean }) {
+export function PromptTurnFlow({ events, running, submitted }: { events: SessionEvent[]; running: boolean; submitted: boolean }) {
   let turnStart = -1
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]
@@ -464,43 +471,52 @@ function PromptTurnFlow({ events, running, submitted }: { events: SessionEvent[]
       break
     }
   }
-  const turnEvents = submitted ? [] : turnStart >= 0 ? events.slice(turnStart + 1) : []
+  const turnEvents = submitted ? [] : turnStart >= 0 ? events.slice(turnStart + 1) : events
   const { plan, tools } = projectActivity(turnEvents)
   if (!running && plan.length === 0 && tools.length === 0) return null
-  const activeTool = [...tools].reverse().find((tool) => tool.status === 'in_progress' || tool.status === 'pending')
+  const activeTools = tools.filter((tool) => tool.status === 'in_progress' || tool.status === 'pending')
   const hasModelStream = turnEvents.some((event) => event.kind === 'update' && event.data && typeof event.data === 'object' && ['agent_thought_chunk', 'agent_message_chunk'].includes(String((event.data as { sessionUpdate?: string }).sessionUpdate)))
   const failedTool = [...tools].reverse().find((tool) => tool.status === 'failed')
-  const status = activeTool ? `Running ${activeTool.title}`
+  const outcome = [...events].reverse().find((event) => (event.data as { sessionUpdate?: string } | undefined)?.sessionUpdate === 'run_completed')?.data as { status?: string } | undefined
+  const status = activeTools.length > 1 ? `${activeTools.length} tools active`
+    : activeTools[0] ? `${activeTools[0].status === 'pending' ? 'Preparing' : 'Running'} ${activeTools[0].title}`
     : running && hasModelStream ? 'Receiving model stream'
     : running && submitted ? 'Starting prompt turn'
     : running ? 'Waiting for model stream'
+    : outcome?.status && outcome.status !== 'completed' ? `Turn ${outcome.status}`
     : failedTool ? `${failedTool.title} failed`
-    : 'Turn complete'
+    : hasTerminalRun(events) ? 'Turn complete' : 'Turn status unavailable'
+  const displayTools = [...tools.filter((tool) => !activeTools.includes(tool)), ...activeTools]
   return <section className="prompt-turn-flow" aria-live="polite">
-    <div className="prompt-turn-status"><span className="dot good" /><strong>{status}</strong>{running && <span className="streaming-cursor" aria-hidden="true">▌</span>}</div>
+    <div className="prompt-turn-status" role="status"><span className={running || activeTools.length ? 'tool-spinner' : failedTool || outcome?.status === 'failed' ? 'dot bad' : 'dot good'} aria-hidden="true" /><strong>{status}</strong>{running && <span className="streaming-cursor" aria-hidden="true">▌</span>}</div>
     {plan.length > 0 && <ol className="prompt-turn-plan">{plan.map((item, index) => <li key={`${index}-${item.content}`} className={item.status}><span className={`activity-status ${item.status}`} />{item.content}</li>)}</ol>}
-    {tools.length > 0 && <div className="prompt-turn-tools">{tools.map((tool) => <Card key={tool.id} className={`prompt-turn-tool ${tool.status}`}><span className={`tool-kind ${tool.kind}`}>{tool.kind}</span><div><strong>{tool.title}</strong><small>{tool.locations.join(' · ') || tool.id}</small>{tool.output.length > 0 && <div className="tool-live-output">{tool.output.map((block, index) => <ContentBlock key={index} block={block} />)}</div>}</div><span className={`pill ${tool.status}`}>{tool.status.replace('_', ' ')}</span></Card>)}</div>}
+    {tools.length > 0 && <div className="prompt-turn-tools">{displayTools.map((tool) => <Card key={tool.id} className={`prompt-turn-tool ${tool.status}`} aria-busy={activeTools.includes(tool)}><span className={`tool-kind ${tool.kind}`}>{tool.kind}</span><div><strong>{tool.title}</strong><small>{tool.locations.join(' · ') || tool.id}</small>{activeTools.includes(tool) && <span className="tool-running-hint">{tool.status === 'pending' ? 'Preparing tool arguments…' : 'Executing tool…'}</span>}{(tool.stdout || tool.stderr) && <div className="tool-live-output"><pre className="tool-stream-output">{tool.stdout}{tool.stderr && <span className="tool-stderr">{tool.stderr}</span>}</pre></div>}{tool.output.length > 0 && <div className="tool-live-output">{tool.output.map((block, index) => <ContentBlock key={index} block={block} />)}</div>}{tool.exitCode !== undefined && <small>Exit code: {tool.exitCode}</small>}</div><span className={`pill ${tool.status}`}>{activeTools.includes(tool) && <span className="tool-spinner" aria-hidden="true" />}{tool.status === 'in_progress' ? 'Running' : tool.status === 'pending' ? 'Preparing' : tool.status}</span></Card>)}</div>}
   </section>
 }
 
-function projectActivity(events: SessionEvent[]): { plan: PlanItem[]; tools: ToolActivity[] } {
+export function projectActivity(events: SessionEvent[]): { plan: PlanItem[]; tools: ToolActivity[] } {
   let plan: PlanItem[] = []
   const tools = new Map<string, ToolActivity>()
   for (const event of events) {
     if (event.kind !== 'update' || !event.data || typeof event.data !== 'object') continue
-    const update = event.data as { sessionUpdate?: string; entries?: PlanItem[]; toolCallId?: string; title?: string; kind?: string; status?: string; locations?: Array<{ path?: string }>; content?: Array<{ type?: string; terminalId?: string; content?: unknown }> }
+    const update = event.data as { sessionUpdate?: string; entries?: PlanItem[]; toolCallId?: string; title?: string; kind?: string; status?: string; locations?: Array<{ path?: string }>; content?: Array<{ type?: string; terminalId?: string; content?: unknown }>; _meta?: { papyrus?: { outputDelta?: { stream?: string; text?: string }; exitCode?: number } } }
     if (update.sessionUpdate === 'plan' && Array.isArray(update.entries)) plan = update.entries
     if ((update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') && update.toolCallId) {
       const current = tools.get(update.toolCallId)
       const locations = update.locations?.flatMap((location) => typeof location.path === 'string' ? [location.path] : []) ?? []
       const terminals = update.content?.flatMap((content) => content.type === 'terminal' && content.terminalId ? [content.terminalId] : []) ?? []
       const output = update.content?.flatMap((content) => content.type === 'content' && content.content && typeof content.content === 'object' && !Array.isArray(content.content) ? [content.content as Record<string, unknown>] : []) ?? []
+      const delta = update._meta?.papyrus?.outputDelta
+      const appendOutput = (channel: string, currentText = '') => (currentText + (delta?.stream === channel && typeof delta.text === 'string' ? delta.text : '')).slice(-65536)
+      const exitCode = update._meta?.papyrus?.exitCode ?? current?.exitCode
       tools.set(update.toolCallId, {
         id: update.toolCallId, title: update.title ?? current?.title ?? 'Tool activity', kind: update.kind ?? current?.kind ?? 'other',
         status: update.status ?? current?.status ?? 'pending', sequence: current?.sequence ?? event.sequence,
         locations: [...new Set([...(current?.locations ?? []), ...locations])],
         terminals: [...new Set([...(current?.terminals ?? []), ...terminals])],
         output: mergeToolOutput(current?.output ?? [], output),
+        stdout: appendOutput('stdout', current?.stdout), stderr: appendOutput('stderr', current?.stderr),
+        ...(exitCode !== undefined ? { exitCode } : {}),
       })
     }
   }

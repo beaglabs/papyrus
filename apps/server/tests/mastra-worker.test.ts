@@ -169,6 +169,39 @@ describe('Cloudflare model compatibility', () => {
     expect(continuation.messages.filter((message: { role: string }) => message.role === 'system')).toHaveLength(1)
     expect(continuation.messages).toContainEqual(expect.objectContaining({ role: 'tool', tool_call_id: 'read-1', content: 'Workspace notes' }))
   })
+
+  it('delivers native stdout while the real Mastra tool is still executing', async () => {
+    const { model } = provider({ toolTurn: true })
+    let release!: () => void
+    let outputReceived!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const streamed = new Promise<void>((resolve) => { outputReceived = resolve })
+    const agent = new Agent({
+      id: 'streaming-tool', name: 'streaming-tool', instructions: 'Read notes', model: wrapModelForCloudflare(model),
+      tools: { read_file: createTool({ id: 'read_file', description: 'Read notes', inputSchema: z.object({ path: z.string() }),
+        execute: async (_input, context) => {
+          await context?.writer?.custom({ type: 'data-sandbox-stdout', data: { toolCallId: context.agent?.toolCallId, output: 'Still executing\n' }, transient: true })
+          await gate
+          await context?.writer?.custom({ type: 'data-sandbox-exit', data: { toolCallId: context.agent?.toolCallId, exitCode: 0, success: true } })
+          return 'Workspace notes'
+        },
+      }) },
+    })
+    const worker = new MastraAgentWorker({ getAgent: () => agent } as never, { model: { endpoint: 'http://model.test/v1', model: model.modelId } } as never, { stagePrompt: async () => undefined } as never)
+    const updates: Array<Record<string, any>> = []
+    const result = worker.runPrompt({ prompt: 'Read notes', onEvent: (event) => {
+      const update = event.data as Record<string, any>
+      updates.push(update)
+      if (update._meta?.papyrus?.outputDelta) outputReceived()
+    } })
+    try {
+      await Promise.race([streamed, result.then(() => { throw new Error('Run finished without live output') })])
+      expect(updates).toContainEqual(expect.objectContaining({ status: 'in_progress', _meta: { papyrus: { outputDelta: { stream: 'stdout', text: 'Still executing\n' } } } }))
+      expect(updates.some((update) => update.status === 'completed')).toBe(false)
+    } finally { release() }
+    await expect(result).resolves.toMatchObject({ stopReason: 'stop' })
+    expect(updates).toContainEqual(expect.objectContaining({ toolCallId: 'read-1', status: 'completed' }))
+  })
 })
 
 describe('Mastra agent runtime', () => {
@@ -182,6 +215,35 @@ describe('Mastra agent runtime', () => {
     const result = worker.runPrompt({ prompt: 'Continue', ...(signal ? { signal } : {}), onEvent: (event) => { events.push(event) } })
     return { result, events }
   }
+
+  it('projects preparation, execution, streamed output and failed process exit without a false success', async () => {
+    const call = { toolCallId: 'cmd-1', toolName: 'mastra_workspace_execute_command' }
+    const { result, events } = runChunks([
+      { type: 'tool-call-input-streaming-start', payload: call },
+      { type: 'tool-call', payload: { ...call, args: { command: 'python build.py' } } },
+      { type: 'data-sandbox-stdout', data: { toolCallId: 'cmd-1', output: 'Building\n' } },
+      { type: 'data-sandbox-stderr', data: { toolCallId: 'cmd-1', output: 'Render failed\n' } },
+      { type: 'data-sandbox-exit', data: { toolCallId: 'cmd-1', exitCode: 1, success: false } },
+      { type: 'tool-result', payload: { ...call, result: 'Render failed\n\nExit code: 1' } },
+      { type: 'data-sandbox-stdout', data: { toolCallId: 'cmd-1', output: 'Late output\n' } },
+      finishChunk('finish', 'stop'),
+    ])
+    await result
+    const updates = events.filter((event) => event.kind === 'update').map((event) => event.data as Record<string, any>)
+    expect(updates.map((update) => update.status)).toEqual(['pending', 'in_progress', 'in_progress', 'in_progress', 'failed', 'failed', 'failed'])
+    expect(updates[1]).toMatchObject({ kind: 'execute' })
+    expect(updates[4]).toMatchObject({ _meta: { papyrus: { exitCode: 1 } } })
+    expect(updates[5]?.content).toEqual([{ type: 'content', content: { type: 'text', text: 'Render failed\n\nExit code: 1' } }])
+  })
+
+  it.each([
+    { type: 'tool-error', payload: { toolCallId: 't', toolName: 'read_file', error: new Error('Denied') } },
+    { type: 'tool-result', payload: { toolCallId: 't', toolName: 'read_file', result: 'Denied', isError: true } },
+  ])('shows $type as failed', async (chunk) => {
+    const { result, events } = runChunks([chunk, finishChunk('finish', 'stop')])
+    await result
+    expect(events).toContainEqual(expect.objectContaining({ data: expect.objectContaining({ toolCallId: 't', status: 'failed' }) }))
+  })
 
   it('does not complete on continuing, unknown, or terminal-looking step events', async () => {
     const { result, events } = runChunks([
@@ -217,6 +279,16 @@ describe('Mastra agent runtime', () => {
     const { result, events } = runChunks(chunks)
     await expect(result).rejects.toThrow(message)
     expect(events.some((event) => event.kind === 'complete')).toBe(false)
+  })
+
+  it.each(['error', 'abort', 'truncated'] as const)('closes active tools when the run is %s', async (ending) => {
+    const chunks: unknown[] = [{ type: 'tool-call', payload: { toolCallId: 'active', toolName: 'read_file' } }]
+    if (ending === 'error') chunks.push({ type: 'error', payload: { error: new Error('Disconnected') } })
+    if (ending === 'abort') chunks.push({ type: 'abort', payload: {} })
+    const { result, events } = runChunks(chunks)
+    if (ending === 'abort') await expect(result).resolves.toMatchObject({ stopReason: 'cancelled' })
+    else await expect(result).rejects.toThrow(ending === 'error' ? 'Disconnected' : 'before the run finished')
+    expect(events.filter((event) => event.kind === 'update').at(-1)).toMatchObject({ data: { toolCallId: 'active', status: 'failed' } })
   })
 
   it.each(['signal', 'chunk'] as const)('reports cancellation from an abort $0', async (source) => {

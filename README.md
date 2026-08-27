@@ -24,11 +24,45 @@ Papyrus is a governed Mastra agent harness with an ACP-compatible gateway. It pl
 - **Sessions** — user-owned runtime sessions with administrative and audit visibility
 - **MCP mediation** — execution-target-scoped server and tool grants through a session-bound proxy
 - **Offline licensing** — deployment-bound signed licenses required in persistent mode
-- **Mastra harness** — persistent goals, working memory, semantic recall, attachments, skills, workspace search, LSP, and sandboxed execution
-- **Live browser** — thread-isolated BrowserViewer sessions controlled by the `browser-use` CLI and streamed into the session UI
+- **Mastra harness** — persistent goals, working memory, semantic recall, attachments, skills, workspace search, and sandboxed execution
+- **Live browser** — thread-isolated BrowserViewer sessions controlled through Cedar-checked Papyrus tools and streamed into the session UI; raw browser control is privileged
 - **Runtime adapter** — Mastra is the sole in-process engine; ACP remains an external compatibility and durable-event projection boundary
 
-Mastra workspaces are isolated per Papyrus session. Files, search indexes, language-server state, skills, and browser contexts never share a session namespace. Organization sources and MCP tools continue to pass through Papyrus' live assignment checks and durable approval flow.
+Mastra workspaces are isolated per Papyrus session. Files, search indexes, skills, and browser contexts have separate session namespaces. Organization sources and MCP tools continue to pass through Papyrus' live assignment checks and durable approval flow.
+
+### Runtime security boundary
+
+Every Mastra tool execution is checked before its implementation runs, including
+workspace commands, files, skills, working memory, image generation, and browser
+tools. Unknown tools fail closed. The gate reloads current roles and environment
+assignments, checks session ownership, and records Cedar decisions. MCP approval
+does not override a denial; permissions are checked again after approval.
+
+Commands run **without network access**, including loopback/CDP, with only their
+own workspace writable. Native profiles restrict host reads to system runtime
+paths and the current workspace. Neither browser endpoints nor server secrets
+are injected into command environments. When native isolation is unavailable,
+local mode exposes contained file tools but no shell; persistent mode refuses to
+start. A functional startup probe also rejects installed but unusable backends;
+failed command launches never fall back to unisolated execution. Host-launched LSP support is disabled pending an isolated
+implementation.
+
+The built-in `papyrus_browser_navigate` and `papyrus_browser_read` tools replace
+shell-based browser CLIs. The browser stays outside the command sandbox and is
+accessible only through PapyrusService. Because BrowserViewer runs page scripts
+and raw input can submit forms, download, upload, or use credentials, native
+browser tools, screencasts, and mouse/keyboard input require **all browser
+permissions** (currently Owner/Admin). Restricted Users should use assigned MCP
+browser tools with separate capability checks. A permitted navigation is not a
+claim that the destination is safe; deployment network controls must restrict
+browser and model egress to approved destinations.
+
+After upgrading, rebuild and restart; existing processes must not continue with
+the old sandbox configuration. This changes policy version to `papyrus-fixed-v2`.
+Run `pnpm test` for the policy and runtime regressions. CI also runs native
+isolation tests on Linux and macOS with `PAPYRUS_REQUIRE_SANDBOX_TESTS=1`; those
+tests must execute a permitted local command before testing denied host reads,
+sibling-session access, writes, symlinks, and loopback network requests.
 
 Papyrus does not expose environments as a user-facing workspace abstraction. New conversations resolve the deployment's internal default execution target automatically; the stored target identifier remains available for future enclave, runtime, or network-boundary routing.
 
@@ -38,15 +72,13 @@ The active daemon-first migration plan is documented in [ACP daemon stack](docs/
 
 - Node.js 24+
 - pnpm 11.22.0
-- Python 3.11+ with the `browser-use` CLI and a Chromium/Chrome executable for browser sessions
+- A Chromium/Chrome executable for browser sessions (`PAPYRUS_BROWSER_EXECUTABLE`); browser tools no longer invoke a shell CLI
 - An approved customer model endpoint
 
 ## Local development (commercial profile)
 
 ```bash
 pnpm install --frozen-lockfile
-python3 -m pip install -r apps/server/requirements-browser.txt
-browser-use install
 pnpm build
 
 export PAPYRUS_MODE=local

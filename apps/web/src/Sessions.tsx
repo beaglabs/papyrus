@@ -84,7 +84,7 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
     if (browserState === 'active') {
       setBrowserPanelOpen(true)
       setArtifactPanelOpen(false)
-    } else if (browserState === 'completed') setBrowserPanelOpen(false)
+    } else if (browserState === 'completed' || browserState === 'failed') setBrowserPanelOpen(false)
   }, [browserState])
   useEffect(() => {
     if (artifacts.length > knownArtifactCount.current) {
@@ -243,7 +243,7 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
               {pendingTurn && <><ContentMessage message={pendingContent(pendingTurn)} /><PromptTurnFlow events={[]} running submitted /></>}
               {(goal || goalPanelOpen) && <InlineGoal sessionId={selected.id} goal={goal} editing={goalPanelOpen} running={running} onChange={setGoal} onEditingChange={setGoalPanelOpen} />}
               {browserPanelOpen && <InlineBrowser sessionId={selected.id} onClose={() => setBrowserPanelOpen(false)} onError={showError} />}
-              {!browserPanelOpen && browserState === 'completed' && <InlineBrowserResult onExpand={() => setBrowserPanelOpen(true)} />}
+              {!browserPanelOpen && (browserState === 'completed' || browserState === 'failed') && <InlineBrowserResult failed={browserState === 'failed'} onExpand={() => setBrowserPanelOpen(true)} />}
               {artifacts.length > 0 && <ArtifactCards artifacts={artifacts} onOpen={(id) => { setSelectedArtifactId(id); setArtifactPanelOpen(true) }} />}
             </div>
             {!followingLatest && <Button className="jump-latest" onClick={() => { setFollowingLatest(true); messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' }) }}>Jump to latest ↓</Button>}
@@ -320,8 +320,8 @@ function InlineBrowser({ sessionId, onClose, onError }: { sessionId: string; onC
   return <section className="inline-browser" aria-label="Session browser"><header className="inline-surface-heading"><span className={`browser-live-dot ${connected ? 'is-live' : ''}`} aria-hidden="true" /><div><small>{connected ? 'LIVE SESSION BROWSER' : 'CONNECTING'}</small><strong>Browser Use</strong></div><Button variant="ghost" onClick={onClose}>×</Button></header><div className="browser-url" title={url}>{url}</div><div className="browser-frame-shell"><div className="browser-surface" ref={surfaceRef} tabIndex={0} onKeyDown={keyboard}>{frame ? <img src={`data:image/jpeg;base64,${frame.data}`} alt="Live browser viewport" onClick={(event) => void mouse(event).catch(onError)} draggable={false} /> : <div className="browser-loading"><span /><strong>Starting browser-use</strong><small>The isolated browser will appear here.</small></div>}</div></div><footer>Click to interact · focus the viewport to type · isolated to this session</footer></section>
 }
 
-function InlineBrowserResult({ onExpand }: { onExpand: () => void }) {
-  return <section className="inline-browser-result"><span className="browser-live-dot is-complete" aria-hidden="true" /><div><small>BROWSER TASK</small><strong>Interactive browsing completed</strong></div><Button variant="ghost" onClick={onExpand}>Reopen session</Button></section>
+function InlineBrowserResult({ onExpand, failed }: { onExpand: () => void; failed: boolean }) {
+  return <section className="inline-browser-result"><span className="browser-live-dot is-complete" aria-hidden="true" /><div><small>BROWSER TASK</small><strong>{failed ? 'Browser action failed or was denied' : 'Browser action completed'}</strong></div><Button variant="ghost" onClick={onExpand}>Reopen session</Button></section>
 }
 
 function mergeSessionEvents(current: SessionEvent[], incoming: SessionEvent[]): SessionEvent[] {
@@ -353,10 +353,10 @@ export function latestRunRunning(events: SessionEvent[]): boolean | undefined {
   return undefined
 }
 
-export function latestBrowserState(events: SessionEvent[]): 'active' | 'completed' | undefined {
+export function latestBrowserState(events: SessionEvent[]): 'active' | 'completed' | 'failed' | undefined {
   for (const event of [...events].reverse()) {
     const update = event.data as { sessionUpdate?: string; status?: string } | undefined
-    if (update?.sessionUpdate === 'browser_state' && (update.status === 'active' || update.status === 'completed')) return update.status
+    if (update?.sessionUpdate === 'browser_state' && (update.status === 'active' || update.status === 'completed' || update.status === 'failed')) return update.status
   }
   return undefined
 }

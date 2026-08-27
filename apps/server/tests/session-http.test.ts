@@ -45,6 +45,32 @@ function fakeRuntime(): AgentRuntime {
 }
 
 describe('governed session HTTP API', () => {
+  it('returns 403 before opening a browser stream or accepting raw input for a restricted User', async () => {
+    const ctx = testContext(() => fakeRuntime())
+    const owner = ctx.db.upsertUser({ externalId: 'browser-owner', displayName: 'Owner', authMethod: 'oidc' })
+    ctx.db.setRole(owner.id, 'Owner')
+    const admin = ctx.db.getPrincipal(owner.id)!
+    const user = ctx.db.upsertUser({ externalId: 'browser-user', displayName: 'User', authMethod: 'oidc' })
+    ctx.db.setRole(user.id, 'User')
+    const principal = ctx.db.getPrincipal(user.id)!
+    const environment = ctx.service.createEnvironment(admin, { name: 'Browser', description: '' })
+    ctx.service.assign(admin, user.id, environment.id)
+    const session = ctx.service.createSession(principal, environment.id, 'papyrus', 'Browser')
+    const server = createPapyrusServer(ctx.config, ctx.service, ctx.auth)
+    server.listen(0, '127.0.0.1'); await once(server, 'listening')
+    const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+    const headers = { authorization: `Bearer ${ctx.auth.issueSession(user.id)}`, 'content-type': 'application/json' }
+    try {
+      const stream = await fetch(`${origin}/api/sessions/${session.id}/browser/stream`, { headers })
+      expect(stream.status).toBe(403)
+      expect(stream.headers.get('content-type')).not.toContain('text/event-stream')
+      for (const kind of ['mouse', 'keyboard']) {
+        const input = await fetch(`${origin}/api/sessions/${session.id}/browser/input`, { method: 'POST', headers, body: JSON.stringify({ kind, event: {} }) })
+        expect(input.status).toBe(403)
+      }
+      expect(ctx.service.audit.list()).toContainEqual(expect.objectContaining({ action: 'BrowserExecute', decision: 'deny', actorId: user.id }))
+    } finally { server.close(); await once(server, 'close'); ctx.dispose() }
+  })
   it('governs uploads and sends selected files as ACP embedded content', async () => {
     let receivedPrompt: unknown
     const runtime = fakeRuntime()

@@ -20,6 +20,10 @@ describe('Mastra session projection', () => {
       event(1, { sessionUpdate: 'browser_state', status: 'active' }),
       event(2, { sessionUpdate: 'browser_state', status: 'completed' }),
     ])).toBe('completed')
+    expect(latestBrowserState([
+      event(1, { sessionUpdate: 'browser_state', status: 'completed' }),
+      event(2, { sessionUpdate: 'browser_state', status: 'failed' }),
+    ])).toBe('failed')
   })
 
   it('uses only the latest run when recovering active state from history', () => {

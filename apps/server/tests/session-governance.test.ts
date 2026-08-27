@@ -2,6 +2,8 @@ import type { AgentRuntime, RuntimeLaunchOptions } from '@papyrus/acp-runtime'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AuthorizationDenied, PapyrusService, SessionLifecycleError } from '../src/service.js'
 import { testContext } from './helpers.js'
+import { Mastra } from '@mastra/core/mastra'
+import { RUNTIME_TOOL_ACTIONS } from '../src/mastra/authorization.js'
 
 function runtime(runPrompt: AgentRuntime['runPrompt']): AgentRuntime {
   return {
@@ -32,6 +34,72 @@ function setup(factory?: (options: RuntimeLaunchOptions) => AgentRuntime) {
 describe('governed session lifecycle', () => {
   const contexts: ReturnType<typeof setup>[] = []
   afterEach(() => { while (contexts.length) contexts.pop()?.context.dispose() })
+
+  it('authorizes built-ins using current identity, session ownership, and environment assignment', () => {
+    const ctx = setup(); contexts.push(ctx)
+    for (const name of Object.keys(RUNTIME_TOOL_ACTIONS).filter((name) => !name.startsWith('papyrus_browser_'))) {
+      expect(() => ctx.context.service.checkToolExecution(ctx.user, ctx.session.id, name), name).not.toThrow()
+      expect(() => ctx.context.service.checkToolExecution(ctx.other, ctx.session.id, name), name).toThrow(AuthorizationDenied)
+    }
+    expect(() => ctx.context.service.checkToolExecution(ctx.owner, ctx.session.id, 'future_unmapped_tool')).toThrow(AuthorizationDenied)
+    expect(() => ctx.context.service.checkToolExecution(ctx.owner, ctx.session.id, 'constructor')).toThrow(AuthorizationDenied)
+    ctx.context.db.sqlite.prepare('DELETE FROM assignments WHERE principal_id=?').run(ctx.user.id)
+    expect(() => ctx.context.service.checkToolExecution(ctx.user, ctx.session.id, 'mastra_workspace_execute_command')).toThrow(AuthorizationDenied)
+    ctx.context.service.assign(ctx.owner, ctx.user.id, ctx.environment.id)
+    ctx.context.db.sqlite.prepare('DELETE FROM user_roles WHERE user_id=?').run(ctx.user.id)
+    ctx.context.db.setRole(ctx.user.id, 'Auditor')
+    // The stale User object from the beginning of a run must not retain access.
+    expect(() => ctx.context.service.checkToolExecution(ctx.user, ctx.session.id, 'mastra_workspace_read_file')).toThrow(AuthorizationDenied)
+    expect(ctx.context.service.audit.list()).toContainEqual(expect.objectContaining({ action: 'WorkspaceExecute', decision: 'allow' }))
+    expect(ctx.context.service.audit.verify()).toEqual({ valid: true })
+  })
+
+  it('denies restricted browser access before launch, navigation, screencast, or input', async () => {
+    const ctx = setup(); contexts.push(ctx)
+    const browser = {
+      isBrowserRunning: vi.fn(() => false), launch: vi.fn(async () => {}),
+      navigate: vi.fn(async () => {}), readPage: vi.fn(async () => ({ text: 'page' })),
+      startScreencast: vi.fn(async () => ({})), injectMouseEvent: vi.fn(async () => {}), injectKeyboardEvent: vi.fn(async () => {}),
+    }
+    const workspaces = { browser, forSession: vi.fn(async () => ({})) }
+    const service = new PapyrusService(ctx.context.db, ctx.context.config, new Mastra(), workspaces as never)
+    for (const actor of [ctx.user, ctx.other]) {
+      await expect(service.browserStream(actor, ctx.session.id)).rejects.toThrow(AuthorizationDenied)
+      await expect(service.browse(actor, ctx.session.id, 'navigate', 'https://example.test')).rejects.toThrow(AuthorizationDenied)
+      await expect(service.browse(actor, ctx.session.id, 'read')).rejects.toThrow(AuthorizationDenied)
+      for (const kind of ['mouse', 'keyboard']) await expect(service.browserInput(actor, ctx.session.id, { kind, event: {} })).rejects.toThrow(AuthorizationDenied)
+    }
+    for (const mock of Object.values(browser)) expect(mock).not.toHaveBeenCalled()
+    expect(workspaces.forSession).not.toHaveBeenCalled()
+    await service.browse(ctx.owner, ctx.session.id, 'navigate', 'https://example.test')
+    expect(browser.navigate).toHaveBeenCalledWith(ctx.session.id, 'https://example.test/')
+    await service.browserInput(ctx.owner, ctx.session.id, { kind: 'mouse', event: { type: 'mouseMoved', x: 1, y: 1 } })
+    expect(browser.injectMouseEvent).toHaveBeenCalledOnce()
+    await expect(service.browse(ctx.owner, ctx.session.id, 'navigate', 'file:///etc/passwd')).rejects.toThrow('HTTP(S)')
+    expect(browser.navigate).toHaveBeenCalledTimes(1)
+    // Even a stale Owner object loses its broad grant when demoted.
+    ctx.context.db.sqlite.prepare('DELETE FROM user_roles WHERE user_id=?').run(ctx.owner.id)
+    ctx.context.db.setRole(ctx.owner.id, 'User')
+    await expect(service.browserInput(ctx.owner, ctx.session.id, { kind: 'keyboard', event: {} })).rejects.toThrow(AuthorizationDenied)
+    expect(browser.injectKeyboardEvent).not.toHaveBeenCalled()
+  })
+
+  it('rechecks authorization after a pending approval before reading a source', async () => {
+    const ctx = setup(() => runtime(async (request) => {
+      if (await request.authorizeTool('papyrus_sources_list')) await request.invokeTool!('papyrus_sources_list', {})
+      return { runtimeSessionId: 'approval-recheck', stopReason: 'stop' }
+    })); contexts.push(ctx)
+    const sourceRead = vi.spyOn(ctx.context.service, 'listApprovedSources')
+    const result = ctx.context.service.prompt(ctx.user, ctx.session.id, 'List sources')
+    const rejected = expect(result).rejects.toThrow(AuthorizationDenied)
+    await vi.waitFor(() => expect(ctx.context.db.listApprovals(ctx.session.id).some((item) => item.status === 'pending')).toBe(true))
+    const approval = ctx.context.db.listApprovals(ctx.session.id).find((item) => item.status === 'pending')!
+    ctx.context.db.sqlite.prepare('DELETE FROM assignments WHERE principal_id=?').run(ctx.user.id)
+    ctx.context.service.decideApproval(ctx.owner, ctx.session.id, approval.id, 'approved')
+    await rejected
+    expect(sourceRead).not.toHaveBeenCalled()
+    expect(ctx.context.db.listSessionRuns(ctx.session.id)[0]?.status).toBe('failed')
+  })
 
   it('allows only one active prompt and supports owner cancellation', async () => {
     let started!: () => void

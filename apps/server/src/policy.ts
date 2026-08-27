@@ -8,6 +8,7 @@ export const ACTIONS = [
   'CreateSession', 'ReadSession', 'PromptSession', 'CancelSession', 'CloseSession', 'DeleteSession', 'SetSessionConfig', 'ResumeSession', 'DecideApproval',
   'ReadAudit', 'ReadActivity',
   'ReadEnvironment', 'InvokeTool', 'ActivateLicense',
+  'WorkspaceRead', 'WorkspaceWrite', 'WorkspaceExecute', 'GenerateImage',
   ...BROWSER_POLICY_ACTIONS,
 ] as const
 export type PolicyAction = (typeof ACTIONS)[number]
@@ -36,7 +37,7 @@ when { principal.roles.contains("Auditor") && (${actionExpression(auditActions)}
 permit(principal, action, resource)
 when {
   principal.roles.contains("User") &&
-  (${actionExpression(['ReadEnvironment', 'CreateSession', 'InvokeTool', ...BROWSER_RESEARCH_ACTIONS])}) &&
+  (${actionExpression(['ReadEnvironment', 'CreateSession', 'InvokeTool', 'WorkspaceRead', 'WorkspaceWrite', 'WorkspaceExecute', 'GenerateImage', ...BROWSER_RESEARCH_ACTIONS])}) &&
   resource has assignedUsers && resource.assignedUsers.contains(principal)
 };
 
@@ -106,7 +107,8 @@ export class PolicyEngine {
       return { allowed: false, reasons: [], errors: answer.errors.map((error) => error.message), policyVersion: this.policyVersion, cedarVersion: this.cedarVersion }
     }
     return {
-      allowed: answer.response.decision === 'allow',
+      // A partial evaluation with errors must not become an authorization grant.
+      allowed: answer.response.decision === 'allow' && answer.response.diagnostics.errors.length === 0,
       reasons: answer.response.diagnostics.reason,
       errors: answer.response.diagnostics.errors.map((error) => error.error.message),
       policyVersion: this.policyVersion,

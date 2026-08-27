@@ -1,10 +1,120 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ContentBlock } from '@agentclientprotocol/sdk'
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
+import type { LanguageModelV4CallOptions, LanguageModelV4Prompt } from '@ai-sdk/provider'
+import { wrapModelForCloudflare } from '../src/mastra/cloudflare-model.js'
 import { MastraAgentWorker } from '../src/mastra/worker.js'
 
 function stream(chunks: unknown[]) {
   return { fullStream: (async function * () { for (const chunk of chunks) yield chunk })() }
 }
+
+describe('Cloudflare model compatibility', () => {
+  const user = { role: 'user', content: [{ type: 'text', text: 'Inspect the workspace' }] } satisfies LanguageModelV4Prompt[number]
+  const assistant = {
+    role: 'assistant',
+    content: [{ type: 'tool-call', toolCallId: 'read-1', toolName: 'read_file', input: { path: 'notes.md' } }],
+  } satisfies LanguageModelV4Prompt[number]
+  const tool = {
+    role: 'tool',
+    content: [{ type: 'tool-result', toolCallId: 'read-1', toolName: 'read_file', output: { type: 'text', value: 'Workspace notes' } }],
+  } satisfies LanguageModelV4Prompt[number]
+
+  // Validate the serialized HTTP payload, not just the input to the SDK.
+  // Qwen rejects any system message whose index is not zero, even adjacent ones.
+  function provider() {
+    const fetch = vi.fn<typeof globalThis.fetch>(async (_url, init) => {
+      const body = JSON.parse(String(init?.body))
+      if (body.messages.some((message: { role: string }, index: number) => message.role === 'system' && index !== 0)) {
+        return Response.json({ error: { message: 'System message must be at the beginning.', type: 'BadRequestError', code: 400 } }, { status: 400 })
+      }
+      if (body.stream) {
+        const chunks = [
+          { choices: [{ index: 0, delta: { role: 'assistant', content: 'Done' }, finish_reason: null }] },
+          { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
+        ]
+        return new Response(chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join('') + 'data: [DONE]\n\n', {
+          headers: { 'content-type': 'text/event-stream' },
+        })
+      }
+      return Response.json({ choices: [{ index: 0, message: { role: 'assistant', content: 'Done' }, finish_reason: 'stop' }] })
+    })
+    const model = createOpenAICompatible({
+      name: 'papyrus-upstream', baseURL: 'https://api.cloudflare.com/client/v4/accounts/test/ai/v1', apiKey: 'test-key', fetch,
+    }).chatModel('@cf/qwen/qwen3.8-27b')
+    return { model, fetch }
+  }
+
+  for (const method of ['doGenerate', 'doStream'] as const) {
+    it(`${method} combines adjacent and late system messages without changing history or tool calls`, async () => {
+      const { model, fetch } = provider()
+      const wrapped = wrapModelForCloudflare(model)
+      const prompt: LanguageModelV4Prompt = [
+        { role: 'system', content: 'Agent instructions' },
+        { role: 'system', content: 'Working memory' },
+        user, assistant, tool,
+        { role: 'system', content: 'Workspace instructions' },
+      ]
+      const original = structuredClone(prompt)
+      const options: LanguageModelV4CallOptions = {
+        prompt, maxOutputTokens: 128, temperature: 0.2,
+        tools: [{ type: 'function', name: 'read_file', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } }],
+        toolChoice: { type: 'auto' }, abortSignal: new AbortController().signal,
+        headers: { 'x-test-header': 'preserved' },
+      }
+
+      for (let call = 0; call < 2; call++) {
+        const result = await wrapped[method](options)
+        if ('stream' in result) {
+          const chunks = []
+          for await (const chunk of result.stream) chunks.push(chunk)
+          expect(chunks).toContainEqual(expect.objectContaining({ type: 'text-delta', delta: 'Done' }))
+          expect(chunks.some((chunk) => chunk.type === 'error')).toBe(false)
+        } else {
+          expect(result.content).toContainEqual({ type: 'text', text: 'Done' })
+        }
+        const [url, init] = fetch.mock.calls[call]!
+        const body = JSON.parse(String(init?.body))
+        expect(url).toBe('https://api.cloudflare.com/client/v4/accounts/test/ai/v1/chat/completions')
+        expect(body.messages).toEqual([
+          { role: 'system', content: 'Agent instructions\n\nWorking memory\n\nWorkspace instructions' },
+          { role: 'user', content: 'Inspect the workspace' },
+          { role: 'assistant', content: null, tool_calls: [{ id: 'read-1', type: 'function', function: { name: 'read_file', arguments: '{"path":"notes.md"}' } }] },
+          { role: 'tool', tool_call_id: 'read-1', content: 'Workspace notes' },
+        ])
+        expect(body).toMatchObject({ max_tokens: 128, temperature: 0.2, tool_choice: 'auto', tools: [{ type: 'function', function: { name: 'read_file' } }] })
+        expect(init?.signal).toBe(options.abortSignal)
+        expect(new Headers(init?.headers).get('x-test-header')).toBe('preserved')
+      }
+      expect(prompt).toEqual(original)
+      expect(wrapped.provider).toBe(model.provider)
+      expect(wrapped.modelId).toBe(model.modelId)
+      expect(wrapped.specificationVersion).toBe(model.specificationVersion)
+      expect(wrapped.supportedUrls).toEqual(model.supportedUrls)
+    })
+  }
+
+  it.each([
+    { name: 'empty prompt', prompt: [], messages: [] },
+    { name: 'no system message', prompt: [user], messages: [{ role: 'user', content: 'Inspect the workspace' }] },
+    {
+      name: 'single leading system message with provider metadata',
+      prompt: [{ role: 'system', content: '', providerOptions: { openaiCompatible: { name: 'instructions' } } }, user],
+      messages: [{ role: 'system', content: '', name: 'instructions' }, { role: 'user', content: 'Inspect the workspace' }],
+    },
+    {
+      name: 'single late system message',
+      prompt: [user, { role: 'system', content: 'Workspace instructions' }],
+      messages: [{ role: 'system', content: 'Workspace instructions' }, { role: 'user', content: 'Inspect the workspace' }],
+    },
+  ] satisfies Array<{ name: string; prompt: LanguageModelV4Prompt; messages: unknown[] }>)('handles $name', async ({ prompt, messages }) => {
+    const { model, fetch } = provider()
+    const original = structuredClone(prompt)
+    await wrapModelForCloudflare(model).doGenerate({ prompt })
+    expect(JSON.parse(String(fetch.mock.calls[0]![1]?.body)).messages).toEqual(messages)
+    expect(prompt).toEqual(original)
+  })
+})
 
 describe('Mastra agent runtime', () => {
   it('reports missing model configuration without starting a turn', async () => {

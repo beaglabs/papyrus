@@ -9,35 +9,11 @@ import { LibSQLVector } from '@mastra/libsql'
 import { createMastraStorage } from './storage.js'
 import { buildStaticAgentTools } from './tools.js'
 import { PapyrusWorkspaceManager } from './workspace.js'
-import type { LanguageModelV4 } from '@ai-sdk/provider'
+import { wrapModelForCloudflare } from './cloudflare-model.js'
 
 export interface PapyrusMastraBundle {
   mastra: Mastra
   workspaces: PapyrusWorkspaceManager
-}
-
-function wrapModelForCloudflare(model: LanguageModelV4): LanguageModelV4 {
-  return {
-    ...model,
-    specificationVersion: model.specificationVersion,
-    provider: model.provider,
-    modelId: model.modelId,
-    supportedUrls: model.supportedUrls,
-    async doGenerate(options: { prompt: any[]; [key: string]: unknown }) {
-      const prompt = options.prompt
-      const systemMessages = prompt.filter((m: any) => m.role === 'system')
-      const otherMessages = prompt.filter((m: any) => m.role !== 'system')
-      const reorderedPrompt = [...systemMessages, ...otherMessages]
-      return model.doGenerate({ ...options, prompt: reorderedPrompt })
-    },
-    async doStream(options: { prompt: any[]; [key: string]: unknown }) {
-      const prompt = options.prompt
-      const systemMessages = prompt.filter((m: any) => m.role === 'system')
-      const otherMessages = prompt.filter((m: any) => m.role !== 'system')
-      const reorderedPrompt = [...systemMessages, ...otherMessages]
-      return model.doStream({ ...options, prompt: reorderedPrompt })
-    },
-  }
 }
 
 // Wires the Mastra runtime, memory-backed agent, and Hono adapter together.
@@ -58,7 +34,8 @@ export function createPapyrusMastra(config: ServerConfig, _db: PapyrusDatabase):
       }).chatModel(model.model)
     : createOpenAICompatible({ name: 'openai', apiKey: process.env.OPENAI_API_KEY ?? 'no-key', baseURL }).chatModel('gpt-4o-mini')
 
-  // Cloudflare Workers AI requires system message to be first
+  // Normalize every provider call to a single leading system message for
+  // Workers AI models such as Qwen, including memory/workspace instructions.
   if (model?.endpoint?.includes('cloudflare.com')) {
     mastraModel = wrapModelForCloudflare(mastraModel)
   }

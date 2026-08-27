@@ -9,10 +9,35 @@ import { LibSQLVector } from '@mastra/libsql'
 import { createMastraStorage } from './storage.js'
 import { buildStaticAgentTools } from './tools.js'
 import { PapyrusWorkspaceManager } from './workspace.js'
+import type { LanguageModelV4 } from '@ai-sdk/provider'
 
 export interface PapyrusMastraBundle {
   mastra: Mastra
   workspaces: PapyrusWorkspaceManager
+}
+
+function wrapModelForCloudflare(model: LanguageModelV4): LanguageModelV4 {
+  return {
+    ...model,
+    specificationVersion: model.specificationVersion,
+    provider: model.provider,
+    modelId: model.modelId,
+    supportedUrls: model.supportedUrls,
+    async doGenerate(options: { prompt: any[]; [key: string]: unknown }) {
+      const prompt = options.prompt
+      const systemMessages = prompt.filter((m: any) => m.role === 'system')
+      const otherMessages = prompt.filter((m: any) => m.role !== 'system')
+      const reorderedPrompt = [...systemMessages, ...otherMessages]
+      return model.doGenerate({ ...options, prompt: reorderedPrompt })
+    },
+    async doStream(options: { prompt: any[]; [key: string]: unknown }) {
+      const prompt = options.prompt
+      const systemMessages = prompt.filter((m: any) => m.role === 'system')
+      const otherMessages = prompt.filter((m: any) => m.role !== 'system')
+      const reorderedPrompt = [...systemMessages, ...otherMessages]
+      return model.doStream({ ...options, prompt: reorderedPrompt })
+    },
+  }
 }
 
 // Wires the Mastra runtime, memory-backed agent, and Hono adapter together.
@@ -25,13 +50,18 @@ export function createPapyrusMastra(config: ServerConfig, _db: PapyrusDatabase):
 
   const model = config.model
   const baseURL = model ? (model.endpoint.endsWith('/v1') ? model.endpoint : `${model.endpoint.replace(/\/$/, '')}/v1`) : 'https://api.openai.com/v1'
-  const mastraModel = model
+  let mastraModel = model
     ? createOpenAICompatible({
         name: 'papyrus-upstream',
         apiKey: model.apiKey ?? 'no-key',
         baseURL,
       }).chatModel(model.model)
     : createOpenAICompatible({ name: 'openai', apiKey: process.env.OPENAI_API_KEY ?? 'no-key', baseURL }).chatModel('gpt-4o-mini')
+
+  // Cloudflare Workers AI requires system message to be first
+  if (model?.endpoint?.includes('cloudflare.com')) {
+    mastraModel = wrapModelForCloudflare(mastraModel)
+  }
 
   const memory = new Memory({
     storage: storage as never,

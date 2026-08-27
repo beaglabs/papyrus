@@ -32,6 +32,9 @@ importers:
       '@ai-sdk/openai-compatible':
         specifier: ^3.0.35
         version: 3.0.35(zod@4.4.3)
+      '@ai-sdk/provider':
+        specifier: 4.0.7
+        version: 4.0.7
       '@cedar-policy/cedar-wasm':
         specifier: 4.12.0
         version: 4.12.0

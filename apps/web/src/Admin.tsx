@@ -118,7 +118,7 @@ function connectionLogo(endpoint:string){const hostname=new URL(endpoint).hostna
 
 function SourceAdministration({data,busy,act}:{data:AdminOverview;busy:boolean;act:(operation:()=>Promise<unknown>)=>Promise<void>}){
   const [kind,setKind]=useState<ApprovedSourceKind>('upload')
-  const kinds=[{value:'upload',label:'Upload'},{value:'domain',label:'Domain'},{value:'mcp',label:'MCP connector'},{value:'api',label:'API'}]
+  const kinds=[{value:'upload',label:'Upload'},{value:'domain',label:'Domain'},{value:'mcp',label:'MCP'},{value:'api',label:'API'}]
   const modes=[{value:'snapshot',label:'Snapshot'},{value:'live',label:'Live'}]
   return <section className="admin-single approved-source-admin"><AdminPanel title="Approved sources">
     <form className="admin-form source-register" onSubmit={(event)=>{event.preventDefault();const form=event.currentTarget;const values=new FormData(form);void act(async()=>{

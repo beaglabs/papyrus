@@ -174,17 +174,6 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
     }
   }
 
-  const beginNewSession = () => {
-    streamRef.current?.close()
-    setSelectedId(undefined)
-    setPendingTurn(undefined)
-    setRunning(false)
-    setError(undefined)
-    setDraftAttachmentIds([])
-    onActivate()
-    requestAnimationFrame(() => newPromptRef.current?.focus())
-  }
-
   const send = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); if (!selectedId || running) return
     const form = event.currentTarget; const values = new FormData(form); const prompt = String(values.get('prompt')).trim()
@@ -236,7 +225,7 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
   const historyTarget = document.getElementById('session-history-rail')
   return <section className="session-layout">
     {historyTarget && createPortal(<aside className="session-sidebar">
-      <div className="session-sidebar-head"><Button variant="ghost" className="new-chat-button" onClick={beginNewSession}><span aria-hidden="true">＋</span> New chat</Button><strong>History</strong></div>
+      <div className="session-sidebar-head"><strong>History</strong></div>
       {loading ? <div className="empty">Loading sessions…</div> : sessions.length ? <div className="session-list">{sessions.map((session) => <Button key={session.id} className={session.id === selectedId ? 'selected' : ''} onClick={() => { setPendingTurn(undefined); setSelectedId(session.id); onActivate() }}><strong>{session.title}</strong><span>{session.status} · {new Date(session.updatedAt).toLocaleString()}</span></Button>)}</div> : <div className="empty">No sessions yet.</div>}
       {nextCursor && <Button className="secondary load-more" onClick={() => void loadSessions(nextCursor)}>Load more</Button>}
     </aside>, historyTarget)}

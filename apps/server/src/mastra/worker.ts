@@ -9,6 +9,7 @@ import type {
 import { RequestContext } from '@mastra/core/request-context'
 import { randomUUID } from 'node:crypto'
 import type { Mastra } from '@mastra/core/mastra'
+import type { ChunkType } from '@mastra/core/stream'
 import type { ServerConfig } from '../config.js'
 import { buildSessionToolset } from './tools.js'
 import type { PapyrusWorkspaceManager } from './workspace.js'
@@ -155,24 +156,25 @@ export class MastraAgentWorker implements AgentRuntime {
           break
         }
         case 'finish': {
-          const payload = chunk.payload as { finishReason?: string }
-          const stopReason = normalizeStopReason(payload.finishReason)
-          return await complete(stopReason)
+          const payload = chunk.payload as Extract<ChunkType, { type: 'finish' }>['payload'] | undefined
+          const reason = payload?.stepResult?.reason
+          if (!reason) throw new Error('Mastra stream finished without a finish reason')
+          if (reason === 'error') throw streamError(payload?.error ?? 'Mastra run failed')
+          return await complete(normalizeStopReason(reason))
         }
-        case 'step-finish': {
-          const payload = chunk.payload as { finishReason?: string }
-          const stopReason = normalizeStopReason(payload.finishReason)
-          if (stopReason !== 'tool_use') return await complete(stopReason)
-          break
-        }
+        // A step is not a turn: tool results, goal evaluation, and further model
+        // calls may follow. Only Mastra's final `finish` completes the run.
+        case 'step-finish': break
+        case 'abort': return await complete('cancelled')
         case 'error': {
-          const payload = chunk.payload as { error?: unknown }
-          throw payload instanceof Error ? payload : new Error(String((payload as { error?: unknown })?.error ?? 'Mastra stream error'))
+          const payload = chunk.payload as { error?: unknown } | undefined
+          throw streamError(payload instanceof Error ? payload : payload?.error)
         }
       }
     }
 
-    return await complete('end_turn')
+    if (request.signal?.aborted) return await complete('cancelled')
+    throw new Error('Mastra stream ended before the run finished')
   }
 }
 
@@ -205,11 +207,19 @@ function isBrowserCall(toolName: string, input: unknown): boolean {
   catch { return false }
 }
 
-function normalizeStopReason(reason: string | undefined): string {
-  if (!reason) return 'end_turn'
-  if (reason === 'tool-calls' || reason === 'tool_use') return 'tool_use'
+function normalizeStopReason(reason: string): string {
+  // A final finish with tool calls means Mastra stopped its loop (e.g. maxSteps),
+  // not that the requested work completed or another step is still running.
+  if (reason === 'tool-calls' || reason === 'tool_use') return 'max_turn_requests'
   if (reason === 'length') return 'max_tokens'
+  if (reason === 'content-filter' || reason === 'tripwire') return 'refusal'
   return reason
+}
+
+function streamError(error: unknown): Error {
+  if (error instanceof Error) return error
+  if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') return new Error(error.message)
+  return new Error(typeof error === 'string' ? error : 'Mastra stream error')
 }
 
 function toolUpdateContent(result: unknown): Array<{ type: 'content'; content: unknown }> {

@@ -81,8 +81,28 @@ export class MastraAgentWorker implements AgentRuntime {
     })
 
     const browserCalls = new Set<string>()
+    const toolStates = new Map<string, { title: string; kind: string; status: string }>()
+    const updateTool = async (id: string, update: Record<string, unknown>) => {
+      const current = toolStates.get(id)
+      const status = String(update.status ?? current?.status ?? 'pending')
+      // Late output must not restart a finished tool; a successful result
+      // wrapper must not overwrite a failed sandbox process exit.
+      const nextStatus = current?.status === 'failed' ? 'failed'
+        : current?.status === 'completed' && ['pending', 'in_progress'].includes(status) ? 'completed' : status
+      const next = { title: String(update.title ?? current?.title ?? 'Tool activity'), kind: String(update.kind ?? current?.kind ?? 'other'), status: nextStatus }
+      toolStates.set(id, next)
+      await request.onEvent({ kind: 'update', at: new Date().toISOString(), data: {
+        sessionUpdate: current ? 'tool_call_update' : 'tool_call', toolCallId: id, ...update, ...next,
+      } })
+    }
+    const closeActiveTools = async (message: string) => {
+      for (const [id, tool] of toolStates) {
+        if (tool.status === 'pending' || tool.status === 'in_progress') await updateTool(id, { status: 'failed', content: toolUpdateContent(message) })
+      }
+    }
     let artifactsEmitted = false
     const complete = async (stopReason: string): Promise<RuntimePromptResult> => {
+      await closeActiveTools(stopReason === 'cancelled' ? 'Cancelled' : 'Run ended before this tool completed')
       if (!artifactsEmitted) {
         artifactsEmitted = true
         const artifacts = await this.workspaces.artifactsSince?.(threadId, artifactBaseline) ?? []
@@ -103,78 +123,113 @@ export class MastraAgentWorker implements AgentRuntime {
       await request.onEvent({ kind: 'complete', at: new Date().toISOString(), data: { stopReason } })
       return { runtimeSessionId, stopReason }
     }
-    for await (const chunk of stream.fullStream as AsyncIterable<{ type: string; payload?: unknown }>) {
-      if (request.signal?.aborted) break
-      switch (chunk.type) {
-        case 'text-delta': {
-          const delta = chunk.payload as { text?: string }
-          if (typeof delta.text === 'string' && delta.text) {
-            await request.onEvent({
-              kind: 'update', at: new Date().toISOString(),
-              data: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: delta.text }, messageId: `agent_${runtimeSessionId}` },
+    try {
+      for await (const chunk of stream.fullStream as AsyncIterable<{ type: string; payload?: unknown; data?: unknown }>) {
+        if (request.signal?.aborted) break
+        switch (chunk.type) {
+          case 'text-delta': {
+            const delta = chunk.payload as { text?: string }
+            if (typeof delta.text === 'string' && delta.text) {
+              await request.onEvent({
+                kind: 'update', at: new Date().toISOString(),
+                data: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: delta.text }, messageId: `agent_${runtimeSessionId}` },
+              })
+            }
+            break
+          }
+          case 'reasoning-delta': {
+            const delta = chunk.payload as { text?: string }
+            if (typeof delta.text === 'string' && delta.text) {
+              await request.onEvent({
+                kind: 'update', at: new Date().toISOString(),
+                data: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: delta.text }, messageId: `thought_${runtimeSessionId}` },
+              })
+            }
+            break
+          }
+          case 'tool-call-input-streaming-start': {
+            const call = chunk.payload as { toolCallId?: string; toolName?: string }
+            if (call.toolCallId && call.toolName) await updateTool(call.toolCallId, {
+              title: call.toolName, kind: toolKindFor(call.toolName), status: 'pending',
             })
+            break
           }
-          break
-        }
-        case 'reasoning-delta': {
-          const delta = chunk.payload as { text?: string }
-          if (typeof delta.text === 'string' && delta.text) {
-            await request.onEvent({
-              kind: 'update', at: new Date().toISOString(),
-              data: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: delta.text }, messageId: `thought_${runtimeSessionId}` },
+          case 'tool-call': {
+            const call = chunk.payload as { toolCallId?: string; toolName?: string; args?: unknown; input?: unknown }
+            if (!call.toolCallId || !call.toolName) break
+            if (isBrowserCall(call.toolName, call.args ?? call.input)) {
+              browserCalls.add(call.toolCallId)
+              await request.onEvent({ kind: 'update', at: new Date().toISOString(), data: { sessionUpdate: 'browser_state', status: 'active', toolCallId: call.toolCallId } })
+            }
+            await updateTool(call.toolCallId, { title: call.toolName, kind: toolKindFor(call.toolName), status: 'in_progress' })
+            break
+          }
+          case 'data-sandbox-stdout':
+          case 'data-sandbox-stderr': {
+            const data = chunk.data as { toolCallId?: string; output?: string } | undefined
+            if (data?.toolCallId && typeof data.output === 'string') await updateTool(data.toolCallId, {
+              status: 'in_progress',
+              _meta: { papyrus: { outputDelta: { stream: chunk.type === 'data-sandbox-stderr' ? 'stderr' : 'stdout', text: data.output } } },
             })
+            break
           }
-          break
-        }
-        case 'tool-call': {
-          const call = chunk.payload as { toolCallId?: string; toolName?: string; args?: unknown; input?: unknown }
-          if (!call.toolCallId || !call.toolName) break
-          if (isBrowserCall(call.toolName, call.args ?? call.input)) {
-            browserCalls.add(call.toolCallId)
-            await request.onEvent({ kind: 'update', at: new Date().toISOString(), data: { sessionUpdate: 'browser_state', status: 'active', toolCallId: call.toolCallId } })
+          case 'data-sandbox-exit': {
+            const data = chunk.data as { toolCallId?: string; exitCode?: number; success?: boolean } | undefined
+            if (data?.toolCallId) await updateTool(data.toolCallId, {
+              status: data.success === false || (typeof data.exitCode === 'number' && data.exitCode !== 0) ? 'failed' : 'in_progress',
+              _meta: { papyrus: { exitCode: data.exitCode } },
+            })
+            break
           }
-          await request.onEvent({
-            kind: 'update', at: new Date().toISOString(),
-            data: { sessionUpdate: 'tool_call', toolCallId: call.toolCallId, title: call.toolName, kind: toolKindFor(call.toolName), status: 'pending' },
-          })
-          break
-        }
-        case 'tool-result': {
-          const result = chunk.payload as { toolCallId?: string; toolName?: string; result?: unknown }
-          if (!result.toolCallId) break
-          await request.onEvent({
-            kind: 'update', at: new Date().toISOString(),
-            data: {
-              sessionUpdate: 'tool_call_update', toolCallId: result.toolCallId,
-              title: result.toolName ?? 'tool', kind: toolKindFor(result.toolName ?? ''), status: 'completed',
-              content: toolUpdateContent(result.result),
-            },
-          })
-          if (browserCalls.delete(result.toolCallId)) {
-            await request.onEvent({ kind: 'update', at: new Date().toISOString(), data: { sessionUpdate: 'browser_state', status: 'completed', toolCallId: result.toolCallId } })
+          case 'tool-output': {
+            const output = chunk.payload as { toolCallId?: string; output?: unknown }
+            if (output.toolCallId && output.output !== undefined) await updateTool(output.toolCallId, { status: 'in_progress', content: toolUpdateContent(output.output) })
+            break
           }
-          break
-        }
-        case 'finish': {
-          const payload = chunk.payload as Extract<ChunkType, { type: 'finish' }>['payload'] | undefined
-          const reason = payload?.stepResult?.reason
-          if (!reason) throw new Error('Mastra stream finished without a finish reason')
-          if (reason === 'error') throw streamError(payload?.error ?? 'Mastra run failed')
-          return await complete(normalizeStopReason(reason))
-        }
-        // A step is not a turn: tool results, goal evaluation, and further model
-        // calls may follow. Only Mastra's final `finish` completes the run.
-        case 'step-finish': break
-        case 'abort': return await complete('cancelled')
-        case 'error': {
-          const payload = chunk.payload as { error?: unknown } | undefined
-          throw streamError(payload instanceof Error ? payload : payload?.error)
+          case 'tool-error': {
+            const error = chunk.payload as { toolCallId?: string; toolName?: string; error?: unknown }
+            if (error.toolCallId) await updateTool(error.toolCallId, {
+              ...(error.toolName ? { title: error.toolName, kind: toolKindFor(error.toolName) } : {}),
+              status: 'failed', content: toolUpdateContent(streamError(error.error).message),
+            })
+            break
+          }
+          case 'tool-result': {
+            const result = chunk.payload as { toolCallId?: string; toolName?: string; result?: unknown; isError?: boolean }
+            if (!result.toolCallId) break
+            await updateTool(result.toolCallId, {
+              ...(result.toolName ? { title: result.toolName, kind: toolKindFor(result.toolName) } : {}),
+              status: result.isError ? 'failed' : 'completed', content: toolUpdateContent(result.result),
+            })
+            if (browserCalls.delete(result.toolCallId)) {
+              await request.onEvent({ kind: 'update', at: new Date().toISOString(), data: { sessionUpdate: 'browser_state', status: 'completed', toolCallId: result.toolCallId } })
+            }
+            break
+          }
+          case 'finish': {
+            const payload = chunk.payload as Extract<ChunkType, { type: 'finish' }>['payload'] | undefined
+            const reason = payload?.stepResult?.reason
+            if (!reason) throw new Error('Mastra stream finished without a finish reason')
+            if (reason === 'error') throw streamError(payload?.error ?? 'Mastra run failed')
+            return await complete(normalizeStopReason(reason))
+          }
+          // A step is not a turn: tool results, goal evaluation, and further model
+          // calls may follow. Only Mastra's final `finish` completes the run.
+          case 'step-finish': break
+          case 'abort': return await complete('cancelled')
+          case 'error': {
+            const payload = chunk.payload as { error?: unknown } | undefined
+            throw streamError(payload instanceof Error ? payload : payload?.error)
+          }
         }
       }
-    }
 
-    if (request.signal?.aborted) return await complete('cancelled')
-    throw new Error('Mastra stream ended before the run finished')
+      if (request.signal?.aborted) return await complete('cancelled')
+      throw new Error('Mastra stream ended before the run finished')
+    } catch (error) {
+      await closeActiveTools(request.signal?.aborted ? 'Cancelled' : streamError(error).message)
+      throw error
+    }
   }
 }
 
@@ -194,7 +249,7 @@ function promptToMessage(prompt: string | ContentBlock[]): string | Array<{ type
 }
 
 function toolKindFor(name: string): string {
-  return name === 'papyrus_exec_code' ? 'execute'
+  return name === 'papyrus_exec_code' || name === 'mastra_workspace_execute_command' ? 'execute'
     : name.includes('read') || name.includes('list') || name.includes('glob') ? 'read'
     : name.includes('write') ? 'edit'
     : 'other'
@@ -229,7 +284,7 @@ function toolUpdateContent(result: unknown): Array<{ type: 'content'; content: u
   if (result && typeof result === 'object' && typeof (result as { type?: string }).type === 'string') {
     return [{ type: 'content', content: result }]
   }
-  return [{ type: 'content', content: { type: 'text', text: safeJson(result) } }]
+  return [{ type: 'content', content: { type: 'text', text: typeof result === 'string' ? result : safeJson(result) } }]
 }
 
 function safeJson(value: unknown): string {

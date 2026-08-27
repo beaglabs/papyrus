@@ -90,11 +90,7 @@ export function App() {
       <aside className="app-sidebar">
         <Logo />
         <div className="classification">{profileLabel(state.data.health.profile)}</div>
-        <nav aria-label="Primary navigation">
-          <NavButton active={view === 'home'} onClick={() => setView('home')}>Overview</NavButton>
-          <NavButton active={view === 'sources'} onClick={() => setView('sources')}>Sources</NavButton>
-          {state.data.me.roles.some((role) => role === 'Owner' || role === 'Admin') && <NavButton active={view === 'administration'} onClick={() => setView('administration')}>Administration</NavButton>}
-        </nav>
+        <PrimaryNavigation view={view} canAdmin={state.data.me.roles.some((role) => role === 'Owner' || role === 'Admin')} onNavigate={setView} onNewSession={openNewSession} />
         <div id="session-history-rail" className="session-history-rail" />
         <div className="runtime-status"><span className="dot good" />Policy enforcement active</div>
         <div className="sidebar-account">
@@ -182,6 +178,15 @@ function ShellView({ view, data, onNewSession }: { view: Exclude<View, 'sessions
 
 function DeploymentFacts({ data }: { data: ShellData }) {
   return <Card className="panel"><div className="panel-head"><h2>Deployment</h2><Badge className="status-good">ENFORCED</Badge></div><dl className="facts"><div><dt>Policy</dt><dd>Cedar {data.health.cedar}</dd></div><div><dt>Topology</dt><dd>ON-PREMISES</dd></div><div><dt>Identity</dt><dd>{data.me.authMethod.toUpperCase()}</dd></div><div><dt>Runtime</dt><dd>PAPYRUS</dd></div></dl></Card>
+}
+
+export function PrimaryNavigation({ view, canAdmin, onNavigate, onNewSession }: { view: View; canAdmin: boolean; onNavigate: (view: View) => void; onNewSession: () => void }) {
+  return <nav aria-label="Primary navigation">
+    <NavButton active={false} onClick={onNewSession}><span aria-hidden="true">＋</span> New Chat</NavButton>
+    <NavButton active={view === 'home'} onClick={() => onNavigate('home')}>Overview</NavButton>
+    <NavButton active={view === 'sources'} onClick={() => onNavigate('sources')}>Sources</NavButton>
+    {canAdmin && <NavButton active={view === 'administration'} onClick={() => onNavigate('administration')}>Administration</NavButton>}
+  </nav>
 }
 
 function NavButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) { return <Button variant="ghost" className={active ? 'active' : ''} onClick={onClick}>{children}</Button> }

@@ -48,6 +48,84 @@ application-visible authentication denial, bootstrap denial, role assignment,
 session revocation, identity migration, and logout are audited. Secrets, OIDC
 tokens, certificate bodies, and biometric objects are never audit metadata.
 
+### Testing provisioning
+
+Use a test deployment with Owner bootstrap already complete. The bootstrap path
+deliberately permits the first identity before invitations exist, so it is not a
+test of normal provisioning. Do not reset an existing deployment's database or
+bootstrap setting to run this check.
+
+For `government-il4` / `government-il6`:
+
+1. Use a **second, previously unenrolled CAC/PIV identity**. For local development,
+   use a separate client certificate signed by a development CA already trusted
+   by `PAPYRUS_TLS_CA`, with a different stable identifier from the Owner. An
+   arbitrary email or self-signed untrusted certificate will not exercise this
+   flow. Do not disable client-certificate verification.
+2. Before enrollment, authenticate as that identity. A trusted certificate with
+   no matching pending identity should receive `403 INVITATION_REQUIRED` from
+   `/api/me`, or the enrollment-required screen in the UI. An untrusted certificate
+   fails at TLS instead; that is a different test.
+3. As Owner, open **Administration → Identity → Create pending CAC/PIV identity**.
+   Enter a display name, the identifier actually carried by the second
+   certificate, and initial role **User**, then click **Create identity**. For
+   example, a development certificate with CN `TEST.MEMBER.1000000002` matches
+   EDIPI `1000000002`. Contact email is optional metadata. Verify the entry appears
+   under **Pending identities**, not yet as an enrolled user.
+4. Authenticate again with the second certificate, using a separate browser
+   profile or an explicit client certificate in curl. Verify `/api/me` returns
+   `200`, the enrolled display name, `authMethod: "mtls"`, and `roles: ["User"]`.
+5. Refresh the Owner's Identity page. The pending entry should disappear and
+   the user should appear under **Identity and roles**. The admin overview API
+   (`GET /api/admin/overview`) retains the invitation with status `accepted` and
+   `acceptedBy` matching that user's ID. The audit API (`GET /api/audit`) should
+   contain `CreateInvitation` and `AcceptInvitation` for that invitation.
+6. Authenticate again and confirm the same user ID is returned, without another
+   pending invitation. As the new User, confirm `/api/admin/overview` returns
+   `403` and the Administration navigation item is absent.
+
+For PEM-based development credentials, this read-only request avoids accidentally
+reusing the Owner's browser certificate. Substitute paths to your test files:
+
+```sh
+curl --include \
+  --cacert /path/to/server-ca.pem \
+  --cert /path/to/test-user.pem \
+  --key /path/to/test-user-key.pem \
+  https://127.0.0.1:3210/api/me
+```
+
+`--cacert` trusts the **server's** certificate; it may differ from the client CA
+configured in `PAPYRUS_TLS_CA`. Use the deployment hostname that matches the server
+certificate. Do not use `-k`, share private keys, or use this PEM example to export
+a real CAC/PIV private key. For a hardware card, use the browser/card middleware.
+
+Additional negative checks: a different valid certificate must not consume the
+pending identity, and a cancelled or expired invitation must not enroll a new
+user. Use a fresh identity for each case: existing enrolled users no longer need
+invitations. Revoking Papyrus sessions invalidates issued cookie/bearer tokens;
+it does **not** revoke a CAC/PIV certificate or block fresh mTLS authentication.
+
+For **commercial OIDC**, use **Administration → Identity → Invite with
+organizational OIDC**, enter the second user's organizational email and role,
+then sign in as that user through the configured IdP. The button records a pending
+invitation; there is currently no email delivery step, so share the deployment URL
+yourself. Matching email is used only for initial enrollment; later logins bind to
+the validated issuer and subject.
+
+Run the existing automated checks from the repository root without a second
+physical certificate or live IdP:
+
+```sh
+pnpm --filter @papyrus/contracts build
+pnpm --filter @papyrus/web build
+pnpm --filter @papyrus/server exec vitest run tests/invitations.test.ts tests/auth.test.ts tests/auth-http.test.ts tests/admin-http.test.ts
+```
+
+These tests use isolated temporary databases and test identities. They verify
+identity matching, initial roles, session authentication, and authorization;
+they do not replace checking your deployment's TLS trust chain or real IdP login.
+
 ## Native client browser handoff
 
 A desktop client that cannot read the system browser's cookies uses a one-time

@@ -365,9 +365,6 @@ nav [data-slot=button].active{border-color:var(--border);background:var(--main);
 .session-history-rail .session-sidebar{width:100%;height:auto;min-height:0;border:0;background:transparent;color:#fff}
 .session-history-rail .session-sidebar-head{min-height:42px;padding:6px 8px 10px;border:0}
 .session-history-rail .session-sidebar-head strong{color:#777;font:700 9px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.08em}
-.session-history-rail .new-chat-button{display:flex;align-items:center;justify-content:flex-start;gap:8px;min-height:36px;padding:7px 9px;border:0;border-radius:7px;background:transparent;color:#fff;box-shadow:none;font-size:13px}
-.session-history-rail .new-chat-button:hover{transform:none;background:#292929;box-shadow:none}
-.session-history-rail .new-chat-button span{color:#fff;font-size:18px;line-height:1}
 .session-history-rail .session-list{padding-right:4px}
 .session-history-rail .session-list [data-slot=button]{display:grid;width:100%;min-height:auto;padding:9px 10px;border:0;border-radius:6px;background:transparent;color:#ddd;box-shadow:none}
 .session-history-rail .session-list [data-slot=button]:hover{transform:none;background:#292929;box-shadow:none}

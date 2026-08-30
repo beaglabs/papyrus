@@ -1,9 +1,16 @@
-import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
+import { Client, InsufficientScopeError, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 
 export interface McpToolDefinition {
   name: string
   description?: string
   inputSchema: Record<string, unknown>
+}
+
+export class McpInsufficientScopeError extends Error {
+  constructor(readonly requiredScope?: string, readonly errorDescription?: string) {
+    super(requiredScope ? `MCP OAuth requires additional scope: ${requiredScope}` : 'MCP OAuth requires additional scope')
+    this.name = 'McpInsufficientScopeError'
+  }
 }
 
 export interface McpBearerAuthProvider {
@@ -57,6 +64,11 @@ async function withMcpClient<T>(endpoint: string, authentication: McpAuthenticat
   try {
     const { client } = await connection
     return await operation(client)
+  } catch (error) {
+    if (error instanceof InsufficientScopeError) {
+      throw new McpInsufficientScopeError(error.requiredScope, error.errorDescription)
+    }
+    throw error
   } finally {
     await close(await connection.catch(() => undefined))
   }

@@ -815,6 +815,9 @@ export class PapyrusService {
 
   setMcpServerEnabled(actor: Principal, serverId: string, enabled: boolean): McpServer {
     this.check(actor, 'ManageTools', { type: 'Deployment', id: this.license.deploymentId })
+    const existing = this.db.getMcpServer(serverId)
+    if (!existing) throw new Error('MCP server not found')
+    if (enabled && !['not_required', 'connected'].includes(existing.oauthStatus)) throw new Error('Complete MCP OAuth authorization before enabling this connection')
     const server = this.db.setMcpServerEnabled(serverId, enabled)
     if (!server) throw new Error('MCP server not found')
     this.audit.append({ actorId: actor.id, action: 'SetMcpServerEnabled', resourceType: 'McpServer', resourceId: serverId, decision: 'info', metadata: { enabled } })
@@ -865,7 +868,7 @@ export class PapyrusService {
     }
     if (input.kind === 'mcp') {
       const server = this.db.getMcpServer(input.locator)
-      if (!server?.enabled || server.oauthStatus === 'authorization_required' || server.oauthStatus === 'error') throw new Error('Choose an enabled, validated MCP connection')
+      if (!server?.enabled || ['configuration_required', 'authorization_required', 'error'].includes(server.oauthStatus)) throw new Error('Choose an enabled, validated MCP connection')
     }
     const source = this.sources.create(input.name, input.kind, input.locator, input.mode)
     this.audit.append({ actorId: actor.id, action: 'CreateSource', resourceType: 'Source', resourceId: source.id, decision: 'info', metadata: { kind: source.kind, mode: source.mode } })

@@ -61,7 +61,12 @@ export async function prepareRemoteMcp(
   const resource = normalizeMcpEndpoint(endpoint)
   const challenge = await fetch(resource, {
     method: 'POST',
-    headers: { accept: 'application/json, text/event-stream', 'content-type': 'application/json' },
+    headers: {
+      accept: 'application/json, text/event-stream',
+      'content-type': 'application/json',
+      'MCP-Protocol-Version': '2026-07-28',
+      'Mcp-Method': 'ping',
+    },
     body: JSON.stringify({ jsonrpc: '2.0', id: 'papyrus-auth-discovery', method: 'ping' }),
     redirect: 'manual',
     signal: AbortSignal.timeout(10_000),
@@ -69,7 +74,8 @@ export async function prepareRemoteMcp(
   if (challenge.ok) return { kind: 'not_required' }
   if (challenge.status !== 401) throw new Error(`MCP discovery failed with HTTP ${challenge.status}`)
 
-  const protectedResource = await discoverResourceMetadata(resource, challenge.headers.get('www-authenticate'))
+  const authenticateHeader = challenge.headers.get('www-authenticate')
+  const protectedResource = await discoverResourceMetadata(resource, authenticateHeader)
   const issuer = protectedResource.authorization_servers?.[0]
   if (!issuer) throw new Error('MCP protected-resource metadata did not identify an authorization server')
 
@@ -83,14 +89,16 @@ export async function prepareRemoteMcp(
   let clientSecret: string | undefined
   let scope: string | undefined
   let registrationMethod: McpOauthRegistrationMethod
+  const requestedScope = challengeScope(authenticateHeader)
 
   if (preregistered) {
     clientId = preregistered.clientId
     clientSecret = preregistered.clientSecret
-    scope = preregistered.scopes?.trim() || undefined
+    scope = preregistered.scopes?.trim() || requestedScope
     registrationMethod = 'preregistered'
-  } else if (authorization.client_id_metadata_document_supported && options.clientMetadataUrl) {
-    clientId = secureUrl(options.clientMetadataUrl, 'client metadata URL').toString()
+  } else if (authorization.client_id_metadata_document_supported && options.clientMetadataUrl && isValidCimdUrl(options.clientMetadataUrl)) {
+    clientId = options.clientMetadataUrl
+    scope = requestedScope
     registrationMethod = 'cimd'
   } else if (authorization.registration_endpoint) {
     const registration = await postJson<{ client_id: string; client_secret?: string }>(
@@ -107,6 +115,7 @@ export async function prepareRemoteMcp(
     if (!registration.client_id) throw new Error('Dynamic Client Registration did not return a client_id')
     clientId = registration.client_id
     clientSecret = registration.client_secret
+    scope = requestedScope
     registrationMethod = 'dcr'
   } else {
     return {
@@ -278,6 +287,22 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
 function resourceMetadataUrl(header: string | null): string | undefined {
   const match = header?.match(/resource_metadata="([^"]+)"/i)
   return match?.[1]
+}
+
+function challengeScope(header: string | null): string | undefined {
+  const quoted = header?.match(/(?:^|[,\s])scope="([^"]+)"/i)?.[1]
+  if (quoted?.trim()) return quoted.trim()
+  const bare = header?.match(/(?:^|[,\s])scope=([^,\s]+)/i)?.[1]
+  return bare?.trim() || undefined
+}
+
+function isValidCimdUrl(value: string): boolean {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' && url.pathname !== '/' && !url.username && !url.password && !url.hash
+  } catch {
+    return false
+  }
 }
 
 function wellKnownResourceCandidates(endpoint: string): string[] {

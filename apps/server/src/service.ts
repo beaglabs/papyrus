@@ -757,7 +757,7 @@ export class PapyrusService {
     const issuerUrl = new URL(input.issuer)
     if (issuerUrl.protocol !== 'https:' && !(issuerUrl.protocol === 'http:' && ['127.0.0.1', '::1', 'localhost'].includes(issuerUrl.hostname))) throw new Error('OAuth issuer must use HTTPS')
     if (issuerUrl.username || issuerUrl.password || issuerUrl.search || issuerUrl.hash) throw new Error('OAuth issuer must not contain credentials, query, or fragment')
-    const issuer = issuerUrl.toString().replace(/\/$/, '')
+    const issuer = input.issuer.trim()
     const clientId = input.clientId.trim()
     if (!clientId) throw new Error('OAuth client ID is required')
     const client = this.db.upsertMcpOauthClient({

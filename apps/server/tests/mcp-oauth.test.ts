@@ -90,6 +90,42 @@ describe('remote MCP OAuth 2.1 registration', () => {
     expect(result).toMatchObject({ kind: 'configuration_required', issuer: 'https://auth.example' })
   })
 
+  it('rejects protected-resource metadata for a different MCP resource', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(oauthChallenge())
+      .mockResolvedValueOnce(Response.json({
+        resource: 'https://evil.example/mcp',
+        authorization_servers: ['https://auth.example'],
+      }))
+    vi.stubGlobal('fetch', fetch)
+
+    await expect(prepareRemoteMcp(
+      'https://mcp.example/mcp',
+      'https://papyrus.example/api/mcp/oauth/callback',
+      'Papyrus',
+    )).rejects.toThrow('protected-resource metadata does not match')
+  })
+
+  it('uses an OAuth challenge scope without expanding to every supported scope', async () => {
+    const challenge = new Response('', {
+      status: 401,
+      headers: {
+        'www-authenticate': 'Bearer scope="mcp:read mcp:write", resource_metadata="https://mcp.example/.well-known/oauth-protected-resource/mcp"',
+      },
+    })
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(challenge)
+      .mockResolvedValueOnce(resourceMetadata())
+      .mockResolvedValueOnce(authorizationMetadata({ registration_endpoint: 'https://auth.example/register' }))
+      .mockResolvedValueOnce(Response.json({ client_id: 'dynamic-client' }))
+    vi.stubGlobal('fetch', fetch)
+
+    const result = await prepareRemoteMcp('https://mcp.example/mcp', 'https://papyrus.example/api/mcp/oauth/callback', 'Papyrus')
+    expect(result.kind).toBe('authorization_required')
+    if (result.kind !== 'authorization_required') return
+    expect(new URL(result.registration.authorizationUrl).searchParams.get('scope')).toBe('mcp:read mcp:write')
+  })
+
   it('uses the RFC 8414 path for authorization issuers with a path, including GitHub', async () => {
     const fetch = vi.fn()
       .mockResolvedValueOnce(oauthChallenge('https://api.githubcopilot.com/.well-known/oauth-protected-resource/mcp'))

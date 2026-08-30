@@ -77,6 +77,25 @@ describe('Papyrus control plane', () => {
     await expect(context.service.invokeTool(activeOther, otherSession.id, server.id, 'read_file', {})).rejects.toThrow(AuthorizationDenied)
   })
 
+  it('fails closed while MCP OAuth authorization is incomplete', () => {
+    const context = testContext(); contexts.push(context)
+    const { owner } = setup(context)
+    const server = context.db.addMcpServer({
+      name: 'Needs OAuth',
+      endpoint: 'https://mcp.example/mcp',
+      oauthStatus: 'configuration_required',
+      oauthIssuer: 'https://auth.example',
+      oauthError: 'OAuth client registration required',
+    })
+
+    expect(() => context.service.setMcpServerEnabled(owner, server.id, true))
+      .toThrow('Complete MCP OAuth authorization before enabling this connection')
+    expect(context.db.getMcpServer(server.id)).toMatchObject({
+      enabled: false,
+      oauthStatus: 'configuration_required',
+    })
+  })
+
   it('deletes MCP connections with pending OAuth state and environment grants', () => {
     const context = testContext(); contexts.push(context)
     const { owner, environment } = setup(context)

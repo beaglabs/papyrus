@@ -207,6 +207,7 @@ export interface McpServer {
   oauthIssuer?: string
   oauthError?: string
   oauthRegistrationMethod?: McpOauthRegistrationMethod
+  oauthScope?: string
   createdAt: string
 }
 

@@ -6,6 +6,7 @@ import { ROLES, type ApprovedSourceKind, type Role, type SignedLicense } from '@
 import { AuthService } from './auth.js'
 import type { ServerConfig } from './config.js'
 import { ApprovalLifecycleError, AuthorizationDenied, PapyrusService, SessionLifecycleError } from './service.js'
+import { mcpClientMetadata } from './mcp-oauth.js'
 
 class HttpError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message) }
@@ -26,8 +27,12 @@ function json(response: ServerResponse, status: number, value: unknown): void {
   response.end(body)
 }
 
-function oauthComplete(response: ServerResponse): void {
-  const body = '<!doctype html><meta charset="utf-8"><title>MCP connected</title><p>MCP authorization complete. You may close this window.</p><script>window.opener?.postMessage({type:"papyrus:mcp-connected"}, window.location.origin);window.close()</script>'
+function oauthComplete(response: ServerResponse, result: { ok: boolean; serverId?: string; message: string }): void {
+  const payload = result.ok
+    ? { type: 'papyrus:mcp-connected', serverId: result.serverId, message: result.message }
+    : { type: 'papyrus:mcp-oauth-error', serverId: result.serverId, message: result.message }
+  const title = result.ok ? 'MCP connected' : 'MCP authorization failed'
+  const body = `<!doctype html><meta charset="utf-8"><title>${title}</title><p>${result.ok ? 'MCP authorization complete.' : 'MCP authorization did not complete.'} You may close this window.</p><script>window.opener?.postMessage(${JSON.stringify(payload)}, window.location.origin);setTimeout(()=>window.close(),100)</script>`
   response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-length': Buffer.byteLength(body), 'cache-control': 'no-store', 'content-security-policy': "default-src 'none'; script-src 'unsafe-inline'" })
   response.end(body)
 }
@@ -196,6 +201,9 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
     response.setHeader('x-request-id', requestId)
     const url = new URL(request.url ?? '/', config.publicOrigin)
     try {
+      if (url.pathname === '/.well-known/mcp-client.json' && request.method === 'GET') {
+        return json(response, 200, mcpClientMetadata(config.publicOrigin))
+      }
       if (url.pathname === '/api/health' && request.method === 'GET') {
         const logoUrl = config.branding.organizationDomain && config.branding.logoDevPublishableKey
           ? `https://img.logo.dev/${config.branding.organizationDomain}?token=${encodeURIComponent(config.branding.logoDevPublishableKey)}&size=128&format=png`
@@ -474,15 +482,36 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
         )
         return json(response, 202, { run })
       }
+      if (url.pathname === '/api/mcp/oauth/clients' && request.method === 'PUT') {
+        const input = await body(request)
+        return json(response, 200, service.upsertMcpOauthClient(principal, {
+          issuer: text(input.issuer, 'issuer', 2048),
+          clientId: text(input.clientId, 'clientId', 2048),
+          ...(typeof input.clientSecret === 'string' && input.clientSecret.trim() ? { clientSecret: input.clientSecret.trim() } : {}),
+          ...(typeof input.scopes === 'string' && input.scopes.trim() ? { scopes: input.scopes.trim().slice(0, 4096) } : {}),
+        }))
+      }
+      const deleteOauthClient = url.pathname.match(/^\/api\/mcp\/oauth\/clients\/([^/]+)$/)
+      if (deleteOauthClient && request.method === 'DELETE') {
+        service.deleteMcpOauthClient(principal, decodeURIComponent(deleteOauthClient[1] as string))
+        return json(response, 204, null)
+      }
       if (url.pathname === '/api/mcp/servers' && request.method === 'POST') {
         const input = await body(request)
         return json(response, 201, await service.addMcpServer(principal, { name: text(input.name, 'name'), endpoint: text(input.endpoint, 'endpoint', 2048) }))
       }
       if (url.pathname === '/api/mcp/oauth/callback' && request.method === 'GET') {
         const state = text(url.searchParams.get('state'), 'state', 256)
+        const issuer = url.searchParams.get('iss')?.trim() || undefined
+        const oauthError = url.searchParams.get('error')?.trim()
+        if (oauthError) {
+          const description = url.searchParams.get('error_description')?.trim() || undefined
+          const server = service.failMcpOauth(principal, state, oauthError, description, issuer)
+          return oauthComplete(response, { ok: false, serverId: server.id, message: description ? `${oauthError}: ${description}` : oauthError })
+        }
         const code = text(url.searchParams.get('code'), 'code', 4096)
-        await service.completeMcpOauth(principal, state, code)
-        return oauthComplete(response)
+        const server = await service.completeMcpOauth(principal, state, code, issuer)
+        return oauthComplete(response, { ok: true, serverId: server.id, message: 'MCP authorization complete' })
       }
       if (url.pathname === '/api/mcp/servers' && request.method === 'GET') return json(response, 200, service.listMcpServers(principal))
       const retryMcpServer = url.pathname.match(/^\/api\/mcp\/servers\/([^/]+)\/retry$/)

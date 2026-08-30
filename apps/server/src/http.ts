@@ -485,11 +485,17 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
       }
       if (url.pathname === '/api/mcp/oauth/clients' && request.method === 'PUT') {
         const input = await body(request)
+        const clientSecret = typeof input.clientSecret === 'string' && input.clientSecret.trim()
+          ? text(input.clientSecret, 'clientSecret', 4096)
+          : undefined
+        const scopes = typeof input.scopes === 'string' && input.scopes.trim()
+          ? text(input.scopes, 'scopes', 4096)
+          : undefined
         return json(response, 200, service.upsertMcpOauthClient(principal, {
           issuer: text(input.issuer, 'issuer', 2048),
           clientId: text(input.clientId, 'clientId', 2048),
-          ...(typeof input.clientSecret === 'string' && input.clientSecret.trim() ? { clientSecret: input.clientSecret.trim() } : {}),
-          ...(typeof input.scopes === 'string' && input.scopes.trim() ? { scopes: input.scopes.trim().slice(0, 4096) } : {}),
+          ...(clientSecret ? { clientSecret } : {}),
+          ...(scopes ? { scopes } : {}),
         }))
       }
       const deleteOauthClient = url.pathname.match(/^\/api\/mcp\/oauth\/clients\/([^/]+)$/)

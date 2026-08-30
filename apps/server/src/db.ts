@@ -734,24 +734,24 @@ export class PapyrusDatabase {
 
   createMcpOauthPending(input: {
     state: string; serverId: string; actorId: string; issuer: string; tokenEndpoint: string; clientId: string; clientSecret?: string;
-    verifier: string; redirectUri: string; resource: string; registrationMethod: McpOauthRegistrationMethod; scope?: string
+    verifier: string; redirectUri: string; resource: string; registrationMethod?: McpOauthRegistrationMethod; scope?: string
   }): void {
     this.sqlite.prepare(`INSERT INTO mcp_oauth_pending(
       state,server_id,actor_id,issuer,token_endpoint,client_id,client_secret,verifier,redirect_uri,resource,registration_method,scope,created_at
     ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       input.state, input.serverId, input.actorId, input.issuer, input.tokenEndpoint, input.clientId, input.clientSecret ?? null,
-      input.verifier, input.redirectUri, input.resource, input.registrationMethod, input.scope ?? null, new Date().toISOString(),
+      input.verifier, input.redirectUri, input.resource, input.registrationMethod ?? 'preregistered', input.scope ?? null, new Date().toISOString(),
     )
   }
 
   replaceMcpOauthPending(input: {
     state: string; serverId: string; actorId: string; issuer: string; tokenEndpoint: string; clientId: string; clientSecret?: string;
-    verifier: string; redirectUri: string; resource: string; registrationMethod: McpOauthRegistrationMethod; scope?: string
+    verifier: string; redirectUri: string; resource: string; registrationMethod?: McpOauthRegistrationMethod; scope?: string
   }): void {
     this.transaction(() => {
       this.sqlite.prepare('DELETE FROM mcp_oauth_pending WHERE server_id=?').run(input.serverId)
       this.sqlite.prepare("UPDATE mcp_servers SET enabled=0,oauth_status='authorization_required',oauth_issuer=?,oauth_error=NULL,oauth_registration_method=?,oauth_access_token=NULL,oauth_refresh_token=NULL,oauth_expires_at=NULL WHERE id=?")
-        .run(input.issuer, input.registrationMethod, input.serverId)
+        .run(input.issuer, input.registrationMethod ?? 'preregistered', input.serverId)
       this.createMcpOauthPending(input)
     })
   }
@@ -839,4 +839,6 @@ export class PapyrusDatabase {
       ...(row.oauth_registration_method ? { oauthRegistrationMethod: String(row.oauth_registration_method) as McpOauthRegistrationMethod } : {}),
       createdAt: String(row.created_at),
     }
-  }}
+  }
+}
+

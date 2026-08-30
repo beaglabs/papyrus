@@ -6,19 +6,26 @@ export interface McpToolDefinition {
   inputSchema: Record<string, unknown>
 }
 
+export interface McpBearerAuthProvider {
+  token(): Promise<string | undefined>
+  onUnauthorized?(context: unknown): Promise<void>
+}
+
+export type McpAuthentication = string | McpBearerAuthProvider | undefined
+
 interface Connection {
   client: Client
   transport: StreamableHTTPClientTransport
 }
 
-export async function validateMcpServer(endpoint: string, accessToken?: string): Promise<void> {
-  await withMcpClient(endpoint, accessToken, async (client) => {
+export async function validateMcpServer(endpoint: string, authentication?: McpAuthentication): Promise<void> {
+  await withMcpClient(endpoint, authentication, async (client) => {
     await client.listTools()
   })
 }
 
-export async function listMcpTools(endpoint: string, accessToken?: string): Promise<McpToolDefinition[]> {
-  return await withMcpClient(endpoint, accessToken, async (client) => {
+export async function listMcpTools(endpoint: string, authentication?: McpAuthentication): Promise<McpToolDefinition[]> {
+  return await withMcpClient(endpoint, authentication, async (client) => {
     const { tools } = await client.listTools()
     return tools.map((tool) => ({
       name: tool.name,
@@ -28,8 +35,8 @@ export async function listMcpTools(endpoint: string, accessToken?: string): Prom
   })
 }
 
-export async function callMcpTool(endpoint: string, accessToken: string | undefined, name: string, args: unknown): Promise<unknown> {
-  return await withMcpClient(endpoint, accessToken, async (client) => {
+export async function callMcpTool(endpoint: string, authentication: McpAuthentication, name: string, args: unknown): Promise<unknown> {
+  return await withMcpClient(endpoint, authentication, async (client) => {
     return await client.callTool({
       name,
       arguments: isRecord(args) ? args : {},
@@ -37,11 +44,14 @@ export async function callMcpTool(endpoint: string, accessToken: string | undefi
   })
 }
 
-async function withMcpClient<T>(endpoint: string, accessToken: string | undefined, operation: (client: Client) => Promise<T>): Promise<T> {
+async function withMcpClient<T>(endpoint: string, authentication: McpAuthentication, operation: (client: Client) => Promise<T>): Promise<T> {
   const signal = AbortSignal.timeout(30_000)
+  const authProvider = typeof authentication === 'string'
+    ? { token: async () => authentication }
+    : authentication
   const options = {
     requestInit: { signal },
-    ...(accessToken ? { authProvider: { token: async () => accessToken } } : {}),
+    ...(authProvider ? { authProvider } : {}),
   }
   const connection = connect(endpoint, options)
   try {

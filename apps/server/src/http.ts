@@ -508,17 +508,22 @@ export function createPapyrusServer(config: ServerConfig, service: PapyrusServic
         return json(response, 201, await service.addMcpServer(principal, { name: text(input.name, 'name'), endpoint: text(input.endpoint, 'endpoint', 2048) }))
       }
       if (url.pathname === '/api/mcp/oauth/callback' && request.method === 'GET') {
-        const state = text(url.searchParams.get('state'), 'state', 256)
-        const issuer = url.searchParams.get('iss')?.trim() || undefined
-        const oauthError = url.searchParams.get('error')?.trim()
-        if (oauthError) {
-          const description = url.searchParams.get('error_description')?.trim() || undefined
-          const server = service.failMcpOauth(principal, state, oauthError, description, issuer)
-          return oauthComplete(response, { ok: false, serverId: server.id, message: description ? `${oauthError}: ${description}` : oauthError })
+        try {
+          const state = text(url.searchParams.get('state'), 'state', 256)
+          const issuer = url.searchParams.get('iss')?.trim() || undefined
+          const oauthError = url.searchParams.get('error')?.trim()
+          if (oauthError) {
+            const description = url.searchParams.get('error_description')?.trim() || undefined
+            const server = service.failMcpOauth(principal, state, oauthError, description, issuer)
+            return oauthComplete(response, { ok: false, serverId: server.id, message: description ? `${oauthError}: ${description}` : oauthError })
+          }
+          const code = text(url.searchParams.get('code'), 'code', 4096)
+          const server = await service.completeMcpOauth(principal, state, code, issuer)
+          return oauthComplete(response, { ok: true, serverId: server.id, message: 'MCP authorization complete' })
+        } catch (error) {
+          const message = error instanceof Error ? error.message.slice(0, 512) : 'MCP OAuth authorization failed'
+          return oauthComplete(response, { ok: false, message })
         }
-        const code = text(url.searchParams.get('code'), 'code', 4096)
-        const server = await service.completeMcpOauth(principal, state, code, issuer)
-        return oauthComplete(response, { ok: true, serverId: server.id, message: 'MCP authorization complete' })
       }
       if (url.pathname === '/api/mcp/servers' && request.method === 'GET') return json(response, 200, service.listMcpServers(principal))
       const retryMcpServer = url.pathname.match(/^\/api\/mcp\/servers\/([^/]+)\/retry$/)

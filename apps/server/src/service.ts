@@ -925,7 +925,7 @@ export class PapyrusService {
     if (!server?.enabled) throw new Error('MCP server unavailable')
     const started = Date.now()
     try {
-      const result = await callMcpTool(server.endpoint, await this.mcpAccessToken(server.id), toolName, args)
+      const result = await callMcpTool(server.endpoint, this.mcpAuthProvider(server.id), toolName, args)
       this.audit.append({ actorId: actor.id, action: 'InvokeTool', resourceType: 'Tool', resourceId: `${mcpServerId}:${toolName}`, decision: 'allow', metadata: { sessionId, durationMs: Date.now() - started, transport: 'mcp-typescript-sdk' } })
       return result
     } catch (error) {
@@ -948,7 +948,7 @@ export class PapyrusService {
     const server = this.db.getMcpServer(mcpServerId)
     if (!server?.enabled) throw new Error('MCP server unavailable')
     if (method === 'tools/list') {
-      const result = await this.forwardRuntimeMcp(server.endpoint, message, await this.mcpAuthorization(server.id))
+      const result = await this.forwardRuntimeMcp(server.endpoint, message, await this.mcpAuthorization(server.id), async () => await this.mcpAuthorization(server.id, true))
       if (result && typeof result === 'object') {
         const envelope = result as { result?: { tools?: Array<{ name?: string }> } }
         if (Array.isArray(envelope.result?.tools)) envelope.result.tools = envelope.result.tools.filter((tool) => typeof tool.name === 'string' && this.db.isToolGranted(session.environmentId, mcpServerId, tool.name))
@@ -957,7 +957,7 @@ export class PapyrusService {
       return result
     }
     if (!['initialize', 'notifications/initialized', 'ping'].includes(method)) throw new AuthorizationDenied('McpMethod', method)
-    return this.forwardRuntimeMcp(server.endpoint, message, await this.mcpAuthorization(server.id))
+    return this.forwardRuntimeMcp(server.endpoint, message, await this.mcpAuthorization(server.id), async () => await this.mcpAuthorization(server.id, true))
   }
 
   activity(actor: Principal): ActivitySummary {
@@ -1145,7 +1145,7 @@ export class PapyrusService {
     tools.set('papyrus_sources_read', { name: 'papyrus_sources_read', description: 'Read a cited approved-source chunk. Access is rechecked against current assignments.', inputSchema: { type: 'object', properties: { chunkId: { type: 'string' } }, required: ['chunkId'] } })
     for (const server of this.db.listMcpServers()) {
       if (!server.enabled || !grantedServerIds.has(server.id)) continue
-      const listed = await listMcpTools(server.endpoint, await this.mcpAccessToken(server.id)).catch((error) => {
+      const listed = await listMcpTools(server.endpoint, this.mcpAuthProvider(server.id)).catch((error) => {
         this.audit.append({
           actorId: session.ownerId,
           action: 'DiscoverTools',
@@ -1204,13 +1204,24 @@ export class PapyrusService {
     }
   }
 
-  private async mcpAccessToken(serverId: string): Promise<string | undefined> {
+  private mcpAuthProvider(serverId: string): { token: () => Promise<string | undefined>; onUnauthorized: () => Promise<void> } | undefined {
+    if (this.db.getMcpServer(serverId)?.oauthStatus !== 'connected') return undefined
+    return {
+      token: async () => await this.mcpAccessToken(serverId),
+      onUnauthorized: async () => { await this.mcpAccessToken(serverId, true) },
+    }
+  }
+
+  private async mcpAccessToken(serverId: string, forceRefresh = false): Promise<string | undefined> {
     const credential = this.db.mcpOauthCredential(serverId)
     if (!credential?.accessToken) return undefined
-    const expiresSoon = credential.expiresAt && Date.parse(credential.expiresAt) <= Date.now() + 60_000
-    if (!expiresSoon) return this.open(credential.accessToken)
+    const expiresAt = credential.expiresAt ? Date.parse(credential.expiresAt) : Number.NaN
+    const expiresSoon = Number.isFinite(expiresAt) && expiresAt <= Date.now() + 60_000
+    if (!forceRefresh && !expiresSoon) return this.open(credential.accessToken)
     if (!credential.refreshToken || !credential.tokenEndpoint || !credential.clientId || !credential.resource) {
-      this.db.markMcpOauthReauthorizationRequired(serverId, 'OAuth access token expired and cannot be refreshed')
+      this.db.markMcpOauthReauthorizationRequired(serverId, forceRefresh
+        ? 'MCP server rejected the OAuth access token and no refresh token is available'
+        : 'OAuth access token expired and cannot be refreshed')
       throw new Error('MCP OAuth authorization must be renewed')
     }
     try {
@@ -1235,8 +1246,8 @@ export class PapyrusService {
     }
   }
 
-  private async mcpAuthorization(serverId: string): Promise<Record<string, string>> {
-    const token = await this.mcpAccessToken(serverId)
+  private async mcpAuthorization(serverId: string, forceRefresh = false): Promise<Record<string, string>> {
+    const token = await this.mcpAccessToken(serverId, forceRefresh)
     return token ? { authorization: `Bearer ${token}` } : {}
   }
 
@@ -1253,8 +1264,18 @@ export class PapyrusService {
     return Buffer.concat([decipher.update(Buffer.from(ciphertext, 'base64url')), decipher.final()]).toString('utf8')
   }
 
-  private async forwardRuntimeMcp(endpoint: string, message: Record<string, unknown>, authorization: Record<string, string> = {}): Promise<unknown> {
-    const response = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...authorization }, body: JSON.stringify(message), signal: AbortSignal.timeout(30_000) })
+  private async forwardRuntimeMcp(endpoint: string, message: Record<string, unknown>, authorization: Record<string, string> = {}, retry?: () => Promise<Record<string, string>>): Promise<unknown> {
+    const send = async (headers: Record<string, string>) => await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...headers },
+      body: JSON.stringify(message),
+      signal: AbortSignal.timeout(30_000),
+    })
+    let response = await send(authorization)
+    if (response.status === 401 && retry) {
+      await response.text().catch(() => undefined)
+      response = await send(await retry())
+    }
     if (!response.ok) throw new Error(`MCP server returned ${response.status}`)
     const body = await response.text()
     return body ? JSON.parse(body) : undefined

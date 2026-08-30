@@ -32,7 +32,8 @@ function oauthComplete(response: ServerResponse, result: { ok: boolean; serverId
     ? { type: 'papyrus:mcp-connected', serverId: result.serverId, message: result.message }
     : { type: 'papyrus:mcp-oauth-error', serverId: result.serverId, message: result.message }
   const title = result.ok ? 'MCP connected' : 'MCP authorization failed'
-  const body = `<!doctype html><meta charset="utf-8"><title>${title}</title><p>${result.ok ? 'MCP authorization complete.' : 'MCP authorization did not complete.'} You may close this window.</p><script>window.opener?.postMessage(${JSON.stringify(payload)}, window.location.origin);setTimeout(()=>window.close(),100)</script>`
+  const serializedPayload = JSON.stringify(payload).replace(/</g, '\\u003c')
+  const body = `<!doctype html><meta charset="utf-8"><title>${title}</title><p>${result.ok ? 'MCP authorization complete.' : 'MCP authorization did not complete.'} You may close this window.</p><script>window.opener?.postMessage(${serializedPayload}, window.location.origin);setTimeout(()=>window.close(),100)</script>`
   response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-length': Buffer.byteLength(body), 'cache-control': 'no-store', 'content-security-policy': "default-src 'none'; script-src 'unsafe-inline'" })
   response.end(body)
 }

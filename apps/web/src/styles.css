@@ -840,3 +840,56 @@ nav [data-slot=button].active{border-color:var(--border);background:var(--main);
 .inline-browser{display:grid;overflow:hidden;background:#171717;color:#eee}.inline-browser>.inline-surface-heading{padding:10px 12px;border-bottom:1px solid #444}.browser-live-dot{width:12px;height:12px;border:2px solid #111;border-radius:50%;background:#f5bb45;box-shadow:0 0 0 0 rgba(245,187,69,.55);animation:browser-pulse 1.4s ease-out infinite}.browser-live-dot.is-live{background:#65d18a;box-shadow:0 0 0 0 rgba(101,209,138,.55)}.browser-live-dot.is-complete{background:#65d18a;animation:none}.browser-url{overflow:hidden;padding:8px 12px;border-bottom:1px solid #444;color:#bbb;text-overflow:ellipsis;white-space:nowrap;font:11px ui-monospace,monospace}.browser-frame-shell{position:relative;overflow:hidden;aspect-ratio:16/9;background:#090909}.browser-frame-shell::after{content:"";position:absolute;inset:-35% 0 auto;height:35%;pointer-events:none;background:linear-gradient(transparent,rgba(101,209,138,.08),transparent);animation:browser-scan 3.2s linear infinite}.browser-surface{display:grid;width:100%;height:100%;overflow:hidden;place-items:center;outline:none}.browser-surface:focus{box-shadow:inset 0 0 0 2px #65d18a}.browser-surface img{display:block;width:100%;height:100%;object-fit:contain;cursor:crosshair;animation:browser-frame-in .18s ease-out}.browser-loading{display:grid;place-items:center;gap:8px;color:#aaa;text-align:center}.browser-loading span{width:28px;height:28px;border:3px solid #555;border-top-color:#65d18a;border-radius:50%;animation:spin .8s linear infinite}.inline-browser footer{padding:7px 12px;border-top:1px solid #444;color:#888;font:9px ui-monospace,monospace}.inline-browser-result{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:12px;padding:11px 14px;background:#dff8e7}.inline-browser-result>div{display:grid;gap:2px}
 @keyframes inline-surface-in{from{opacity:0;transform:translateY(16px) scale(.985)}to{opacity:1;transform:none}}@keyframes goal-orbit{to{transform:rotate(360deg)}}@keyframes goal-progress{to{width:78%}}@keyframes browser-pulse{70%{box-shadow:0 0 0 9px transparent}}@keyframes browser-scan{to{transform:translateY(390%)}}@keyframes browser-frame-in{from{opacity:.72;filter:saturate(.7)}to{opacity:1;filter:none}}@keyframes spin{to{transform:rotate(360deg)}}
 @media(max-width:760px){.inline-goal,.inline-browser,.inline-browser-result{width:100%;border-radius:10px}.inline-goal-actions{align-items:stretch;flex-wrap:wrap}.inline-goal-actions small{width:100%;margin:0}.browser-frame-shell{aspect-ratio:4/3}}
+
+
+/* Identity role administration layout */
+.identity-admin .admin-list article.identity-card {
+  display: grid;
+  grid-template-columns: minmax(190px, 1fr) max-content;
+  align-items: center;
+  gap: 20px;
+}
+
+.identity-admin .admin-list form.identity-role-actions {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(170px, 200px) max-content max-content;
+  align-items: end;
+  gap: 10px;
+}
+
+.identity-role-actions .select-field {
+  width: 100%;
+  min-width: 0;
+}
+
+.identity-role-actions .select-field > span,
+.identity-role-actions [data-slot=button] {
+  white-space: nowrap;
+}
+
+.identity-role-actions [data-slot=button] {
+  min-height: 44px;
+}
+
+@media (max-width: 1180px) {
+  .identity-admin .admin-list article.identity-card {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .identity-admin .admin-list form.identity-role-actions {
+    width: 100%;
+    grid-template-columns: minmax(180px, 1fr) max-content max-content;
+  }
+}
+
+@media (max-width: 680px) {
+  .identity-admin .admin-list form.identity-role-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .identity-role-actions [data-slot=button] {
+    width: 100%;
+  }
+}

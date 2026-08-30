@@ -76,6 +76,9 @@ export async function prepareRemoteMcp(
 
   const authenticateHeader = challenge.headers.get('www-authenticate')
   const protectedResource = await discoverResourceMetadata(resource, authenticateHeader)
+  if (protectedResource.resource && !sameOAuthResource(protectedResource.resource, resource)) {
+    throw new Error('MCP protected-resource metadata does not match the requested MCP endpoint')
+  }
   const issuer = protectedResource.authorization_servers?.[0]
   if (!issuer) throw new Error('MCP protected-resource metadata did not identify an authorization server')
 
@@ -311,6 +314,21 @@ function wellKnownResourceCandidates(endpoint: string): string[] {
   const candidates = [new URL(`/.well-known/oauth-protected-resource${path}`, url.origin).toString()]
   if (path) candidates.push(new URL('/.well-known/oauth-protected-resource', url.origin).toString())
   return candidates
+}
+
+function sameOAuthResource(advertised: string, requested: string): boolean {
+  try {
+    const a = secureUrl(advertised, 'protected resource')
+    const b = secureUrl(requested, 'MCP endpoint')
+    const normalizePath = (path: string) => path === '/' ? '/' : path.replace(/\/$/, '')
+    return a.protocol === b.protocol
+      && a.hostname === b.hostname
+      && a.port === b.port
+      && normalizePath(a.pathname) === normalizePath(b.pathname)
+      && a.search === b.search
+  } catch {
+    return false
+  }
 }
 
 function secureUrl(value: string, label: string): URL {

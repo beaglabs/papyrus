@@ -77,6 +77,41 @@ describe('Papyrus control plane', () => {
     await expect(context.service.invokeTool(activeOther, otherSession.id, server.id, 'read_file', {})).rejects.toThrow(AuthorizationDenied)
   })
 
+  it('persists and unions MCP OAuth scope step-up requirements', () => {
+    const context = testContext(); contexts.push(context)
+    const { owner } = setup(context)
+    const server = context.db.addMcpServer({
+      name: 'Scoped MCP',
+      endpoint: 'https://mcp.example/mcp',
+      oauthStatus: 'authorization_required',
+      oauthIssuer: 'https://auth.example',
+      oauthRegistrationMethod: 'preregistered',
+    })
+    context.db.createMcpOauthPending({
+      state: 'scope-state',
+      serverId: server.id,
+      actorId: owner.id,
+      issuer: 'https://auth.example',
+      tokenEndpoint: 'https://auth.example/token',
+      clientId: 'client',
+      verifier: 'sealed-verifier',
+      redirectUri: 'https://papyrus.example/api/mcp/oauth/callback',
+      resource: server.endpoint,
+      registrationMethod: 'preregistered',
+      scope: 'repo',
+    })
+    context.db.finishMcpOauth('scope-state', 'sealed-access', 'sealed-refresh', new Date(Date.now() + 60_000).toISOString())
+    expect(context.db.getMcpServer(server.id)).toMatchObject({ oauthStatus: 'connected', oauthScope: 'repo', enabled: true })
+
+    context.db.markMcpOauthScopeRequired(server.id, 'workflow repo')
+    expect(context.db.getMcpServer(server.id)).toMatchObject({
+      oauthStatus: 'authorization_required',
+      oauthScope: 'repo workflow',
+      enabled: false,
+    })
+    expect(context.db.mcpOauthCredential(server.id)).toBeUndefined()
+  })
+
   it('fails closed while MCP OAuth authorization is incomplete', () => {
     const context = testContext(); contexts.push(context)
     const { owner } = setup(context)

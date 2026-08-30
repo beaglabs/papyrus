@@ -704,7 +704,7 @@ export class PapyrusDatabase {
     const now = new Date().toISOString()
     this.sqlite.prepare(`INSERT INTO mcp_oauth_clients(issuer,client_id,client_secret,scopes,registration_method,metadata_url,created_at,updated_at)
       VALUES(?,?,?,?,?,?,?,?)
-      ON CONFLICT(issuer) DO UPDATE SET client_id=excluded.client_id,client_secret=excluded.client_secret,scopes=excluded.scopes,registration_method=excluded.registration_method,metadata_url=excluded.metadata_url,updated_at=excluded.updated_at`)
+      ON CONFLICT(issuer) DO UPDATE SET client_id=excluded.client_id,client_secret=COALESCE(excluded.client_secret,mcp_oauth_clients.client_secret),scopes=excluded.scopes,registration_method=excluded.registration_method,metadata_url=excluded.metadata_url,updated_at=excluded.updated_at`)
       .run(input.issuer, input.clientId, input.clientSecret ?? null, input.scopes ?? null, input.registrationMethod ?? 'preregistered', input.metadataUrl ?? null, now, now)
     return this.getMcpOauthClient(input.issuer)!
   }

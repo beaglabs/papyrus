@@ -43,6 +43,7 @@ export type McpOAuthPreparation =
 
 export interface PrepareRemoteMcpOptions {
   clientMetadataUrl?: string
+  requestedScope?: string
   resolveClient?: (issuer: string) => McpOauthClientCredentials | undefined | Promise<McpOauthClientCredentials | undefined>
 }
 
@@ -92,12 +93,12 @@ export async function prepareRemoteMcp(
   let clientSecret: string | undefined
   let scope: string | undefined
   let registrationMethod: McpOauthRegistrationMethod
-  const requestedScope = challengeScope(authenticateHeader)
+  const requestedScope = mergeOAuthScopes(options.requestedScope, challengeScope(authenticateHeader))
 
   if (preregistered) {
     clientId = preregistered.clientId
     clientSecret = preregistered.clientSecret
-    scope = preregistered.scopes?.trim() || requestedScope
+    scope = mergeOAuthScopes(preregistered.scopes?.trim() || undefined, requestedScope)
     registrationMethod = 'preregistered'
   } else if (authorization.client_id_metadata_document_supported && options.clientMetadataUrl && isValidCimdUrl(options.clientMetadataUrl)) {
     clientId = options.clientMetadataUrl
@@ -290,6 +291,12 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
 function resourceMetadataUrl(header: string | null): string | undefined {
   const match = header?.match(/resource_metadata="([^"]+)"/i)
   return match?.[1]
+}
+
+function mergeOAuthScopes(...values: Array<string | undefined>): string | undefined {
+  const scopes = new Set<string>()
+  for (const value of values) for (const scope of value?.split(/\s+/).filter(Boolean) ?? []) scopes.add(scope)
+  return scopes.size ? [...scopes].join(' ') : undefined
 }
 
 function challengeScope(header: string | null): string | undefined {

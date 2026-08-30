@@ -184,15 +184,29 @@ export interface SourceSearchResult {
   citation: SourceCitation
 }
 
+export type McpOauthRegistrationMethod = 'preregistered' | 'cimd' | 'dcr'
+
+export interface McpOauthClient {
+  issuer: string
+  clientId: string
+  hasClientSecret: boolean
+  scopes?: string
+  registrationMethod: McpOauthRegistrationMethod
+  metadataUrl?: string
+  createdAt: string
+  updatedAt: string
+}
+
 export interface McpServer {
   id: string
   name: string
   transport: 'http'
   endpoint: string
   enabled: boolean
-  oauthStatus: 'not_required' | 'authorization_required' | 'connected' | 'error'
+  oauthStatus: 'not_required' | 'configuration_required' | 'authorization_required' | 'connected' | 'error'
   oauthIssuer?: string
   oauthError?: string
+  oauthRegistrationMethod?: McpOauthRegistrationMethod
   createdAt: string
 }
 
@@ -226,6 +240,7 @@ export interface AdminOverview {
   environments: AdminEnvironment[]
   sources: ApprovedSource[]
   mcpServers: McpServer[]
+  mcpOauthClients: McpOauthClient[]
   toolGrants: ToolGrant[]
   license: LicenseStatus
 }

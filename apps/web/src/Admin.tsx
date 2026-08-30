@@ -11,7 +11,7 @@ export function AdminView({ me }: { me: Principal }) {
   const [tab, setTab] = useState<AdminTab>('deployment')
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
-  const [oauthRequest,setOauthRequest]=useState<{authorizationUrl:string;name:string;endpoint:string;issuer?:string;registrationMethod?:McpServer['oauthRegistrationMethod']}>()
+  const [oauthRequest,setOauthRequest]=useState<{authorizationUrl:string;name:string;endpoint:string;issuer?:string;registrationMethod?:McpServer['oauthRegistrationMethod'];scope?:string}>()
   const [oauthClientRequest,setOauthClientRequest]=useState<McpServer>()
   const [oauthNotice,setOauthNotice]=useState<string>()
   const [deleteRequest,setDeleteRequest]=useState<McpServer>()
@@ -44,6 +44,7 @@ export function AdminView({ me }: { me: Principal }) {
         endpoint: result.server.endpoint,
         ...(result.server.oauthIssuer ? { issuer: result.server.oauthIssuer } : {}),
         ...(result.server.oauthRegistrationMethod ? { registrationMethod: result.server.oauthRegistrationMethod } : {}),
+        ...(result.server.oauthScope ? { scope: result.server.oauthScope } : {}),
       })
     } else if (result.server.oauthStatus === 'configuration_required') {
       setOauthClientRequest(result.server)
@@ -171,7 +172,7 @@ export function AdminView({ me }: { me: Principal }) {
     <Dialog open={Boolean(oauthRequest)} onOpenChange={open=>{if(!open)setOauthRequest(undefined)}}>
       {oauthRequest&&<DialogContent className="oauth-registration-dialog">
         <DialogHeader><img src={connectionLogo(oauthRequest.endpoint)} alt="Connection logo" referrerPolicy="no-referrer"/><div><p className="eyebrow">MCP OAUTH</p><h2>Authorize {oauthRequest.name}</h2></div></DialogHeader>
-        <dl className="facts"><Fact label="Resource" value={oauthRequest.endpoint}/><Fact label="Authorization server" value={oauthRequest.issuer??new URL(oauthRequest.authorizationUrl).origin}/><Fact label="Client registration" value={registrationMethodLabel(oauthRequest.registrationMethod)}/><Fact label="Flow" value="Authorization code + PKCE"/><Fact label="Redirect" value="Papyrus MCP OAuth callback"/></dl>
+        <dl className="facts"><Fact label="Resource" value={oauthRequest.endpoint}/><Fact label="Authorization server" value={oauthRequest.issuer??new URL(oauthRequest.authorizationUrl).origin}/><Fact label="Client registration" value={registrationMethodLabel(oauthRequest.registrationMethod)}/>{oauthRequest.scope&&<Fact label="Requested scope" value={oauthRequest.scope}/>}<Fact label="Flow" value="Authorization code + PKCE"/><Fact label="Redirect" value="Papyrus MCP OAuth callback"/></dl>
         <p>Papyrus validated the MCP protected-resource and authorization-server metadata. Continue to the provider to approve this connection.</p>
         <DialogFooter><Button variant="neutral" onClick={()=>setOauthRequest(undefined)}>Cancel</Button><Button onClick={()=>{const popup=window.open(oauthRequest.authorizationUrl,'papyrus-mcp-oauth','popup,width=720,height=820');if(!popup)setError('The OAuth popup was blocked by the browser. Allow popups for Papyrus and try again.');setOauthRequest(undefined)}}>Continue to authorization →</Button></DialogFooter>
       </DialogContent>}
@@ -182,7 +183,7 @@ export function AdminView({ me }: { me: Principal }) {
 function mcpStatus(server:McpServer){
   if(server.oauthStatus==='connected')return `OAuth connected · ${server.oauthIssuer} · ${registrationMethodLabel(server.oauthRegistrationMethod)}`
   if(server.oauthStatus==='configuration_required')return server.oauthError??'OAuth client registration required'
-  if(server.oauthStatus==='authorization_required')return 'Waiting for OAuth authorization'
+  if(server.oauthStatus==='authorization_required')return server.oauthError??'Waiting for OAuth authorization'
   if(server.oauthStatus==='error')return server.oauthError??'OAuth connection failed'
   return 'Connected · validated with MCP SDK'
 }

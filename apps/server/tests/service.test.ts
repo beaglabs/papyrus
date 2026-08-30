@@ -77,6 +77,41 @@ describe('Papyrus control plane', () => {
     await expect(context.service.invokeTool(activeOther, otherSession.id, server.id, 'read_file', {})).rejects.toThrow(AuthorizationDenied)
   })
 
+  it('expires stale MCP OAuth callback state', () => {
+    const context = testContext(); contexts.push(context)
+    const { owner } = setup(context)
+    const server = context.db.addMcpServer({
+      name: 'Expired OAuth',
+      endpoint: 'https://mcp.example/mcp',
+      oauthStatus: 'authorization_required',
+      oauthIssuer: 'https://auth.example',
+      oauthRegistrationMethod: 'preregistered',
+    })
+    context.db.createMcpOauthPending({
+      state: 'expired-state',
+      serverId: server.id,
+      actorId: owner.id,
+      issuer: 'https://auth.example',
+      tokenEndpoint: 'https://auth.example/token',
+      clientId: 'client',
+      verifier: 'sealed-verifier',
+      redirectUri: 'https://papyrus.example/api/mcp/oauth/callback',
+      resource: server.endpoint,
+      registrationMethod: 'preregistered',
+    })
+    context.db.sqlite.prepare('UPDATE mcp_oauth_pending SET created_at=? WHERE state=?')
+      .run(new Date(Date.now() - 11 * 60 * 1000).toISOString(), 'expired-state')
+
+    expect(() => context.service.failMcpOauth(owner, 'expired-state', 'access_denied'))
+      .toThrow('OAuth state is invalid or expired')
+    expect(context.db.getMcpOauthPending('expired-state')).toBeUndefined()
+    expect(context.db.getMcpServer(server.id)).toMatchObject({
+      enabled: false,
+      oauthStatus: 'error',
+      oauthError: 'OAuth authorization request expired',
+    })
+  })
+
   it('persists and unions MCP OAuth scope step-up requirements', () => {
     const context = testContext(); contexts.push(context)
     const { owner } = setup(context)

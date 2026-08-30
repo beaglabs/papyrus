@@ -18,7 +18,7 @@ import { projectResearchSources } from './sources.js'
 import type { ServerConfig } from './config.js'
 import { PapyrusDatabase } from './db.js'
 import { LicenseService } from './license.js'
-import { callMcpTool, listMcpTools, validateMcpServer } from './mcp-client.js'
+import { callMcpTool, listMcpTools, McpInsufficientScopeError, validateMcpServer } from './mcp-client.js'
 import { exchangeMcpCode, normalizeMcpEndpoint, prepareRemoteMcp, refreshMcpToken } from './mcp-oauth.js'
 import { PolicyEngine, cedarUser, cedarUsers, type AuthorizationResource, type PolicyAction } from './policy.js'
 
@@ -785,6 +785,7 @@ export class PapyrusService {
     const redirectUri = `${this.config.publicOrigin}/api/mcp/oauth/callback`
     const preparation = await prepareRemoteMcp(existing.endpoint, redirectUri, `Papyrus — ${existing.name}`, {
       clientMetadataUrl: `${this.config.publicOrigin}/.well-known/mcp-client.json`,
+      ...(existing.oauthScope ? { requestedScope: existing.oauthScope } : {}),
       resolveClient: (issuer) => this.mcpOauthClientCredentials(issuer),
     })
     if (preparation.kind === 'not_required') throw new Error('MCP server no longer requires OAuth; delete it and connect it again')
@@ -929,6 +930,9 @@ export class PapyrusService {
       this.audit.append({ actorId: actor.id, action: 'InvokeTool', resourceType: 'Tool', resourceId: `${mcpServerId}:${toolName}`, decision: 'allow', metadata: { sessionId, durationMs: Date.now() - started, transport: 'mcp-typescript-sdk' } })
       return result
     } catch (error) {
+      if (error instanceof McpInsufficientScopeError) {
+        this.db.markMcpOauthScopeRequired(server.id, error.requiredScope, safeError(error))
+      }
       this.audit.append({ actorId: actor.id, action: 'InvokeTool', resourceType: 'Tool', resourceId: `${mcpServerId}:${toolName}`, decision: 'deny', metadata: { sessionId, durationMs: Date.now() - started, transport: 'mcp-typescript-sdk', error: safeError(error) } })
       throw error
     }
@@ -1146,6 +1150,9 @@ export class PapyrusService {
     for (const server of this.db.listMcpServers()) {
       if (!server.enabled || !grantedServerIds.has(server.id)) continue
       const listed = await listMcpTools(server.endpoint, this.mcpAuthProvider(server.id)).catch((error) => {
+        if (error instanceof McpInsufficientScopeError) {
+          this.db.markMcpOauthScopeRequired(server.id, error.requiredScope, safeError(error))
+        }
         this.audit.append({
           actorId: session.ownerId,
           action: 'DiscoverTools',

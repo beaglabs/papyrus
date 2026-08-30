@@ -674,6 +674,16 @@ export class PapyrusDatabase {
     return this.getMcpServer(id)
   }
 
+  markMcpOauthScopeRequired(id: string, requiredScope?: string, error?: string): McpServer | undefined {
+    const row = this.sqlite.prepare('SELECT oauth_scope FROM mcp_servers WHERE id=?').get(id) as Row | undefined
+    if (!row) return undefined
+    const scope = mergeOAuthScopes(row.oauth_scope ? String(row.oauth_scope) : undefined, requiredScope)
+    const message = error ?? (scope ? `Additional OAuth scope required: ${scope}` : 'Additional OAuth scope authorization required')
+    this.sqlite.prepare("UPDATE mcp_servers SET enabled=0,oauth_status='authorization_required',oauth_error=?,oauth_scope=?,oauth_access_token=NULL,oauth_refresh_token=NULL,oauth_expires_at=NULL WHERE id=?")
+      .run(message, scope ?? null, id)
+    return this.getMcpServer(id)
+  }
+
   grantMcpServer(environmentId: string, mcpServerId: string): void {
     this.sqlite.prepare('INSERT OR IGNORE INTO tool_grants VALUES(?,?,?,?,?,?)').run(crypto.randomUUID(), environmentId, mcpServerId, '*', 'allow', new Date().toISOString())
   }
@@ -837,8 +847,15 @@ export class PapyrusDatabase {
       ...(row.oauth_issuer ? { oauthIssuer: String(row.oauth_issuer) } : {}),
       ...(row.oauth_error ? { oauthError: String(row.oauth_error) } : {}),
       ...(row.oauth_registration_method ? { oauthRegistrationMethod: String(row.oauth_registration_method) as McpOauthRegistrationMethod } : {}),
+      ...(row.oauth_scope ? { oauthScope: String(row.oauth_scope) } : {}),
       createdAt: String(row.created_at),
     }
   }
 }
+function mergeOAuthScopes(...values: Array<string | undefined>): string | undefined {
+  const scopes = new Set<string>()
+  for (const value of values) for (const scope of value?.split(/\s+/).filter(Boolean) ?? []) scopes.add(scope)
+  return scopes.size ? [...scopes].join(' ') : undefined
+}
+
 

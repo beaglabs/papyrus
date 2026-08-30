@@ -22,6 +22,8 @@ import { callMcpTool, listMcpTools, McpInsufficientScopeError, validateMcpServer
 import { exchangeMcpCode, normalizeMcpEndpoint, prepareRemoteMcp, refreshMcpToken } from './mcp-oauth.js'
 import { PolicyEngine, cedarUser, cedarUsers, type AuthorizationResource, type PolicyAction } from './policy.js'
 
+const MCP_OAUTH_PENDING_MAX_AGE_MS = 10 * 60 * 1000
+
 export class AuthorizationDenied extends Error {
   constructor(readonly action: string, readonly resourceId: string) { super(`Not authorized to ${action} ${resourceId}`) }
 }
@@ -714,8 +716,7 @@ export class PapyrusService {
   }
 
   async completeMcpOauth(actor: Principal, state: string, code: string, issuer?: string): Promise<McpServer> {
-    const pending = this.db.getMcpOauthPending(state)
-    if (!pending || String(pending.actor_id) !== actor.id) throw new Error('OAuth state is invalid or expired')
+    const pending = this.requireMcpOauthPending(actor, state)
     if (issuer && issuer !== String(pending.issuer)) throw new Error('OAuth authorization-server issuer does not match the pending request')
     try {
       const token = await exchangeMcpCode({
@@ -737,8 +738,7 @@ export class PapyrusService {
   }
 
   failMcpOauth(actor: Principal, state: string, error: string, description?: string, issuer?: string): McpServer {
-    const pending = this.db.getMcpOauthPending(state)
-    if (!pending || String(pending.actor_id) !== actor.id) throw new Error('OAuth state is invalid or expired')
+    const pending = this.requireMcpOauthPending(actor, state)
     if (issuer && issuer !== String(pending.issuer)) throw new Error('OAuth authorization-server issuer does not match the pending request')
     const message = description?.trim() ? `${error}: ${description}` : error
     const server = this.db.failMcpOauth(state, message)
@@ -1199,6 +1199,17 @@ export class PapyrusService {
       const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as { sessionId: string; serverId: string; exp: number }
       return payload.sessionId === sessionId && payload.serverId === serverId && payload.exp > Date.now()
     } catch { return false }
+  }
+
+  private requireMcpOauthPending(actor: Principal, state: string): Record<string, unknown> {
+    const pending = this.db.getMcpOauthPending(state)
+    if (!pending || String(pending.actor_id) !== actor.id) throw new Error('OAuth state is invalid or expired')
+    const createdAt = Date.parse(String(pending.created_at))
+    if (!Number.isFinite(createdAt) || Date.now() - createdAt > MCP_OAUTH_PENDING_MAX_AGE_MS) {
+      this.db.failMcpOauth(state, 'OAuth authorization request expired')
+      throw new Error('OAuth state is invalid or expired')
+    }
+    return pending
   }
 
   private mcpOauthClientCredentials(issuer: string): { clientId: string; clientSecret?: string; scopes?: string } | undefined {

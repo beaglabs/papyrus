@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { Agent as HttpsAgent } from 'node:https'
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { SESSION_SURFACES } from '@papyrus/contracts'
-import type { ActivitySummary, AdminOverview, ApprovedSource, ApprovedSourceKind, Approval, Attachment, Elicitation, Environment, Invitation, InvitationIdentityKind, McpServer, Principal, ResearchSource, Role, Session, SessionConfigOption, SessionEvent, SessionRun, SessionSurface, SignedLicense, SourceSearchResult } from '@papyrus/contracts'
+import type { ActivitySummary, AdminOverview, ApprovedSource, ApprovedSourceKind, Approval, Attachment, Elicitation, Environment, Invitation, InvitationIdentityKind, McpOauthClient, McpServer, Principal, ResearchSource, Role, Session, SessionConfigOption, SessionEvent, SessionRun, SessionSurface, SignedLicense, SourceSearchResult } from '@papyrus/contracts'
 import type { ContentBlock } from '@agentclientprotocol/sdk'
 import type { AgentRuntime, RuntimeEvent, RuntimeLaunchOptions, RuntimeTool } from '@papyrus/acp-runtime'
 import { BROWSER_POLICY_ACTIONS, connectorPolicyAction } from './catalog.js'
@@ -19,7 +19,7 @@ import type { ServerConfig } from './config.js'
 import { PapyrusDatabase } from './db.js'
 import { LicenseService } from './license.js'
 import { callMcpTool, listMcpTools, validateMcpServer } from './mcp-client.js'
-import { exchangeMcpCode, normalizeMcpEndpoint, registerRemoteMcp } from './mcp-oauth.js'
+import { exchangeMcpCode, normalizeMcpEndpoint, prepareRemoteMcp, refreshMcpToken } from './mcp-oauth.js'
 import { PolicyEngine, cedarUser, cedarUsers, type AuthorizationResource, type PolicyAction } from './policy.js'
 
 export class AuthorizationDenied extends Error {
@@ -671,24 +671,79 @@ export class PapyrusService {
     const parsed = new URL(normalizeMcpEndpoint(input.endpoint))
     if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && ['127.0.0.1', '::1', 'localhost'].includes(parsed.hostname))) throw new Error('Remote MCP endpoints must use HTTPS')
     const redirectUri = `${this.config.publicOrigin}/api/mcp/oauth/callback`
-    const oauth = await registerRemoteMcp(parsed.toString(), redirectUri, `Papyrus — ${input.name}`)
-    if (!oauth) await validateMcpServer(parsed.toString())
-    const server = this.db.addMcpServer({ ...input, endpoint: parsed.toString(), oauthStatus: oauth ? 'authorization_required' : 'not_required', ...(oauth ? { oauthIssuer: oauth.issuer } : {}) })
-    if (oauth) this.db.createMcpOauthPending({ state: oauth.state, serverId: server.id, actorId: actor.id, issuer: oauth.issuer, tokenEndpoint: oauth.tokenEndpoint, clientId: oauth.clientId, ...(oauth.clientSecret ? { clientSecret: this.seal(oauth.clientSecret) } : {}), verifier: this.seal(oauth.verifier), redirectUri, resource: oauth.resource })
-    this.audit.append({ actorId: actor.id, action: 'AddMcpServer', resourceType: 'McpServer', resourceId: server.id, decision: 'info', metadata: { name: server.name } })
-    return { server, ...(oauth ? { authorizationUrl: oauth.authorizationUrl } : {}) }
+    const preparation = await prepareRemoteMcp(parsed.toString(), redirectUri, `Papyrus — ${input.name}`, {
+      clientMetadataUrl: `${this.config.publicOrigin}/.well-known/mcp-client.json`,
+      resolveClient: (issuer) => this.mcpOauthClientCredentials(issuer),
+    })
+
+    if (preparation.kind === 'not_required') {
+      await validateMcpServer(parsed.toString())
+      const server = this.db.addMcpServer({ ...input, endpoint: parsed.toString(), oauthStatus: 'not_required' })
+      this.audit.append({ actorId: actor.id, action: 'AddMcpServer', resourceType: 'McpServer', resourceId: server.id, decision: 'info', metadata: { name: server.name, oauth: 'not_required' } })
+      return { server }
+    }
+
+    if (preparation.kind === 'configuration_required') {
+      const server = this.db.addMcpServer({
+        ...input,
+        endpoint: parsed.toString(),
+        oauthStatus: 'configuration_required',
+        oauthIssuer: preparation.issuer,
+        oauthError: preparation.reason,
+      })
+      this.audit.append({ actorId: actor.id, action: 'AddMcpServer', resourceType: 'McpServer', resourceId: server.id, decision: 'info', metadata: { name: server.name, oauth: 'configuration_required', issuer: preparation.issuer } })
+      return { server }
+    }
+
+    const oauth = preparation.registration
+    const server = this.db.addMcpServer({
+      ...input,
+      endpoint: parsed.toString(),
+      oauthStatus: 'authorization_required',
+      oauthIssuer: oauth.issuer,
+      oauthRegistrationMethod: oauth.registrationMethod,
+    })
+    this.db.createMcpOauthPending({
+      state: oauth.state, serverId: server.id, actorId: actor.id, issuer: oauth.issuer, tokenEndpoint: oauth.tokenEndpoint, clientId: oauth.clientId,
+      ...(oauth.clientSecret ? { clientSecret: this.seal(oauth.clientSecret) } : {}),
+      verifier: this.seal(oauth.verifier), redirectUri, resource: oauth.resource, registrationMethod: oauth.registrationMethod,
+      ...(oauth.scope ? { scope: oauth.scope } : {}),
+    })
+    this.audit.append({ actorId: actor.id, action: 'AddMcpServer', resourceType: 'McpServer', resourceId: server.id, decision: 'info', metadata: { name: server.name, oauth: oauth.registrationMethod, issuer: oauth.issuer } })
+    return { server, authorizationUrl: oauth.authorizationUrl }
   }
 
-  async completeMcpOauth(actor: Principal, state: string, code: string): Promise<McpServer> {
+  async completeMcpOauth(actor: Principal, state: string, code: string, issuer?: string): Promise<McpServer> {
     const pending = this.db.getMcpOauthPending(state)
     if (!pending || String(pending.actor_id) !== actor.id) throw new Error('OAuth state is invalid or expired')
-    const token = await exchangeMcpCode({ ...pending, verifier: this.open(String(pending.verifier)), ...(pending.client_secret ? { client_secret: this.open(String(pending.client_secret)) } : {}) }, code)
-    const pendingServer = this.db.getMcpServer(String(pending.server_id))
-    if (!pendingServer) throw new Error('MCP server registration was not found')
-    await validateMcpServer(pendingServer.endpoint, token.accessToken)
-    const server = this.db.finishMcpOauth(state, this.seal(token.accessToken), token.refreshToken ? this.seal(token.refreshToken) : undefined, token.expiresAt)
+    if (issuer && issuer !== String(pending.issuer)) throw new Error('OAuth authorization-server issuer does not match the pending request')
+    try {
+      const token = await exchangeMcpCode({
+        ...pending,
+        verifier: this.open(String(pending.verifier)),
+        ...(pending.client_secret ? { client_secret: this.open(String(pending.client_secret)) } : {}),
+      }, code)
+      const pendingServer = this.db.getMcpServer(String(pending.server_id))
+      if (!pendingServer) throw new Error('MCP server registration was not found')
+      await validateMcpServer(pendingServer.endpoint, token.accessToken)
+      const server = this.db.finishMcpOauth(state, this.seal(token.accessToken), token.refreshToken ? this.seal(token.refreshToken) : undefined, token.expiresAt)
+      if (!server) throw new Error('MCP server registration was not found')
+      this.audit.append({ actorId: actor.id, action: 'AuthorizeMcpServer', resourceType: 'McpServer', resourceId: server.id, decision: 'allow', metadata: { issuer: server.oauthIssuer, registrationMethod: server.oauthRegistrationMethod } })
+      return server
+    } catch (error) {
+      this.db.failMcpOauth(state, safeError(error))
+      throw error
+    }
+  }
+
+  failMcpOauth(actor: Principal, state: string, error: string, description?: string, issuer?: string): McpServer {
+    const pending = this.db.getMcpOauthPending(state)
+    if (!pending || String(pending.actor_id) !== actor.id) throw new Error('OAuth state is invalid or expired')
+    if (issuer && issuer !== String(pending.issuer)) throw new Error('OAuth authorization-server issuer does not match the pending request')
+    const message = description?.trim() ? `${error}: ${description}` : error
+    const server = this.db.failMcpOauth(state, message)
     if (!server) throw new Error('MCP server registration was not found')
-    this.audit.append({ actorId: actor.id, action: 'AuthorizeMcpServer', resourceType: 'McpServer', resourceId: server.id, decision: 'allow', metadata: { issuer: server.oauthIssuer } })
+    this.audit.append({ actorId: actor.id, action: 'AuthorizeMcpServer', resourceType: 'McpServer', resourceId: server.id, decision: 'deny', metadata: { issuer: server.oauthIssuer, error } })
     return server
   }
 
@@ -697,18 +752,57 @@ export class PapyrusService {
     return this.db.listMcpServers()
   }
 
-  async retryMcpOauth(actor: Principal, serverId: string): Promise<{ server: McpServer; authorizationUrl: string }> {
+  upsertMcpOauthClient(actor: Principal, input: { issuer: string; clientId: string; clientSecret?: string; scopes?: string }): McpOauthClient {
+    this.check(actor, 'ManageTools', { type: 'Deployment', id: this.license.deploymentId })
+    const issuerUrl = new URL(input.issuer)
+    if (issuerUrl.protocol !== 'https:' && !(issuerUrl.protocol === 'http:' && ['127.0.0.1', '::1', 'localhost'].includes(issuerUrl.hostname))) throw new Error('OAuth issuer must use HTTPS')
+    if (issuerUrl.username || issuerUrl.password || issuerUrl.search || issuerUrl.hash) throw new Error('OAuth issuer must not contain credentials, query, or fragment')
+    const issuer = issuerUrl.toString().replace(/\/$/, '')
+    const clientId = input.clientId.trim()
+    if (!clientId) throw new Error('OAuth client ID is required')
+    const client = this.db.upsertMcpOauthClient({
+      issuer,
+      clientId,
+      ...(input.clientSecret?.trim() ? { clientSecret: this.seal(input.clientSecret.trim()) } : {}),
+      ...(input.scopes?.trim() ? { scopes: input.scopes.trim() } : {}),
+      registrationMethod: 'preregistered',
+    })
+    this.audit.append({ actorId: actor.id, action: 'ConfigureMcpOauthClient', resourceType: 'McpOauthClient', resourceId: issuer, decision: 'info', metadata: { hasClientSecret: client.hasClientSecret } })
+    return client
+  }
+
+  deleteMcpOauthClient(actor: Principal, issuer: string): void {
+    this.check(actor, 'ManageTools', { type: 'Deployment', id: this.license.deploymentId })
+    if (!this.db.deleteMcpOauthClient(issuer)) throw new Error('OAuth client registration not found')
+    this.audit.append({ actorId: actor.id, action: 'DeleteMcpOauthClient', resourceType: 'McpOauthClient', resourceId: issuer, decision: 'info', metadata: {} })
+  }
+
+  async retryMcpOauth(actor: Principal, serverId: string): Promise<{ server: McpServer; authorizationUrl?: string }> {
     this.check(actor, 'ManageTools', { type: 'Deployment', id: this.license.deploymentId })
     const existing = this.db.getMcpServer(serverId)
     if (!existing) throw new Error('MCP server not found')
-    if (existing.oauthStatus !== 'authorization_required' && existing.oauthStatus !== 'error') throw new Error('MCP server does not require OAuth authorization')
+    if (!['configuration_required', 'authorization_required', 'error'].includes(existing.oauthStatus)) throw new Error('MCP server does not require OAuth authorization')
     const redirectUri = `${this.config.publicOrigin}/api/mcp/oauth/callback`
-    const oauth = await registerRemoteMcp(existing.endpoint, redirectUri, `Papyrus — ${existing.name}`)
-    if (!oauth) throw new Error('MCP server no longer requires OAuth; delete it and connect it again')
-    this.db.replaceMcpOauthPending({ state: oauth.state, serverId, actorId: actor.id, issuer: oauth.issuer, tokenEndpoint: oauth.tokenEndpoint, clientId: oauth.clientId, ...(oauth.clientSecret ? { clientSecret: this.seal(oauth.clientSecret) } : {}), verifier: this.seal(oauth.verifier), redirectUri, resource: oauth.resource })
+    const preparation = await prepareRemoteMcp(existing.endpoint, redirectUri, `Papyrus — ${existing.name}`, {
+      clientMetadataUrl: `${this.config.publicOrigin}/.well-known/mcp-client.json`,
+      resolveClient: (issuer) => this.mcpOauthClientCredentials(issuer),
+    })
+    if (preparation.kind === 'not_required') throw new Error('MCP server no longer requires OAuth; delete it and connect it again')
+    if (preparation.kind === 'configuration_required') {
+      const server = this.db.markMcpOauthConfigurationRequired(serverId, preparation.issuer, preparation.reason)
+      if (!server) throw new Error('MCP server not found')
+      return { server }
+    }
+    const oauth = preparation.registration
+    this.db.replaceMcpOauthPending({
+      state: oauth.state, serverId, actorId: actor.id, issuer: oauth.issuer, tokenEndpoint: oauth.tokenEndpoint, clientId: oauth.clientId,
+      ...(oauth.clientSecret ? { clientSecret: this.seal(oauth.clientSecret) } : {}),
+      verifier: this.seal(oauth.verifier), redirectUri, resource: oauth.resource, registrationMethod: oauth.registrationMethod,
+      ...(oauth.scope ? { scope: oauth.scope } : {}),
+    })
     const server = this.db.getMcpServer(serverId)
     if (!server) throw new Error('MCP server not found')
-    this.audit.append({ actorId: actor.id, action: 'RetryMcpAuthorization', resourceType: 'McpServer', resourceId: serverId, decision: 'info', metadata: { issuer: oauth.issuer } })
+    this.audit.append({ actorId: actor.id, action: 'RetryMcpAuthorization', resourceType: 'McpServer', resourceId: serverId, decision: 'info', metadata: { issuer: oauth.issuer, registrationMethod: oauth.registrationMethod } })
     return { server, authorizationUrl: oauth.authorizationUrl }
   }
 
@@ -806,7 +900,7 @@ export class PapyrusService {
       invitations: this.db.listInvitations(),
       environments: this.db.listEnvironments().map((environment) => ({ ...environment, assignedUserIds: this.db.assignedUserIds('environment', environment.id) })),
       sources: this.sources.listAll(),
-      mcpServers: this.db.listMcpServers(), toolGrants: this.db.listToolGrants(),
+      mcpServers: this.db.listMcpServers(), mcpOauthClients: this.db.listMcpOauthClients(), toolGrants: this.db.listToolGrants(),
       license: this.license.status(),
     }
   }
@@ -828,7 +922,7 @@ export class PapyrusService {
     if (!server?.enabled) throw new Error('MCP server unavailable')
     const started = Date.now()
     try {
-      const result = await callMcpTool(server.endpoint, this.mcpAccessToken(server.id), toolName, args)
+      const result = await callMcpTool(server.endpoint, await this.mcpAccessToken(server.id), toolName, args)
       this.audit.append({ actorId: actor.id, action: 'InvokeTool', resourceType: 'Tool', resourceId: `${mcpServerId}:${toolName}`, decision: 'allow', metadata: { sessionId, durationMs: Date.now() - started, transport: 'mcp-typescript-sdk' } })
       return result
     } catch (error) {
@@ -851,7 +945,7 @@ export class PapyrusService {
     const server = this.db.getMcpServer(mcpServerId)
     if (!server?.enabled) throw new Error('MCP server unavailable')
     if (method === 'tools/list') {
-      const result = await this.forwardRuntimeMcp(server.endpoint, message, this.mcpAuthorization(server.id))
+      const result = await this.forwardRuntimeMcp(server.endpoint, message, await this.mcpAuthorization(server.id))
       if (result && typeof result === 'object') {
         const envelope = result as { result?: { tools?: Array<{ name?: string }> } }
         if (Array.isArray(envelope.result?.tools)) envelope.result.tools = envelope.result.tools.filter((tool) => typeof tool.name === 'string' && this.db.isToolGranted(session.environmentId, mcpServerId, tool.name))
@@ -860,7 +954,7 @@ export class PapyrusService {
       return result
     }
     if (!['initialize', 'notifications/initialized', 'ping'].includes(method)) throw new AuthorizationDenied('McpMethod', method)
-    return this.forwardRuntimeMcp(server.endpoint, message, this.mcpAuthorization(server.id))
+    return this.forwardRuntimeMcp(server.endpoint, message, await this.mcpAuthorization(server.id))
   }
 
   activity(actor: Principal): ActivitySummary {
@@ -1048,7 +1142,7 @@ export class PapyrusService {
     tools.set('papyrus_sources_read', { name: 'papyrus_sources_read', description: 'Read a cited approved-source chunk. Access is rechecked against current assignments.', inputSchema: { type: 'object', properties: { chunkId: { type: 'string' } }, required: ['chunkId'] } })
     for (const server of this.db.listMcpServers()) {
       if (!server.enabled || !grantedServerIds.has(server.id)) continue
-      const listed = await listMcpTools(server.endpoint, this.mcpAccessToken(server.id)).catch((error) => {
+      const listed = await listMcpTools(server.endpoint, await this.mcpAccessToken(server.id)).catch((error) => {
         this.audit.append({
           actorId: session.ownerId,
           action: 'DiscoverTools',
@@ -1097,13 +1191,49 @@ export class PapyrusService {
     } catch { return false }
   }
 
-  private mcpAccessToken(serverId: string): string | undefined {
-    const token = this.db.mcpAccessToken(serverId)
-    return token ? this.open(token) : undefined
+  private mcpOauthClientCredentials(issuer: string): { clientId: string; clientSecret?: string; scopes?: string } | undefined {
+    const credentials = this.db.mcpOauthClientCredentials(issuer)
+    if (!credentials) return undefined
+    return {
+      clientId: credentials.clientId,
+      ...(credentials.clientSecret ? { clientSecret: this.open(credentials.clientSecret) } : {}),
+      ...(credentials.scopes ? { scopes: credentials.scopes } : {}),
+    }
   }
 
-  private mcpAuthorization(serverId: string): Record<string, string> {
-    const token = this.mcpAccessToken(serverId)
+  private async mcpAccessToken(serverId: string): Promise<string | undefined> {
+    const credential = this.db.mcpOauthCredential(serverId)
+    if (!credential?.accessToken) return undefined
+    const expiresSoon = credential.expiresAt && Date.parse(credential.expiresAt) <= Date.now() + 60_000
+    if (!expiresSoon) return this.open(credential.accessToken)
+    if (!credential.refreshToken || !credential.tokenEndpoint || !credential.clientId || !credential.resource) {
+      this.db.markMcpOauthReauthorizationRequired(serverId, 'OAuth access token expired and cannot be refreshed')
+      throw new Error('MCP OAuth authorization must be renewed')
+    }
+    try {
+      const refreshed = await refreshMcpToken({
+        tokenEndpoint: credential.tokenEndpoint,
+        clientId: credential.clientId,
+        ...(credential.clientSecret ? { clientSecret: this.open(credential.clientSecret) } : {}),
+        refreshToken: this.open(credential.refreshToken),
+        resource: credential.resource,
+        ...(credential.scope ? { scope: credential.scope } : {}),
+      })
+      this.db.updateMcpOauthTokens(
+        serverId,
+        this.seal(refreshed.accessToken),
+        refreshed.refreshToken ? this.seal(refreshed.refreshToken) : undefined,
+        refreshed.expiresAt,
+      )
+      return refreshed.accessToken
+    } catch (error) {
+      this.db.markMcpOauthReauthorizationRequired(serverId, `OAuth refresh failed: ${safeError(error)}`)
+      throw error
+    }
+  }
+
+  private async mcpAuthorization(serverId: string): Promise<Record<string, string>> {
+    const token = await this.mcpAccessToken(serverId)
     return token ? { authorization: `Bearer ${token}` } : {}
   }
 

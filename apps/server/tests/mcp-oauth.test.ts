@@ -106,6 +106,22 @@ describe('remote MCP OAuth 2.1 registration', () => {
     )).rejects.toThrow('protected-resource metadata does not match')
   })
 
+  it('unions a stored step-up scope with configured client scopes', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(oauthChallenge())
+      .mockResolvedValueOnce(resourceMetadata())
+      .mockResolvedValueOnce(authorizationMetadata())
+    vi.stubGlobal('fetch', fetch)
+
+    const result = await prepareRemoteMcp('https://mcp.example/mcp', 'https://papyrus.example/api/mcp/oauth/callback', 'Papyrus', {
+      requestedScope: 'workflow notifications',
+      resolveClient: () => ({ clientId: 'configured-client', clientSecret: 'configured-secret', scopes: 'repo workflow' }),
+    })
+    expect(result.kind).toBe('authorization_required')
+    if (result.kind !== 'authorization_required') return
+    expect(new Set(new URL(result.registration.authorizationUrl).searchParams.get('scope')?.split(' '))).toEqual(new Set(['repo', 'workflow', 'notifications']))
+  })
+
   it('uses an OAuth challenge scope without expanding to every supported scope', async () => {
     const challenge = new Response('', {
       status: 401,

@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import Database from 'libsql'
-import type { Approval, Attachment, Elicitation, Environment, Invitation, InvitationIdentityKind, McpServer, Principal, Role, Session, SessionEvent, SessionSurface, SessionRun, ToolGrant } from '@papyrus/contracts'
+import type { Approval, Attachment, Elicitation, Environment, Invitation, InvitationIdentityKind, McpOauthClient, McpOauthRegistrationMethod, McpServer, Principal, Role, Session, SessionEvent, SessionSurface, SessionRun, ToolGrant } from '@papyrus/contracts'
 
 type Row = Record<string, unknown>
 type SqliteDatabase = InstanceType<typeof Database>
@@ -91,12 +91,19 @@ export class PapyrusDatabase {
         id TEXT PRIMARY KEY, name TEXT NOT NULL, transport TEXT NOT NULL CHECK(transport = 'http'),
         endpoint TEXT NOT NULL, enabled INTEGER NOT NULL, created_at TEXT NOT NULL,
         oauth_status TEXT NOT NULL DEFAULT 'not_required', oauth_issuer TEXT, oauth_error TEXT,
-        oauth_access_token TEXT, oauth_refresh_token TEXT, oauth_expires_at TEXT
+        oauth_registration_method TEXT, oauth_access_token TEXT, oauth_refresh_token TEXT, oauth_expires_at TEXT,
+        oauth_token_endpoint TEXT, oauth_client_id TEXT, oauth_client_secret TEXT, oauth_resource TEXT, oauth_scope TEXT
+      );
+      CREATE TABLE IF NOT EXISTS mcp_oauth_clients (
+        issuer TEXT PRIMARY KEY, client_id TEXT NOT NULL, client_secret TEXT, scopes TEXT,
+        registration_method TEXT NOT NULL DEFAULT 'preregistered',
+        metadata_url TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS mcp_oauth_pending (
         state TEXT PRIMARY KEY, server_id TEXT NOT NULL REFERENCES mcp_servers(id), actor_id TEXT NOT NULL REFERENCES users(id),
         issuer TEXT NOT NULL, token_endpoint TEXT NOT NULL, client_id TEXT NOT NULL, client_secret TEXT,
-        verifier TEXT NOT NULL, redirect_uri TEXT NOT NULL, resource TEXT NOT NULL, created_at TEXT NOT NULL
+        verifier TEXT NOT NULL, redirect_uri TEXT NOT NULL, resource TEXT NOT NULL,
+        registration_method TEXT NOT NULL DEFAULT 'preregistered', scope TEXT, created_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS tool_grants (
         id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
@@ -154,9 +161,25 @@ export class PapyrusDatabase {
       this.sqlite.exec('ALTER TABLE runtime_events ADD COLUMN run_id TEXT REFERENCES session_runs(id)')
     }
     const mcpColumns = this.sqlite.prepare('PRAGMA table_info(mcp_servers)').all() as Row[]
-    for (const [name, definition] of Object.entries({ oauth_status: "TEXT NOT NULL DEFAULT 'not_required'", oauth_issuer: 'TEXT', oauth_error: 'TEXT', oauth_access_token: 'TEXT', oauth_refresh_token: 'TEXT', oauth_expires_at: 'TEXT' })) {
+    for (const [name, definition] of Object.entries({
+      oauth_status: "TEXT NOT NULL DEFAULT 'not_required'",
+      oauth_issuer: 'TEXT',
+      oauth_error: 'TEXT',
+      oauth_registration_method: 'TEXT',
+      oauth_access_token: 'TEXT',
+      oauth_refresh_token: 'TEXT',
+      oauth_expires_at: 'TEXT',
+      oauth_token_endpoint: 'TEXT',
+      oauth_client_id: 'TEXT',
+      oauth_client_secret: 'TEXT',
+      oauth_resource: 'TEXT',
+      oauth_scope: 'TEXT',
+    })) {
       if (!mcpColumns.some((column) => column.name === name)) this.sqlite.exec(`ALTER TABLE mcp_servers ADD COLUMN ${name} ${definition}`)
     }
+    const pendingColumns = this.sqlite.prepare('PRAGMA table_info(mcp_oauth_pending)').all() as Row[]
+    if (!pendingColumns.some((column) => column.name === 'registration_method')) this.sqlite.exec("ALTER TABLE mcp_oauth_pending ADD COLUMN registration_method TEXT NOT NULL DEFAULT 'preregistered'")
+    if (!pendingColumns.some((column) => column.name === 'scope')) this.sqlite.exec('ALTER TABLE mcp_oauth_pending ADD COLUMN scope TEXT')
     this.sqlite.prepare("UPDATE assignments SET resource_type='environment' WHERE resource_type='workspace'").run()
     this.sqlite.exec(`
       CREATE UNIQUE INDEX IF NOT EXISTS invitations_one_pending_identity
@@ -607,9 +630,17 @@ export class PapyrusDatabase {
     }
   }
 
-  addMcpServer(input: Pick<McpServer, 'name' | 'endpoint'> & Pick<McpServer, 'oauthStatus' | 'oauthIssuer' | 'oauthError'>): McpServer {
-    const server: McpServer = { id: crypto.randomUUID(), name: input.name, endpoint: input.endpoint, transport: 'http', enabled: input.oauthStatus === 'not_required', oauthStatus: input.oauthStatus, ...(input.oauthIssuer ? { oauthIssuer: input.oauthIssuer } : {}), ...(input.oauthError ? { oauthError: input.oauthError } : {}), createdAt: new Date().toISOString() }
-    this.sqlite.prepare('INSERT INTO mcp_servers(id,name,transport,endpoint,enabled,created_at,oauth_status,oauth_issuer,oauth_error) VALUES(?,?,?,?,?,?,?,?,?)').run(server.id, server.name, server.transport, server.endpoint, server.enabled ? 1 : 0, server.createdAt, server.oauthStatus, server.oauthIssuer ?? null, server.oauthError ?? null)
+  addMcpServer(input: Pick<McpServer, 'name' | 'endpoint'> & Pick<McpServer, 'oauthStatus' | 'oauthIssuer' | 'oauthError' | 'oauthRegistrationMethod'>): McpServer {
+    const server: McpServer = {
+      id: crypto.randomUUID(), name: input.name, endpoint: input.endpoint, transport: 'http',
+      enabled: input.oauthStatus === 'not_required', oauthStatus: input.oauthStatus,
+      ...(input.oauthIssuer ? { oauthIssuer: input.oauthIssuer } : {}),
+      ...(input.oauthError ? { oauthError: input.oauthError } : {}),
+      ...(input.oauthRegistrationMethod ? { oauthRegistrationMethod: input.oauthRegistrationMethod } : {}),
+      createdAt: new Date().toISOString(),
+    }
+    this.sqlite.prepare('INSERT INTO mcp_servers(id,name,transport,endpoint,enabled,created_at,oauth_status,oauth_issuer,oauth_error,oauth_registration_method) VALUES(?,?,?,?,?,?,?,?,?,?)')
+      .run(server.id, server.name, server.transport, server.endpoint, server.enabled ? 1 : 0, server.createdAt, server.oauthStatus, server.oauthIssuer ?? null, server.oauthError ?? null, server.oauthRegistrationMethod ?? null)
     return server
   }
 
@@ -625,6 +656,21 @@ export class PapyrusDatabase {
 
   setMcpServerEnabled(id: string, enabled: boolean): McpServer | undefined {
     this.sqlite.prepare('UPDATE mcp_servers SET enabled=? WHERE id=?').run(enabled ? 1 : 0, id)
+    return this.getMcpServer(id)
+  }
+
+  markMcpOauthConfigurationRequired(id: string, issuer: string, error: string): McpServer | undefined {
+    this.sqlite.prepare("UPDATE mcp_servers SET enabled=0,oauth_status='configuration_required',oauth_issuer=?,oauth_error=?,oauth_registration_method=NULL WHERE id=?").run(issuer, error, id)
+    return this.getMcpServer(id)
+  }
+
+  markMcpOauthError(id: string, error: string): McpServer | undefined {
+    this.sqlite.prepare("UPDATE mcp_servers SET enabled=0,oauth_status='error',oauth_error=? WHERE id=?").run(error, id)
+    return this.getMcpServer(id)
+  }
+
+  markMcpOauthReauthorizationRequired(id: string, error?: string): McpServer | undefined {
+    this.sqlite.prepare("UPDATE mcp_servers SET enabled=0,oauth_status='authorization_required',oauth_error=?,oauth_access_token=NULL,oauth_refresh_token=NULL,oauth_expires_at=NULL WHERE id=?").run(error ?? null, id)
     return this.getMcpServer(id)
   }
 
@@ -654,14 +700,58 @@ export class PapyrusDatabase {
     return rows.map((row) => this.mcpServer(row))
   }
 
-  createMcpOauthPending(input: { state: string; serverId: string; actorId: string; issuer: string; tokenEndpoint: string; clientId: string; clientSecret?: string; verifier: string; redirectUri: string; resource: string }): void {
-    this.sqlite.prepare('INSERT INTO mcp_oauth_pending VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(input.state, input.serverId, input.actorId, input.issuer, input.tokenEndpoint, input.clientId, input.clientSecret ?? null, input.verifier, input.redirectUri, input.resource, new Date().toISOString())
+  upsertMcpOauthClient(input: { issuer: string; clientId: string; clientSecret?: string; scopes?: string; registrationMethod?: McpOauthRegistrationMethod; metadataUrl?: string }): McpOauthClient {
+    const now = new Date().toISOString()
+    this.sqlite.prepare(`INSERT INTO mcp_oauth_clients(issuer,client_id,client_secret,scopes,registration_method,metadata_url,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?)
+      ON CONFLICT(issuer) DO UPDATE SET client_id=excluded.client_id,client_secret=excluded.client_secret,scopes=excluded.scopes,registration_method=excluded.registration_method,metadata_url=excluded.metadata_url,updated_at=excluded.updated_at`)
+      .run(input.issuer, input.clientId, input.clientSecret ?? null, input.scopes ?? null, input.registrationMethod ?? 'preregistered', input.metadataUrl ?? null, now, now)
+    return this.getMcpOauthClient(input.issuer)!
   }
 
-  replaceMcpOauthPending(input: { state: string; serverId: string; actorId: string; issuer: string; tokenEndpoint: string; clientId: string; clientSecret?: string; verifier: string; redirectUri: string; resource: string }): void {
+  getMcpOauthClient(issuer: string): McpOauthClient | undefined {
+    const row = this.sqlite.prepare('SELECT * FROM mcp_oauth_clients WHERE issuer=?').get(issuer) as Row | undefined
+    return row ? this.mcpOauthClient(row) : undefined
+  }
+
+  listMcpOauthClients(): McpOauthClient[] {
+    return (this.sqlite.prepare('SELECT * FROM mcp_oauth_clients ORDER BY issuer').all() as Row[]).map((row) => this.mcpOauthClient(row))
+  }
+
+  mcpOauthClientCredentials(issuer: string): { clientId: string; clientSecret?: string; scopes?: string } | undefined {
+    const row = this.sqlite.prepare('SELECT client_id,client_secret,scopes FROM mcp_oauth_clients WHERE issuer=?').get(issuer) as Row | undefined
+    if (!row) return undefined
+    return {
+      clientId: String(row.client_id),
+      ...(row.client_secret ? { clientSecret: String(row.client_secret) } : {}),
+      ...(row.scopes ? { scopes: String(row.scopes) } : {}),
+    }
+  }
+
+  deleteMcpOauthClient(issuer: string): boolean {
+    return Number(this.sqlite.prepare('DELETE FROM mcp_oauth_clients WHERE issuer=?').run(issuer).changes) > 0
+  }
+
+  createMcpOauthPending(input: {
+    state: string; serverId: string; actorId: string; issuer: string; tokenEndpoint: string; clientId: string; clientSecret?: string;
+    verifier: string; redirectUri: string; resource: string; registrationMethod: McpOauthRegistrationMethod; scope?: string
+  }): void {
+    this.sqlite.prepare(`INSERT INTO mcp_oauth_pending(
+      state,server_id,actor_id,issuer,token_endpoint,client_id,client_secret,verifier,redirect_uri,resource,registration_method,scope,created_at
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      input.state, input.serverId, input.actorId, input.issuer, input.tokenEndpoint, input.clientId, input.clientSecret ?? null,
+      input.verifier, input.redirectUri, input.resource, input.registrationMethod, input.scope ?? null, new Date().toISOString(),
+    )
+  }
+
+  replaceMcpOauthPending(input: {
+    state: string; serverId: string; actorId: string; issuer: string; tokenEndpoint: string; clientId: string; clientSecret?: string;
+    verifier: string; redirectUri: string; resource: string; registrationMethod: McpOauthRegistrationMethod; scope?: string
+  }): void {
     this.transaction(() => {
       this.sqlite.prepare('DELETE FROM mcp_oauth_pending WHERE server_id=?').run(input.serverId)
-      this.sqlite.prepare("UPDATE mcp_servers SET enabled=0,oauth_status='authorization_required',oauth_issuer=?,oauth_error=NULL,oauth_access_token=NULL,oauth_refresh_token=NULL,oauth_expires_at=NULL WHERE id=?").run(input.issuer, input.serverId)
+      this.sqlite.prepare("UPDATE mcp_servers SET enabled=0,oauth_status='authorization_required',oauth_issuer=?,oauth_error=NULL,oauth_registration_method=?,oauth_access_token=NULL,oauth_refresh_token=NULL,oauth_expires_at=NULL WHERE id=?")
+        .run(input.issuer, input.registrationMethod, input.serverId)
       this.createMcpOauthPending(input)
     })
   }
@@ -674,22 +764,79 @@ export class PapyrusDatabase {
     })
   }
 
-  getMcpOauthPending(state: string): Row | undefined { return this.sqlite.prepare('SELECT * FROM mcp_oauth_pending WHERE state=?').get(state) as Row | undefined }
-  finishMcpOauth(state: string, accessToken: string, refreshToken: string | undefined, expiresAt: string | undefined): McpServer | undefined {
+  getMcpOauthPending(state: string): Row | undefined {
+    return this.sqlite.prepare('SELECT * FROM mcp_oauth_pending WHERE state=?').get(state) as Row | undefined
+  }
+
+  failMcpOauth(state: string, error: string): McpServer | undefined {
     const pending = this.getMcpOauthPending(state); if (!pending) return undefined
     this.transaction(() => {
-      this.sqlite.prepare("UPDATE mcp_servers SET enabled=1,oauth_status='connected',oauth_error=NULL,oauth_access_token=?,oauth_refresh_token=?,oauth_expires_at=? WHERE id=?").run(accessToken, refreshToken ?? null, expiresAt ?? null, String(pending.server_id))
+      this.sqlite.prepare("UPDATE mcp_servers SET enabled=0,oauth_status='error',oauth_error=? WHERE id=?").run(error, String(pending.server_id))
       this.sqlite.prepare('DELETE FROM mcp_oauth_pending WHERE state=?').run(state)
     })
     return this.getMcpServer(String(pending.server_id))
   }
 
-  mcpAccessToken(serverId: string): string | undefined {
-    const row = this.sqlite.prepare("SELECT oauth_access_token token FROM mcp_servers WHERE id=? AND oauth_status='connected'").get(serverId) as Row | undefined
-    return row?.token ? String(row.token) : undefined
+  finishMcpOauth(state: string, accessToken: string, refreshToken: string | undefined, expiresAt: string | undefined): McpServer | undefined {
+    const pending = this.getMcpOauthPending(state); if (!pending) return undefined
+    this.transaction(() => {
+      this.sqlite.prepare(`UPDATE mcp_servers SET
+        enabled=1,oauth_status='connected',oauth_error=NULL,oauth_registration_method=?,
+        oauth_access_token=?,oauth_refresh_token=?,oauth_expires_at=?,
+        oauth_token_endpoint=?,oauth_client_id=?,oauth_client_secret=?,oauth_resource=?,oauth_scope=?
+        WHERE id=?`).run(
+        String(pending.registration_method), accessToken, refreshToken ?? null, expiresAt ?? null,
+        String(pending.token_endpoint), String(pending.client_id), pending.client_secret ?? null,
+        String(pending.resource), pending.scope ?? null, String(pending.server_id),
+      )
+      this.sqlite.prepare('DELETE FROM mcp_oauth_pending WHERE state=?').run(state)
+    })
+    return this.getMcpServer(String(pending.server_id))
+  }
+
+  mcpOauthCredential(serverId: string): {
+    accessToken?: string; refreshToken?: string; expiresAt?: string; tokenEndpoint?: string; clientId?: string; clientSecret?: string; resource?: string; scope?: string
+  } | undefined {
+    const row = this.sqlite.prepare(`SELECT oauth_access_token,oauth_refresh_token,oauth_expires_at,oauth_token_endpoint,oauth_client_id,oauth_client_secret,oauth_resource,oauth_scope
+      FROM mcp_servers WHERE id=? AND oauth_status='connected'`).get(serverId) as Row | undefined
+    if (!row) return undefined
+    return {
+      ...(row.oauth_access_token ? { accessToken: String(row.oauth_access_token) } : {}),
+      ...(row.oauth_refresh_token ? { refreshToken: String(row.oauth_refresh_token) } : {}),
+      ...(row.oauth_expires_at ? { expiresAt: String(row.oauth_expires_at) } : {}),
+      ...(row.oauth_token_endpoint ? { tokenEndpoint: String(row.oauth_token_endpoint) } : {}),
+      ...(row.oauth_client_id ? { clientId: String(row.oauth_client_id) } : {}),
+      ...(row.oauth_client_secret ? { clientSecret: String(row.oauth_client_secret) } : {}),
+      ...(row.oauth_resource ? { resource: String(row.oauth_resource) } : {}),
+      ...(row.oauth_scope ? { scope: String(row.oauth_scope) } : {}),
+    }
+  }
+
+  updateMcpOauthTokens(serverId: string, accessToken: string, refreshToken: string | undefined, expiresAt: string | undefined): void {
+    this.sqlite.prepare('UPDATE mcp_servers SET oauth_access_token=?,oauth_refresh_token=COALESCE(?,oauth_refresh_token),oauth_expires_at=?,oauth_error=NULL WHERE id=?')
+      .run(accessToken, refreshToken ?? null, expiresAt ?? null, serverId)
+  }
+
+  private mcpOauthClient(row: Row): McpOauthClient {
+    return {
+      issuer: String(row.issuer),
+      clientId: String(row.client_id),
+      hasClientSecret: Boolean(row.client_secret),
+      ...(row.scopes ? { scopes: String(row.scopes) } : {}),
+      registrationMethod: String(row.registration_method ?? 'preregistered') as McpOauthRegistrationMethod,
+      ...(row.metadata_url ? { metadataUrl: String(row.metadata_url) } : {}),
+      createdAt: String(row.created_at),
+      updatedAt: String(row.updated_at),
+    }
   }
 
   private mcpServer(row: Row): McpServer {
-    return { id: String(row.id), name: String(row.name), transport: 'http', endpoint: String(row.endpoint), enabled: Boolean(row.enabled), oauthStatus: String(row.oauth_status ?? 'not_required') as McpServer['oauthStatus'], ...(row.oauth_issuer ? { oauthIssuer: String(row.oauth_issuer) } : {}), ...(row.oauth_error ? { oauthError: String(row.oauth_error) } : {}), createdAt: String(row.created_at) }
-  }
-}
+    return {
+      id: String(row.id), name: String(row.name), transport: 'http', endpoint: String(row.endpoint),
+      enabled: Boolean(row.enabled), oauthStatus: String(row.oauth_status ?? 'not_required') as McpServer['oauthStatus'],
+      ...(row.oauth_issuer ? { oauthIssuer: String(row.oauth_issuer) } : {}),
+      ...(row.oauth_error ? { oauthError: String(row.oauth_error) } : {}),
+      ...(row.oauth_registration_method ? { oauthRegistrationMethod: String(row.oauth_registration_method) as McpOauthRegistrationMethod } : {}),
+      createdAt: String(row.created_at),
+    }
+  }}

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Artifact, SessionEvent } from '@papyrus/contracts'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { ArtifactWorkspace, PromptTurnFlow, hasAcceptedTurn, latestBrowserState, latestRunRunning, projectActivity } from './Sessions.js'
+import { ArtifactWorkspace, PromptTurnFlow, hasAcceptedTurn, isArtifactGenerationActive, latestBrowserState, latestRunRunning, projectActivity } from './Sessions.js'
 
 function event(sequence: number, data: Record<string, unknown>): SessionEvent {
   return { id: String(sequence), sessionId: 'session', runId: 'run', sequence, kind: 'update', occurredAt: new Date(0).toISOString(), data } as SessionEvent
@@ -64,6 +64,26 @@ describe('Mastra session projection', () => {
     const continuing = renderToStaticMarkup(createElement(PromptTurnFlow, { events: [event(1, { sessionUpdate: 'tool_call', toolCallId: 't', status: 'completed' })], running: true, submitted: false }))
     expect(continuing).toContain('Working…')
     expect(continuing).not.toContain('Turn complete')
+  })
+
+  it('surfaces a failed tool while the model is recovering instead of a generic working status', () => {
+    const html = renderToStaticMarkup(createElement(PromptTurnFlow, { events: [
+      event(1, { sessionUpdate: 'agent_thought_chunk', messageId: 'thought', content: { type: 'text', text: 'Working…' } }),
+      event(2, { sessionUpdate: 'tool_call', toolCallId: 'cmd', title: 'Execute command', status: 'in_progress' }),
+      event(3, { sessionUpdate: 'tool_call_update', toolCallId: 'cmd', title: 'Execute command', status: 'failed', _meta: { papyrus: { exitCode: 128 } } }),
+    ], running: true, submitted: false }))
+    expect(html).toContain('Recovering after Execute command failed')
+    expect(html).toContain('Command exited with code 128 and produced no diagnostic output.')
+  })
+
+  it('keeps artifact generation visible after Create PDF finishes while the turn finalizes', () => {
+    const events = [
+      event(1, { sessionUpdate: 'tool_call', toolCallId: 'pdf', title: 'Create PDF', kind: 'edit', status: 'in_progress' }),
+      event(2, { sessionUpdate: 'tool_call_update', toolCallId: 'pdf', title: 'Create PDF', kind: 'edit', status: 'completed' }),
+    ]
+    expect(isArtifactGenerationActive(events)).toBe(true)
+    const html = renderToStaticMarkup(createElement(PromptTurnFlow, { events, running: true, submitted: false }))
+    expect(html).toContain('Create PDF complete · finalizing artifact')
   })
 
   it('does not label a failed run as complete', () => {

@@ -130,6 +130,7 @@ export class MastraAgentWorker implements AgentRuntime {
     }
     let artifactsEmitted = false
     let reasoningStatusEmitted = false
+    let agentMessageStep = 0
     const complete = async (stopReason: string): Promise<RuntimePromptResult> => {
       await closeActiveTools(stopReason === 'cancelled' ? 'Cancelled' : 'Run ended before this tool completed')
       if (!artifactsEmitted) {
@@ -161,7 +162,7 @@ export class MastraAgentWorker implements AgentRuntime {
             if (typeof delta.text === 'string' && delta.text) {
               await request.onEvent({
                 kind: 'update', at: new Date().toISOString(),
-                data: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: delta.text }, messageId: `agent_${runtimeSessionId}` },
+                data: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: delta.text }, messageId: `agent_${runtimeSessionId}_${agentMessageStep}` },
               })
             }
             break
@@ -251,8 +252,12 @@ export class MastraAgentWorker implements AgentRuntime {
             return await complete(normalizeStopReason(reason))
           }
           // A step is not a turn: tool results, goal evaluation, and further model
-          // calls may follow. Only Mastra's final `finish` completes the run.
-          case 'step-finish': break
+          // calls may follow. Advance the ACP message id so text from a
+          // post-tool synthesis step is rendered after the tool activity
+          // instead of being merged into the pre-tool assistant message.
+          case 'step-finish':
+            agentMessageStep += 1
+            break
           case 'abort': return await complete('cancelled')
           case 'error': {
             const payload = chunk.payload as { error?: unknown } | undefined

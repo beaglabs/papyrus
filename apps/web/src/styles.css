@@ -893,3 +893,67 @@ nav [data-slot=button].active{border-color:var(--border);background:var(--main);
     width: 100%;
   }
 }
+
+
+/* MCP OAuth administration */
+.mcp-oauth-clients {
+  display: grid;
+  gap: 10px;
+  padding-top: 4px;
+}
+.mcp-oauth-clients > .eyebrow {
+  margin: 0;
+}
+.oauth-client-dialog [data-slot=dialog-header],
+.oauth-registration-dialog [data-slot=dialog-header] {
+  margin-bottom: 18px;
+}
+.oauth-client-dialog form {
+  display: grid;
+  gap: 18px;
+}
+.oauth-client-dialog form > p {
+  margin: 0;
+  color: #555;
+  line-height: 1.5;
+}
+.oauth-client-fields {
+  display: grid;
+  gap: 12px;
+}
+.oauth-client-fields label {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  color: #555;
+  font: 700 10px ui-monospace, monospace;
+  text-transform: uppercase;
+}
+.oauth-client-fields [data-slot=input] {
+  width: 100%;
+  min-width: 0;
+  text-transform: none;
+}
+.connection-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: #dff8e7;
+}
+.connection-notice [data-slot=button] {
+  min-height: 30px;
+  padding: 4px 8px;
+  box-shadow: none;
+}
+@media (max-width: 720px) {
+  .oauth-client-dialog [data-slot=dialog-footer],
+  .oauth-registration-dialog [data-slot=dialog-footer] {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .oauth-client-dialog [data-slot=dialog-footer] [data-slot=button],
+  .oauth-registration-dialog [data-slot=dialog-footer] [data-slot=button] {
+    width: 100%;
+  }
+}

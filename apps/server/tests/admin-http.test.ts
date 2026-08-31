@@ -58,4 +58,115 @@ describe('deployment administration HTTP API', () => {
       ctx.dispose()
     }
   })
+  it('returns OAuth denial callbacks to the opener and records the connection error', async () => {
+    const ctx = testContext()
+    const owner = ctx.db.upsertUser({ externalId: 'oidc:oauth-denial-owner', displayName: 'Owner', authMethod: 'oidc' })
+    ctx.db.setRole(owner.id, 'Owner')
+    const activeOwner = ctx.db.getPrincipal(owner.id)!
+    const mcp = ctx.db.addMcpServer({
+      name: 'Denied MCP',
+      endpoint: 'https://mcp.example/mcp',
+      oauthStatus: 'authorization_required',
+      oauthIssuer: 'https://auth.example',
+      oauthRegistrationMethod: 'preregistered',
+    })
+    ctx.db.createMcpOauthPending({
+      state: 'denied-state',
+      serverId: mcp.id,
+      actorId: activeOwner.id,
+      issuer: 'https://auth.example',
+      tokenEndpoint: 'https://auth.example/token',
+      clientId: 'client',
+      verifier: 'sealed-verifier',
+      redirectUri: `${ctx.config.publicOrigin}/api/mcp/oauth/callback`,
+      resource: mcp.endpoint,
+      registrationMethod: 'preregistered',
+    })
+
+    const server = createPapyrusServer(ctx.config, ctx.service, ctx.auth)
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+    const token = ctx.auth.issueSession(activeOwner.id)
+
+    try {
+      const response = await fetch(`${origin}/api/mcp/oauth/callback?state=denied-state&error=access_denied&error_description=Nope&iss=${encodeURIComponent('https://auth.example')}`, {
+        headers: { authorization: `Bearer ${token}` },
+      })
+      expect(response.status).toBe(200)
+      const html = await response.text()
+      expect(html).toContain('papyrus:mcp-oauth-error')
+      expect(html).toContain('access_denied')
+      expect(ctx.db.getMcpOauthPending('denied-state')).toBeUndefined()
+      expect(ctx.db.getMcpServer(mcp.id)).toMatchObject({
+        enabled: false,
+        oauthStatus: 'error',
+        oauthError: 'access_denied: Nope',
+      })
+    } finally {
+      server.close()
+      await once(server, 'close')
+      ctx.dispose()
+    }
+  })
+
+  it('publishes MCP client metadata and keeps configured OAuth client secrets out of the admin API', async () => {
+    const ctx = testContext()
+    const owner = ctx.db.upsertUser({ externalId: 'oidc:oauth-owner', displayName: 'Owner', authMethod: 'oidc' })
+    ctx.db.setRole(owner.id, 'Owner')
+    const activeOwner = ctx.db.getPrincipal(owner.id)!
+    const server = createPapyrusServer(ctx.config, ctx.service, ctx.auth)
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+    const ownerToken = ctx.auth.issueSession(activeOwner.id)
+    const request = (path: string, init: RequestInit = {}) => fetch(`${origin}${path}`, {
+      ...init, headers: { authorization: `Bearer ${ownerToken}`, 'content-type': 'application/json', ...init.headers },
+    })
+
+    try {
+      const metadata = await fetch(`${origin}/.well-known/mcp-client.json`)
+      expect(metadata.status).toBe(200)
+      expect(await metadata.json()).toMatchObject({
+        client_id: `${ctx.config.publicOrigin}/.well-known/mcp-client.json`,
+        redirect_uris: [`${ctx.config.publicOrigin}/api/mcp/oauth/callback`],
+      })
+
+      const configured = await request('/api/mcp/oauth/clients', {
+        method: 'PUT',
+        body: JSON.stringify({
+          issuer: 'https://github.com/login/oauth',
+          clientId: 'papyrus-github-client',
+          clientSecret: 'super-secret-client-value',
+          scopes: 'read:user user:email',
+        }),
+      })
+      expect(configured.status).toBe(200)
+      expect(await configured.json()).toMatchObject({
+        issuer: 'https://github.com/login/oauth',
+        clientId: 'papyrus-github-client',
+        hasClientSecret: true,
+        scopes: 'read:user user:email',
+      })
+
+      const overviewResponse = await request('/api/admin/overview')
+      const overview = await overviewResponse.json() as AdminOverview
+      expect(overview.mcpOauthClients).toEqual([expect.objectContaining({
+        issuer: 'https://github.com/login/oauth',
+        clientId: 'papyrus-github-client',
+        hasClientSecret: true,
+      })])
+      expect(JSON.stringify(overview)).not.toContain('super-secret-client-value')
+      expect(ctx.db.mcpOauthClientCredentials('https://github.com/login/oauth')?.clientSecret).not.toBe('super-secret-client-value')
+
+      const removed = await request(`/api/mcp/oauth/clients/${encodeURIComponent('https://github.com/login/oauth')}`, { method: 'DELETE' })
+      expect(removed.status).toBe(204)
+      expect(ctx.db.listMcpOauthClients()).toEqual([])
+    } finally {
+      server.close()
+      await once(server, 'close')
+      ctx.dispose()
+    }
+  })
+
 })

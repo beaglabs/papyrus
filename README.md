@@ -68,6 +68,24 @@ Papyrus does not expose environments as a user-facing workspace abstraction. New
 
 The active daemon-first migration plan is documented in [ACP daemon stack](docs/acp-daemon-stack.md). Runtime-neutral core interfaces, local stdio supervision, remote Streamable HTTP, external client bridging, adapter profiles, and the hardened FIPS image land as separate stacked pull requests.
 
+## Remote MCP OAuth
+
+Remote MCP connections discover RFC 9728 protected-resource metadata and bind OAuth credentials to the advertised authorization-server issuer. Papyrus chooses client registration in this order:
+
+1. an Owner/Admin configured pre-registered OAuth client for the issuer;
+2. a Client ID Metadata Document (CIMD) at `/.well-known/mcp-client.json` when the authorization server advertises CIMD support;
+3. Dynamic Client Registration (DCR) only when the authorization server advertises a registration endpoint.
+
+If none is available, the Integrations page marks the connection **OAuth setup required** instead of treating discovery as a generic error. Configure the provider's OAuth client ID/secret in that connection, then Papyrus resumes the authorization-code + PKCE flow. Client secrets, access tokens, refresh tokens, and PKCE verifiers are sealed before database persistence. Access tokens are refreshed before expiry and the MCP SDK gets a one-time refresh/retry hook when a server returns HTTP 401.
+
+For the GitHub remote MCP endpoint `https://api.githubcopilot.com/mcp/`, create a GitHub OAuth App for the Papyrus deployment and set its callback URL to:
+
+```text
+<PAPYRUS_PUBLIC_ORIGIN>/api/mcp/oauth/callback
+```
+
+Then add the GitHub MCP endpoint under **Administration → Integrations**. Papyrus discovers the GitHub authorization issuer, prompts for the pre-registered OAuth client when needed, renders the authorization confirmation, and opens the GitHub approval flow.
+
 ## Requirements
 
 - Node.js 24+

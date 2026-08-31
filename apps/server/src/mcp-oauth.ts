@@ -76,9 +76,10 @@ export async function prepareRemoteMcp(
   if (challenge.status !== 401) throw new Error(`MCP discovery failed with HTTP ${challenge.status}`)
 
   const authenticateHeader = challenge.headers.get('www-authenticate')
-  const protectedResource = await discoverResourceMetadata(resource, authenticateHeader)
-  if (protectedResource.resource && !sameOAuthResource(protectedResource.resource, resource)) {
-    throw new Error('MCP protected-resource metadata does not match the requested MCP endpoint')
+  const discoveredResource = await discoverResourceMetadata(resource, authenticateHeader)
+  const protectedResource = discoveredResource.metadata
+  if (protectedResource.resource && !sameOAuthResource(protectedResource.resource, resource, discoveredResource.viaChallenge)) {
+    throw new Error(`MCP protected-resource metadata resource "${protectedResource.resource}" does not match requested endpoint "${resource}"`)
   }
   const issuer = protectedResource.authorization_servers?.[0]
   if (!issuer) throw new Error('MCP protected-resource metadata did not identify an authorization server')
@@ -209,13 +210,17 @@ export function mcpClientMetadata(publicOrigin: string): Record<string, unknown>
   }
 }
 
-async function discoverResourceMetadata(resource: string, header: string | null): Promise<ResourceMetadata> {
+async function discoverResourceMetadata(
+  resource: string,
+  header: string | null,
+): Promise<{ metadata: ResourceMetadata; viaChallenge: boolean }> {
   const explicit = resourceMetadataUrl(header)
   const candidates = explicit ? [explicit] : wellKnownResourceCandidates(resource)
   let lastError: unknown
   for (const candidate of candidates) {
-    try { return await json<ResourceMetadata>(candidate) }
-    catch (error) { lastError = error }
+    try {
+      return { metadata: await json<ResourceMetadata>(candidate), viaChallenge: Boolean(explicit) }
+    } catch (error) { lastError = error }
   }
   const detail = lastError instanceof Error ? ` ${lastError.message}.` : ''
   throw new Error(`MCP endpoint requires OAuth, but protected-resource metadata could not be discovered.${detail} Use the provider's OAuth-capable MCP endpoint.`)
@@ -323,19 +328,38 @@ function wellKnownResourceCandidates(endpoint: string): string[] {
   return candidates
 }
 
-function sameOAuthResource(advertised: string, requested: string): boolean {
+function sameOAuthResource(advertised: string, requested: string, viaChallenge: boolean): boolean {
   try {
     const a = secureUrl(advertised, 'protected resource')
     const b = secureUrl(requested, 'MCP endpoint')
-    const normalizePath = (path: string) => path === '/' ? '/' : path.replace(/\/$/, '')
-    return a.protocol === b.protocol
-      && a.hostname === b.hostname
-      && a.port === b.port
-      && normalizePath(a.pathname) === normalizePath(b.pathname)
-      && a.search === b.search
+    if (a.protocol !== b.protocol || a.hostname !== b.hostname || effectivePort(a) !== effectivePort(b)) return false
+    if (a.search !== b.search) return false
+
+    const advertisedPath = normalizedResourcePath(a.pathname)
+    const requestedPath = normalizedResourcePath(b.pathname)
+
+    // Directly discovered RFC 9728 metadata remains exact-match.
+    if (!viaChallenge) return advertisedPath === requestedPath
+
+    // Challenge-supplied metadata may cover a same-origin resource hierarchy.
+    // Match only on URI path-segment boundaries; never accept sibling prefixes.
+    if (advertisedPath === requestedPath) return true
+    if (advertisedPath === '/') return true
+    return requestedPath.startsWith(advertisedPath.endsWith('/') ? advertisedPath : `${advertisedPath}/`)
   } catch {
     return false
   }
+}
+
+function normalizedResourcePath(path: string): string {
+  let decoded: string
+  try { decoded = decodeURIComponent(path) } catch { return path }
+  if (!decoded || decoded === '/') return '/'
+  return decoded.replace(/\/+$/, '') || '/'
+}
+
+function effectivePort(url: URL): string {
+  return url.port || (url.protocol === 'https:' ? '443' : url.protocol === 'http:' ? '80' : '')
 }
 
 function secureUrl(value: string, label: string): URL {

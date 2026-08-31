@@ -30,10 +30,8 @@ export function acpContent(events: SessionEvent[]): AcpContentItem[] {
 
 export function ContentMessage({ message, active = false }: { message: AcpContentItem; active?: boolean }) {
   if (message.role === 'thought') {
-    return <details className="message thought" open={active}>
-      <summary><span className="thought-orbit" aria-hidden="true" /><strong>{active ? 'Thinking' : 'Thought process'}</strong></summary>
-      <div className="content-blocks">{message.blocks.map((block, index) => <ContentBlock key={index} block={block} />)}</div>
-    </details>
+    if (!active) return null
+    return <div className="message thought thought-status" role="status"><span className="thought-orbit" aria-hidden="true" /><strong>Working…</strong></div>
   }
   return <Message position={message.role === 'user' ? 'right' : 'left'} className={`message ${message.role}`}><span>{message.role === 'user' ? 'YOU' : 'PAPYRUS'}</span><MessageContent className="content-blocks" isStreaming={active}>{message.blocks.map((block, index) => <ContentBlock key={index} block={block} />)}{active && <MessageStreaming />}</MessageContent></Message>
 }

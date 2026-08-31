@@ -435,9 +435,13 @@ function artifactIcon(artifact: Artifact): string {
   return '▤'
 }
 
-function isArtifactGenerationActive(events: SessionEvent[]): boolean {
+export function isArtifactGenerationActive(events: SessionEvent[]): boolean {
   const { tools } = projectActivity(events)
-  return tools.some((tool) => ['pending', 'in_progress'].includes(tool.status) && (tool.kind === 'edit' || /generate|write|render|export|artifact|image/i.test(tool.title)))
+  return tools.some((tool) => ['pending', 'in_progress', 'completed'].includes(tool.status) && isArtifactTool(tool))
+}
+
+function isArtifactTool(tool: Pick<ToolActivity, 'kind' | 'title'>): boolean {
+  return tool.kind === 'edit' || /generate|create.*pdf|write|render|export|artifact|image/i.test(tool.title)
 }
 
 function ArtifactCards({ artifacts, onOpen }: { artifacts: Artifact[]; onOpen: (id: string) => void }) {
@@ -466,9 +470,13 @@ export function PromptTurnFlow({ events, running, submitted }: { events: Session
   const activeTools = tools.filter((tool) => tool.status === 'in_progress' || tool.status === 'pending')
   const hasModelStream = turnEvents.some((event) => event.kind === 'update' && event.data && typeof event.data === 'object' && ['agent_thought_chunk', 'agent_message_chunk'].includes(String((event.data as { sessionUpdate?: string }).sessionUpdate)))
   const failedTool = [...tools].reverse().find((tool) => tool.status === 'failed')
+  const latestTool = tools.at(-1)
+  const latestArtifactTool = [...tools].reverse().find((tool) => isArtifactTool(tool))
   const outcome = [...events].reverse().find((event) => (event.data as { sessionUpdate?: string } | undefined)?.sessionUpdate === 'run_completed')?.data as { status?: string } | undefined
   const status = activeTools.length > 1 ? `${activeTools.length} tools active`
     : activeTools[0] ? `${activeTools[0].status === 'pending' ? 'Preparing' : 'Running'} ${activeTools[0].title}`
+    : running && latestTool?.status === 'failed' ? `Recovering after ${latestTool.title} failed`
+    : running && latestArtifactTool?.status === 'completed' ? `${latestArtifactTool.title} complete · finalizing artifact`
     : running && submitted ? 'Starting…'
     : running && hasModelStream ? 'Working…'
     : running ? 'Working…'
@@ -479,7 +487,7 @@ export function PromptTurnFlow({ events, running, submitted }: { events: Session
   return <section className="prompt-turn-flow" aria-live="polite">
     <div className="prompt-turn-status" role="status"><span className={running || activeTools.length ? 'tool-spinner' : failedTool || outcome?.status === 'failed' ? 'dot bad' : 'dot good'} aria-hidden="true" /><strong>{status}</strong>{running && <span className="streaming-cursor" aria-hidden="true">▌</span>}</div>
     {plan.length > 0 && <ol className="prompt-turn-plan">{plan.map((item, index) => <li key={`${index}-${item.content}`} className={item.status}><span className={`activity-status ${item.status}`} />{item.content}</li>)}</ol>}
-    {tools.length > 0 && <div className="prompt-turn-tools">{displayTools.map((tool) => <Card key={tool.id} className={`prompt-turn-tool ${tool.status}`} aria-busy={activeTools.includes(tool)}><span className={`tool-kind ${tool.kind}`}>{tool.kind}</span><div><strong>{tool.title}</strong><small>{tool.locations.join(' · ') || tool.id}</small>{activeTools.includes(tool) && <span className="tool-running-hint">{tool.status === 'pending' ? 'Preparing tool arguments…' : 'Executing tool…'}</span>}{(tool.stdout || tool.stderr) && <div className="tool-live-output"><pre className="tool-stream-output">{tool.stdout}{tool.stderr && <span className="tool-stderr">{tool.stderr}</span>}</pre></div>}{tool.output.length > 0 && <div className="tool-live-output">{tool.output.map((block, index) => <ContentBlock key={index} block={block} />)}</div>}{tool.exitCode !== undefined && <small>Exit code: {tool.exitCode}</small>}</div><span className={`pill ${tool.status}`}>{activeTools.includes(tool) && <span className="tool-spinner" aria-hidden="true" />}{tool.status === 'in_progress' ? 'Running' : tool.status === 'pending' ? 'Preparing' : tool.status}</span></Card>)}</div>}
+    {tools.length > 0 && <div className="prompt-turn-tools">{displayTools.map((tool) => <Card key={tool.id} className={`prompt-turn-tool ${tool.status}`} aria-busy={activeTools.includes(tool)}><span className={`tool-kind ${tool.kind}`}>{tool.kind}</span><div><strong>{tool.title}</strong><small>{tool.locations.join(' · ') || tool.id}</small>{activeTools.includes(tool) && <span className="tool-running-hint">{tool.status === 'pending' ? 'Preparing tool arguments…' : 'Executing tool…'}</span>}{(tool.stdout || tool.stderr) && <div className="tool-live-output"><pre className="tool-stream-output">{tool.stdout}{tool.stderr && <span className="tool-stderr">{tool.stderr}</span>}</pre></div>}{tool.output.length > 0 && <div className="tool-live-output">{tool.output.map((block, index) => <ContentBlock key={index} block={block} />)}</div>}{tool.status === 'failed' && !tool.stdout && !tool.stderr && tool.output.length === 0 && <span className="tool-failure-hint">{tool.exitCode !== undefined ? `Command exited with code ${tool.exitCode} and produced no diagnostic output.` : 'Tool failed without diagnostic output.'}</span>}{tool.exitCode !== undefined && <small>Exit code: {tool.exitCode}</small>}</div><span className={`pill ${tool.status}`}>{activeTools.includes(tool) && <span className="tool-spinner" aria-hidden="true" />}{tool.status === 'in_progress' ? 'Running' : tool.status === 'pending' ? 'Preparing' : tool.status}</span></Card>)}</div>}
   </section>
 }
 

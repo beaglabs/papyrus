@@ -176,6 +176,45 @@ describe('Cloudflare model compatibility', () => {
     expect(continuation.messages).toContainEqual(expect.objectContaining({ role: 'tool', tool_call_id: 'read-1', content: 'Workspace notes' }))
   })
 
+  it('creates a PDF through the first-class artifact tool without shell execution', async () => {
+    const { model, fetch } = provider({
+      toolTurn: true,
+      toolName: 'papyrus_create_pdf',
+      input: { filename: 'sample', title: 'Sample PDF', body: 'Created without shell probing.' },
+    })
+    const agent = new Agent({
+      id: 'pdf-agent',
+      name: 'pdf-agent',
+      instructions: 'Use the PDF tool.',
+      model: wrapModelForCloudflare(model),
+      tools: buildStaticAgentTools(),
+    })
+    const writeArtifact = vi.fn(async (_sessionId: string, name: string, data: Buffer) => {
+      expect(name).toBe('sample.pdf')
+      expect(data.toString('ascii')).toContain('%PDF-1.4')
+      return 'sample.pdf'
+    })
+    const worker = new MastraAgentWorker(
+      { getAgent: () => agent } as never,
+      { model: { endpoint: 'https://api.cloudflare.com/client/v4/accounts/test/ai/v1', model: model.modelId } } as never,
+      { stagePrompt: async () => undefined, writeArtifact } as never,
+    )
+    const events: Array<{ kind: string; data: unknown }> = []
+    await expect(worker.runPrompt({
+      sessionId: '11111111-1111-4111-8111-111111111111',
+      prompt: 'Can you generate a PDF for me?',
+      checkToolExecution: async () => {},
+      onEvent: (event) => { events.push(event) },
+    })).resolves.toMatchObject({ stopReason: 'stop' })
+
+    expect(writeArtifact).toHaveBeenCalledOnce()
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(events).toContainEqual(expect.objectContaining({
+      data: expect.objectContaining({ title: 'Create PDF', kind: 'edit', status: 'completed' }),
+    }))
+    expect(events.some((event) => JSON.stringify(event.data).includes('Execute command'))).toBe(false)
+  })
+
   it('delivers native stdout while the real Mastra tool is still executing', async () => {
     const { model } = provider({ toolTurn: true })
     let release!: () => void
@@ -468,7 +507,8 @@ describe('Mastra agent runtime', () => {
 
     const continuation = JSON.parse(String(fetch.mock.calls[1]![1]?.body))
     expect(continuation.messages).toContainEqual(expect.objectContaining({ role: 'tool', tool_call_id: 'read-1' }))
-    expect(continuation.tools ?? []).toEqual([])
+    expect(JSON.stringify(continuation)).not.toContain('mastra_workspace_execute_command')
+    expect(JSON.stringify(continuation)).not.toContain('mastra_workspace_list_files')
     expect(events).toContainEqual(expect.objectContaining({
       kind: 'update',
       data: expect.objectContaining({

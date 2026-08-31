@@ -32,6 +32,21 @@ describe('Mastra session workspace', () => {
     await workspace.destroy()
   })
 
+  it('writes generated artifacts without overwriting an existing file', async () => {
+    vi.spyOn(LocalSandbox, 'detectIsolation').mockReturnValue({ available: false, backend: 'none', message: 'Unavailable' })
+    const dataDir = mkdtempSync(join(tmpdir(), 'papyrus-generated-artifact-')); roots.push(dataDir)
+    const manager = new PapyrusWorkspaceManager({ mode: 'local', dataDir } as never)
+    const sessionId = '11111111-1111-4111-8111-111111111111'
+    const first = await manager.writeArtifact(sessionId, '../document.pdf', Buffer.from('%PDF-first'))
+    const second = await manager.writeArtifact(sessionId, 'document.pdf', Buffer.from('%PDF-second'))
+    expect(first).toBe('document.pdf')
+    expect(second).toBe('document-2.pdf')
+    const workspace = await manager.forSession(sessionId)
+    expect(String(await workspace.filesystem!.readFile(first))).toBe('%PDF-first')
+    expect(String(await workspace.filesystem!.readFile(second))).toBe('%PDF-second')
+    await workspace.destroy()
+  })
+
   it('never exposes an unisolated shell, host LSP, or browser CDP in local mode', async () => {
     vi.spyOn(LocalSandbox, 'detectIsolation').mockReturnValue({ available: false, backend: 'none', message: 'Unavailable' })
     const dataDir = mkdtempSync(join(tmpdir(), 'papyrus-no-isolation-')); roots.push(dataDir)

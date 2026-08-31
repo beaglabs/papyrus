@@ -62,7 +62,7 @@ describe('Mastra session projection', () => {
     const preparing = renderToStaticMarkup(createElement(PromptTurnFlow, { events: [event(1, { sessionUpdate: 'tool_call', toolCallId: 't', title: 'Render PDF', status: 'pending' })], running: true, submitted: false }))
     expect(preparing).toContain('Preparing Render PDF')
     const continuing = renderToStaticMarkup(createElement(PromptTurnFlow, { events: [event(1, { sessionUpdate: 'tool_call', toolCallId: 't', status: 'completed' })], running: true, submitted: false }))
-    expect(continuing).toContain('Waiting for model stream')
+    expect(continuing).toContain('Working…')
     expect(continuing).not.toContain('Turn complete')
   })
 

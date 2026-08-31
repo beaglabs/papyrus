@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { requestedFieldSchema } from '../src/mastra/tools.js'
+import { runtimeToolAction } from '../src/mastra/authorization.js'
 
 describe('Mastra elicitation fields', () => {
   it('builds a required schema from concrete field-level gaps', () => {
@@ -16,4 +17,9 @@ describe('Mastra elicitation fields', () => {
       additionalProperties: false,
     })
   })
+
+  it('maps the PDF tool through the normal governed workspace-write policy', () => {
+    expect(runtimeToolAction('papyrus_create_pdf')).toBe('WorkspaceWrite')
+  })
+
 })

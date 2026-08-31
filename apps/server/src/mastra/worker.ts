@@ -74,6 +74,8 @@ export class MastraAgentWorker implements AgentRuntime {
       inputSchema: tool.inputSchema,
     })))
 
+    let failedCommandExecutions = 0
+    let blockedCommandRetries = 0
     const stream = await (agent as unknown as {
       stream: (m: unknown, opts: Record<string, unknown>) => Promise<{ fullStream: AsyncIterable<unknown> }>
     }).stream(message, {
@@ -83,6 +85,11 @@ export class MastraAgentWorker implements AgentRuntime {
       hooks: {
         beforeToolCall: async ({ toolName }: { toolName: string }) => {
           if (!request.checkToolExecution) throw new Error('Tool execution authorization is unavailable')
+          if (toolName === 'mastra_workspace_execute_command' && failedCommandExecutions >= 2) {
+            blockedCommandRetries += 1
+            if (blockedCommandRetries > 1) throw new Error('Repeated shell command retry after sandbox failures')
+            throw new Error('Shell command execution failed twice in this run. Use filesystem or purpose-built artifact tools instead of retrying shell probes.')
+          }
           request.signal?.throwIfAborted()
           await request.checkToolExecution(toolName)
           request.signal?.throwIfAborted()
@@ -166,7 +173,7 @@ export class MastraAgentWorker implements AgentRuntime {
           case 'tool-call-input-streaming-start': {
             const call = chunk.payload as { toolCallId?: string; toolName?: string }
             if (call.toolCallId && call.toolName) await updateTool(call.toolCallId, {
-              title: call.toolName, kind: toolKindFor(call.toolName), status: 'pending',
+              title: toolTitleFor(call.toolName), kind: toolKindFor(call.toolName), status: 'pending',
             })
             break
           }
@@ -177,7 +184,7 @@ export class MastraAgentWorker implements AgentRuntime {
               browserCalls.add(call.toolCallId)
               await request.onEvent({ kind: 'update', at: new Date().toISOString(), data: { sessionUpdate: 'browser_state', status: 'active', toolCallId: call.toolCallId } })
             }
-            await updateTool(call.toolCallId, { title: call.toolName, kind: toolKindFor(call.toolName), status: 'in_progress' })
+            await updateTool(call.toolCallId, { title: toolTitleFor(call.toolName), kind: toolKindFor(call.toolName), status: 'in_progress' })
             break
           }
           case 'data-sandbox-stdout':
@@ -191,8 +198,10 @@ export class MastraAgentWorker implements AgentRuntime {
           }
           case 'data-sandbox-exit': {
             const data = chunk.data as { toolCallId?: string; exitCode?: number; success?: boolean } | undefined
+            const failed = data?.success === false || (typeof data?.exitCode === 'number' && data.exitCode !== 0)
+            if (failed) failedCommandExecutions += 1
             if (data?.toolCallId) await updateTool(data.toolCallId, {
-              status: data.success === false || (typeof data.exitCode === 'number' && data.exitCode !== 0) ? 'failed' : 'in_progress',
+              status: failed ? 'failed' : 'in_progress',
               _meta: { papyrus: { exitCode: data.exitCode } },
             })
             break
@@ -204,18 +213,20 @@ export class MastraAgentWorker implements AgentRuntime {
           }
           case 'tool-error': {
             const error = chunk.payload as { toolCallId?: string; toolName?: string; error?: unknown }
+            const failure = streamError(error.error)
             if (error.toolCallId) await updateTool(error.toolCallId, {
-              ...(error.toolName ? { title: error.toolName, kind: toolKindFor(error.toolName) } : {}),
-              status: 'failed', content: toolUpdateContent(streamError(error.error).message),
+              ...(error.toolName ? { title: toolTitleFor(error.toolName), kind: toolKindFor(error.toolName) } : {}),
+              status: 'failed', content: toolUpdateContent(failure.message),
             })
             if (error.toolCallId && browserCalls.delete(error.toolCallId)) await request.onEvent({ kind: 'update', at: new Date().toISOString(), data: { sessionUpdate: 'browser_state', status: 'failed', toolCallId: error.toolCallId } })
+            if (error.toolName === 'mastra_workspace_execute_command' && failure.message === 'Repeated shell command retry after sandbox failures') throw failure
             break
           }
           case 'tool-result': {
             const result = chunk.payload as { toolCallId?: string; toolName?: string; result?: unknown; isError?: boolean }
             if (!result.toolCallId) break
             await updateTool(result.toolCallId, {
-              ...(result.toolName ? { title: result.toolName, kind: toolKindFor(result.toolName) } : {}),
+              ...(result.toolName ? { title: toolTitleFor(result.toolName), kind: toolKindFor(result.toolName) } : {}),
               status: result.isError ? 'failed' : 'completed', content: toolUpdateContent(result.result),
             })
             if (browserCalls.delete(result.toolCallId)) {
@@ -271,6 +282,14 @@ function toolKindFor(name: string): string {
     : name.includes('read') || name.includes('list') || name.includes('glob') ? 'read'
     : name.includes('write') ? 'edit'
     : 'other'
+}
+
+function toolTitleFor(name: string): string {
+  if (name === 'papyrus_create_pdf') return 'Create PDF'
+  if (name === 'mastra_workspace_execute_command') return 'Execute command'
+  if (name === 'mastra_workspace_write_file') return 'Write file'
+  if (name === 'mastra_workspace_read_file') return 'Read file'
+  return name
 }
 
 function isBrowserCall(toolName: string): boolean {

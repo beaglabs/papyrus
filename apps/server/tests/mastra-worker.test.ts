@@ -486,6 +486,10 @@ describe('Mastra agent runtime', () => {
     expect(isGenericPdfRequest('Generate a PDF from the workspace notes')).toBe(false)
     expect(isGenericPdfRequest('Create a PDF about quarterly revenue')).toBe(false)
     expect(isGenericPdfRequest([{ type: 'text', text: 'Make me a PDF' }] as ContentBlock[])).toBe(true)
+    expect(isGenericPdfRequest([
+      { type: 'text', text: 'Make me a PDF' },
+      { type: 'resource', resource: { uri: 'papyrus://attachment/source.txt', mimeType: 'text/plain', text: 'Source material' } },
+    ] as ContentBlock[])).toBe(false)
   })
 
   it('projects brokered browser execution as durable inline surface state', async () => {

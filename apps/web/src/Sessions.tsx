@@ -374,7 +374,7 @@ function promptTurns(events: SessionEvent[]): PromptTurnGroup[] {
     .sort((left, right) => left.sequence - right.sequence)
 }
 
-function DurablePromptTurn({ turn, running }: { turn: PromptTurnGroup; running: boolean }) {
+export function DurablePromptTurn({ turn, running }: { turn: PromptTurnGroup; running: boolean }) {
   const messages = acpContent(turn.events)
   const { tools } = projectActivity(turn.events)
   const lastUser = [...messages].reverse().find((message) => message.role === 'user')?.sequence ?? -1

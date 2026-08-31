@@ -261,6 +261,7 @@ export class MastraAgentWorker implements AgentRuntime {
 }
 
 export function isGenericPdfRequest(prompt: string | ContentBlock[]): boolean {
+  if (Array.isArray(prompt) && prompt.some((block) => block.type !== 'text')) return false
   const text = promptText(prompt).trim().toLowerCase().replace(/\s+/g, ' ')
   return /^(?:(?:can|could|would|will) you\s+)?(?:please\s+)?(?:generate|create|make)(?:\s+me)?\s+(?:a\s+)?pdf(?:\s+for me)?[?.!]*$/.test(text)
     || /^(?:please\s+)?show me (?:a\s+)?pdf[?.!]*$/.test(text)

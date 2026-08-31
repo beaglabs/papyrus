@@ -16,7 +16,8 @@ description: Work safely inside the current governed Papyrus session.
 - Keep generated and edited files inside this workspace.
 - Read a file before overwriting it and preserve unrelated content.
 - Use workspace search for uploaded files and workspace notes.
-- Commands are offline and isolated. Host files, network access, and browser CDP are unavailable.
+- Commands are offline and isolated when the deployment exposes a working command sandbox. If the command tool is absent or fails, do not repeatedly probe it; use dedicated artifact and filesystem tools instead. Host files, network access, and browser CDP are unavailable.
+- Use papyrus_create_pdf for PDF generation instead of shelling out to Python, Node, or system PDF utilities.
 - Use papyrus_browser_navigate/read for privileged browser tasks, or assigned MCP browser tools for restricted access. Browser CLIs cannot connect from the shell.
 - Approved organization sources and MCP integrations are available only through the papyrus_* tools. Never try to bypass their approval or authorization result.
 `
@@ -70,6 +71,15 @@ export class PapyrusWorkspaceManager {
     }
   }
 
+  async writeArtifact(sessionId: string, filename: string, data: string | Buffer): Promise<string> {
+    const workspace = await this.forSession(sessionId)
+    const filesystem = workspace.filesystem
+    if (!filesystem) throw new Error('Session workspace filesystem is unavailable')
+    const path = safeName(filename, 'artifact.bin')
+    await filesystem.writeFile(path, data)
+    return path
+  }
+
   async snapshotArtifacts(sessionId: string): Promise<Map<string, number>> {
     const files = await this.workspaceFiles(sessionId)
     return new Map(files.map((file) => [file.path, file.modified]))
@@ -117,13 +127,14 @@ export class PapyrusWorkspaceManager {
     // Profiles must not be writable from the session sandbox.
     const profilePath = join(this.root, `${sessionId}.sb`)
     if (this.isolation === 'seatbelt') await writeFile(profilePath, seatbeltProfile(root), { mode: 0o600 })
-    const workspace = new Workspace({
-      id: `papyrus-${sessionId}`,
-      name: `Papyrus session ${sessionId}`,
-      filesystem: new LocalFilesystem({ basePath: root, contained: true }),
-      // Local mode may still use contained file tools without an OS backend;
-      // it must never silently fall back to unsandboxed command execution.
-      ...(this.isolation === 'none' ? {} : { sandbox: new LocalSandbox({
+
+    // Mastra's backend detection only proves that the sandbox binary exists.
+    // Probe the actual per-session LocalSandbox before exposing execute_command;
+    // on local deployments, a broken Seatbelt/bwrap setup should remove the
+    // command tool rather than let the model retry an unusable shell forever.
+    let sandbox: LocalSandbox | undefined
+    if (this.isolation !== 'none') {
+      const candidate = new LocalSandbox({
         workingDirectory: root,
         isolation: this.isolation,
         env: sandboxEnvironment(root),
@@ -133,7 +144,26 @@ export class PapyrusWorkspaceManager {
           readWritePaths: [root],
           ...(this.isolation === 'seatbelt' ? { seatbeltProfilePath: profilePath } : { bwrapArgs: bubblewrapArgs(root) }),
         },
-      }) }),
+      })
+      try {
+        const probe = await candidate.executeCommand!(process.execPath, ['-e', 'process.exit(0)'], { timeout: 3000 })
+        if (probe.exitCode !== 0) throw new Error(`probe exited ${probe.exitCode}`)
+        sandbox = candidate
+      } catch (error) {
+        if (this.config.mode === 'persistent') {
+          const detail = error instanceof Error ? error.message : String(error)
+          throw new Error(`Mastra session command sandbox failed its execution probe: ${detail}`)
+        }
+      }
+    }
+
+    const workspace = new Workspace({
+      id: `papyrus-${sessionId}`,
+      name: `Papyrus session ${sessionId}`,
+      filesystem: new LocalFilesystem({ basePath: root, contained: true }),
+      // Local mode may still use contained file tools without an OS backend;
+      // it must never silently fall back to unsandboxed command execution.
+      ...(sandbox ? { sandbox } : {}),
       bm25: true,
       searchIndexName: `papyrus_ws_${sessionId.replaceAll('-', '_')}`,
       autoIndexPaths: ['attachments'],

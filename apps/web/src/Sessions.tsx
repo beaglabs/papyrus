@@ -23,7 +23,7 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
   const [goalPanelOpen, setGoalPanelOpen] = useState(false)
   const [goal, setGoal] = useState<MastraGoal | null>(null)
   const [selectedArtifactId, setSelectedArtifactId] = useState<string>()
-  const knownArtifactCount = useRef(0)
+  const artifactContext = useRef<{ sessionId?: string; ids: Set<string> }>({ ids: new Set() })
   const [loading, setLoading] = useState(true)
   const [runPending, setRunning] = useState(false)
   const [pendingTurn, setPendingTurn] = useState<{ prompt: string; attachments: Attachment[] }>()
@@ -44,8 +44,17 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
 
   const loadContext = async (sessionId: string) => {
     const [nextArtifacts, nextApprovals, nextAttachments, nextElicitations, nextGoal] = await Promise.all([sessionArtifacts(sessionId), sessionApprovals(sessionId), sessionAttachments(sessionId), sessionElicitations(sessionId), sessionGoal(sessionId)])
+    const previous = artifactContext.current
+    const sameSession = previous.sessionId === sessionId
+    const newlyCreated = sameSession ? nextArtifacts.filter((artifact) => !previous.ids.has(artifact.id)) : []
+    artifactContext.current = { sessionId, ids: new Set(nextArtifacts.map((artifact) => artifact.id)) }
     setArtifacts(nextArtifacts); setApprovals(nextApprovals); setAttachments(nextAttachments); setElicitations(nextElicitations)
     setGoal(nextGoal)
+    const newest = newlyCreated.at(-1)
+    if (newest) {
+      setSelectedArtifactId(newest.id)
+      setArtifactPanelOpen(true)
+    }
   }
 
   const loadSessions = async (cursor?: string) => {
@@ -77,28 +86,19 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
     return () => cancelAnimationFrame(frame)
   }, [events, running, followingLatest])
   useEffect(() => {
-    if (artifactGenerating) setArtifactPanelOpen(true)
-    else if (artifacts.length === 0) setArtifactPanelOpen(false)
-  }, [artifactGenerating, artifacts.length])
-  useEffect(() => {
     if (browserState === 'active') {
       setBrowserPanelOpen(true)
       setArtifactPanelOpen(false)
     } else if (browserState === 'completed' || browserState === 'failed') setBrowserPanelOpen(false)
   }, [browserState])
-  useEffect(() => {
-    if (artifacts.length > knownArtifactCount.current) {
-      setSelectedArtifactId(artifacts.at(-1)?.id)
-      if (running) setArtifactPanelOpen(true)
-    }
-    knownArtifactCount.current = artifacts.length
-  }, [artifacts, running])
 
   useEffect(() => {
     streamRef.current?.close()
     setFollowingLatest(true)
     setDraftAttachmentIds([])
     setLiveError(undefined)
+    setArtifactPanelOpen(false)
+    setSelectedArtifactId(undefined)
     if (!selectedId) { setEvents([]); setArtifacts([]); setApprovals([]); setAttachments([]); setElicitations([]); return }
     setEvents([])
     let active = true
@@ -469,9 +469,9 @@ export function PromptTurnFlow({ events, running, submitted }: { events: Session
   const outcome = [...events].reverse().find((event) => (event.data as { sessionUpdate?: string } | undefined)?.sessionUpdate === 'run_completed')?.data as { status?: string } | undefined
   const status = activeTools.length > 1 ? `${activeTools.length} tools active`
     : activeTools[0] ? `${activeTools[0].status === 'pending' ? 'Preparing' : 'Running'} ${activeTools[0].title}`
-    : running && hasModelStream ? 'Receiving model stream'
-    : running && submitted ? 'Starting prompt turn'
-    : running ? 'Waiting for model stream'
+    : running && submitted ? 'Starting…'
+    : running && hasModelStream ? 'Working…'
+    : running ? 'Working…'
     : outcome?.status && outcome.status !== 'completed' ? `Turn ${outcome.status}`
     : failedTool ? `${failedTool.title} failed`
     : hasTerminalRun(events) ? 'Turn complete' : 'Turn status unavailable'

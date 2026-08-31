@@ -61,6 +61,7 @@ export class MastraAgentWorker implements AgentRuntime {
     requestContext.set('sessionId', threadId)
     requestContext.set('runId', request.runId ?? runtimeSessionId)
     requestContext.set('upstreamModel', { endpoint: model.endpoint, ...(model.apiKey ? { apiKey: model.apiKey } : {}) })
+    requestContext.set('writeArtifact', async (filename: string, data: Buffer) => await this.workspaces.writeArtifact(threadId, filename, data))
     if (request.invokeTool) requestContext.set('invokeTool', request.invokeTool)
     if (request.authorizeTool) requestContext.set('authorizeTool', request.authorizeTool)
     if (request.elicit) requestContext.set('elicit', request.elicit)
@@ -112,6 +113,7 @@ export class MastraAgentWorker implements AgentRuntime {
       browserCalls.clear()
     }
     let artifactsEmitted = false
+    let reasoningStatusEmitted = false
     const complete = async (stopReason: string): Promise<RuntimePromptResult> => {
       await closeActiveTools(stopReason === 'cancelled' ? 'Cancelled' : 'Run ended before this tool completed')
       if (!artifactsEmitted) {
@@ -149,11 +151,14 @@ export class MastraAgentWorker implements AgentRuntime {
             break
           }
           case 'reasoning-delta': {
-            const delta = chunk.payload as { text?: string }
-            if (typeof delta.text === 'string' && delta.text) {
+            // Never persist or render the provider's raw chain-of-thought.
+            // One compact status event keeps the UI responsive without leaking
+            // internal reasoning or flooding durable session history.
+            if (!reasoningStatusEmitted) {
+              reasoningStatusEmitted = true
               await request.onEvent({
                 kind: 'update', at: new Date().toISOString(),
-                data: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: delta.text }, messageId: `thought_${runtimeSessionId}` },
+                data: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Working…' }, messageId: `thought_${runtimeSessionId}` },
               })
             }
             break
@@ -262,6 +267,7 @@ function promptToMessage(prompt: string | ContentBlock[]): string | Array<{ type
 
 function toolKindFor(name: string): string {
   return name === 'papyrus_exec_code' || name === 'mastra_workspace_execute_command' ? 'execute'
+    : name === 'papyrus_create_pdf' ? 'edit'
     : name.includes('read') || name.includes('list') || name.includes('glob') ? 'read'
     : name.includes('write') ? 'edit'
     : 'other'

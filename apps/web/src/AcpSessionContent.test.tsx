@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { MarkdownText } from './AcpSessionContent.js'
+import { ContentMessage, MarkdownText } from './AcpSessionContent.js'
 
 describe('MarkdownText', () => {
   it('renders common Markdown structures', () => {
@@ -29,4 +29,17 @@ describe('MarkdownText', () => {
     expect(html).not.toContain('<script>')
     expect(html).not.toContain('href="javascript:')
   })
+  it('shows only a compact working indicator for active reasoning', () => {
+    const message = {
+      id: 'thought',
+      role: 'thought',
+      sequence: 1,
+      blocks: [{ type: 'text', text: 'raw provider reasoning that must not be rendered' }],
+    } as never
+    const active = renderToStaticMarkup(<ContentMessage message={message} active />)
+    expect(active).toContain('Working…')
+    expect(active).not.toContain('raw provider reasoning')
+    expect(renderToStaticMarkup(<ContentMessage message={message} />)).toBe('')
+  })
+
 })

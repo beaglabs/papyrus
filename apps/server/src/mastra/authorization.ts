@@ -19,6 +19,7 @@ export const RUNTIME_TOOL_ACTIONS: Readonly<Record<string, PolicyAction>> = {
   skill: 'WorkspaceRead', skill_read: 'WorkspaceRead', skill_search: 'WorkspaceRead',
   updateWorkingMemory: 'WorkspaceWrite',
   papyrus_set_goal: 'WorkspaceWrite',
+  papyrus_create_pdf: 'WorkspaceWrite',
   papyrus_request_input: 'WorkspaceRead',
   papyrus_generate: 'GenerateImage',
   papyrus_browser_navigate: 'BrowserNavigate',

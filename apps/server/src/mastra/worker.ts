@@ -76,12 +76,21 @@ export class MastraAgentWorker implements AgentRuntime {
 
     let failedCommandExecutions = 0
     let blockedCommandRetries = 0
+    const pdfOnly = isGenericPdfRequest(request.prompt)
     const stream = await (agent as unknown as {
       stream: (m: unknown, opts: Record<string, unknown>) => Promise<{ fullStream: AsyncIterable<unknown> }>
     }).stream(message, {
       threadId, resourceId, maxSteps: 32,
       requestContext, abortSignal: request.signal,
       toolsets: Object.keys(sessionTools).length ? { session: sessionTools } : undefined,
+      ...(pdfOnly ? {
+        // Keep broad PDF generation inside Mastra's normal model → tool-call
+        // → createTool loop while preventing irrelevant workspace/shell probes.
+        activeTools: ['papyrus_create_pdf'],
+        prepareStep: ({ step }: { step: number }) => step === 0
+          ? { activeTools: ['papyrus_create_pdf'], toolChoice: { type: 'tool', toolName: 'papyrus_create_pdf' } }
+          : { activeTools: [], toolChoice: 'none' },
+      } : {}),
       hooks: {
         beforeToolCall: async ({ toolName }: { toolName: string }) => {
           if (!request.checkToolExecution) throw new Error('Tool execution authorization is unavailable')
@@ -259,6 +268,18 @@ export class MastraAgentWorker implements AgentRuntime {
       throw error
     }
   }
+}
+
+export function isGenericPdfRequest(prompt: string | ContentBlock[]): boolean {
+  if (Array.isArray(prompt) && prompt.some((block) => block.type !== 'text')) return false
+  const text = promptText(prompt).trim().toLowerCase().replace(/\s+/g, ' ')
+  return /^(?:(?:can|could|would|will) you\s+)?(?:please\s+)?(?:generate|create|make)(?:\s+me)?\s+(?:a\s+)?pdf(?:\s+for me)?[?.!]*$/.test(text)
+    || /^(?:please\s+)?show me (?:a\s+)?pdf[?.!]*$/.test(text)
+}
+
+function promptText(prompt: string | ContentBlock[]): string {
+  if (typeof prompt === 'string') return prompt
+  return prompt.flatMap((block) => block.type === 'text' ? [block.text] : []).join('\n')
 }
 
 function promptToMessage(prompt: string | ContentBlock[]): string | Array<{ type: 'text'; text: string } | { type: 'file'; data: Uint8Array; mediaType: string; filename?: string }> {

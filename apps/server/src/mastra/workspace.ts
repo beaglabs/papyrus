@@ -75,7 +75,22 @@ export class PapyrusWorkspaceManager {
     const workspace = await this.forSession(sessionId)
     const filesystem = workspace.filesystem
     if (!filesystem) throw new Error('Session workspace filesystem is unavailable')
-    const path = safeName(filename, 'artifact.bin')
+    const cleaned = safeName(filename, 'artifact.bin')
+    const dot = cleaned.lastIndexOf('.')
+    const stem = dot > 0 ? cleaned.slice(0, dot) : cleaned
+    const extension = dot > 0 ? cleaned.slice(dot) : ''
+    let path = cleaned
+    let available = false
+    for (let copy = 2; copy <= 1000; copy += 1) {
+      try {
+        await filesystem.readFile(path)
+        path = `${stem}-${copy}${extension}`
+      } catch {
+        available = true
+        break
+      }
+    }
+    if (!available) throw new Error('Too many artifacts share the requested filename')
     await filesystem.writeFile(path, data)
     return path
   }

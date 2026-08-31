@@ -607,6 +607,14 @@ nav [data-slot=button].active{border-color:var(--border);background:var(--main);
 .prompt-turn-tool .pill.in_progress, .prompt-turn-tool .pill.pending { background: #fff0e6; }
 .tool-spinner { display: inline-block; flex: 0 0 auto; width: 12px; height: 12px; border: 2px solid #e9c4ad; border-top-color: #c44812; border-radius: 50%; animation: artifact-spin .8s linear infinite; }
 .tool-running-hint { margin-top: 5px; color: #9c3810; font: 11px ui-monospace, monospace; }
+.tool-failure-hint {
+  margin-top: 6px;
+  padding: 7px 9px;
+  border-left: 3px solid #d95319;
+  background: #fff0f3;
+  color: #7d2712;
+  font: 11px/1.4 ui-monospace, monospace;
+}
 .tool-stream-output { padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, monospace; }
 .tool-stderr { color: #ffb6ad; }
 @media (prefers-reduced-motion: reduce) { .tool-spinner { animation: none; } }

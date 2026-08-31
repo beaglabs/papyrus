@@ -273,8 +273,16 @@ export class MastraAgentWorker implements AgentRuntime {
 export function isGenericPdfRequest(prompt: string | ContentBlock[]): boolean {
   if (Array.isArray(prompt) && prompt.some((block) => block.type !== 'text')) return false
   const text = promptText(prompt).trim().toLowerCase().replace(/\s+/g, ' ')
-  return /^(?:(?:can|could|would|will) you\s+)?(?:please\s+)?(?:generate|create|make)(?:\s+me)?\s+(?:a\s+)?pdf(?:\s+for me)?[?.!]*$/.test(text)
-    || /^(?:please\s+)?show me (?:a\s+)?pdf[?.!]*$/.test(text)
+  if (!/\bpdf\b/.test(text)) return false
+  if (!/\b(?:generate|create|make|design|render|build|show)\b/.test(text)) return false
+
+  // Requests that explicitly depend on existing workspace/source material need
+  // the normal Mastra tool inventory. Self-contained PDF prompts, including
+  // styling modifiers, should stay on the dedicated PDF tool path.
+  if (/\b(?:from|using|based on)\s+(?:the\s+)?(?:workspace|attachments?|uploads?|files?|notes?|sources?|artifacts?)\b/.test(text)) return false
+  if (/\b(?:current|existing)\s+(?:workspace|file|document|report|artifact)\b/.test(text)) return false
+  if (/\b(?:convert|turn)\b.*\b(?:file|document|attachment|upload)\b/.test(text)) return false
+  return true
 }
 
 function promptText(prompt: string | ContentBlock[]): string {

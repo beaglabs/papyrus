@@ -522,6 +522,14 @@ nav [data-slot=button].active{border-color:var(--border);background:var(--main);
   border-radius: 50%;
 }
 .message.thought[open] .thought-orbit { animation: artifact-spin 1s linear infinite; }
+.message.thought.thought-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #555;
+  font: 700 11px ui-monospace, monospace;
+}
+.message.thought.thought-status .thought-orbit { animation: artifact-spin 1s linear infinite; }
 
 .durable-prompt-turn {
   display: grid;

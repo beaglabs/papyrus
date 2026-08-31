@@ -90,6 +90,57 @@ describe('remote MCP OAuth 2.1 registration', () => {
     expect(result).toMatchObject({ kind: 'configuration_required', issuer: 'https://auth.example' })
   })
 
+  it('accepts same-origin hierarchical protected resources from a WWW-Authenticate challenge', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(oauthChallenge('https://api.githubcopilot.com/.well-known/oauth-protected-resource/mcp'))
+      .mockResolvedValueOnce(Response.json({
+        resource: 'https://api.githubcopilot.com/mcp',
+        authorization_servers: ['https://auth.example'],
+      }))
+      .mockResolvedValueOnce(authorizationMetadata())
+    vi.stubGlobal('fetch', fetch)
+
+    const result = await prepareRemoteMcp(
+      'https://api.githubcopilot.com/mcp/readonly',
+      'https://papyrus.example/api/mcp/oauth/callback',
+      'Papyrus',
+      { resolveClient: () => ({ clientId: 'client' }) },
+    )
+    expect(result.kind).toBe('authorization_required')
+  })
+
+  it('rejects same-origin resource prefixes that split a path segment', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(oauthChallenge())
+      .mockResolvedValueOnce(Response.json({
+        resource: 'https://mcp.example/mc',
+        authorization_servers: ['https://auth.example'],
+      }))
+    vi.stubGlobal('fetch', fetch)
+
+    await expect(prepareRemoteMcp(
+      'https://mcp.example/mcp',
+      'https://papyrus.example/api/mcp/oauth/callback',
+      'Papyrus',
+    )).rejects.toThrow('does not match requested endpoint')
+  })
+
+  it('keeps exact resource matching for direct well-known discovery', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response('', { status: 401 }))
+      .mockResolvedValueOnce(Response.json({
+        resource: 'https://mcp.example/mcp',
+        authorization_servers: ['https://auth.example'],
+      }))
+    vi.stubGlobal('fetch', fetch)
+
+    await expect(prepareRemoteMcp(
+      'https://mcp.example/mcp/readonly',
+      'https://papyrus.example/api/mcp/oauth/callback',
+      'Papyrus',
+    )).rejects.toThrow('does not match requested endpoint')
+  })
+
   it('rejects protected-resource metadata for a different MCP resource', async () => {
     const fetch = vi.fn()
       .mockResolvedValueOnce(oauthChallenge())

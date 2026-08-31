@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Principal } from '@papyrus/contracts'
 import { ACTIONS, PolicyEngine, cedarUser, cedarUsers, type PolicyAction } from '../src/policy.js'
+import { runtimeToolAction } from '../src/mastra/authorization.js'
 
 const principal = (id: string, roles: Principal['roles']): Principal => ({ id, externalId: id, displayName: id, roles, authMethod: 'oidc' })
 
@@ -20,6 +21,10 @@ describe('fixed Cedar policy', () => {
       expect(policy.authorize(principal('mallory', ['User']), action, environment).allowed).toBe(false)
       expect(policy.authorize(principal('auditor', ['Auditor']), action, environment).allowed).toBe(false)
     }
+  })
+
+  it('maps first-class PDF creation to governed workspace writes', () => {
+    expect(runtimeToolAction('papyrus_create_pdf')).toBe('WorkspaceWrite')
   })
 
   it('enforces session ownership', () => {

@@ -267,6 +267,7 @@ function promptToMessage(prompt: string | ContentBlock[]): string | Array<{ type
 
 function toolKindFor(name: string): string {
   return name === 'papyrus_exec_code' || name === 'mastra_workspace_execute_command' ? 'execute'
+    : name === 'papyrus_create_pdf' ? 'edit'
     : name.includes('read') || name.includes('list') || name.includes('glob') ? 'read'
     : name.includes('write') ? 'edit'
     : 'other'

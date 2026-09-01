@@ -135,6 +135,8 @@ export function displayToolTitle(title: string): string {
   const exact: Record<string, string> = {
     papyrus_browser_navigate: 'Open page',
     papyrus_browser_read: 'Read page',
+    'Browser navigate': 'Open page',
+    'Browser read': 'Read page',
     papyrus_request_input: 'Request input',
     papyrus_set_goal: 'Update goal',
     papyrus_create_pdf: 'Create PDF',
@@ -144,6 +146,7 @@ export function displayToolTitle(title: string): string {
     mastra_workspace_execute_command: 'Run command',
   }
   if (exact[title]) return exact[title]
+  if (!title.includes('_')) return title
 
   const normalized = title.startsWith('mastra_workspace_') ? title.slice('mastra_workspace_'.length)
     : title.startsWith('papyrus_') ? title.slice('papyrus_'.length)

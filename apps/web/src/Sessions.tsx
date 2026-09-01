@@ -6,7 +6,7 @@ import { ToolActivityGroup, displayToolTitle, projectActivity, type ToolActivity
 import { createPortal } from 'react-dom'
 import { Alert, Button, Input, Textarea } from './components/ui/index.js'
 
-export { projectActivity } from './SessionActivity.js'
+export { projectActivity }
 
 interface PromptTurnGroup { runId: string; sequence: number; events: SessionEvent[] }
 export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRequest: number; onActivate: () => void }) {

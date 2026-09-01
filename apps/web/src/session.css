@@ -630,7 +630,6 @@
 }
 
 .session-v2 .composer [data-slot=button].primary {
-  margin-left: auto;
   border-color: #111;
   background: #ff5f1f;
   color: #111;
@@ -638,7 +637,6 @@
 }
 
 .session-v2 .composer [data-slot=button].session-stop {
-  margin-left: auto;
   border-color: #111;
   background: #ff9fb4;
   color: #111;
@@ -649,11 +647,6 @@
   margin-left: auto;
   color: #98938b;
   font: 8px ui-monospace, monospace;
-}
-
-.session-v2 .composer .primary + .session-composer-hint,
-.session-v2 .composer .session-stop + .session-composer-hint {
-  margin-left: 0;
 }
 
 .session-v2 .attachment-chips {

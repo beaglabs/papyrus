@@ -365,12 +365,28 @@
 }
 
 .session-tool-row > summary {
+  position: relative;
+  padding-right: 18px;
   cursor: pointer;
   list-style: none;
 }
 
 .session-tool-row > summary::-webkit-details-marker {
   display: none;
+}
+
+.session-tool-row > summary::after {
+  content: '›';
+  position: absolute;
+  right: 3px;
+  color: #aaa69f;
+  font: 700 12px ui-monospace, monospace;
+  transform: rotate(90deg);
+  transition: transform 120ms ease;
+}
+
+.session-tool-row[open] > summary::after {
+  transform: rotate(270deg);
 }
 
 .session-tool-row > summary:hover {

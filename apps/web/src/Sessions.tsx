@@ -536,7 +536,7 @@ function ToolActivityCard({ tool, active }: { tool: ToolActivity; active: boolea
   const hasDetail = active || tool.status === 'failed' || Boolean(browser) || Boolean(tool.stdout || tool.stderr) || tool.output.length > 0 || tool.exitCode !== undefined
   const row = <ToolActivitySummary tool={tool} active={active} summary={summary} />
   if (!hasDetail) return <div className={`prompt-turn-tool tool-row ${tool.status}`} aria-busy={active}>{row}</div>
-  return <details className={`prompt-turn-tool ${tool.status}`} open={active || tool.status === 'failed'} aria-busy={active}>
+  return <details className={`prompt-turn-tool ${tool.status}`} open={active || tool.status === 'failed' || Boolean(browser)} aria-busy={active}>
     <summary>{row}</summary>
     <div className="tool-row-detail">
       {active && <span className="tool-running-hint">{tool.status === 'pending' ? 'Preparing tool arguments…' : 'Executing tool…'}</span>}

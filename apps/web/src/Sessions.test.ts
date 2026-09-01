@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Artifact, SessionEvent } from '@papyrus/contracts'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { ArtifactWorkspace, PromptTurnFlow, hasAcceptedTurn, isArtifactGenerationActive, latestBrowserState, latestRunRunning, projectActivity } from './Sessions.js'
+import { ArtifactWorkspace, DurablePromptTurn, PromptTurnFlow, hasAcceptedTurn, isArtifactGenerationActive, latestBrowserState, latestRunRunning, projectActivity } from './Sessions.js'
 
 function event(sequence: number, data: Record<string, unknown>): SessionEvent {
   return { id: String(sequence), sessionId: 'session', runId: 'run', sequence, kind: 'update', occurredAt: new Date(0).toISOString(), data } as SessionEvent
@@ -92,6 +92,29 @@ describe('Mastra session projection', () => {
       event(2, { sessionUpdate: 'run_completed', status: 'failed' }),
     ], running: false, submitted: false }))
     expect(html).toContain('Turn failed')
+    expect(html).not.toContain('Turn complete')
+  })
+
+  it('renders assistant text, tool activity, and final text in event order', () => {
+    const turn = {
+      runId: 'run',
+      sequence: 1,
+      events: [
+        event(1, { sessionUpdate: 'user_message_chunk', messageId: 'user', content: { type: 'text', text: 'Generate a PDF' } }),
+        event(2, { sessionUpdate: 'agent_message_chunk', messageId: 'agent-0', content: { type: 'text', text: 'I’ll generate it now.' } }),
+        event(3, { sessionUpdate: 'tool_call', toolCallId: 'pdf', title: 'Create PDF', kind: 'edit', status: 'in_progress' }),
+        event(4, { sessionUpdate: 'tool_call_update', toolCallId: 'pdf', title: 'Create PDF', kind: 'edit', status: 'completed' }),
+        event(5, { sessionUpdate: 'agent_message_chunk', messageId: 'agent-1', content: { type: 'text', text: 'Your PDF is ready.' } }),
+        event(6, { sessionUpdate: 'run_completed', status: 'completed' }),
+      ],
+    }
+    const html = renderToStaticMarkup(createElement(DurablePromptTurn, { turn, running: false }))
+    const preamble = html.indexOf('I’ll generate it now.')
+    const tool = html.indexOf('Create PDF')
+    const final = html.indexOf('Your PDF is ready.')
+    expect(preamble).toBeGreaterThan(-1)
+    expect(tool).toBeGreaterThan(preamble)
+    expect(final).toBeGreaterThan(tool)
     expect(html).not.toContain('Turn complete')
   })
 

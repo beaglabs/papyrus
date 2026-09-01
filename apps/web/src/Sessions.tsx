@@ -374,14 +374,22 @@ function promptTurns(events: SessionEvent[]): PromptTurnGroup[] {
     .sort((left, right) => left.sequence - right.sequence)
 }
 
-function DurablePromptTurn({ turn, running }: { turn: PromptTurnGroup; running: boolean }) {
+export function DurablePromptTurn({ turn, running }: { turn: PromptTurnGroup; running: boolean }) {
   const messages = acpContent(turn.events)
+  const { tools } = projectActivity(turn.events)
   const lastUser = [...messages].reverse().find((message) => message.role === 'user')?.sequence ?? -1
   const activeThoughtId = [...messages].reverse().find((message) => message.role === 'thought' && message.sequence > lastUser)?.id
   const lifecycle = [...turn.events].reverse().find((event) => event.kind === 'run')?.data as { sessionUpdate?: string; status?: string; error?: string } | undefined
+  const timeline = [
+    ...messages.map((message) => ({ type: 'message' as const, sequence: message.sequence, id: `message:${message.id}`, message })),
+    ...tools.map((tool) => ({ type: 'tool' as const, sequence: tool.sequence, id: `tool:${tool.id}`, tool })),
+  ].sort((left, right) => left.sequence - right.sequence || (left.type === 'message' ? -1 : 1))
+
   return <section className="durable-prompt-turn" data-run-id={turn.runId}>
-    {messages.map((message) => <ContentMessage message={message} active={running && message.id === activeThoughtId} key={message.id} />)}
-    <PromptTurnFlow events={turn.events} running={running} submitted={false} />
+    {timeline.map((item) => item.type === 'message'
+      ? <ContentMessage message={item.message} active={running && item.message.id === activeThoughtId} key={item.id} />
+      : <div className="inline-tool-activity" key={item.id}><ToolActivityCard tool={item.tool} active={running && (item.tool.status === 'pending' || item.tool.status === 'in_progress')} /></div>)}
+    <PromptTurnFlow events={turn.events} running={running} submitted={false} showTools={false} />
     {lifecycle?.sessionUpdate === 'run_completed' && lifecycle.status && lifecycle.status !== 'completed' && <div className={`turn-outcome ${lifecycle.status}`}><strong>{lifecycle.status}</strong>{lifecycle.error && <span>{lifecycle.error}</span>}</div>}
   </section>
 }
@@ -455,7 +463,7 @@ function ArtifactCards({ artifacts, onOpen }: { artifacts: Artifact[]; onOpen: (
   </section>
 }
 
-export function PromptTurnFlow({ events, running, submitted }: { events: SessionEvent[]; running: boolean; submitted: boolean }) {
+export function PromptTurnFlow({ events, running, submitted, showTools = true }: { events: SessionEvent[]; running: boolean; submitted: boolean; showTools?: boolean }) {
   let turnStart = -1
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]
@@ -466,7 +474,7 @@ export function PromptTurnFlow({ events, running, submitted }: { events: Session
   }
   const turnEvents = submitted ? [] : turnStart >= 0 ? events.slice(turnStart + 1) : events
   const { plan, tools } = projectActivity(turnEvents)
-  if (!running && plan.length === 0 && tools.length === 0) return null
+  if (!running && plan.length === 0 && (!showTools || tools.length === 0)) return null
   const activeTools = tools.filter((tool) => tool.status === 'in_progress' || tool.status === 'pending')
   const hasModelStream = turnEvents.some((event) => event.kind === 'update' && event.data && typeof event.data === 'object' && ['agent_thought_chunk', 'agent_message_chunk'].includes(String((event.data as { sessionUpdate?: string }).sessionUpdate)))
   const failedTool = [...tools].reverse().find((tool) => tool.status === 'failed')
@@ -482,13 +490,31 @@ export function PromptTurnFlow({ events, running, submitted }: { events: Session
     : running ? 'Working…'
     : outcome?.status && outcome.status !== 'completed' ? `Turn ${outcome.status}`
     : failedTool ? `${failedTool.title} failed`
-    : hasTerminalRun(events) ? 'Turn complete' : 'Turn status unavailable'
+    : 'Turn status unavailable'
   const displayTools = [...tools.filter((tool) => !activeTools.includes(tool)), ...activeTools]
+  const showStatus = running || Boolean(failedTool) || Boolean(outcome?.status && outcome.status !== 'completed')
+  if (!showStatus && plan.length === 0 && (!showTools || displayTools.length === 0)) return null
   return <section className="prompt-turn-flow" aria-live="polite">
-    <div className="prompt-turn-status" role="status"><span className={running || activeTools.length ? 'tool-spinner' : failedTool || outcome?.status === 'failed' ? 'dot bad' : 'dot good'} aria-hidden="true" /><strong>{status}</strong>{running && <span className="streaming-cursor" aria-hidden="true">▌</span>}</div>
+    {showStatus && <div className="prompt-turn-status" role="status"><span className={running || activeTools.length ? 'tool-spinner' : failedTool || outcome?.status === 'failed' ? 'dot bad' : 'dot good'} aria-hidden="true" /><strong>{status}</strong>{running && <span className="streaming-cursor" aria-hidden="true">▌</span>}</div>}
     {plan.length > 0 && <ol className="prompt-turn-plan">{plan.map((item, index) => <li key={`${index}-${item.content}`} className={item.status}><span className={`activity-status ${item.status}`} />{item.content}</li>)}</ol>}
-    {tools.length > 0 && <div className="prompt-turn-tools">{displayTools.map((tool) => <Card key={tool.id} className={`prompt-turn-tool ${tool.status}`} aria-busy={activeTools.includes(tool)}><span className={`tool-kind ${tool.kind}`}>{tool.kind}</span><div><strong>{tool.title}</strong><small>{tool.locations.join(' · ') || tool.id}</small>{activeTools.includes(tool) && <span className="tool-running-hint">{tool.status === 'pending' ? 'Preparing tool arguments…' : 'Executing tool…'}</span>}{(tool.stdout || tool.stderr) && <div className="tool-live-output"><pre className="tool-stream-output">{tool.stdout}{tool.stderr && <span className="tool-stderr">{tool.stderr}</span>}</pre></div>}{tool.output.length > 0 && <div className="tool-live-output">{tool.output.map((block, index) => <ContentBlock key={index} block={block} />)}</div>}{tool.status === 'failed' && !tool.stdout && !tool.stderr && tool.output.length === 0 && <span className="tool-failure-hint">{tool.exitCode !== undefined ? `Command exited with code ${tool.exitCode} and produced no diagnostic output.` : 'Tool failed without diagnostic output.'}</span>}{tool.exitCode !== undefined && <small>Exit code: {tool.exitCode}</small>}</div><span className={`pill ${tool.status}`}>{activeTools.includes(tool) && <span className="tool-spinner" aria-hidden="true" />}{tool.status === 'in_progress' ? 'Running' : tool.status === 'pending' ? 'Preparing' : tool.status}</span></Card>)}</div>}
+    {showTools && displayTools.length > 0 && <div className="prompt-turn-tools">{displayTools.map((tool) => <ToolActivityCard key={tool.id} tool={tool} active={activeTools.includes(tool)} />)}</div>}
   </section>
+}
+
+function ToolActivityCard({ tool, active }: { tool: ToolActivity; active: boolean }) {
+  return <Card className={`prompt-turn-tool ${tool.status}`} aria-busy={active}>
+    <span className={`tool-kind ${tool.kind}`}>{tool.kind}</span>
+    <div>
+      <strong>{tool.title}</strong>
+      <small>{tool.locations.join(' · ') || tool.id}</small>
+      {active && <span className="tool-running-hint">{tool.status === 'pending' ? 'Preparing tool arguments…' : 'Executing tool…'}</span>}
+      {(tool.stdout || tool.stderr) && <div className="tool-live-output"><pre className="tool-stream-output">{tool.stdout}{tool.stderr && <span className="tool-stderr">{tool.stderr}</span>}</pre></div>}
+      {tool.output.length > 0 && <div className="tool-live-output">{tool.output.map((block, index) => <ContentBlock key={index} block={block} />)}</div>}
+      {tool.status === 'failed' && !tool.stdout && !tool.stderr && tool.output.length === 0 && <span className="tool-failure-hint">{tool.exitCode !== undefined ? `Command exited with code ${tool.exitCode} and produced no diagnostic output.` : 'Tool failed without diagnostic output.'}</span>}
+      {tool.exitCode !== undefined && <small>Exit code: {tool.exitCode}</small>}
+    </div>
+    <span className={`pill ${tool.status}`}>{active && <span className="tool-spinner" aria-hidden="true" />}{tool.status === 'in_progress' ? 'Running' : tool.status === 'pending' ? 'Preparing' : tool.status}</span>
+  </Card>
 }
 
 export function projectActivity(events: SessionEvent[]): { plan: PlanItem[]; tools: ToolActivity[] } {

@@ -385,6 +385,25 @@ describe('Mastra agent runtime', () => {
     expect(events.at(-1)).toMatchObject({ kind: 'complete' })
   })
 
+  it('uses a new ACP message id after a tool step so final text stays after tool activity', async () => {
+    const { result, events } = runChunks([
+      { type: 'text-delta', payload: { text: 'I’ll generate it now.' } },
+      { type: 'tool-call', payload: { toolCallId: 'pdf', toolName: 'papyrus_create_pdf', args: {} } },
+      { type: 'tool-result', payload: { toolCallId: 'pdf', toolName: 'papyrus_create_pdf', result: 'Created document.pdf' } },
+      finishChunk('step-finish', 'tool-calls', true),
+      { type: 'text-delta', payload: { text: 'Your PDF is ready.' } },
+      finishChunk('finish', 'stop'),
+    ])
+    await expect(result).resolves.toMatchObject({ stopReason: 'stop' })
+    const messages = events
+      .map((event) => event.data as { sessionUpdate?: string; messageId?: string; content?: { text?: string } })
+      .filter((event) => event.sessionUpdate === 'agent_message_chunk')
+    expect(messages).toHaveLength(2)
+    expect(messages[0]?.content?.text).toBe('I’ll generate it now.')
+    expect(messages[1]?.content?.text).toBe('Your PDF is ready.')
+    expect(messages[0]?.messageId).not.toBe(messages[1]?.messageId)
+  })
+
   it.each([
     { reason: 'length', stopReason: 'max_tokens' },
     { reason: 'tool-calls', stopReason: 'max_turn_requests' },
@@ -519,12 +538,14 @@ describe('Mastra agent runtime', () => {
     }))
   })
 
-  it('limits PDF-only Mastra routing to broad requests without source material', () => {
+  it('routes self-contained styled PDF requests while preserving source-dependent turns', () => {
     expect(isGenericPdfRequest('Can you generate a PDF for me?')).toBe(true)
     expect(isGenericPdfRequest('Create a PDF')).toBe(true)
     expect(isGenericPdfRequest('Show me a PDF')).toBe(true)
+    expect(isGenericPdfRequest('Generate a random styled PDF')).toBe(true)
+    expect(isGenericPdfRequest('Create a two-page art deco PDF about quarterly revenue')).toBe(true)
     expect(isGenericPdfRequest('Generate a PDF from the workspace notes')).toBe(false)
-    expect(isGenericPdfRequest('Create a PDF about quarterly revenue')).toBe(false)
+    expect(isGenericPdfRequest('Create a PDF using the uploaded files')).toBe(false)
     expect(isGenericPdfRequest([{ type: 'text', text: 'Make me a PDF' }] as ContentBlock[])).toBe(true)
     expect(isGenericPdfRequest([
       { type: 'text', text: 'Make me a PDF' },

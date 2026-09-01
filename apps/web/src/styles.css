@@ -580,6 +580,10 @@ nav [data-slot=button].active{border-color:var(--border);background:var(--main);
   gap: 8px;
 }
 .prompt-turn-tools { display: grid; gap: 8px; }
+.inline-tool-activity {
+  width: min(760px, 92%);
+  justify-self: start;
+}
 .prompt-turn-tool[data-slot=card] {
   min-width: 0;
   display: grid;

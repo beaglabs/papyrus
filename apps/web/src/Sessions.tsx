@@ -40,6 +40,8 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
   const turns = useMemo(() => promptTurns(events), [events])
   const activeRunId = useMemo(() => [...events].reverse().find((event) => event.runId)?.runId, [events])
   const browserState = useMemo(() => latestBrowserState(events), [events])
+  const activeActivity = useMemo(() => projectActivity(activeRunId ? events.filter((event) => event.runId === activeRunId) : []), [activeRunId, events])
+  const pendingInput = elicitations.some((item) => item.status === 'pending')
   const artifactGenerating = useMemo(() => running && isArtifactGenerationActive(activeRunId ? events.filter((event) => event.runId === activeRunId) : []), [activeRunId, events, running])
 
   const loadContext = async (sessionId: string) => {
@@ -232,7 +234,7 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
     <div className={`conversation-panel ${selected ? '' : 'new-session-panel'}`}>
       {(error || liveError) && <Alert className={error ? 'error' : 'connection-notice'}>{error ?? liveError}<Button variant="ghost" onClick={() => { setError(undefined); setLiveError(undefined) }}>×</Button></Alert>}
       {!selected ? <div className="new-session-home"><div className="new-session-intro"><p className="eyebrow">NEW DURABLE SESSION</p><h2>What should we work on?</h2><p>Your first prompt creates the session automatically and keeps the complete governed history.</p></div><form className="new-session-composer" onSubmit={startNewSession}><Textarea ref={newPromptRef} name="prompt" disabled={running} placeholder="Describe the work to perform…" onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} /><div className="new-session-controls"><span className="new-session-note">Your deployment’s approved runtime and access assignments are applied automatically.</span><Button className="primary" disabled={running}>{running ? 'Starting…' : 'Start →'}</Button></div></form></div> : <>
-        <div className="conversation-head"><div><strong>{selected.title}</strong><span>{running ? 'running' : selected.status === 'running' ? 'ready' : selected.status}{goal?.objective ? ' · goal active' : ''}</span></div><div className="session-actions">{running ? <Button className="danger" onClick={() => void cancel()}>Cancel run</Button> : <Button className="text-button" onClick={() => void removeSession()}>Delete</Button>}</div></div>
+        <div className="conversation-head"><div><strong>{selected.title}</strong><span>{running ? ['running', activeActivity.tools.length ? `${activeActivity.tools.length} tool call${activeActivity.tools.length === 1 ? '' : 's'}` : '', pendingInput ? 'input required' : '', goal?.objective ? 'goal active' : ''].filter(Boolean).join(' · ') : `${selected.status === 'running' ? 'ready' : selected.status}${goal?.objective ? ' · goal active' : ''}`}</span></div><div className="session-actions">{running ? <Button className="danger" onClick={() => void cancel()}>Cancel run</Button> : <Button className="text-button" onClick={() => void removeSession()}>Delete</Button>}</div></div>
         <div className={`session-content ${artifactPanelOpen ? 'artifact-panel-open' : ''}`}>
           <div className="message-region">
             <div className="messages" ref={messagesRef} aria-live="polite" onScroll={(event) => {
@@ -501,20 +503,107 @@ export function PromptTurnFlow({ events, running, submitted, showTools = true }:
   </section>
 }
 
+interface BrowserToolPreview {
+  url?: string
+  title?: string
+  text?: string
+}
+
+export function browserToolPreview(tool: Pick<ToolActivity, 'title' | 'output'>): BrowserToolPreview | undefined {
+  if (!/browser/i.test(tool.title)) return undefined
+  for (const block of [...tool.output].reverse()) {
+    if (block.type !== 'text' || typeof block.text !== 'string') continue
+    try {
+      const parsed = JSON.parse(block.text) as unknown
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue
+      const value = parsed as Record<string, unknown>
+      const preview = {
+        ...(typeof value.url === 'string' ? { url: value.url } : {}),
+        ...(typeof value.title === 'string' ? { title: value.title } : {}),
+        ...(typeof value.text === 'string' ? { text: value.text } : {}),
+      }
+      if (preview.url || preview.title || preview.text) return preview
+    } catch {
+      // Browser MCP/native tools may return plain text; keep the generic summary.
+    }
+  }
+  return undefined
+}
+
 function ToolActivityCard({ tool, active }: { tool: ToolActivity; active: boolean }) {
-  return <Card className={`prompt-turn-tool ${tool.status}`} aria-busy={active}>
-    <span className={`tool-kind ${tool.kind}`}>{tool.kind}</span>
-    <div>
-      <strong>{tool.title}</strong>
-      <small>{tool.locations.join(' · ') || tool.id}</small>
+  const browser = browserToolPreview(tool)
+  const summary = toolSummary(tool, browser)
+  const hasDetail = active || tool.status === 'failed' || Boolean(browser) || Boolean(tool.stdout || tool.stderr) || tool.output.length > 0 || tool.exitCode !== undefined
+  const row = <ToolActivitySummary tool={tool} active={active} summary={summary} />
+  if (!hasDetail) return <div className={`prompt-turn-tool tool-row ${tool.status}`} aria-busy={active}>{row}</div>
+  return <details className={`prompt-turn-tool ${tool.status}`} open={active || tool.status === 'failed'} aria-busy={active}>
+    <summary>{row}</summary>
+    <div className="tool-row-detail">
       {active && <span className="tool-running-hint">{tool.status === 'pending' ? 'Preparing tool arguments…' : 'Executing tool…'}</span>}
-      {(tool.stdout || tool.stderr) && <div className="tool-live-output"><pre className="tool-stream-output">{tool.stdout}{tool.stderr && <span className="tool-stderr">{tool.stderr}</span>}</pre></div>}
-      {tool.output.length > 0 && <div className="tool-live-output">{tool.output.map((block, index) => <ContentBlock key={index} block={block} />)}</div>}
+      {browser ? <BrowserToolPreviewCard preview={browser} /> : <>
+        {(tool.stdout || tool.stderr) && <div className="tool-live-output"><pre className="tool-stream-output">{tool.stdout}{tool.stderr && <span className="tool-stderr">{tool.stderr}</span>}</pre></div>}
+        {tool.output.length > 0 && <div className="tool-live-output">{tool.output.map((block, index) => <ContentBlock key={index} block={block} />)}</div>}
+      </>}
+      {browser && tool.output.length > 0 && <details className="tool-raw-detail"><summary>Raw browser response</summary><div className="tool-live-output">{tool.output.map((block, index) => <ContentBlock key={index} block={block} />)}</div></details>}
       {tool.status === 'failed' && !tool.stdout && !tool.stderr && tool.output.length === 0 && <span className="tool-failure-hint">{tool.exitCode !== undefined ? `Command exited with code ${tool.exitCode} and produced no diagnostic output.` : 'Tool failed without diagnostic output.'}</span>}
-      {tool.exitCode !== undefined && <small>Exit code: {tool.exitCode}</small>}
+      {tool.exitCode !== undefined && <small className="tool-exit-code">Exit code: {tool.exitCode}</small>}
     </div>
+  </details>
+}
+
+function ToolActivitySummary({ tool, active, summary }: { tool: ToolActivity; active: boolean; summary: string }) {
+  return <>
+    <span className={`activity-status ${tool.status}`} aria-hidden="true" />
+    <span className={`tool-kind compact ${tool.kind}`}>{tool.kind}</span>
+    <span className="tool-row-copy"><strong>{displayToolTitle(tool.title)}</strong><small>{summary}</small></span>
     <span className={`pill ${tool.status}`}>{active && <span className="tool-spinner" aria-hidden="true" />}{tool.status === 'in_progress' ? 'Running' : tool.status === 'pending' ? 'Preparing' : tool.status}</span>
-  </Card>
+  </>
+}
+
+function BrowserToolPreviewCard({ preview }: { preview: BrowserToolPreview }) {
+  const url = safeBrowserUrl(preview.url)
+  const hostname = url ? new URL(url).hostname : undefined
+  const snippet = preview.text ? compactToolText(preview.text, 420) : undefined
+  return <div className="browser-tool-preview">
+    <div className="browser-tool-preview-meta"><span>PAGE PREVIEW</span>{hostname && <span>{hostname}</span>}</div>
+    <strong>{preview.title?.trim() || hostname || 'Browser result'}</strong>
+    {url && <a href={url} target="_blank" rel="noreferrer">{url}</a>}
+    {snippet && <p>{snippet}</p>}
+  </div>
+}
+
+function toolSummary(tool: ToolActivity, browser?: BrowserToolPreview): string {
+  if (browser) {
+    const url = safeBrowserUrl(browser.url)
+    const host = url ? new URL(url).hostname : ''
+    return [host, browser.title?.trim()].filter(Boolean).join(' · ') || 'Browser result ready'
+  }
+  if (tool.locations.length) return compactToolText(tool.locations.join(' · '), 140)
+  const stream = (tool.stderr || tool.stdout).trim().split(/\r?\n/).filter(Boolean).at(-1)
+  if (stream) return compactToolText(stream, 140)
+  const output = tool.output.find((block) => block.type === 'text' && typeof block.text === 'string')
+  if (output && typeof output.text === 'string') return compactToolText(output.text, 140)
+  return tool.id
+}
+
+function displayToolTitle(title: string): string {
+  const normalized = title.startsWith('mastra_workspace_') ? `Workspace ${title.slice('mastra_workspace_'.length)}`
+    : title.startsWith('papyrus_') ? title.slice('papyrus_'.length)
+    : title
+  return normalized.replaceAll('_', ' ').replace(/\b\w/g, (character) => character.toUpperCase())
+}
+
+function compactToolText(text: string, limit: number): string {
+  const compact = text.replace(/\\n/g, ' ').replace(/\s+/g, ' ').trim()
+  return compact.length > limit ? `${compact.slice(0, Math.max(0, limit - 1))}…` : compact
+}
+
+function safeBrowserUrl(value?: string): string | undefined {
+  if (!value) return undefined
+  try {
+    const url = new URL(value)
+    return ['http:', 'https:'].includes(url.protocol) ? url.href : undefined
+  } catch { return undefined }
 }
 
 export function projectActivity(events: SessionEvent[]): { plan: PlanItem[]; tools: ToolActivity[] } {

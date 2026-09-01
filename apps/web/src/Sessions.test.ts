@@ -54,8 +54,8 @@ describe('Mastra session projection', () => {
     const html = renderToStaticMarkup(createElement(PromptTurnFlow, { events, running: true, submitted: false }))
     expect(html).toContain('Running Render PDF')
     expect(html).toContain('aria-busy="true"')
-    expect(html).toContain('Executing tool…')
-    expect(html).toContain('tool-row-copy')
+    expect(html).toContain('session-activity')
+    expect(html).toContain('Render PDF')
     expect(html).not.toContain('Turn complete')
   })
 
@@ -75,11 +75,20 @@ describe('Mastra session projection', () => {
       }),
     ]
     const html = renderToStaticMarkup(createElement(PromptTurnFlow, { events, running: false, submitted: false }))
-    expect(html).toContain('PAGE PREVIEW')
+    expect(html).toContain('session-browser-preview')
     expect(html).toContain('Dinner guide')
     expect(html).toContain('example.com')
     expect(html).toContain('A concise guide to neighborhood dinner options')
-    expect(html).toContain('Raw browser response')
+    expect(html).toContain('Raw response')
+  })
+
+  it('renders request-input as a waiting state without duplicating it as tool chrome', () => {
+    const html = renderToStaticMarkup(createElement(PromptTurnFlow, { events: [
+      event(1, { sessionUpdate: 'tool_call', toolCallId: 'input', title: 'papyrus_request_input', status: 'in_progress' }),
+    ], running: true, submitted: false }))
+    expect(html).toContain('Waiting for input')
+    expect(html).not.toContain('Request input')
+    expect(html).not.toContain('session-activity')
   })
 
   it('distinguishes argument preparation from running and model continuation', () => {
@@ -97,7 +106,7 @@ describe('Mastra session projection', () => {
       event(3, { sessionUpdate: 'tool_call_update', toolCallId: 'cmd', title: 'Execute command', status: 'failed', _meta: { papyrus: { exitCode: 128 } } }),
     ], running: true, submitted: false }))
     expect(html).toContain('Recovering after Execute command failed')
-    expect(html).toContain('Command exited with code 128 and produced no diagnostic output.')
+    expect(html).toContain('Exited with code 128 without diagnostic output.')
   })
 
   it('keeps artifact generation visible after Create PDF finishes while the turn finalizes', () => {
@@ -107,7 +116,7 @@ describe('Mastra session projection', () => {
     ]
     expect(isArtifactGenerationActive(events)).toBe(true)
     const html = renderToStaticMarkup(createElement(PromptTurnFlow, { events, running: true, submitted: false }))
-    expect(html).toContain('Create PDF complete · finalizing artifact')
+    expect(html).toContain('Create PDF complete · finalizing output')
   })
 
   it('does not label a failed run as complete', () => {

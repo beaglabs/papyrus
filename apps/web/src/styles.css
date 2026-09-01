@@ -1006,7 +1006,7 @@ nav [data-slot=button].active{border-color:var(--border);background:var(--main);
 .prompt-turn-tool.in_progress,.prompt-turn-tool.pending{border-left-color:#ff5f1f;background:#fffaf6}
 .prompt-turn-tool>summary,.prompt-turn-tool.tool-row{
   display:grid;
-  grid-template-columns:10px auto minmax(0,1fr) auto;
+  grid-template-columns:10px auto minmax(0,1fr) auto auto;
   align-items:center;
   gap:8px;
   min-height:38px;
@@ -1017,7 +1017,7 @@ nav [data-slot=button].active{border-color:var(--border);background:var(--main);
 .prompt-turn-tool>summary::-webkit-details-marker{display:none}
 .prompt-turn-tool>summary::after{
   content:"›";
-  grid-column:4;
+  grid-column:5;
   grid-row:1;
   margin-left:auto;
   padding-left:6px;
@@ -1027,7 +1027,7 @@ nav [data-slot=button].active{border-color:var(--border);background:var(--main);
   transition:transform .14s ease;
 }
 .prompt-turn-tool[open]>summary::after{transform:rotate(270deg)}
-.prompt-turn-tool>summary>.pill{margin-right:16px}
+.prompt-turn-tool>summary>.pill{margin-right:0}
 .prompt-turn-tool .activity-status{width:8px;height:8px;border:0}
 .prompt-turn-tool .tool-kind.compact{min-width:42px;padding:2px 4px;font-size:8px;line-height:1.1}
 .tool-row-copy{display:grid;min-width:0;gap:1px}

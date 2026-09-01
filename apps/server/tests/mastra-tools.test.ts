@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { requestedFieldSchema } from '../src/mastra/tools.js'
+import { buildStaticAgentTools, requestedFieldSchema } from '../src/mastra/tools.js'
 import { runtimeToolAction } from '../src/mastra/authorization.js'
 
 describe('Mastra elicitation fields', () => {
@@ -20,6 +20,15 @@ describe('Mastra elicitation fields', () => {
 
   it('maps the PDF tool through the normal governed workspace-write policy', () => {
     expect(runtimeToolAction('papyrus_create_pdf')).toBe('WorkspaceWrite')
+  })
+
+  it('does not expose native browser tools when the deployment disables them', () => {
+    const disabled = Object.keys(buildStaticAgentTools({ nativeBrowserEnabled: false }))
+    expect(disabled).not.toContain('papyrus_browser_navigate')
+    expect(disabled).not.toContain('papyrus_browser_read')
+
+    const enabled = Object.keys(buildStaticAgentTools({ nativeBrowserEnabled: true }))
+    expect(enabled).toEqual(expect.arrayContaining(['papyrus_browser_navigate', 'papyrus_browser_read']))
   })
 
 })

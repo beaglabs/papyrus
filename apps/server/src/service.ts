@@ -309,6 +309,17 @@ export class PapyrusService {
     this.check(actor, 'PromptSession', this.sessionResource(session))
     this.check(actor, 'ReadEnvironment', this.environmentResource(session.environmentId))
     const resource = this.runtimeToolResource(session, 'native-browser')
+    if (!this.config.nativeBrowserEnabled) {
+      this.audit.append({
+        actorId: actor.id,
+        action: 'InvokeTool',
+        resourceType: 'Tool',
+        resourceId: resource.id,
+        decision: 'deny',
+        metadata: { sessionId, profile: this.config.profile, reason: 'Native browser disabled by deployment profile' },
+      })
+      throw new AuthorizationDenied('UseNativeBrowser', resource.id)
+    }
     for (const action of BROWSER_POLICY_ACTIONS) this.check(actor, action, resource)
   }
 

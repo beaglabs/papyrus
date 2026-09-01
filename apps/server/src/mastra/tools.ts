@@ -26,7 +26,7 @@ export function requestedFieldSchema(fields: ElicitationField[]) {
 
 // Non-workspace tools. Files, commands, search, skills, LSP, and browser access
 // come from the session-scoped Mastra Workspace.
-export function buildStaticAgentTools() {
+export function buildStaticAgentTools(options: { nativeBrowserEnabled?: boolean } = {}) {
   const browserNavigate = createTool({
     id: 'papyrus_browser_navigate',
     description: 'Navigate the session browser. Requires privileged browser permissions; restricted users must use assigned browser MCP tools.',
@@ -136,8 +136,10 @@ export function buildStaticAgentTools() {
   })
 
   return {
-    papyrus_browser_navigate: browserNavigate,
-    papyrus_browser_read: browserRead,
+    ...((options.nativeBrowserEnabled ?? true) ? {
+      papyrus_browser_navigate: browserNavigate,
+      papyrus_browser_read: browserRead,
+    } : {}),
     papyrus_set_goal: setGoal,
     papyrus_generate: generateImage,
     papyrus_create_pdf: createPdf,

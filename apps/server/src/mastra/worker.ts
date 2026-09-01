@@ -320,6 +320,8 @@ function toolKindFor(name: string): string {
 
 function toolTitleFor(name: string): string {
   if (name === 'papyrus_create_pdf') return 'Create PDF'
+  if (name === 'papyrus_browser_navigate') return 'Browser navigate'
+  if (name === 'papyrus_browser_read') return 'Browser read'
   if (name === 'mastra_workspace_execute_command') return 'Execute command'
   if (name === 'mastra_workspace_write_file') return 'Write file'
   if (name === 'mastra_workspace_read_file') return 'Read file'

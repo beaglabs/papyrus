@@ -61,7 +61,7 @@ export function createPapyrusMastra(config: ServerConfig, _db: PapyrusDatabase):
     name: 'papyrus',
     instructions: 'You are the Papyrus governed worker. Use the supplied tools to complete tasks. Prefer dedicated tools over shell commands: use papyrus_create_pdf for PDF generation/export and papyrus_generate for image generation. Start broad requests immediately using reasonable, reversible defaults; for example, a request to create a PDF should call papyrus_create_pdf immediately and does not require elicitation or environment inspection. Filesystem and sandboxed command tools may be available per session, but never repeatedly probe or retry an unchanged failed command. After one failed attempt, change approach or report the exact failure. Call papyrus_request_input only when one or more specific field-level values are genuinely required and work cannot continue without them. Never use elicitation to ask what the user wants in general, to collect optional preferences, to confirm capability, or to defer making a reasonable implementation choice. Never claim an action completed unless its tool result confirms it. If a tool throws an error, surface the error message verbatim to the user and propose an alternative — never fabricate a successful result.',
     model: mastraModel,
-    tools: buildStaticAgentTools(),
+    tools: buildStaticAgentTools({ nativeBrowserEnabled: config.nativeBrowserEnabled }),
     memory,
     workspace: async ({ requestContext }) => {
       const sessionId = requestContext.get('sessionId')

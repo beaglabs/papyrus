@@ -22,6 +22,16 @@ const persistentEnv = {
   PAPYRUS_OIDC_REDIRECT_URI: 'https://papyrus.example.test/api/auth/oidc/callback',
 }
 
+const governmentEnv = {
+  PAPYRUS_MODE: 'local',
+  PAPYRUS_PROFILE: 'government-il4',
+  PAPYRUS_PUBLIC_ORIGIN: 'https://127.0.0.1:3210',
+  PAPYRUS_SESSION_SECRET: 'a'.repeat(32),
+  PAPYRUS_TLS_CERT: '/tmp/server.pem',
+  PAPYRUS_TLS_KEY: '/tmp/server-key.pem',
+  PAPYRUS_TLS_CA: '/tmp/cac-ca.pem',
+}
+
 describe('license deployment invariant', () => {
   it('always requires a license in persistent mode', () => {
     vi.stubGlobal('process', { ...process, versions: { ...process.versions, node: '24.0.0' } })
@@ -63,6 +73,13 @@ describe('authentication deployment boundaries', () => {
       ...baseEnv,
       PAPYRUS_PROFILE: 'government-il4',
     })).toThrow(/do not support OIDC/)
+  })
+
+  it('fails closed on native browser access in government profiles unless explicitly enabled', () => {
+    expect(loadConfig(governmentEnv).nativeBrowserEnabled).toBe(false)
+    expect(loadConfig({ ...governmentEnv, PAPYRUS_NATIVE_BROWSER_ENABLED: 'true' }).nativeBrowserEnabled).toBe(true)
+    expect(loadConfig(baseEnv).nativeBrowserEnabled).toBe(true)
+    expect(() => loadConfig({ ...governmentEnv, PAPYRUS_NATIVE_BROWSER_ENABLED: 'yes' })).toThrow(/must be true or false/)
   })
 
   it('loads commercial tenant branding and validates the logo domain', () => {

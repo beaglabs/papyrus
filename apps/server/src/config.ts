@@ -38,6 +38,7 @@ export interface ServerConfig {
   runtimeWorkerTls?: { certPath: string; keyPath: string; caPath: string }
   model?: { endpoint: string; model: string; apiKey?: string }
   connectors?: ConnectorProfile[]
+  nativeBrowserEnabled: boolean
   licenseRequired: boolean
   licenseAuthorities: Record<string, string>
 }
@@ -129,6 +130,14 @@ export function loadConfig(env = process.env): ServerConfig {
   const profile = (env.PAPYRUS_PROFILE ?? 'commercial') as DeploymentProfile
   if (!['local', 'persistent'].includes(mode)) throw new Error('PAPYRUS_MODE must be local or persistent')
   if (!['commercial', 'government-il4', 'government-il6'].includes(profile)) throw new Error('Invalid PAPYRUS_PROFILE')
+  const nativeBrowserValue = env.PAPYRUS_NATIVE_BROWSER_ENABLED
+  if (nativeBrowserValue !== undefined && !['true', 'false'].includes(nativeBrowserValue)) {
+    throw new Error('PAPYRUS_NATIVE_BROWSER_ENABLED must be true or false')
+  }
+  // Native BrowserViewer control is a privileged, unrestricted surface. Commercial
+  // deployments preserve the existing default; government profiles fail closed
+  // unless an operator explicitly enables the native browser.
+  const nativeBrowserEnabled = nativeBrowserValue === undefined ? profile === 'commercial' : nativeBrowserValue === 'true'
   const host = env.PAPYRUS_HOST ?? (mode === 'local' ? '127.0.0.1' : '0.0.0.0')
   const port = Number(env.PAPYRUS_PORT ?? 3210)
   if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new Error('Invalid PAPYRUS_PORT')
@@ -269,6 +278,7 @@ export function loadConfig(env = process.env): ServerConfig {
     ...(runtimeWorkerTls ? { runtimeWorkerTls } : {}),
     ...(model ? { model } : {}),
     ...(fileConfig.connectors ? { connectors: fileConfig.connectors.map((id) => CONNECTOR_PROFILES[id] as ConnectorProfile) } : {}),
+    nativeBrowserEnabled,
     // Licensing is a deployment invariant: persistent mode always requires a valid license.
     // Local mode remains usable for development without a production bypass flag.
     licenseRequired: mode === 'persistent',

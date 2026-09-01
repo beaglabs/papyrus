@@ -71,6 +71,8 @@ describe('Mastra session projection', () => {
           url: 'https://example.com/dining',
           title: 'Dinner guide',
           text: 'A concise guide to neighborhood dinner options and reservations.',
+          description: 'Dinner recommendations and reservation information.',
+          status: 404,
         }) } }],
       }),
     ]
@@ -78,7 +80,8 @@ describe('Mastra session projection', () => {
     expect(html).toContain('session-browser-preview')
     expect(html).toContain('Dinner guide')
     expect(html).toContain('example.com')
-    expect(html).toContain('A concise guide to neighborhood dinner options')
+    expect(html).toContain('Dinner recommendations and reservation information.')
+    expect(html).toContain('HTTP 404')
     expect(html).toContain('Raw response')
   })
 
@@ -126,6 +129,25 @@ describe('Mastra session projection', () => {
     ], running: false, submitted: false }))
     expect(html).toContain('Turn failed')
     expect(html).not.toContain('Turn complete')
+  })
+
+  it('groups consecutive tools into one compact activity rail', () => {
+    const turn = {
+      runId: 'run',
+      sequence: 1,
+      events: [
+        event(1, { sessionUpdate: 'agent_message_chunk', messageId: 'agent-0', content: { type: 'text', text: 'Checking the workspace.' } }),
+        event(2, { sessionUpdate: 'tool_call', toolCallId: 'list', title: 'mastra_workspace_list_files', kind: 'read', status: 'completed' }),
+        event(3, { sessionUpdate: 'tool_call', toolCallId: 'read', title: 'mastra_workspace_read_file', kind: 'read', status: 'completed' }),
+        event(4, { sessionUpdate: 'agent_message_chunk', messageId: 'agent-1', content: { type: 'text', text: 'Done.' } }),
+      ],
+    }
+    const html = renderToStaticMarkup(createElement(DurablePromptTurn, { turn, running: false }))
+    expect((html.match(/aria-label="Tool activity"/g) ?? []).length).toBe(1)
+    expect(html).toContain('List files')
+    expect(html).toContain('Read file')
+    expect(html.indexOf('Checking the workspace.')).toBeLessThan(html.indexOf('List files'))
+    expect(html.indexOf('Read file')).toBeLessThan(html.indexOf('Done.'))
   })
 
   it('renders assistant text, tool activity, and final text in event order', () => {

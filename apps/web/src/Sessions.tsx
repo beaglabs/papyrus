@@ -635,13 +635,14 @@ export function PromptTurnFlow({ events, running, submitted, showTools = true }:
   }
   const turnEvents = submitted ? [] : turnStart >= 0 ? events.slice(turnStart + 1) : events
   const { plan, tools } = projectActivity(turnEvents)
-  if (!running && plan.length === 0 && (!showTools || tools.length === 0)) return null
+  const flowTools = tools.filter((tool) => tool.title !== 'papyrus_request_input' && !/request input/i.test(tool.title))
+  if (!running && plan.length === 0 && (!showTools || flowTools.length === 0)) return null
 
-  const activeTools = tools.filter((tool) => tool.status === 'in_progress' || tool.status === 'pending')
+  const activeTools = flowTools.filter((tool) => tool.status === 'in_progress' || tool.status === 'pending')
   const hasModelStream = turnEvents.some((event) => event.kind === 'update' && event.data && typeof event.data === 'object' && ['agent_thought_chunk', 'agent_message_chunk'].includes(String((event.data as { sessionUpdate?: string }).sessionUpdate)))
-  const failedTool = [...tools].reverse().find((tool) => tool.status === 'failed')
-  const latestTool = tools.at(-1)
-  const latestArtifactTool = [...tools].reverse().find((tool) => isArtifactTool(tool))
+  const failedTool = [...flowTools].reverse().find((tool) => tool.status === 'failed')
+  const latestTool = flowTools.at(-1)
+  const latestArtifactTool = [...flowTools].reverse().find((tool) => isArtifactTool(tool))
   const outcome = [...events].reverse().find((event) => (event.data as { sessionUpdate?: string } | undefined)?.sessionUpdate === 'run_completed')?.data as { status?: string } | undefined
   const status = activeTools.length > 1 ? `${activeTools.length} tools active`
     : activeTools[0] ? `${activeTools[0].status === 'pending' ? 'Preparing' : 'Running'} ${displayToolTitle(activeTools[0].title)}`
@@ -654,7 +655,7 @@ export function PromptTurnFlow({ events, running, submitted, showTools = true }:
     : failedTool ? `${displayToolTitle(failedTool.title)} failed`
     : 'Turn status unavailable'
 
-  const displayTools = [...tools.filter((tool) => !activeTools.includes(tool)), ...activeTools]
+  const displayTools = [...flowTools.filter((tool) => !activeTools.includes(tool)), ...activeTools]
   const showStatus = running || Boolean(failedTool) || Boolean(outcome?.status && outcome.status !== 'completed')
   if (!showStatus && plan.length === 0 && (!showTools || displayTools.length === 0)) return null
 

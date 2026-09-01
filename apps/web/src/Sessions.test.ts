@@ -55,7 +55,31 @@ describe('Mastra session projection', () => {
     expect(html).toContain('Running Render PDF')
     expect(html).toContain('aria-busy="true"')
     expect(html).toContain('Executing tool…')
+    expect(html).toContain('tool-row-copy')
     expect(html).not.toContain('Turn complete')
+  })
+
+  it('renders browser results as a page preview instead of leading with raw JSON', () => {
+    const events = [
+      event(1, { sessionUpdate: 'tool_call', toolCallId: 'browser', title: 'Browser navigate', kind: 'other', status: 'in_progress' }),
+      event(2, {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'browser',
+        title: 'Browser navigate',
+        status: 'completed',
+        content: [{ type: 'content', content: { type: 'text', text: JSON.stringify({
+          url: 'https://example.com/dining',
+          title: 'Dinner guide',
+          text: 'A concise guide to neighborhood dinner options and reservations.',
+        }) } }],
+      }),
+    ]
+    const html = renderToStaticMarkup(createElement(PromptTurnFlow, { events, running: false, submitted: false }))
+    expect(html).toContain('PAGE PREVIEW')
+    expect(html).toContain('Dinner guide')
+    expect(html).toContain('example.com')
+    expect(html).toContain('A concise guide to neighborhood dinner options')
+    expect(html).toContain('Raw browser response')
   })
 
   it('distinguishes argument preparation from running and model continuation', () => {

@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import type { Approval, Artifact, Attachment, Elicitation, Session, SessionEvent } from '@papyrus/contracts'
 import { cancelSession, clearSessionGoal, createSession, decideApproval, deleteSession, promptSession, respondElicitation, resumeSession, sendBrowserInput, sessionApprovals, sessionArtifacts, sessionAttachments, sessionElicitations, sessionEvents, sessionGoal, sessionPage, setSessionGoal, uploadAttachment, type MastraGoal } from './api.js'
-import { acpContent, ContentBlock, ContentMessage } from './AcpSessionContent.js'
+import { acpContent, ContentMessage } from './AcpSessionContent.js'
+import { ToolActivityGroup, displayToolTitle, projectActivity, type ToolActivity } from './SessionActivity.js'
 import { createPortal } from 'react-dom'
-import { Alert, Button, Card, Input, Textarea } from './components/ui/index.js'
+import { Alert, Button, Input, Textarea } from './components/ui/index.js'
 
-interface ToolActivity { id: string; title: string; kind: string; status: string; sequence: number; locations: string[]; terminals: string[]; output: Array<Record<string, unknown>>; stdout: string; stderr: string; exitCode?: number }
-interface PlanItem { content: string; status: string; priority: string }
+export { projectActivity } from './SessionActivity.js'
+
 interface PromptTurnGroup { runId: string; sequence: number; events: SessionEvent[] }
 export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRequest: number; onActivate: () => void }) {
   const [sessions, setSessions] = useState<Session[]>([])
@@ -40,7 +41,6 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
   const turns = useMemo(() => promptTurns(events), [events])
   const activeRunId = useMemo(() => [...events].reverse().find((event) => event.runId)?.runId, [events])
   const browserState = useMemo(() => latestBrowserState(events), [events])
-  const activeActivity = useMemo(() => projectActivity(activeRunId ? events.filter((event) => event.runId === activeRunId) : []), [activeRunId, events])
   const pendingInput = elicitations.some((item) => item.status === 'pending')
   const artifactGenerating = useMemo(() => running && isArtifactGenerationActive(activeRunId ? events.filter((event) => event.runId === activeRunId) : []), [activeRunId, events, running])
 
@@ -225,56 +225,153 @@ export function SessionHarness({ newSessionRequest, onActivate }: { newSessionRe
   function showError(cause: unknown) { setError(cause instanceof Error ? cause.message : 'Session request failed') }
 
   const historyTarget = document.getElementById('session-history-rail')
-  return <section className="session-layout">
+  const pendingApprovals = approvals.filter((approval) => approval.status === 'pending')
+  const pendingElicitation = elicitations.find((item) => item.status === 'pending')
+
+  return <section className="session-layout session-v2">
     {historyTarget && createPortal(<aside className="session-sidebar">
       <div className="session-sidebar-head"><strong>History</strong></div>
-      {loading ? <div className="empty">Loading sessions…</div> : sessions.length ? <div className="session-list">{sessions.map((session) => <Button key={session.id} className={session.id === selectedId ? 'selected' : ''} onClick={() => { setPendingTurn(undefined); setSelectedId(session.id); onActivate() }}><strong>{session.title}</strong><span>{session.status} · {new Date(session.updatedAt).toLocaleString()}</span></Button>)}</div> : <div className="empty">No sessions yet.</div>}
+      {loading
+        ? <div className="empty">Loading sessions…</div>
+        : sessions.length
+          ? <div className="session-list">{sessions.map((session) => <SessionHistoryItem key={session.id} session={session} selected={session.id === selectedId} onClick={() => { setPendingTurn(undefined); setSelectedId(session.id); onActivate() }} />)}</div>
+          : <div className="empty">No sessions yet.</div>}
       {nextCursor && <Button className="secondary load-more" onClick={() => void loadSessions(nextCursor)}>Load more</Button>}
     </aside>, historyTarget)}
+
     <div className={`conversation-panel ${selected ? '' : 'new-session-panel'}`}>
       {(error || liveError) && <Alert className={error ? 'error' : 'connection-notice'}>{error ?? liveError}<Button variant="ghost" onClick={() => { setError(undefined); setLiveError(undefined) }}>×</Button></Alert>}
-      {!selected ? <div className="new-session-home"><div className="new-session-intro"><p className="eyebrow">NEW DURABLE SESSION</p><h2>What should we work on?</h2><p>Your first prompt creates the session automatically and keeps the complete governed history.</p></div><form className="new-session-composer" onSubmit={startNewSession}><Textarea ref={newPromptRef} name="prompt" disabled={running} placeholder="Describe the work to perform…" onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} /><div className="new-session-controls"><span className="new-session-note">Your deployment’s approved runtime and access assignments are applied automatically.</span><Button className="primary" disabled={running}>{running ? 'Starting…' : 'Start →'}</Button></div></form></div> : <>
-        <div className="conversation-head"><div><strong>{selected.title}</strong><span>{running ? ['running', activeActivity.tools.length ? `${activeActivity.tools.length} tool call${activeActivity.tools.length === 1 ? '' : 's'}` : '', pendingInput ? 'input required' : '', goal?.objective ? 'goal active' : ''].filter(Boolean).join(' · ') : `${selected.status === 'running' ? 'ready' : selected.status}${goal?.objective ? ' · goal active' : ''}`}</span></div><div className="session-actions">{running ? <Button className="danger" onClick={() => void cancel()}>Cancel run</Button> : <Button className="text-button" onClick={() => void removeSession()}>Delete</Button>}</div></div>
-        <div className={`session-content ${artifactPanelOpen ? 'artifact-panel-open' : ''}`}>
-          <div className="message-region">
-            <div className="messages" ref={messagesRef} aria-live="polite" onScroll={(event) => {
-              const element = event.currentTarget
-              setFollowingLatest(element.scrollHeight - element.scrollTop - element.clientHeight < 72)
-            }}>
-              {turns.length ? turns.map((turn) => <DurablePromptTurn key={turn.runId} turn={turn} running={running && turn.runId === activeRunId} />) : !pendingTurn && !goalPanelOpen && <div className="conversation-empty compact"><h2>What should Papyrus do?</h2><p>Attach context or describe the work.</p></div>}
-              {pendingTurn && <><ContentMessage message={pendingContent(pendingTurn)} /><PromptTurnFlow events={[]} running submitted /></>}
-              {(goal || goalPanelOpen) && <InlineGoal sessionId={selected.id} goal={goal} editing={goalPanelOpen} running={running} onChange={setGoal} onEditingChange={setGoalPanelOpen} />}
-              {browserPanelOpen && <InlineBrowser sessionId={selected.id} onClose={() => setBrowserPanelOpen(false)} onError={showError} />}
-              {!browserPanelOpen && (browserState === 'completed' || browserState === 'failed') && <InlineBrowserResult failed={browserState === 'failed'} onExpand={() => setBrowserPanelOpen(true)} />}
-              {artifacts.length > 0 && <ArtifactCards artifacts={artifacts} onOpen={(id) => { setSelectedArtifactId(id); setArtifactPanelOpen(true) }} />}
+
+      {!selected
+        ? <div className="new-session-home">
+            <div className="new-session-intro">
+              <p className="eyebrow">NEW SESSION</p>
+              <h2>What should Papyrus do?</h2>
+              <p>Start with the work. Papyrus will keep the durable governed history, tools, approvals, and outputs attached to this session.</p>
             </div>
-            {!followingLatest && <Button className="jump-latest" onClick={() => { setFollowingLatest(true); messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' }) }}>Jump to latest ↓</Button>}
+            <form className="new-session-composer" onSubmit={startNewSession}>
+              <Textarea ref={newPromptRef} name="prompt" disabled={running} placeholder="Describe the work to perform…" onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} />
+              <div className="new-session-controls">
+                <span className="new-session-note">Approved runtime and access policy are applied automatically.</span>
+                <Button className="primary" disabled={running}>{running ? 'Starting…' : 'Start →'}</Button>
+              </div>
+            </form>
           </div>
-          <ArtifactWorkspace artifacts={artifacts} generating={artifactGenerating} open={artifactPanelOpen} selectedId={selectedArtifactId} onOpenChange={setArtifactPanelOpen} />
-        </div>
-        <div className="session-footer">
-        {approvals.filter((approval) => approval.status === 'pending').map((approval) => <ApprovalCard key={approval.id} approval={approval} onDecision={reviewApproval} />)}
-        {elicitations.find((item) => item.status === 'pending') && <ElicitationCard item={elicitations.find((item) => item.status === 'pending')!} onRespond={async (id, response) => { await respondElicitation(selected.id, id, response); await loadContext(selected.id) }} />}
-        <form className="composer" onSubmit={send}>
-          {draftAttachmentIds.length > 0 && <div className="attachment-chips">{draftAttachmentIds.map((id) => { const attachment = attachments.find((item) => item.id === id); return attachment && <span key={id}><span>↧ {attachment.name} · {formatBytes(attachment.size)}</span><Button type="button" onClick={() => setDraftAttachmentIds((current) => current.filter((item) => item !== id))} aria-label={`Remove ${attachment.name}`}>×</Button></span> })}</div>}
-          <Textarea name="prompt" disabled={running} placeholder={draftAttachmentIds.length ? 'Add instructions for these files…' : 'Describe the work to perform…'} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} />
-          <Input ref={fileInputRef} className="visually-hidden" type="file" multiple accept="text/*,image/*,.pdf,.json,.xml,.zip,.docx,.xlsx,.pptx" onChange={(event) => void addFiles(event.currentTarget.files)} />
-          <div><span>Enter to submit · Shift+Enter for a new line · 10 MB per file</span><div className="composer-actions"><Button type="button" variant="ghost" disabled={running} onClick={() => setGoalPanelOpen((open) => !open)}>{goal?.objective ? 'Edit goal' : 'Set goal'}</Button><Button type="button" className="attach-button" disabled={running || uploading} onClick={() => fileInputRef.current?.click()}>{uploading ? 'Uploading…' : 'Attach files'}</Button><Button className="primary" disabled={running || uploading}>{running ? 'Running…' : 'Send →'}</Button></div></div>
-        </form>
-        </div>
-      </>}
+        : <>
+          <SessionHeader
+            session={selected}
+            running={running}
+            pendingInput={pendingInput}
+            browserActive={browserState === 'active'}
+            browserOpen={browserPanelOpen}
+            onOpenBrowser={() => setBrowserPanelOpen(true)}
+            onDelete={() => void removeSession()}
+          />
+
+          <div className={`session-content ${artifactPanelOpen ? 'artifact-panel-open' : ''}`}>
+            <div className="message-region">
+              <div className="messages" ref={messagesRef} aria-live="polite" onScroll={(event) => {
+                const element = event.currentTarget
+                setFollowingLatest(element.scrollHeight - element.scrollTop - element.clientHeight < 72)
+              }}>
+                {turns.length
+                  ? turns.map((turn) => <DurablePromptTurn key={turn.runId} turn={turn} running={running && turn.runId === activeRunId} />)
+                  : !pendingTurn && <div className="conversation-empty compact"><h2>Ready for work</h2><p>Send a prompt, attach context, or set a durable goal.</p></div>}
+                {pendingTurn && <><ContentMessage message={pendingContent(pendingTurn)} /><PromptTurnFlow events={[]} running submitted /></>}
+                {artifacts.length > 0 && <ArtifactCards artifacts={artifacts} onOpen={(id) => { setSelectedArtifactId(id); setArtifactPanelOpen(true); setBrowserPanelOpen(false) }} />}
+              </div>
+              {!followingLatest && <Button className="jump-latest" onClick={() => { setFollowingLatest(true); messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' }) }}>Latest ↓</Button>}
+            </div>
+
+            {browserPanelOpen && <BrowserWorkspace sessionId={selected.id} onClose={() => setBrowserPanelOpen(false)} onError={showError} />}
+            {!browserPanelOpen && <ArtifactWorkspace artifacts={artifacts} generating={artifactGenerating} open={artifactPanelOpen} selectedId={selectedArtifactId} onOpenChange={setArtifactPanelOpen} />}
+          </div>
+
+          <div className="session-footer">
+            <div className="session-footer-inner">
+              {pendingApprovals.map((approval) => <ApprovalCard key={approval.id} approval={approval} onDecision={reviewApproval} />)}
+              {pendingElicitation && <ElicitationCard item={pendingElicitation} onRespond={async (id, response) => { await respondElicitation(selected.id, id, response); await loadContext(selected.id) }} />}
+              <SessionGoal sessionId={selected.id} goal={goal} editing={goalPanelOpen} onChange={setGoal} onEditingChange={setGoalPanelOpen} />
+
+              <form className="composer" onSubmit={send}>
+                {draftAttachmentIds.length > 0 && <div className="attachment-chips">{draftAttachmentIds.map((id) => {
+                  const attachment = attachments.find((item) => item.id === id)
+                  return attachment && <span key={id}><span>↧ {attachment.name} · {formatBytes(attachment.size)}</span><Button type="button" onClick={() => setDraftAttachmentIds((current) => current.filter((item) => item !== id))} aria-label={`Remove ${attachment.name}`}>×</Button></span>
+                })}</div>}
+
+                <Textarea name="prompt" rows={1} disabled={running} placeholder={draftAttachmentIds.length ? 'Add instructions for these files…' : running ? 'Papyrus is working…' : 'Message Papyrus…'} onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault()
+                    event.currentTarget.form?.requestSubmit()
+                  }
+                }} />
+                <Input ref={fileInputRef} className="visually-hidden" type="file" multiple accept="text/*,image/*,.pdf,.json,.xml,.zip,.docx,.xlsx,.pptx" onChange={(event) => void addFiles(event.currentTarget.files)} />
+
+                <div className="session-composer-bottom">
+                  <div className="session-composer-tools">
+                    <Button type="button" variant="neutral" disabled={running} onClick={() => setGoalPanelOpen((open) => !open)}>{goal?.objective ? 'Goal' : '+ Goal'}</Button>
+                    <Button type="button" variant="neutral" disabled={running || uploading} onClick={() => fileInputRef.current?.click()}>{uploading ? 'Uploading…' : '+ Attach'}</Button>
+                  </div>
+                  <span className="session-composer-hint">Enter to send · Shift+Enter for newline</span>
+                  {running
+                    ? <Button type="button" className="session-stop" onClick={() => void cancel()}>Stop</Button>
+                    : <Button className="primary" disabled={uploading}>Send ↑</Button>}
+                </div>
+              </form>
+            </div>
+          </div>
+        </>}
     </div>
   </section>
 }
 
-function InlineGoal({ sessionId, goal, editing, running, onChange, onEditingChange }: { sessionId: string; goal: MastraGoal | null; editing: boolean; running: boolean; onChange: (goal: MastraGoal | null) => void; onEditingChange: (editing: boolean) => void }) {
-  if (!editing && goal) return <section className={`inline-goal goal-summary ${running ? 'is-evaluating' : ''}`}>
-    <div className="inline-surface-heading"><span className="goal-orbit" aria-hidden="true" /><div><small>MASTRA GOAL</small><strong>{running ? 'Evaluating progress' : String(goal.status ?? 'Active objective')}</strong></div><Button variant="ghost" onClick={() => onEditingChange(true)}>Edit</Button></div>
-    <p>{goal.objective}</p>
-    <div className="goal-progress" aria-hidden="true"><i /></div>
-  </section>
-  if (!editing) return null
-  return <GoalEditor sessionId={sessionId} goal={goal} onChange={onChange} onClose={() => onEditingChange(false)} />
+function SessionHeader({ session, running, pendingInput, browserActive, browserOpen, onOpenBrowser, onDelete }: {
+  session: Session
+  running: boolean
+  pendingInput: boolean
+  browserActive: boolean
+  browserOpen: boolean
+  onOpenBrowser: () => void
+  onDelete: () => void
+}) {
+  const state = pendingInput ? 'waiting' : running ? 'running' : session.status === 'running' ? 'ready' : session.status
+  const label = pendingInput ? 'Waiting for input' : running ? 'Running' : session.status === 'running' ? 'Ready' : session.status.replaceAll('_', ' ')
+  return <div className="conversation-head">
+    <div>
+      <strong>{session.title}</strong>
+      <span className="session-head-status"><span className={`session-head-dot ${state}`} aria-hidden="true" />{label}</span>
+    </div>
+    <div className="session-actions">
+      {browserActive && !browserOpen && <Button variant="ghost" onClick={onOpenBrowser}>Open browser</Button>}
+      {!running && <Button variant="ghost" onClick={onDelete}>Delete</Button>}
+    </div>
+  </div>
+}
+
+function SessionHistoryItem({ session, selected, onClick }: { session: Session; selected: boolean; onClick: () => void }) {
+  return <Button className={`session-history-item ${selected ? 'selected' : ''}`} onClick={onClick}>
+    <span className={`session-history-status ${session.status}`} aria-hidden="true" />
+    <span className="session-history-copy">
+      <strong>{session.title}</strong>
+      <small>{session.status.replaceAll('_', ' ')} · {new Date(session.updatedAt).toLocaleString()}</small>
+    </span>
+  </Button>
+}
+
+function SessionGoal({ sessionId, goal, editing, onChange, onEditingChange }: {
+  sessionId: string
+  goal: MastraGoal | null
+  editing: boolean
+  onChange: (goal: MastraGoal | null) => void
+  onEditingChange: (editing: boolean) => void
+}) {
+  if (editing) return <GoalEditor sessionId={sessionId} goal={goal} onChange={onChange} onClose={() => onEditingChange(false)} />
+  if (!goal) return null
+  return <div className="session-goal-bar">
+    <span className="session-goal-mark" aria-hidden="true" />
+    <span className="session-goal-copy"><small>Goal</small><strong>{goal.objective}</strong></span>
+    <Button type="button" variant="ghost" onClick={() => onEditingChange(true)}>Edit</Button>
+  </div>
 }
 
 function GoalEditor({ sessionId, goal, onChange, onClose }: { sessionId: string; goal: MastraGoal | null; onChange: (goal: MastraGoal | null) => void; onClose: () => void }) {
@@ -282,18 +379,35 @@ function GoalEditor({ sessionId, goal, onChange, onClose }: { sessionId: string;
   const [saving, setSaving] = useState(false)
   useEffect(() => setObjective(goal?.objective ?? ''), [goal?.objective])
   const save = async (event: FormEvent) => {
-    event.preventDefault(); if (!objective.trim()) return
+    event.preventDefault()
+    if (!objective.trim()) return
     setSaving(true)
-    try { onChange(await setSessionGoal(sessionId, objective.trim())); onClose() } finally { setSaving(false) }
+    try {
+      onChange(await setSessionGoal(sessionId, objective.trim()))
+      onClose()
+    } finally {
+      setSaving(false)
+    }
   }
-  return <form className="inline-goal goal-editor" onSubmit={save}><div className="inline-surface-heading"><span className="goal-orbit" aria-hidden="true" /><div><small>MASTRA GOAL</small><strong>Durable objective for this thread</strong></div><Button type="button" variant="ghost" onClick={onClose}>×</Button></div><Textarea value={objective} onChange={(event) => setObjective(event.currentTarget.value)} placeholder="Define the outcome Papyrus should keep working toward…" maxLength={4000} /><div className="inline-goal-actions"><small>The Mastra judge checks progress across turns.</small>{goal && <Button type="button" variant="ghost" disabled={saving} onClick={() => void clearSessionGoal(sessionId).then(() => { onChange(null); onClose() })}>Clear</Button>}<Button className="primary" disabled={saving || !objective.trim()}>{saving ? 'Saving…' : 'Save goal'}</Button></div></form>
+  return <form className="session-goal-editor" onSubmit={save}>
+    <div className="session-goal-editor-head">
+      <div><small>Durable goal</small><strong>Keep Papyrus aimed at an outcome across turns.</strong></div>
+      <Button type="button" variant="ghost" onClick={onClose}>×</Button>
+    </div>
+    <Textarea value={objective} onChange={(event) => setObjective(event.currentTarget.value)} placeholder="Define the outcome…" maxLength={4000} />
+    <div className="session-goal-editor-actions">
+      {goal && <Button type="button" variant="ghost" disabled={saving} onClick={() => void clearSessionGoal(sessionId).then(() => { onChange(null); onClose() })}>Clear</Button>}
+      <Button className="primary" disabled={saving || !objective.trim()}>{saving ? 'Saving…' : 'Save goal'}</Button>
+    </div>
+  </form>
 }
 
-function InlineBrowser({ sessionId, onClose, onError }: { sessionId: string; onClose: () => void; onError: (error: unknown) => void }) {
+function BrowserWorkspace({ sessionId, onClose, onError }: { sessionId: string; onClose: () => void; onError: (error: unknown) => void }) {
   const [frame, setFrame] = useState<{ data: string; viewport?: { width: number; height: number } }>()
   const [url, setUrl] = useState('Launching session browser…')
   const [connected, setConnected] = useState(false)
   const surfaceRef = useRef<HTMLDivElement | null>(null)
+
   useEffect(() => {
     const source = new EventSource(`/api/sessions/${encodeURIComponent(sessionId)}/browser/stream`)
     source.onopen = () => setConnected(true)
@@ -306,6 +420,7 @@ function InlineBrowser({ sessionId, onClose, onError }: { sessionId: string; onC
     source.onerror = () => setConnected(false)
     return () => source.close()
   }, [sessionId])
+
   const mouse = async (event: React.MouseEvent<HTMLImageElement>) => {
     if (!frame?.viewport) return
     const rect = event.currentTarget.getBoundingClientRect()
@@ -314,16 +429,29 @@ function InlineBrowser({ sessionId, onClose, onError }: { sessionId: string; onC
     await sendBrowserInput(sessionId, { kind: 'mouse', event: { type: 'mousePressed', x, y, button: 'left', clickCount: 1 } })
     await sendBrowserInput(sessionId, { kind: 'mouse', event: { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 } })
   }
+
   const keyboard = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (!event.key || event.metaKey || event.ctrlKey || event.altKey) return
     event.preventDefault()
     void sendBrowserInput(sessionId, { kind: 'keyboard', event: { type: 'keyDown', key: event.key, code: event.code, text: event.key.length === 1 ? event.key : undefined } }).catch(onError)
   }
-  return <section className="inline-browser" aria-label="Session browser"><header className="inline-surface-heading"><span className={`browser-live-dot ${connected ? 'is-live' : ''}`} aria-hidden="true" /><div><small>{connected ? 'LIVE SESSION BROWSER' : 'CONNECTING'}</small><strong>Browser Use</strong></div><Button variant="ghost" onClick={onClose}>×</Button></header><div className="browser-url" title={url}>{url}</div><div className="browser-frame-shell"><div className="browser-surface" ref={surfaceRef} tabIndex={0} onKeyDown={keyboard}>{frame ? <img src={`data:image/jpeg;base64,${frame.data}`} alt="Live browser viewport" onClick={(event) => void mouse(event).catch(onError)} draggable={false} /> : <div className="browser-loading"><span /><strong>Starting browser-use</strong><small>The isolated browser will appear here.</small></div>}</div></div><footer>Click to interact · focus the viewport to type · isolated to this session</footer></section>
-}
 
-function InlineBrowserResult({ onExpand, failed }: { onExpand: () => void; failed: boolean }) {
-  return <section className="inline-browser-result"><span className="browser-live-dot is-complete" aria-hidden="true" /><div><small>BROWSER TASK</small><strong>{failed ? 'Browser action failed or was denied' : 'Browser action completed'}</strong></div><Button variant="ghost" onClick={onExpand}>Reopen session</Button></section>
+  return <aside className="session-sidecar browser-workspace" aria-label="Session browser">
+    <div className="browser-workspace-head">
+      <span className={`browser-live-dot ${connected ? 'is-live' : ''}`} aria-hidden="true" />
+      <div><small>{connected ? 'Live browser' : 'Connecting'}</small><strong>Browser workspace</strong></div>
+      <Button variant="ghost" onClick={onClose} aria-label="Close browser workspace">×</Button>
+    </div>
+    <div className="browser-workspace-url" title={url}>{url}</div>
+    <div className="browser-workspace-frame">
+      <div className="browser-workspace-surface" ref={surfaceRef} tabIndex={0} onKeyDown={keyboard}>
+        {frame
+          ? <img src={`data:image/jpeg;base64,${frame.data}`} alt="Live browser viewport" onClick={(event) => void mouse(event).catch(onError)} draggable={false} />
+          : <div className="browser-workspace-loading"><span /><strong>Starting browser</strong><small>The isolated session viewport will appear here.</small></div>}
+      </div>
+    </div>
+    <div className="browser-workspace-foot">Click to interact · focus to type · isolated to this session</div>
+  </aside>
 }
 
 function mergeSessionEvents(current: SessionEvent[], incoming: SessionEvent[]): SessionEvent[] {

@@ -136,7 +136,7 @@ export function buildStaticAgentTools(options: { nativeBrowserEnabled?: boolean 
   })
 
   return {
-    ...(options.nativeBrowserEnabled ?? true ? {
+    ...((options.nativeBrowserEnabled ?? true) ? {
       papyrus_browser_navigate: browserNavigate,
       papyrus_browser_read: browserRead,
     } : {}),

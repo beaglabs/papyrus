@@ -510,15 +510,29 @@ export function DurablePromptTurn({ turn, running }: { turn: PromptTurnGroup; ru
   const lastUser = [...messages].reverse().find((message) => message.role === 'user')?.sequence ?? -1
   const activeThoughtId = [...messages].reverse().find((message) => message.role === 'thought' && message.sequence > lastUser)?.id
   const lifecycle = [...turn.events].reverse().find((event) => event.kind === 'run')?.data as { sessionUpdate?: string; status?: string; error?: string } | undefined
-  const timeline = [
+  const rawTimeline = [
     ...messages.map((message) => ({ type: 'message' as const, sequence: message.sequence, id: `message:${message.id}`, message })),
     ...tools.map((tool) => ({ type: 'tool' as const, sequence: tool.sequence, id: `tool:${tool.id}`, tool })),
   ].sort((left, right) => left.sequence - right.sequence || (left.type === 'message' ? -1 : 1))
 
+  const timeline = rawTimeline.reduce<Array<
+    | { type: 'message'; sequence: number; id: string; message: (typeof messages)[number] }
+    | { type: 'tools'; sequence: number; id: string; tools: ToolActivity[] }
+  >>((grouped, item) => {
+    if (item.type === 'message') {
+      grouped.push(item)
+      return grouped
+    }
+    const previous = grouped.at(-1)
+    if (previous?.type === 'tools') previous.tools.push(item.tool)
+    else grouped.push({ type: 'tools', sequence: item.sequence, id: `tools:${item.id}`, tools: [item.tool] })
+    return grouped
+  }, [])
+
   return <section className="durable-prompt-turn" data-run-id={turn.runId}>
     {timeline.map((item) => item.type === 'message'
       ? <ContentMessage message={item.message} active={running && item.message.id === activeThoughtId} key={item.id} />
-      : <div className="inline-tool-activity" key={item.id}><ToolActivityCard tool={item.tool} active={running && (item.tool.status === 'pending' || item.tool.status === 'in_progress')} /></div>)}
+      : <ToolActivityGroup key={item.id} tools={item.tools} running={running} />)}
     <PromptTurnFlow events={turn.events} running={running} submitted={false} showTools={false} />
     {lifecycle?.sessionUpdate === 'run_completed' && lifecycle.status && lifecycle.status !== 'completed' && <div className={`turn-outcome ${lifecycle.status}`}><strong>{lifecycle.status}</strong>{lifecycle.error && <span>{lifecycle.error}</span>}</div>}
   </section>
@@ -539,12 +553,29 @@ function pendingContent(turn: { prompt: string; attachments: Attachment[] }) {
 function ElicitationCard({ item, onRespond }: { item: Elicitation; onRespond: (id: string, response: Record<string, unknown>) => Promise<void> }) {
   const [saving, setSaving] = useState(false)
   const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault(); setSaving(true)
+    event.preventDefault()
+    setSaving(true)
     const values = Object.fromEntries(new FormData(event.currentTarget).entries())
-    try { await onRespond(item.id, { action: 'accept', content: values }) } finally { setSaving(false) }
+    try {
+      await onRespond(item.id, { action: 'accept', content: values })
+    } finally {
+      setSaving(false)
+    }
   }
   const schema = item.request.requestedSchema as { properties?: Record<string, { title?: string; description?: string; type?: string }> } | undefined
-  return <form className="elicitation-card" onSubmit={submit}><div><span>INPUT REQUIRED</span><strong>{String(item.request.message ?? 'The agent needs more information')}</strong></div>{Object.entries(schema?.properties ?? { response: { title: 'Response', type: 'string' } }).map(([name, field]) => <label key={name}>{field.title ?? name}<Input name={name} type={field.type === 'number' || field.type === 'integer' ? 'number' : 'text'} required />{field.description && <small>{field.description}</small>}</label>)}<div><Button type="button" className="secondary" disabled={saving} onClick={() => void onRespond(item.id, { action: 'decline' })}>Decline</Button><Button className="primary" disabled={saving}>{saving ? 'Sending…' : 'Continue →'}</Button></div></form>
+  const fields = Object.entries(schema?.properties ?? { response: { title: 'Response', type: 'string' } })
+  return <form className="session-interrupt elicitation-card" onSubmit={submit}>
+    <div className="session-interrupt-heading"><small>Input required</small><strong>{String(item.request.message ?? 'Papyrus needs more information to continue')}</strong></div>
+    <div className="session-interrupt-fields">{fields.map(([name, field]) => <label key={name}>
+      {field.title ?? name}
+      <Input name={name} type={field.type === 'number' || field.type === 'integer' ? 'number' : 'text'} required />
+      {field.description && <small>{field.description}</small>}
+    </label>)}</div>
+    <div className="session-interrupt-actions">
+      <Button type="button" variant="neutral" disabled={saving} onClick={() => void onRespond(item.id, { action: 'decline' })}>Decline</Button>
+      <Button className="primary" disabled={saving}>{saving ? 'Sending…' : 'Continue →'}</Button>
+    </div>
+  </form>
 }
 
 function sessionTitle(prompt: string) { const title = prompt.replace(/\s+/g, ' ').trim(); return title.length > 72 ? `${title.slice(0, 69)}…` : title }
@@ -605,6 +636,7 @@ export function PromptTurnFlow({ events, running, submitted, showTools = true }:
   const turnEvents = submitted ? [] : turnStart >= 0 ? events.slice(turnStart + 1) : events
   const { plan, tools } = projectActivity(turnEvents)
   if (!running && plan.length === 0 && (!showTools || tools.length === 0)) return null
+
   const activeTools = tools.filter((tool) => tool.status === 'in_progress' || tool.status === 'pending')
   const hasModelStream = turnEvents.some((event) => event.kind === 'update' && event.data && typeof event.data === 'object' && ['agent_thought_chunk', 'agent_message_chunk'].includes(String((event.data as { sessionUpdate?: string }).sessionUpdate)))
   const failedTool = [...tools].reverse().find((tool) => tool.status === 'failed')
@@ -612,166 +644,47 @@ export function PromptTurnFlow({ events, running, submitted, showTools = true }:
   const latestArtifactTool = [...tools].reverse().find((tool) => isArtifactTool(tool))
   const outcome = [...events].reverse().find((event) => (event.data as { sessionUpdate?: string } | undefined)?.sessionUpdate === 'run_completed')?.data as { status?: string } | undefined
   const status = activeTools.length > 1 ? `${activeTools.length} tools active`
-    : activeTools[0] ? `${activeTools[0].status === 'pending' ? 'Preparing' : 'Running'} ${activeTools[0].title}`
-    : running && latestTool?.status === 'failed' ? `Recovering after ${latestTool.title} failed`
-    : running && latestArtifactTool?.status === 'completed' ? `${latestArtifactTool.title} complete · finalizing artifact`
+    : activeTools[0] ? `${activeTools[0].status === 'pending' ? 'Preparing' : 'Running'} ${displayToolTitle(activeTools[0].title)}`
+    : running && latestTool?.status === 'failed' ? `Recovering after ${displayToolTitle(latestTool.title)} failed`
+    : running && latestArtifactTool?.status === 'completed' ? `${displayToolTitle(latestArtifactTool.title)} complete · finalizing output`
     : running && submitted ? 'Starting…'
     : running && hasModelStream ? 'Working…'
     : running ? 'Working…'
     : outcome?.status && outcome.status !== 'completed' ? `Turn ${outcome.status}`
-    : failedTool ? `${failedTool.title} failed`
+    : failedTool ? `${displayToolTitle(failedTool.title)} failed`
     : 'Turn status unavailable'
+
   const displayTools = [...tools.filter((tool) => !activeTools.includes(tool)), ...activeTools]
   const showStatus = running || Boolean(failedTool) || Boolean(outcome?.status && outcome.status !== 'completed')
   if (!showStatus && plan.length === 0 && (!showTools || displayTools.length === 0)) return null
+
   return <section className="prompt-turn-flow" aria-live="polite">
-    {showStatus && <div className="prompt-turn-status" role="status"><span className={running || activeTools.length ? 'tool-spinner' : failedTool || outcome?.status === 'failed' ? 'dot bad' : 'dot good'} aria-hidden="true" /><strong>{status}</strong>{running && <span className="streaming-cursor" aria-hidden="true">▌</span>}</div>}
+    {showStatus && <div className="prompt-turn-status" role="status"><span className={running || activeTools.length ? 'tool-spinner' : failedTool || outcome?.status === 'failed' ? 'dot bad' : 'dot good'} aria-hidden="true" /><strong>{status}</strong></div>}
     {plan.length > 0 && <ol className="prompt-turn-plan">{plan.map((item, index) => <li key={`${index}-${item.content}`} className={item.status}><span className={`activity-status ${item.status}`} />{item.content}</li>)}</ol>}
-    {showTools && displayTools.length > 0 && <div className="prompt-turn-tools">{displayTools.map((tool) => <ToolActivityCard key={tool.id} tool={tool} active={activeTools.includes(tool)} />)}</div>}
+    {showTools && displayTools.length > 0 && <ToolActivityGroup tools={displayTools} running={running} />}
   </section>
-}
-
-interface BrowserToolPreview {
-  url?: string
-  title?: string
-  text?: string
-}
-
-export function browserToolPreview(tool: Pick<ToolActivity, 'title' | 'output'>): BrowserToolPreview | undefined {
-  if (!/browser/i.test(tool.title)) return undefined
-  for (const block of [...tool.output].reverse()) {
-    if (block.type !== 'text' || typeof block.text !== 'string') continue
-    try {
-      const parsed = JSON.parse(block.text) as unknown
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue
-      const value = parsed as Record<string, unknown>
-      const preview = {
-        ...(typeof value.url === 'string' ? { url: value.url } : {}),
-        ...(typeof value.title === 'string' ? { title: value.title } : {}),
-        ...(typeof value.text === 'string' ? { text: value.text } : {}),
-      }
-      if (preview.url || preview.title || preview.text) return preview
-    } catch {
-      // Browser MCP/native tools may return plain text; keep the generic summary.
-    }
-  }
-  return undefined
-}
-
-function ToolActivityCard({ tool, active }: { tool: ToolActivity; active: boolean }) {
-  const browser = browserToolPreview(tool)
-  const summary = toolSummary(tool, browser)
-  const hasDetail = active || tool.status === 'failed' || Boolean(browser) || Boolean(tool.stdout || tool.stderr) || tool.output.length > 0 || tool.exitCode !== undefined
-  const row = <ToolActivitySummary tool={tool} active={active} summary={summary} />
-  if (!hasDetail) return <div className={`prompt-turn-tool tool-row ${tool.status}`} aria-busy={active}>{row}</div>
-  return <details className={`prompt-turn-tool ${tool.status}`} open={active || tool.status === 'failed' || Boolean(browser)} aria-busy={active}>
-    <summary>{row}</summary>
-    <div className="tool-row-detail">
-      {active && <span className="tool-running-hint">{tool.status === 'pending' ? 'Preparing tool arguments…' : 'Executing tool…'}</span>}
-      {browser ? <BrowserToolPreviewCard preview={browser} /> : <>
-        {(tool.stdout || tool.stderr) && <div className="tool-live-output"><pre className="tool-stream-output">{tool.stdout}{tool.stderr && <span className="tool-stderr">{tool.stderr}</span>}</pre></div>}
-        {tool.output.length > 0 && <div className="tool-live-output">{tool.output.map((block, index) => <ContentBlock key={index} block={block} />)}</div>}
-      </>}
-      {browser && tool.output.length > 0 && <details className="tool-raw-detail"><summary>Raw browser response</summary><div className="tool-live-output">{tool.output.map((block, index) => <ContentBlock key={index} block={block} />)}</div></details>}
-      {tool.status === 'failed' && !tool.stdout && !tool.stderr && tool.output.length === 0 && <span className="tool-failure-hint">{tool.exitCode !== undefined ? `Command exited with code ${tool.exitCode} and produced no diagnostic output.` : 'Tool failed without diagnostic output.'}</span>}
-      {tool.exitCode !== undefined && <small className="tool-exit-code">Exit code: {tool.exitCode}</small>}
-    </div>
-  </details>
-}
-
-function ToolActivitySummary({ tool, active, summary }: { tool: ToolActivity; active: boolean; summary: string }) {
-  return <>
-    <span className={`activity-status ${tool.status}`} aria-hidden="true" />
-    <span className={`tool-kind compact ${tool.kind}`}>{tool.kind}</span>
-    <span className="tool-row-copy"><strong>{displayToolTitle(tool.title)}</strong><small>{summary}</small></span>
-    <span className={`pill ${tool.status}`}>{active && <span className="tool-spinner" aria-hidden="true" />}{tool.status === 'in_progress' ? 'Running' : tool.status === 'pending' ? 'Preparing' : tool.status}</span>
-  </>
-}
-
-function BrowserToolPreviewCard({ preview }: { preview: BrowserToolPreview }) {
-  const url = safeBrowserUrl(preview.url)
-  const hostname = url ? new URL(url).hostname : undefined
-  const snippet = preview.text ? compactToolText(preview.text, 420) : undefined
-  return <div className="browser-tool-preview">
-    <div className="browser-tool-preview-meta"><span>PAGE PREVIEW</span>{hostname && <span>{hostname}</span>}</div>
-    <strong>{preview.title?.trim() || hostname || 'Browser result'}</strong>
-    {url && <a href={url} target="_blank" rel="noreferrer">{url}</a>}
-    {snippet && <p>{snippet}</p>}
-  </div>
-}
-
-function toolSummary(tool: ToolActivity, browser?: BrowserToolPreview): string {
-  if (browser) {
-    const url = safeBrowserUrl(browser.url)
-    const host = url ? new URL(url).hostname : ''
-    return [host, browser.title?.trim()].filter(Boolean).join(' · ') || 'Browser result ready'
-  }
-  if (tool.locations.length) return compactToolText(tool.locations.join(' · '), 140)
-  const stream = (tool.stderr || tool.stdout).trim().split(/\r?\n/).filter(Boolean).at(-1)
-  if (stream) return compactToolText(stream, 140)
-  const output = tool.output.find((block) => block.type === 'text' && typeof block.text === 'string')
-  if (output && typeof output.text === 'string') return compactToolText(output.text, 140)
-  return tool.id
-}
-
-function displayToolTitle(title: string): string {
-  const normalized = title.startsWith('mastra_workspace_') ? `Workspace ${title.slice('mastra_workspace_'.length)}`
-    : title.startsWith('papyrus_') ? title.slice('papyrus_'.length)
-    : title
-  return normalized.replaceAll('_', ' ').replace(/\b\w/g, (character) => character.toUpperCase())
-}
-
-function compactToolText(text: string, limit: number): string {
-  const compact = text.replace(/\\n/g, ' ').replace(/\s+/g, ' ').trim()
-  return compact.length > limit ? `${compact.slice(0, Math.max(0, limit - 1))}…` : compact
-}
-
-function safeBrowserUrl(value?: string): string | undefined {
-  if (!value) return undefined
-  try {
-    const url = new URL(value)
-    return ['http:', 'https:'].includes(url.protocol) ? url.href : undefined
-  } catch { return undefined }
-}
-
-export function projectActivity(events: SessionEvent[]): { plan: PlanItem[]; tools: ToolActivity[] } {
-  let plan: PlanItem[] = []
-  const tools = new Map<string, ToolActivity>()
-  for (const event of events) {
-    if (event.kind !== 'update' || !event.data || typeof event.data !== 'object') continue
-    const update = event.data as { sessionUpdate?: string; entries?: PlanItem[]; toolCallId?: string; title?: string; kind?: string; status?: string; locations?: Array<{ path?: string }>; content?: Array<{ type?: string; terminalId?: string; content?: unknown }>; _meta?: { papyrus?: { outputDelta?: { stream?: string; text?: string }; exitCode?: number } } }
-    if (update.sessionUpdate === 'plan' && Array.isArray(update.entries)) plan = update.entries
-    if ((update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') && update.toolCallId) {
-      const current = tools.get(update.toolCallId)
-      const locations = update.locations?.flatMap((location) => typeof location.path === 'string' ? [location.path] : []) ?? []
-      const terminals = update.content?.flatMap((content) => content.type === 'terminal' && content.terminalId ? [content.terminalId] : []) ?? []
-      const output = update.content?.flatMap((content) => content.type === 'content' && content.content && typeof content.content === 'object' && !Array.isArray(content.content) ? [content.content as Record<string, unknown>] : []) ?? []
-      const delta = update._meta?.papyrus?.outputDelta
-      const appendOutput = (channel: string, currentText = '') => (currentText + (delta?.stream === channel && typeof delta.text === 'string' ? delta.text : '')).slice(-65536)
-      const exitCode = update._meta?.papyrus?.exitCode ?? current?.exitCode
-      tools.set(update.toolCallId, {
-        id: update.toolCallId, title: update.title ?? current?.title ?? 'Tool activity', kind: update.kind ?? current?.kind ?? 'other',
-        status: update.status ?? current?.status ?? 'pending', sequence: current?.sequence ?? event.sequence,
-        locations: [...new Set([...(current?.locations ?? []), ...locations])],
-        terminals: [...new Set([...(current?.terminals ?? []), ...terminals])],
-        output: mergeToolOutput(current?.output ?? [], output),
-        stdout: appendOutput('stdout', current?.stdout), stderr: appendOutput('stderr', current?.stderr),
-        ...(exitCode !== undefined ? { exitCode } : {}),
-      })
-    }
-  }
-  return { plan, tools: [...tools.values()].sort((left, right) => left.sequence - right.sequence) }
-}
-
-function mergeToolOutput(current: Array<Record<string, unknown>>, incoming: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
-  const merged = new Map(current.map((block) => [JSON.stringify(block), block]))
-  for (const block of incoming) merged.set(JSON.stringify(block), block)
-  return [...merged.values()]
 }
 
 function ApprovalCard({ approval, onDecision }: { approval: Approval; onDecision: (id: string, decision: 'approved' | 'denied', reason?: string) => Promise<void> }) {
   const [reason, setReason] = useState('')
   const [saving, setSaving] = useState(false)
-  const decide = async (decision: 'approved' | 'denied') => { setSaving(true); try { await onDecision(approval.id, decision, reason) } finally { setSaving(false) } }
-  return <Card className="approval-card"><div><span className="approval-kicker">TOOL PERMISSION</span><strong>{approval.toolTitle}</strong><span>Requested {new Date(approval.requestedAt).toLocaleString()}</span></div><label>Decision rationale (optional)<Textarea value={reason} maxLength={2000} onChange={(event) => setReason(event.target.value)} placeholder="Why is this action appropriate or denied?" /></label><div className="approval-actions"><Button className="danger" disabled={saving} onClick={() => void decide('denied')}>Deny</Button><Button className="primary" disabled={saving} onClick={() => void decide('approved')}>{saving ? 'Saving…' : 'Approve'}</Button></div></Card>
+  const decide = async (decision: 'approved' | 'denied') => {
+    setSaving(true)
+    try {
+      await onDecision(approval.id, decision, reason)
+    } finally {
+      setSaving(false)
+    }
+  }
+  return <section className="session-interrupt approval-card">
+    <div className="session-interrupt-heading"><small>Tool permission</small><strong>{displayToolTitle(approval.toolTitle)}</strong></div>
+    <div className="session-interrupt-fields">
+      <label>Rationale <Input value={reason} maxLength={2000} onChange={(event) => setReason(event.target.value)} placeholder="Optional decision rationale" /></label>
+    </div>
+    <div className="session-interrupt-actions">
+      <Button variant="danger" disabled={saving} onClick={() => void decide('denied')}>Deny</Button>
+      <Button className="primary" disabled={saving} onClick={() => void decide('approved')}>{saving ? 'Saving…' : 'Approve'}</Button>
+    </div>
+  </section>
 }
+

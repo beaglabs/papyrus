@@ -48,8 +48,12 @@ describe('Observation API push setup', () => {
     const command = buildObservationTailCommand(integration, 'zeek.conn@1')
     expect(command).toContain('tail -Fn0 "$SOURCE_NDJSON"')
     expect(command).toContain('SOURCE_NDJSON=/opt/zeek/logs/current/conn.log')
+    expect(command).toContain('PAPYRUS_DAEMON_ORIGIN=https://127.0.0.1:3210')
     expect(command).toContain('--arg schema "zeek.conn@1"')
     expect(command).toContain('/api/integrations/integration-1042/observations')
+    expect(command).toContain('openssl dgst -sha256')
+    expect(command).not.toContain('sha256sum')
+    expect(command).not.toMatch(/^#/m)
     expect(command).not.toContain('papyrus.customer.example')
   })
 

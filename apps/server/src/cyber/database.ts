@@ -57,12 +57,12 @@ export class CyberDatabase {
   }
 
   getIntegration(id: string): IntegrationConfiguration | undefined {
-    const row = this.sqlite.prepare('SELECT * FROM cyber_integrations WHERE id=?').get(id) as Row | undefined
+    const row = this.sqlite.prepare('SELECT * FROM cyber_integrations WHERE id=? AND deleted_at IS NULL').get(id) as Row | undefined
     return row ? this.integration(row) : undefined
   }
 
   listIntegrations(): IntegrationConfiguration[] {
-    return (this.sqlite.prepare('SELECT * FROM cyber_integrations ORDER BY updated_at DESC').all() as Row[]).map((row) => this.integration(row))
+    return (this.sqlite.prepare('SELECT * FROM cyber_integrations WHERE deleted_at IS NULL ORDER BY updated_at DESC').all() as Row[]).map((row) => this.integration(row))
   }
 
   markTested(id: string, actorOid: string, result: Record<string, unknown>, connectionVerified = false): IntegrationConfiguration {
@@ -97,6 +97,14 @@ export class CyberDatabase {
     this.transition(id, 'disabled')
     this.appendEvent(id, actorOid, 'IntegrationDisabled', { ...(reason ? { reason } : {}) })
     return this.getIntegration(id) as IntegrationConfiguration
+  }
+
+  deleteIntegration(id: string, actorOid: string): void {
+    const integration = this.requireIntegration(id)
+    const now = new Date().toISOString()
+    this.appendEvent(id, actorOid, 'IntegrationDeleted', { previousState: integration.state, evidenceRetained: true })
+    this.sqlite.prepare("UPDATE cyber_integrations SET state='disabled',deleted_at=?,updated_at=?,version=version+1 WHERE id=?")
+      .run(now, now, id)
   }
 
   recordSyncSuccess(id: string, evidenceAt?: string): void {
@@ -137,7 +145,9 @@ export class CyberDatabase {
       sum(CASE WHEN state='awaiting_approval' THEN 1 ELSE 0 END) awaiting_approval,
       sum(CASE WHEN integration_class='evidence_source' THEN 1 ELSE 0 END) evidence_sources,
       sum(CASE WHEN integration_class='action_executor' OR authority='controlled_actions' THEN 1 ELSE 0 END) action_executors
-      FROM cyber_integrations`).get() as Row
+      FROM cyber_integrations
+      WHERE deleted_at IS NULL
+        AND (integration_class NOT IN ('evidence_source','terrain_source') OR last_evidence_at IS NOT NULL)`).get() as Row
     return {
       integrations: Number(rows.integrations ?? 0), healthy: Number(rows.healthy ?? 0), degraded: Number(rows.degraded ?? 0),
       awaitingApproval: Number(rows.awaiting_approval ?? 0), evidenceSources: Number(rows.evidence_sources ?? 0),
@@ -245,6 +255,7 @@ export class CyberDatabase {
     `)
     this.ensureColumn('cyber_integrations', 'last_sync_at', 'TEXT')
     this.ensureColumn('cyber_integrations', 'last_sync_error', 'TEXT')
+    this.ensureColumn('cyber_integrations', 'deleted_at', 'TEXT')
   }
 
 

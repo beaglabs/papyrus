@@ -81,6 +81,10 @@ export async function transitionIntegration(id: string, action: 'test' | 'submit
   })
 }
 
+export async function deleteIntegration(id: string): Promise<void> {
+  await api(`/api/integrations/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
 export async function integrationEvents(id: string): Promise<IntegrationEvent[]> {
   return (await api<{ events: IntegrationEvent[] }>(`/api/integrations/${encodeURIComponent(id)}/events`)).events
 }

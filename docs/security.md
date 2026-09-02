@@ -23,6 +23,7 @@ Starlings may produce observations, claims, conflicts, and action proposals. It 
 - Configurations store only customer-vault, certificate, or managed-identity references.
 - Non-loopback endpoints require HTTPS.
 - Observation sources register active immediately and cannot perform outbound or controlled actions. Integrations that establish outbound access or action authority follow draft, tested, approval, and active states.
+- Integration deletion is a configuration tombstone: the route is invalidated and the integration disappears from active configuration, while accepted evidence and its audit chain remain append-only.
 - Configuration and lifecycle events are append-only and SHA-256 hash chained.
 - A configuration test validates deterministic policy and manifest requirements; it does not claim live network reachability.
 

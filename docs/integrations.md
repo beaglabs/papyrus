@@ -6,7 +6,7 @@ Observation API sources are registered active immediately because they grant no 
 
 `connect → waiting for data → receiving | degraded | disabled`
 
-The catalog card expands into the ingestion terminal as soon as **Connect** is selected. While it is open, the portal polls the daemon for `lastEvidenceAt` and changes from **WAITING FOR DATA** to **RECEIVING** after the first accepted observation.
+Selecting **Connect** on the catalog card opens the ingestion terminal immediately. The portal polls the daemon for `lastEvidenceAt`; the source remains out of **Operational integrations** until the first accepted observation, then appears as **RECEIVING**.
 
 Integrations that establish outbound access, hold external credentials, or execute controlled actions retain the governed lifecycle:
 
@@ -69,12 +69,14 @@ A curated source can instead publish its native fields under a versioned `schema
 
 Papyrus retains the accepted raw record and schema provenance alongside the projection produced by the pinned deterministic normalizer. A record must use either `schema` or `terrain`, never both. Schemas are constrained by the configured source profile, so a Zeek integration cannot submit a Suricata schema. Invalid source-native records are rejected without partially mutating Terrain and can be corrected and retried under the same source record identifier.
 
-The expanded catalog card provides two terminal workflows:
+The catalog modal provides two terminal workflows:
 
 - **Stream NDJSON** continuously tails a customer-produced JSON-lines file and wraps each record in the selected source schema before sending it to the daemon.
 - **Send one record** validates authentication, schema acceptance, normalization, and Terrain projection with a single example.
 
 The stream command is a bridge, not a collector: source-specific export configuration remains under customer control, and every input line must match the selected versioned schema. The daemon endpoint currently accepts the caller's Entra bearer token and requires `Papyrus.Integration.Manage`; source-scoped non-human publishing credentials remain a production hardening slice.
+
+Deleting an integration tombstones its configuration and invalidates its ingestion route. Previously accepted evidence and its append-only provenance remain in Terrain; deletion does not rewrite historical evidence.
 
 `GET /api/terrain` returns the resulting entity/relationship snapshot.
 

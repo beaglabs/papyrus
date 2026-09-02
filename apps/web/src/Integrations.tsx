@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react'
 import type { EntraAppRole, IntegrationCatalogEntry, IntegrationClass, IntegrationConfiguration, IntegrationEvent, PortalPrincipal } from '@papyrus/contracts'
-import { createIntegration, integrationEvents, requestIntegrationSync, transitionIntegration } from './api.js'
+import { createIntegration, deleteIntegration, integrationEvents, requestIntegrationSync, transitionIntegration } from './api.js'
 import { Alert, Badge, Button, Card, Dialog, DialogContent, DialogFooter, DialogHeader, Input, Label, NativeSelect } from './components/ui/index.js'
 
 const CLASS_LABELS: Record<IntegrationClass, string> = {
@@ -34,6 +34,14 @@ export function IntegrationsView({ me, catalog, integrations, onChanged }: {
   const configuredIds = new Set(integrations.map((item) => item.catalogId))
   const canManage = can(me, 'Papyrus.Integration.Manage')
   const canAudit = can(me, 'Papyrus.Audit.View')
+  const operationalIntegrations = integrations.filter((integration) => {
+    const entry = catalog.find((candidate) => candidate.id === integration.catalogId)
+    return !entry?.observationProtocol || Boolean(integration.lastEvidenceAt)
+  })
+  const hasWaitingSource = integrations.some((integration) => {
+    const entry = catalog.find((candidate) => candidate.id === integration.catalogId)
+    return Boolean(entry?.observationProtocol && !integration.lastEvidenceAt)
+  })
 
   useEffect(() => {
     if (!setupFor) return
@@ -42,10 +50,10 @@ export function IntegrationsView({ me, catalog, integrations, onChanged }: {
   }, [integrations, setupFor])
 
   useEffect(() => {
-    if (!setupFor || setupFor.lastEvidenceAt) return
+    if (!hasWaitingSource) return
     const timer = window.setInterval(() => { void onChanged() }, 2_000)
     return () => window.clearInterval(timer)
-  }, [onChanged, setupFor])
+  }, [hasWaitingSource, onChanged])
 
   const transition = async (integration: IntegrationConfiguration, action: 'test' | 'submit' | 'activate' | 'disable') => {
     setBusy(`${integration.id}:${action}`); setError(undefined)
@@ -79,10 +87,21 @@ export function IntegrationsView({ me, catalog, integrations, onChanged }: {
     finally { setBusy(undefined) }
   }
 
+  const remove = async (integration: IntegrationConfiguration) => {
+    if (!window.confirm(`Delete ${integration.name}? Its accepted evidence remains in the append-only Terrain record.`)) return
+    setBusy(`${integration.id}:delete`); setError(undefined)
+    try {
+      await deleteIntegration(integration.id)
+      if (setupFor?.id === integration.id) setSetupFor(undefined)
+      await onChanged()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to delete integration') }
+    finally { setBusy(undefined) }
+  }
+
   return <div className="integrations-page">
     <section className="integration-summary">
-      <div><span className="summary-number">{integrations.length}</span><span>configured</span></div>
-      <div><span className="summary-number">{integrations.filter((item) => item.state === 'active').length}</span><span>active</span></div>
+      <div><span className="summary-number">{operationalIntegrations.length}</span><span>operational</span></div>
+      <div><span className="summary-number">{operationalIntegrations.filter((item) => item.state === 'active').length}</span><span>active</span></div>
       <div><span className="summary-number">{integrations.filter((item) => item.state === 'awaiting_approval').length}</span><span>awaiting approval</span></div>
       <div><span className="summary-number">{integrations.filter((item) => item.health === 'degraded' || item.health === 'unreachable').length}</span><span>degraded</span></div>
     </section>
@@ -90,10 +109,10 @@ export function IntegrationsView({ me, catalog, integrations, onChanged }: {
     {error && <Alert className="error integration-error">{error}<Button variant="ghost" onClick={() => setError(undefined)} aria-label="Dismiss">×</Button></Alert>}
 
     <section className="portal-section">
-      <div className="section-heading"><div><p className="eyebrow">DEPLOYED CONNECTIONS</p><h2>Operational integrations</h2></div><Badge>{integrations.length} TOTAL</Badge></div>
-      {integrations.length === 0
+      <div className="section-heading"><div><p className="eyebrow">DEPLOYED CONNECTIONS</p><h2>Operational integrations</h2></div><Badge>{operationalIntegrations.length} TOTAL</Badge></div>
+      {operationalIntegrations.length === 0
         ? <Card className="empty-integration"><span aria-hidden="true">↗</span><div><h3>No integrations configured</h3><p>Connect an operator interface or security evidence source from the catalog below.</p></div></Card>
-        : <div className="configured-list">{integrations.map((integration) => {
+        : <div className="configured-list">{operationalIntegrations.map((integration) => {
           const entry = catalog.find((candidate) => candidate.id === integration.catalogId)
           const canActivate = integration.risk === 'high' || integration.risk === 'critical' || integration.authority === 'controlled_actions'
             ? can(me, 'Papyrus.Security.Manage') : canManage
@@ -105,9 +124,9 @@ export function IntegrationsView({ me, catalog, integrations, onChanged }: {
               {integration.state === 'draft' && canManage && <Button size="sm" disabled={Boolean(busy)} onClick={() => void transition(integration, 'test')}>Test configuration</Button>}
               {integration.state === 'tested' && canManage && <Button size="sm" disabled={Boolean(busy)} onClick={() => void transition(integration, 'submit')}>Submit</Button>}
               {integration.state === 'awaiting_approval' && canActivate && <Button className="primary" size="sm" disabled={Boolean(busy)} onClick={() => void transition(integration, 'activate')}>Activate</Button>}
-              {integration.state === 'active' && entry?.observationProtocol && canManage && <Button className="primary" size="sm" onClick={() => setSetupFor(integration)}>Open terminal</Button>}
               {integration.state === 'active' && entry && ['pull', 'hybrid'].includes(entry.syncMode) && canManage && <Button size="sm" disabled={Boolean(busy)} onClick={() => void syncNow(integration)}>Sync now</Button>}
               {integration.state !== 'disabled' && canManage && <Button variant="ghost" size="sm" disabled={Boolean(busy)} onClick={() => void transition(integration, 'disable')}>Disable</Button>}
+              {canManage && <Button variant="ghost" size="sm" disabled={Boolean(busy)} onClick={() => void remove(integration)}>Delete</Button>}
               {canAudit && <Button variant="ghost" size="sm" onClick={() => void openEvents(integration)}>Audit</Button>}
             </div>
           </Card>
@@ -122,19 +141,20 @@ export function IntegrationsView({ me, catalog, integrations, onChanged }: {
       </div>
       <div className="catalog-grid">{visibleCatalog.map((entry) => {
         const configured = integrations.find((integration) => integration.catalogId === entry.id && integration.state !== 'disabled')
-        const sourceExpanded = Boolean(entry.observationProtocol && setupFor?.catalogId === entry.id)
-        return <Card className={`catalog-card${sourceExpanded ? ' source-expanded' : ''}`} key={entry.id} style={{ '--connector-accent': entry.accent } as CSSProperties}>
+        return <Card className="catalog-card" key={entry.id} style={{ '--connector-accent': entry.accent } as CSSProperties}>
         <div className="catalog-card-head"><div className="connector-mark">{entry.initials}</div><Badge className={`risk-${entry.risk}`}>{entry.risk}</Badge></div>
         <p className="catalog-vendor">{entry.vendor}</p><h3>{entry.name}</h3><p>{entry.description}</p>
         <div className="capability-list">{entry.capabilities.slice(0, 3).map((capability) => <span key={capability}>{capability}</span>)}</div>
-        {sourceExpanded && setupFor && <SourceIngestionPanel integration={setupFor} entry={entry} onClose={() => setSetupFor(undefined)} />}
         <div className="catalog-card-foot"><span>{CLASS_LABELS[entry.integrationClass]}</span>{entry.observationProtocol
-          ? <Button className={configured ? 'primary' : undefined} disabled={!canManage || Boolean(busy)} onClick={() => void connectSource(entry)}>{busy === `${entry.id}:connect` ? 'Connecting…' : configured ? 'Open terminal' : 'Connect'} →</Button>
+          ? configured?.lastEvidenceAt
+            ? <Button className="primary" disabled>Connected ✓</Button>
+            : <Button className={configured ? 'primary' : undefined} disabled={!canManage || Boolean(busy)} onClick={() => void connectSource(entry)}>{busy === `${entry.id}:connect` ? 'Connecting…' : configured ? 'Continue setup' : 'Connect'} →</Button>
           : <Button disabled={!canManage} onClick={() => setSelected(entry)}>{configuredIds.has(entry.id) ? 'Add another' : 'Configure'} →</Button>}</div>
       </Card>})}</div>
     </section>
 
     <ConfigureIntegration entry={selected} open={Boolean(selected)} onClose={() => setSelected(undefined)} onCreated={async () => { setSelected(undefined); await onChanged() }} />
+    <SourceIngestionModal key={setupFor?.id ?? 'closed'} integration={setupFor} entry={catalog.find((candidate) => candidate.id === setupFor?.catalogId)} onClose={() => setSetupFor(undefined)} onDelete={remove} />
     <Dialog open={Boolean(eventsFor)} onOpenChange={(open) => { if (!open) setEventsFor(undefined) }}><DialogHeader><div><p className="eyebrow">APPEND-ONLY HISTORY</p><h2>{eventsFor?.name}</h2></div><Button variant="ghost" onClick={() => setEventsFor(undefined)}>×</Button></DialogHeader><DialogContent>
       <div className="event-list">{events.length ? events.map((event) => <div key={event.sequence}><span>{event.sequence}</span><div><strong>{event.action}</strong><small>{new Date(event.occurredAt).toLocaleString()} · {event.actorOid}</small></div></div>) : <p className="empty-copy">No audit events available.</p>}</div>
     </DialogContent></Dialog>
@@ -209,8 +229,8 @@ export function buildNativeObservationExample(entry: IntegrationCatalogEntry, sc
   }
 }
 
-export function buildObservationCurlCommand(integration: IntegrationConfiguration, payload: unknown): string {
-  return `export PAPYRUS_DAEMON_ORIGIN=https://papyrus-daemon.internal
+export function buildObservationCurlCommand(integration: IntegrationConfiguration, payload: unknown, daemonOrigin = 'https://127.0.0.1:3210'): string {
+  return `export PAPYRUS_DAEMON_ORIGIN=${daemonOrigin}
 export PAPYRUS_ENTRA_TOKEN='replace-with-entra-access-token'
 
 curl --fail-with-body -X POST \\
@@ -233,16 +253,15 @@ const SOURCE_SPOOL_PATHS: Record<string, string> = {
   'microsoft-sentinel': '/var/lib/papyrus-ingest/sentinel.ndjson',
 }
 
-export function buildObservationTailCommand(integration: IntegrationConfiguration, schemaId: string): string {
+export function buildObservationTailCommand(integration: IntegrationConfiguration, schemaId: string, daemonOrigin = 'https://127.0.0.1:3210'): string {
   const spoolPath = SOURCE_SPOOL_PATHS[integration.catalogId] ?? `/var/lib/papyrus-ingest/${integration.catalogId}.ndjson`
-  return `export PAPYRUS_DAEMON_ORIGIN=https://papyrus-daemon.internal
+  return `export PAPYRUS_DAEMON_ORIGIN=${daemonOrigin}
 export PAPYRUS_ENTRA_TOKEN='replace-with-entra-access-token'
 export SOURCE_NDJSON=${spoolPath}
 
-# Each input line must be one JSON object matching ${schemaId}.
 tail -Fn0 "$SOURCE_NDJSON" | while IFS= read -r record; do
   observed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  source_record_id=$(printf '%s' "$record" | sha256sum | cut -d' ' -f1)
+  source_record_id=$(printf '%s' "$record" | openssl dgst -sha256 | awk '{print $NF}')
 
   jq -cn \\
     --arg sourceRecordId "$source_record_id" \\
@@ -258,14 +277,15 @@ tail -Fn0 "$SOURCE_NDJSON" | while IFS= read -r record; do
 done`
 }
 
-function SourceIngestionPanel({ integration, entry, onClose }: {
-  integration: IntegrationConfiguration
-  entry: IntegrationCatalogEntry
+function SourceIngestionModal({ integration, entry, onClose, onDelete }: {
+  integration: IntegrationConfiguration | undefined
+  entry: IntegrationCatalogEntry | undefined
   onClose: () => void
+  onDelete: (integration: IntegrationConfiguration) => Promise<void>
 }) {
   const schemas = entry?.observationProtocol?.schemas ?? []
   const [mode, setMode] = useState<'native' | 'canonical'>(schemas.length ? 'native' : 'canonical')
-  const [commandMode, setCommandMode] = useState<'stream' | 'test'>(schemas.length ? 'stream' : 'test')
+  const [commandMode, setCommandMode] = useState<'stream' | 'test'>('test')
   const [selectedSchema, setSelectedSchema] = useState(schemas[0]?.id ?? '')
   const [copied, setCopied] = useState(false)
   const payload = useMemo(
@@ -273,17 +293,17 @@ function SourceIngestionPanel({ integration, entry, onClose }: {
       : mode === 'native' ? buildNativeObservationExample(entry, selectedSchema) : buildCanonicalObservationExample(entry, integration, selectedSchema),
     [entry, integration, mode, selectedSchema],
   )
-  if (!entry.observationProtocol) return null
+  if (!integration || !entry?.observationProtocol) return null
+  const daemonOrigin = window.location.origin
   const command = commandMode === 'stream' && mode === 'native'
-    ? buildObservationTailCommand(integration, selectedSchema)
-    : buildObservationCurlCommand(integration, payload)
+    ? buildObservationTailCommand(integration, selectedSchema, daemonOrigin)
+    : buildObservationCurlCommand(integration, payload, daemonOrigin)
   const copy = async () => {
     await navigator.clipboard.writeText(command)
     setCopied(true)
     window.setTimeout(() => setCopied(false), 1_500)
   }
-  return <section className="catalog-ingestion" aria-label={`${integration.name} ingestion setup`}>
-    <div className="catalog-ingestion-head"><div><p className="eyebrow">DAEMON INGESTION</p><h3>{integration.name}</h3></div><Button size="sm" variant="ghost" onClick={onClose}>Close ×</Button></div>
+  return <Dialog open onOpenChange={(open) => { if (!open) onClose() }}><DialogHeader><div><p className="eyebrow">DAEMON INGESTION</p><h2>{integration.name}</h2></div><Button variant="ghost" onClick={onClose}>×</Button></DialogHeader><DialogContent>
     <div className="source-setup-meta"><Badge className={integration.lastEvidenceAt ? 'status-good' : 'state-tested'}>{integration.lastEvidenceAt ? 'RECEIVING' : 'WAITING FOR DATA'}</Badge><code>/api/integrations/{integration.id}/observations</code></div>
     <p className="source-setup-copy">This route is served by the current Papyrus daemon. The integration ID identifies the source; the selected schema controls deterministic normalization into Terrain.</p>
     {!integration.lastEvidenceAt && <p className="source-polling"><span className="signal-loader"><i /><i /><i /></span>Polling the daemon for the first accepted observation…</p>}
@@ -304,5 +324,5 @@ function SourceIngestionPanel({ integration, entry, onClose }: {
     {commandMode === 'stream' && mode === 'native'
       ? <Alert className="source-boundary"><strong>Customer-owned bridge</strong><span>Point SOURCE_NDJSON at a JSON-lines export matching the selected schema. The command tails it continuously and sends each record to this daemon; Papyrus does not need credentials for the source system.</span></Alert>
       : <Alert className="source-boundary"><strong>One-record validation</strong><span>Run this against the daemon to validate authentication, schema acceptance, normalization, and Terrain projection before connecting a live stream.</span></Alert>}
-  </section>
+  </DialogContent><DialogFooter><Button variant="ghost" onClick={() => void onDelete(integration)}>Delete integration</Button><Button onClick={onClose}>Close</Button></DialogFooter></Dialog>
 }

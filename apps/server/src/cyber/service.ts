@@ -219,6 +219,13 @@ export class CyberService {
     return disabled
   }
 
+  deleteIntegration(principal: PortalPrincipal, id: string): void {
+    const integration = this.integration(id)
+    requireRole(principal, integration.authority === 'controlled_actions' ? 'Papyrus.Security.Manage' : 'Papyrus.Integration.Manage')
+    this.syncRuntime?.cancel(id)
+    this.db.deleteIntegration(id, principal.oid)
+  }
+
   requestSync(principal: PortalPrincipal, id: string): SyncJob {
     requireRole(principal, 'Papyrus.Integration.Manage')
     const integration = this.integration(id)

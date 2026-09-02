@@ -54,5 +54,8 @@ describe('cyber portal HTTP surface', () => {
     const terrainResponse = await fetch(`${origin}/api/terrain`)
     expect(terrainResponse.status).toBe(200)
     expect(await terrainResponse.json()).toMatchObject({ observationCount: 1, entities: [{ label: '10.0.0.12' }, { label: '10.0.0.8' }], relationships: [{ kind: 'connected_to' }] })
+    expect((await fetch(`${origin}/api/integrations/${created.id}`, { method: 'DELETE' })).status).toBe(204)
+    expect(await (await fetch(`${origin}/api/integrations`)).json()).toEqual({ integrations: [] })
+    expect(await (await fetch(`${origin}/api/terrain`)).json()).toMatchObject({ observationCount: 1 })
   })
 })

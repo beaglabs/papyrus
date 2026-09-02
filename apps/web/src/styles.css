@@ -120,7 +120,6 @@ p { color: var(--muted); line-height: 1.55; }
 .filter-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
 .catalog-grid { display: grid; grid-template-columns: repeat(3, minmax(220px, 1fr)); gap: 17px; }
 .catalog-card { position: relative; display: flex; flex-direction: column; min-height: 340px; overflow: hidden; }
-.catalog-card.source-expanded { grid-column: 1 / -1; min-height: 0; }
 .catalog-card::before { content: ""; position: absolute; inset: 0 0 auto; height: 8px; background: var(--connector-accent); border-bottom: 2px solid #111; }
 .catalog-card-head { display: flex; justify-content: space-between; align-items: center; margin: 4px 0 20px; }
 .catalog-vendor { margin-bottom: 5px; font: 600 10px ui-monospace, monospace; text-transform: uppercase; }
@@ -141,8 +140,6 @@ p { color: var(--muted); line-height: 1.55; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 17px; }.span-two { grid-column: span 2; }
 .authority-warning { display: grid; margin-top: 20px; background: var(--rose); }.authority-warning span { color: #4b4244; font-size: 12px; }
 .source-boundary { display: grid; gap: 4px; background: #fff7cf; }.source-boundary span { color: #514c3e; font-size: 12px; }
-.catalog-ingestion { margin: 4px 0 18px; padding: 18px; border: 2px solid #111; background: #f7f2e7; box-shadow: 4px 4px 0 #111; }
-.catalog-ingestion-head { display: flex; align-items: start; justify-content: space-between; gap: 16px; margin-bottom: 12px; }.catalog-ingestion-head h3 { margin: 0; }.catalog-ingestion-head .nb-button { box-shadow: none; }
 .source-setup-meta { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }.source-setup-meta code { min-width: 0; overflow: hidden; text-overflow: ellipsis; padding: 7px 9px; border: 1px solid #111; background: #fff; font: 10px ui-monospace, monospace; }
 .source-setup-copy { margin: 0 0 18px; color: #4f4b43; font-size: 13px; }
 .source-polling { display: flex; align-items: center; gap: 8px; margin: -7px 0 18px; color: #625c50; font: 700 10px ui-monospace, monospace; letter-spacing: .04em; }.source-polling.receiving { color: #25562e; }.source-polling .signal-loader { display: flex; gap: 3px; }.source-polling .signal-loader i { width: 5px; height: 5px; border: 1px solid #111; border-radius: 50%; background: var(--yellow); animation: signal 1.1s infinite alternate; }.source-polling .signal-loader i:nth-child(2) { animation-delay: .2s; }.source-polling .signal-loader i:nth-child(3) { animation-delay: .4s; }

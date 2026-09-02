@@ -56,6 +56,16 @@ describe('cyber integration lifecycle', () => {
     expect(service.createIntegration(integrationManager, 'microsoft-entra', { name: 'Entra terrain', settings: {} })).toMatchObject({ state: 'active', scope: 'daemon' })
   })
 
+  it('deletes an integration from active configuration while retaining its audit tombstone', () => {
+    const { db, service, owner } = setup()
+    const integration = service.createIntegration(owner, 'zeek', { name: 'Temporary Zeek', settings: {} })
+    service.deleteIntegration(owner, integration.id)
+    expect(service.integrations(owner)).toEqual([])
+    expect(db.sqlite.prepare('SELECT state,deleted_at FROM cyber_integrations WHERE id=?').get(integration.id)).toMatchObject({ state: 'disabled' })
+    expect(db.sqlite.prepare('SELECT action FROM cyber_integration_events WHERE integration_id=? ORDER BY sequence DESC LIMIT 1').get(integration.id)).toMatchObject({ action: 'IntegrationDeleted' })
+    expect(db.verifyEventChain()).toEqual({ valid: true, count: 2 })
+  })
+
   it('keeps configuration-only tests unknown and refuses to activate a pull connector without a driver', async () => {
     const { service, owner } = setup()
     const integration = service.createIntegration(owner, 'exchange-email', { name: 'Mailbox', scope: 'operations', settings: {} })

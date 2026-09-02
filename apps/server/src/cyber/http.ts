@@ -111,6 +111,11 @@ export function createCyberServer(config: CyberConfig, service: CyberService, au
         const input = await body(request)
         return json(response, 201, service.createIntegration(await principal(request, auth, service), input.catalogId, input))
       }
+      const integrationResource = url.pathname.match(/^\/api\/integrations\/([^/]+)$/)
+      if (integrationResource && request.method === 'DELETE') {
+        service.deleteIntegration(await principal(request, auth, service), decodeURIComponent(integrationResource[1] as string))
+        securityHeaders(response); response.writeHead(204); return response.end()
+      }
       if (url.pathname === '/api/license/activate' && request.method === 'POST') {
         const actor = await principal(request, auth, service)
         requireRole(actor, 'Papyrus.System.Owner')

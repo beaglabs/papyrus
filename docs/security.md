@@ -24,6 +24,7 @@ Starlings may produce observations, claims, conflicts, and action proposals. It 
 - Non-loopback endpoints require HTTPS.
 - Observation sources register active immediately and cannot perform outbound or controlled actions. Integrations that establish outbound access or action authority follow draft, tested, approval, and active states.
 - Integration deletion is a configuration tombstone: the route is invalidated and the integration disappears from active configuration, while accepted evidence and its audit chain remain append-only.
+- The portal never exposes a user's Entra access token to command-generation JavaScript. It exchanges the HttpOnly portal session for a one-hour HMAC-signed ingestion token containing only an integration ID, issuer audit identity, nonce, and expiration. Issuance is recorded in the integration's append-only audit history; observation routes reject expired, modified, or cross-source tokens.
 - Configuration and lifecycle events are append-only and SHA-256 hash chained.
 - A configuration test validates deterministic policy and manifest requirements; it does not claim live network reachability.
 

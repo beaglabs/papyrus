@@ -1,5 +1,7 @@
+import type { IncomingMessage } from 'node:http'
 import { describe, expect, it } from 'vitest'
-import { hasAppRole, principalFromClaims } from '../src/cyber/entra-auth.js'
+import type { CyberConfig } from '../src/cyber/config.js'
+import { EntraAuthService, hasAppRole, principalFromClaims } from '../src/cyber/entra-auth.js'
 
 describe('Entra-native portal identity', () => {
   it('maps only declared Entra application roles and never provisions local roles', () => {
@@ -23,5 +25,23 @@ describe('Entra-native portal identity', () => {
     const principal = principalFromClaims({ oid: 'owner', tid: 'tenant', roles: ['Papyrus.System.Owner'] }, 'entra')
     expect(hasAppRole(principal, 'Papyrus.Security.Manage')).toBe(true)
     expect(hasAppRole(principal, 'Papyrus.Audit.View')).toBe(true)
+  })
+
+  it('issues expiring ingestion tokens bound to one integration route', () => {
+    const config: CyberConfig = {
+      mode: 'local', profile: 'gcc', host: '127.0.0.1', port: 3210, publicOrigin: 'https://127.0.0.1:3210',
+      dataDir: '/tmp/papyrus-auth-test', databasePath: ':memory:', portalSecret: 'portal-secret-at-least-thirty-two-characters',
+      organizationName: 'Example Agency', cloud: 'Public', licenseRequired: false, licenseAuthorities: {},
+    }
+    const auth = new EntraAuthService(config)
+    const issued = auth.issueIngestionToken('source-1', 'owner')
+    const request = { headers: { authorization: `Bearer ${issued.token}` } } as IncomingMessage
+    expect(issued.token).toMatch(/^pap_ing_[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/)
+    expect(auth.verifyIngestionRequest(request, 'source-1')).toBe(true)
+    expect(() => auth.verifyIngestionRequest(request, 'source-2')).toThrow(/not valid for this source/)
+
+    const expired = auth.issueIngestionToken('source-1', 'owner', -1)
+    expect(() => auth.verifyIngestionRequest({ headers: { authorization: `Bearer ${expired.token}` } } as IncomingMessage, 'source-1')).toThrow(/expired/)
+    expect(auth.verifyIngestionRequest({ headers: {} } as IncomingMessage, 'source-1')).toBe(false)
   })
 })

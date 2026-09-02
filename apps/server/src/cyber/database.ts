@@ -107,6 +107,11 @@ export class CyberDatabase {
       .run(now, now, id)
   }
 
+  recordIngestionTokenIssued(id: string, actorOid: string, expiresAt: string): void {
+    this.requireIntegration(id)
+    this.appendEvent(id, actorOid, 'IngestionTokenIssued', { expiresAt, scope: 'observations:write' })
+  }
+
   recordSyncSuccess(id: string, evidenceAt?: string): void {
     const now = new Date().toISOString()
     this.sqlite.prepare(`UPDATE cyber_integrations SET health='healthy',last_sync_at=?,last_sync_error=NULL,

@@ -243,8 +243,28 @@ export class CyberService {
     return this.terrain.listJobs(id)
   }
 
+  authorizeIngestionToken(principal: PortalPrincipal, id: string): void {
+    requireRole(principal, 'Papyrus.Integration.Manage')
+    const integration = this.integration(id)
+    if (integration.state !== 'active') throw new CyberServiceError(409, 'INTEGRATION_NOT_ACTIVE', 'Ingestion credentials are issued only for active integrations')
+    const entry = catalogEntry(integration.catalogId)
+    if (!entry?.observationProtocol) throw new CyberServiceError(409, 'INTEGRATION_NOT_OBSERVATION_SOURCE', 'This integration does not accept Observation API records')
+  }
+
+  recordIngestionTokenIssued(principal: PortalPrincipal, id: string, expiresAt: string): void {
+    this.db.recordIngestionTokenIssued(id, principal.oid, expiresAt)
+  }
+
   ingestObservation(principal: PortalPrincipal, id: string, value: Record<string, unknown>) {
     requireRole(principal, 'Papyrus.Integration.Manage')
+    return this.ingestAuthorizedObservation(id, value)
+  }
+
+  ingestObservationWithScopedCredential(id: string, value: Record<string, unknown>) {
+    return this.ingestAuthorizedObservation(id, value)
+  }
+
+  private ingestAuthorizedObservation(id: string, value: Record<string, unknown>) {
     const integration = this.integration(id)
     if (integration.state !== 'active') throw new CyberServiceError(409, 'INTEGRATION_NOT_ACTIVE', 'Observations are accepted only from active integrations')
     const entry = catalogEntry(integration.catalogId)

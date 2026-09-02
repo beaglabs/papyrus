@@ -40,12 +40,16 @@ describe('cyber portal HTTP surface', () => {
     const created = await createdResponse.json() as { id: string; state: string }
     expect(created.state).toBe('active')
     expect((await fetch(`${origin}/api/sessions`)).status).toBe(404)
+    const tokenResponse = await fetch(`${origin}/api/integrations/${created.id}/ingestion-token`, { method: 'POST', body: '{}' })
+    expect(tokenResponse.status).toBe(201)
+    const credential = await tokenResponse.json() as { token: string; expiresAt: string }
+    expect(credential.token).toMatch(/^pap_ing_/)
     const observationBody = JSON.stringify({
         sourceRecordId: 'zeek-1', observedAt: '2026-09-02T07:00:00Z', schema: 'zeek.conn@1',
         payload: { uid: 'C1', 'id.orig_h': '10.0.0.12', 'id.orig_p': 51822, 'id.resp_h': '10.0.0.8', 'id.resp_p': 443, proto: 'tcp' },
       })
     const observationResponse = await fetch(`${origin}/api/integrations/${created.id}/observations`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: observationBody,
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${credential.token}` }, body: observationBody,
     })
     expect(observationResponse.status).toBe(201)
     expect((await fetch(`${origin}/api/integrations/${created.id}/observations`, {
@@ -55,6 +59,9 @@ describe('cyber portal HTTP surface', () => {
     expect(terrainResponse.status).toBe(200)
     expect(await terrainResponse.json()).toMatchObject({ observationCount: 1, entities: [{ label: '10.0.0.12' }, { label: '10.0.0.8' }], relationships: [{ kind: 'connected_to' }] })
     expect((await fetch(`${origin}/api/integrations/${created.id}`, { method: 'DELETE' })).status).toBe(204)
+    expect((await fetch(`${origin}/api/integrations/${created.id}/observations`, {
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${credential.token}` }, body: observationBody,
+    })).status).toBe(404)
     expect(await (await fetch(`${origin}/api/integrations`)).json()).toEqual({ integrations: [] })
     expect(await (await fetch(`${origin}/api/terrain`)).json()).toMatchObject({ observationCount: 1 })
   })

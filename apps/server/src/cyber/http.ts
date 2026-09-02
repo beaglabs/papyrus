@@ -134,11 +134,22 @@ export function createCyberServer(config: CyberConfig, service: CyberService, au
       }
       const events = url.pathname.match(/^\/api\/integrations\/([^/]+)\/events$/)
       if (events && request.method === 'GET') return json(response, 200, { events: service.events(await principal(request, auth, service), decodeURIComponent(events[1] as string)) })
+      const ingestionToken = url.pathname.match(/^\/api\/integrations\/([^/]+)\/ingestion-token$/)
+      if (ingestionToken && request.method === 'POST') {
+        const actor = await principal(request, auth, service)
+        const id = decodeURIComponent(ingestionToken[1] as string)
+        service.authorizeIngestionToken(actor, id)
+        const issued = auth.issueIngestionToken(id, actor.oid)
+        service.recordIngestionTokenIssued(actor, id, issued.expiresAt)
+        return json(response, 201, issued)
+      }
       const observations = url.pathname.match(/^\/api\/integrations\/([^/]+)\/observations$/)
       if (observations && request.method === 'POST') {
-        const result = service.ingestObservation(
-          await principal(request, auth, service), decodeURIComponent(observations[1] as string), await body(request),
-        )
+        const id = decodeURIComponent(observations[1] as string)
+        const input = await body(request)
+        const result = auth.verifyIngestionRequest(request, id)
+          ? service.ingestObservationWithScopedCredential(id, input)
+          : service.ingestObservation(await principal(request, auth, service), id, input)
         return json(response, result.created ? 201 : 200, result)
       }
       const sync = url.pathname.match(/^\/api\/integrations\/([^/]+)\/sync$/)

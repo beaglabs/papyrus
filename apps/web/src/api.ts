@@ -85,6 +85,10 @@ export async function deleteIntegration(id: string): Promise<void> {
   await api(`/api/integrations/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }
 
+export async function issueIngestionToken(id: string): Promise<{ token: string; expiresAt: string }> {
+  return api(`/api/integrations/${encodeURIComponent(id)}/ingestion-token`, { method: 'POST', body: '{}' })
+}
+
 export async function integrationEvents(id: string): Promise<IntegrationEvent[]> {
   return (await api<{ events: IntegrationEvent[] }>(`/api/integrations/${encodeURIComponent(id)}/events`)).events
 }

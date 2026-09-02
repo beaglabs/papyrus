@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react'
 import type { EntraAppRole, IntegrationCatalogEntry, IntegrationClass, IntegrationConfiguration, IntegrationEvent, PortalPrincipal } from '@papyrus/contracts'
-import { createIntegration, deleteIntegration, integrationEvents, requestIntegrationSync, transitionIntegration } from './api.js'
+import { createIntegration, deleteIntegration, integrationEvents, issueIngestionToken, requestIntegrationSync, transitionIntegration } from './api.js'
 import { Alert, Badge, Button, Card, Dialog, DialogContent, DialogFooter, DialogHeader, Input, Label, NativeSelect } from './components/ui/index.js'
 
 const CLASS_LABELS: Record<IntegrationClass, string> = {
@@ -229,12 +229,12 @@ export function buildNativeObservationExample(entry: IntegrationCatalogEntry, sc
   }
 }
 
-export function buildObservationCurlCommand(integration: IntegrationConfiguration, payload: unknown, daemonOrigin = 'https://127.0.0.1:3210'): string {
+export function buildObservationCurlCommand(integration: IntegrationConfiguration, payload: unknown, daemonOrigin = 'https://127.0.0.1:3210', ingestionToken = 'request-a-source-token-from-the-portal'): string {
   return `export PAPYRUS_DAEMON_ORIGIN=${daemonOrigin}
-export PAPYRUS_ENTRA_TOKEN='replace-with-entra-access-token'
+export PAPYRUS_INGEST_TOKEN='${ingestionToken}'
 
 curl --fail-with-body -X POST \\
-  -H "Authorization: Bearer $PAPYRUS_ENTRA_TOKEN" \\
+  -H "Authorization: Bearer $PAPYRUS_INGEST_TOKEN" \\
   -H "Content-Type: application/json" \\
   "$PAPYRUS_DAEMON_ORIGIN/api/integrations/${integration.id}/observations" \\
   --data-binary @- <<'JSON'
@@ -253,10 +253,10 @@ const SOURCE_SPOOL_PATHS: Record<string, string> = {
   'microsoft-sentinel': '/var/lib/papyrus-ingest/sentinel.ndjson',
 }
 
-export function buildObservationTailCommand(integration: IntegrationConfiguration, schemaId: string, daemonOrigin = 'https://127.0.0.1:3210'): string {
+export function buildObservationTailCommand(integration: IntegrationConfiguration, schemaId: string, daemonOrigin = 'https://127.0.0.1:3210', ingestionToken = 'request-a-source-token-from-the-portal'): string {
   const spoolPath = SOURCE_SPOOL_PATHS[integration.catalogId] ?? `/var/lib/papyrus-ingest/${integration.catalogId}.ndjson`
   return `export PAPYRUS_DAEMON_ORIGIN=${daemonOrigin}
-export PAPYRUS_ENTRA_TOKEN='replace-with-entra-access-token'
+export PAPYRUS_INGEST_TOKEN='${ingestionToken}'
 export SOURCE_NDJSON=${spoolPath}
 
 tail -Fn0 "$SOURCE_NDJSON" | while IFS= read -r record; do
@@ -270,7 +270,7 @@ tail -Fn0 "$SOURCE_NDJSON" | while IFS= read -r record; do
     --argjson payload "$record" \\
     '{sourceRecordId:$sourceRecordId,observedAt:$observedAt,schema:$schema,payload:$payload}' \\
   | curl --fail-with-body --silent --show-error -X POST \\
-      -H "Authorization: Bearer $PAPYRUS_ENTRA_TOKEN" \\
+      -H "Authorization: Bearer $PAPYRUS_INGEST_TOKEN" \\
       -H "Content-Type: application/json" \\
       "$PAPYRUS_DAEMON_ORIGIN/api/integrations/${integration.id}/observations" \\
       --data-binary @-
@@ -288,17 +288,31 @@ function SourceIngestionModal({ integration, entry, onClose, onDelete }: {
   const [commandMode, setCommandMode] = useState<'stream' | 'test'>('test')
   const [selectedSchema, setSelectedSchema] = useState(schemas[0]?.id ?? '')
   const [copied, setCopied] = useState(false)
+  const [credential, setCredential] = useState<{ token: string; expiresAt: string }>()
+  const [credentialError, setCredentialError] = useState<string>()
   const payload = useMemo(
     () => !integration || !entry?.observationProtocol ? undefined
       : mode === 'native' ? buildNativeObservationExample(entry, selectedSchema) : buildCanonicalObservationExample(entry, integration, selectedSchema),
     [entry, integration, mode, selectedSchema],
   )
+  useEffect(() => {
+    if (!integration) return
+    let cancelled = false
+    setCredential(undefined); setCredentialError(undefined)
+    void issueIngestionToken(integration.id).then((issued) => {
+      if (!cancelled) setCredential(issued)
+    }).catch((cause) => {
+      if (!cancelled) setCredentialError(cause instanceof Error ? cause.message : 'Unable to issue ingestion token')
+    })
+    return () => { cancelled = true }
+  }, [integration?.id])
   if (!integration || !entry?.observationProtocol) return null
   const daemonOrigin = window.location.origin
   const command = commandMode === 'stream' && mode === 'native'
-    ? buildObservationTailCommand(integration, selectedSchema, daemonOrigin)
-    : buildObservationCurlCommand(integration, payload, daemonOrigin)
+    ? buildObservationTailCommand(integration, selectedSchema, daemonOrigin, credential?.token)
+    : buildObservationCurlCommand(integration, payload, daemonOrigin, credential?.token)
   const copy = async () => {
+    if (!credential) return
     await navigator.clipboard.writeText(command)
     setCopied(true)
     window.setTimeout(() => setCopied(false), 1_500)
@@ -313,7 +327,8 @@ function SourceIngestionModal({ integration, entry, onClose, onDelete }: {
       <button type="button" className={mode === 'canonical' ? 'active' : ''} onClick={() => { setMode('canonical'); setCommandMode('test') }}>Canonical Terrain</button>
     </div>
     {schemas.length > 0 && <Label>{mode === 'native' ? 'Versioned source schema' : 'Canonical projection example'}<NativeSelect value={selectedSchema} onChange={(event) => setSelectedSchema(event.target.value)}>{schemas.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.label} · {candidate.id}</option>)}</NativeSelect><small>{schemas.find((candidate) => candidate.id === selectedSchema)?.description}</small></Label>}
-    <div className="command-head"><div><strong>Connect this source</strong><small>Uses an Entra bearer token with Papyrus.Integration.Manage.</small></div><Button size="sm" onClick={() => void copy()}>{copied ? 'Copied' : 'Copy command'}</Button></div>
+    {credentialError && <Alert className="error">{credentialError}</Alert>}
+    <div className="command-head"><div><strong>Connect this source</strong><small>{credential ? `Source-scoped token expires ${new Date(credential.expiresAt).toLocaleTimeString()}.` : 'Issuing a source-scoped ingestion token…'}</small></div><Button size="sm" disabled={!credential} onClick={() => void copy()}>{copied ? 'Copied' : credential ? 'Copy command' : 'Preparing…'}</Button></div>
     <div className="terminal-shell">
       <div className="terminal-bar"><span className="terminal-lights" aria-hidden="true"><i /><i /><i /></span><div className="terminal-tabs" role="group" aria-label="Ingestion command">
         {schemas.length > 0 && <button type="button" className={commandMode === 'stream' ? 'active' : ''} onClick={() => { setMode('native'); setCommandMode('stream') }}>Stream NDJSON</button>}

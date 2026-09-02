@@ -74,7 +74,9 @@ The catalog modal provides two terminal workflows:
 - **Stream NDJSON** continuously tails a customer-produced JSON-lines file and wraps each record in the selected source schema before sending it to the daemon.
 - **Send one record** validates authentication, schema acceptance, normalization, and Terrain projection with a single example.
 
-The stream command is a bridge, not a collector: source-specific export configuration remains under customer control, and every input line must match the selected versioned schema. The daemon endpoint currently accepts the caller's Entra bearer token and requires `Papyrus.Integration.Manage`; source-scoped non-human publishing credentials remain a production hardening slice.
+The stream command is a bridge, not a collector: source-specific export configuration remains under customer control, and every input line must match the selected versioned schema. When the modal opens, the authenticated portal session requests a one-hour daemon-signed ingestion token scoped to that integration. The generated command receives it as `PAPYRUS_INGEST_TOKEN`; the browser never exposes or copies the user's Entra access token. A token cannot publish to another integration, and disabling or deleting its integration makes the route reject observations.
+
+Long-running unattended collectors should ultimately use customer-approved workload identity or mTLS rather than repeatedly issuing interactive setup tokens.
 
 Deleting an integration tombstones its configuration and invalidates its ingestion route. Previously accepted evidence and its append-only provenance remain in Terrain; deletion does not rewrite historical evidence.
 

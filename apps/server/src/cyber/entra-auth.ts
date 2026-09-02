@@ -19,6 +19,14 @@ interface PendingLogin {
   expiresAt: number
 }
 
+interface IngestionTokenClaims {
+  type: 'papyrus-ingestion'
+  integrationId: string
+  issuedBy: string
+  expiresAt: number
+  nonce: string
+}
+
 export class EntraAuthError extends Error {
   constructor(readonly code: string, message: string) { super(message) }
 }
@@ -68,6 +76,40 @@ export class EntraAuthService {
 
   async verifyTeamsToken(token: string): Promise<PortalPrincipal> {
     return this.verifyEntraToken(token, 'teams-sso')
+  }
+
+  issueIngestionToken(integrationId: string, issuedBy: string, lifetimeSeconds = 3_600): { token: string; expiresAt: string } {
+    const expiresAt = Date.now() + lifetimeSeconds * 1_000
+    const body = encoded(JSON.stringify({
+      type: 'papyrus-ingestion', integrationId, issuedBy, expiresAt, nonce: encoded(randomBytes(18)),
+    } satisfies IngestionTokenClaims))
+    const signature = encoded(createHmac('sha256', this.config.portalSecret).update(`papyrus-ingestion:${body}`).digest())
+    return { token: `pap_ing_${body}.${signature}`, expiresAt: new Date(expiresAt).toISOString() }
+  }
+
+  verifyIngestionRequest(request: IncomingMessage, integrationId: string): boolean {
+    const authorization = request.headers.authorization
+    if (!authorization?.startsWith('Bearer pap_ing_')) return false
+    const token = authorization.slice('Bearer '.length)
+    const parts = token.slice('pap_ing_'.length).split('.')
+    if (parts.length !== 2) throw new EntraAuthError('INVALID_INGESTION_TOKEN', 'Ingestion token is malformed')
+    const [body, suppliedSignature] = parts
+    if (!body || !suppliedSignature) throw new EntraAuthError('INVALID_INGESTION_TOKEN', 'Ingestion token is malformed')
+    const expectedSignature = createHmac('sha256', this.config.portalSecret).update(`papyrus-ingestion:${body}`).digest()
+    let actualSignature: Buffer
+    try { actualSignature = Buffer.from(suppliedSignature, 'base64url') }
+    catch { throw new EntraAuthError('INVALID_INGESTION_TOKEN', 'Ingestion token signature is malformed') }
+    if (actualSignature.length !== expectedSignature.length || !timingSafeEqual(actualSignature, expectedSignature)) {
+      throw new EntraAuthError('INVALID_INGESTION_TOKEN', 'Ingestion token signature is invalid')
+    }
+    let claims: IngestionTokenClaims
+    try { claims = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as IngestionTokenClaims }
+    catch { throw new EntraAuthError('INVALID_INGESTION_TOKEN', 'Ingestion token claims are malformed') }
+    if (claims.type !== 'papyrus-ingestion' || claims.integrationId !== integrationId) {
+      throw new EntraAuthError('INGESTION_TOKEN_SCOPE_MISMATCH', 'Ingestion token is not valid for this source')
+    }
+    if (!Number.isFinite(claims.expiresAt) || claims.expiresAt <= Date.now()) throw new EntraAuthError('INGESTION_TOKEN_EXPIRED', 'Ingestion token has expired')
+    return true
   }
 
   async startLogin(returnTo = '/portal'): Promise<string> {

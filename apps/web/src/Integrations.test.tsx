@@ -39,9 +39,16 @@ describe('Observation API push setup', () => {
   it('generates a command bound to the configured integration route', () => {
     const command = buildObservationCurlCommand(integration, buildNativeObservationExample(entry, 'zeek.conn@1'))
     expect(command).toContain('/api/integrations/integration-1042/observations')
-    expect(command).toContain('Authorization: Bearer $PAPYRUS_ENTRA_TOKEN')
+    expect(command).toContain('Authorization: Bearer $PAPYRUS_INGEST_TOKEN')
     expect(command).toContain('PAPYRUS_DAEMON_ORIGIN')
     expect(command).toContain('"schema": "zeek.conn@1"')
+  })
+
+  it('fills a scoped ingestion token into generated commands', () => {
+    const command = buildObservationCurlCommand(integration, {}, 'https://papyrus.internal', 'pap_ing_example.token')
+    expect(command).toContain("PAPYRUS_INGEST_TOKEN='pap_ing_example.token'")
+    expect(command).toContain('PAPYRUS_DAEMON_ORIGIN=https://papyrus.internal')
+    expect(command).not.toContain('PAPYRUS_ENTRA_TOKEN')
   })
 
   it('generates a continuous NDJSON bridge into the daemon API', () => {

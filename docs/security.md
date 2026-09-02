@@ -22,7 +22,7 @@ Starlings may produce observations, claims, conflicts, and action proposals. It 
 - Inline passwords, secrets, private keys, API keys, and tokens are rejected.
 - Configurations store only customer-vault, certificate, or managed-identity references.
 - Non-loopback endpoints require HTTPS.
-- Connector activation follows draft, tested, approval, and active states.
+- Observation sources register active immediately and cannot perform outbound or controlled actions. Integrations that establish outbound access or action authority follow draft, tested, approval, and active states.
 - Configuration and lifecycle events are append-only and SHA-256 hash chained.
 - A configuration test validates deterministic policy and manifest requirements; it does not claim live network reachability.
 

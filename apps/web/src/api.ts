@@ -68,7 +68,7 @@ export async function createIntegration(input: {
   catalogId: string
   name: string
   endpoint?: string
-  scope: string
+  scope?: string
   credentialRef?: string
   settings: Record<string, string | number | boolean>
 }): Promise<IntegrationConfiguration> {

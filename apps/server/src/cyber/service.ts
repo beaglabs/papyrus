@@ -154,7 +154,7 @@ export class CyberService {
     const endpoint = optionalEndpoint(input.endpoint, this.config.mode)
     const create: CreateIntegrationInput = {
       name: cleanText(input.name ?? entry.name, 'name'),
-      scope: cleanText(input.scope, 'scope', 512),
+      scope: cleanText(input.scope ?? (entry.observationProtocol ? 'daemon' : undefined), 'scope', 512),
       settings: Object.fromEntries(Object.entries(settings as Record<string, unknown>).map(([key, value]) => {
         if (!['string', 'number', 'boolean'].includes(typeof value)) throw new CyberServiceError(400, 'INVALID_INPUT', `settings.${key} must be a string, number, or boolean`)
         return [key, value as string | number | boolean]

@@ -10,7 +10,7 @@ describe('durable terrain observations', () => {
   const disposers: Array<() => void> = []
   afterEach(() => { while (disposers.length) disposers.pop()?.() })
 
-  async function setup(catalogId = 'observation-api') {
+  function setup(catalogId = 'observation-api') {
     const dataDir = mkdtempSync(join(tmpdir(), 'papyrus-terrain-test-'))
     const db = new CyberDatabase(':memory:')
     const config: CyberConfig = {
@@ -21,15 +21,13 @@ describe('durable terrain observations', () => {
     const service = new CyberService(db, config)
     const owner = { oid: 'owner', tenantId: 'tenant', displayName: 'Owner', roles: ['Papyrus.System.Owner' as const], groups: [], source: 'development' as const }
     const integration = service.createIntegration(owner, catalogId, { name: 'Terrain ingest', scope: 'test', settings: {} })
-    await service.testIntegration(owner, integration.id)
-    service.submitIntegration(owner, integration.id)
-    service.activateIntegration(owner, integration.id)
+    expect(integration.state).toBe('active')
     disposers.push(() => { db.close(); rmSync(dataDir, { recursive: true, force: true }) })
     return { db, service, owner, integration: service.integrations(owner)[0]! }
   }
 
   it('projects entities and relationships with observation provenance', async () => {
-    const { db, service, owner, integration } = await setup()
+    const { db, service, owner, integration } = setup()
     const input = {
       sourceRecordId: 'sensor-record-1', observedAt: '2026-09-02T07:00:00Z', evidenceType: 'NetworkConnection', subject: 'device:workstation-1',
       payload: { raw: 'preserved', bytes: 42 },
@@ -52,7 +50,7 @@ describe('durable terrain observations', () => {
   })
 
   it('is idempotent for identical source records and rejects divergent reuse', async () => {
-    const { service, owner, integration } = await setup()
+    const { service, owner, integration } = setup()
     const input = {
       sourceRecordId: 'record-1', observedAt: '2026-09-02T07:00:00Z', evidenceType: 'Device', subject: 'device:1', payload: { value: 1 },
       terrain: { entities: [{ externalId: 'device:1', kind: 'Device', label: 'Device 1' }] },
@@ -64,7 +62,7 @@ describe('durable terrain observations', () => {
   })
 
   it('atomically rejects relationships whose endpoints are unknown', async () => {
-    const { service, owner, integration } = await setup()
+    const { service, owner, integration } = setup()
     expect(() => service.ingestObservation(owner, integration.id, {
       sourceRecordId: 'bad-record', observedAt: '2026-09-02T07:00:00Z', evidenceType: 'NetworkConnection', subject: 'unknown', payload: {},
       terrain: { entities: [], relationships: [{ kind: 'connected_to', sourceExternalId: 'missing-a', targetExternalId: 'missing-b' }] },
@@ -73,7 +71,7 @@ describe('durable terrain observations', () => {
   })
 
   it('normalizes a versioned source-native record and retains its schema', async () => {
-    const { service, owner, integration } = await setup('zeek')
+    const { service, owner, integration } = setup('zeek')
     const result = service.ingestObservation(owner, integration.id, {
       sourceRecordId: 'zeek-native-1', observedAt: '2026-09-02T07:00:00Z', schema: 'zeek.conn@1',
       payload: { uid: 'C1', 'id.orig_h': '10.0.0.12', 'id.orig_p': 51822, 'id.resp_h': '10.0.0.8', 'id.resp_p': 443, proto: 'tcp' },
@@ -88,7 +86,7 @@ describe('durable terrain observations', () => {
   })
 
   it('constrains source-native schemas and keeps canonical mode unambiguous', async () => {
-    const { service, owner, integration } = await setup('zeek')
+    const { service, owner, integration } = setup('zeek')
     const base = { sourceRecordId: 'bad-native', observedAt: '2026-09-02T07:00:00Z', payload: { value: 1 } }
     expect(() => service.ingestObservation(owner, integration.id, base)).toThrow(/supported schema or a canonical Terrain projection/)
     expect(() => service.ingestObservation(owner, integration.id, { ...base, schema: 'suricata.eve.flow@1' })).toThrow(/not supported by zeek/)

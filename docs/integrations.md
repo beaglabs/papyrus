@@ -2,7 +2,13 @@
 
 `/portal/integrations` is the control surface for human adapters, evidence sources, terrain sources, controlled executors, agent peers, and secret infrastructure.
 
-Each connector follows:
+Observation API sources are registered active immediately because they grant no outbound or action authority:
+
+`connect → waiting for data → receiving | degraded | disabled`
+
+The catalog card expands into the ingestion terminal as soon as **Connect** is selected. While it is open, the portal polls the daemon for `lastEvidenceAt` and changes from **WAITING FOR DATA** to **RECEIVING** after the first accepted observation.
+
+Integrations that establish outbound access, hold external credentials, or execute controlled actions retain the governed lifecycle:
 
 `draft → tested → awaiting_approval → active → degraded | disabled`
 
@@ -63,7 +69,7 @@ A curated source can instead publish its native fields under a versioned `schema
 
 Papyrus retains the accepted raw record and schema provenance alongside the projection produced by the pinned deterministic normalizer. A record must use either `schema` or `terrain`, never both. Schemas are constrained by the configured source profile, so a Zeek integration cannot submit a Suricata schema. Invalid source-native records are rejected without partially mutating Terrain and can be corrected and retried under the same source record identifier.
 
-The active integration's **Ingestion setup** dialog provides two terminal workflows:
+The expanded catalog card provides two terminal workflows:
 
 - **Stream NDJSON** continuously tails a customer-produced JSON-lines file and wraps each record in the selected source schema before sending it to the daemon.
 - **Send one record** validates authentication, schema acceptance, normalization, and Terrain projection with a single example.

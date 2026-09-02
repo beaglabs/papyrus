@@ -52,7 +52,7 @@ The web product is now rooted at `/portal` and has no chat/session surface:
 Draft → Tested → Awaiting Approval → Active → Degraded / Disabled
 ```
 
-Connector activation and configuration events form an append-only SHA-256 hash chain.
+Integration registration, activation, configuration, and disable events form an append-only SHA-256 hash chain.
 
 ## Entra application roles
 
@@ -141,7 +141,7 @@ Teams SSO tokens can be exchanged at `POST /api/auth/teams`; standard portal log
 
 This branch implements the Entra-native daemon, new portal shell, governed integration lifecycle, offline licensing, audit chain, customer-managed Observation API source profiles, deterministic native-schema normalization, durable observations, database-leased sync workers, provenance-preserving Terrain storage, and the Orb 2D Terrain view.
 
-Evidence and Terrain entries are push profiles rather than vendor drivers: Papyrus generates the source-bound ingestion route and tested configuration examples, while the customer owns collection, export, and network routing. Live Teams command handling, Exchange mailbox polling, source-scoped publishing credentials, customer-vault resolvers, and the Starlings process adapter remain connector-specific implementation slices. Pull integrations cannot activate until their driver is registered, and configuration-only tests leave health unknown rather than pretending that saving a connector performed live network validation.
+Evidence and Terrain entries are daemon-owned Observation API source profiles rather than vendor drivers. Selecting **Connect** registers them active immediately, expands an inline terminal, and polls the daemon until evidence arrives; the customer owns collection, export, and network routing. Live Teams command handling, Exchange mailbox polling, source-scoped publishing credentials, customer-vault resolvers, and the Starlings process adapter remain connector-specific implementation slices. Pull integrations cannot activate until their driver is registered, and configuration-only tests leave health unknown rather than pretending that saving a connector performed live network validation.
 
 ## Verification
 

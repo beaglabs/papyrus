@@ -42,14 +42,17 @@ export class CyberDatabase {
   createIntegration(entry: IntegrationCatalogEntry, input: CreateIntegrationInput, actorOid: string): IntegrationConfiguration {
     const now = new Date().toISOString()
     const id = randomUUID()
+    const initialState: IntegrationState = entry.observationProtocol ? 'active' : 'draft'
     this.sqlite.prepare(`INSERT INTO cyber_integrations(
       id,catalog_id,name,integration_class,authority,risk,state,endpoint,scope,credential_ref,settings_json,
       health,created_by_oid,created_at,updated_at,version
     ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)`).run(
-      id, entry.id, input.name, entry.integrationClass, entry.authority, entry.risk, 'draft', input.endpoint ?? null,
+      id, entry.id, input.name, entry.integrationClass, entry.authority, entry.risk, initialState, input.endpoint ?? null,
       input.scope, input.credentialRef ?? null, JSON.stringify(input.settings), 'unknown', actorOid, now, now,
     )
-    this.appendEvent(id, actorOid, 'IntegrationCreated', { catalogId: entry.id, authority: entry.authority, scope: input.scope })
+    this.appendEvent(id, actorOid, entry.observationProtocol ? 'ObservationSourceRegistered' : 'IntegrationCreated', {
+      catalogId: entry.id, authority: entry.authority, scope: input.scope, state: initialState,
+    })
     return this.getIntegration(id) as IntegrationConfiguration
   }
 

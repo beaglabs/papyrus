@@ -38,11 +38,8 @@ describe('cyber portal HTTP surface', () => {
     })
     expect(createdResponse.status).toBe(201)
     const created = await createdResponse.json() as { id: string; state: string }
-    expect(created.state).toBe('draft')
+    expect(created.state).toBe('active')
     expect((await fetch(`${origin}/api/sessions`)).status).toBe(404)
-    expect((await fetch(`${origin}/api/integrations/${created.id}/test`, { method: 'POST', body: '{}' })).status).toBe(200)
-    expect((await fetch(`${origin}/api/integrations/${created.id}/submit`, { method: 'POST', body: '{}' })).status).toBe(200)
-    expect((await fetch(`${origin}/api/integrations/${created.id}/activate`, { method: 'POST', body: '{}' })).status).toBe(200)
     const observationBody = JSON.stringify({
         sourceRecordId: 'zeek-1', observedAt: '2026-09-02T07:00:00Z', schema: 'zeek.conn@1',
         payload: { uid: 'C1', 'id.orig_h': '10.0.0.12', 'id.orig_p': 51822, 'id.resp_h': '10.0.0.8', 'id.resp_p': 443, proto: 'tcp' },

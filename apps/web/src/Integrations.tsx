@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react'
 import type { EntraAppRole, IntegrationCatalogEntry, IntegrationClass, IntegrationConfiguration, IntegrationEvent, PortalPrincipal } from '@papyrus/contracts'
 import { createIntegration, integrationEvents, requestIntegrationSync, transitionIntegration } from './api.js'
 import { Alert, Badge, Button, Card, Dialog, DialogContent, DialogFooter, DialogHeader, Input, Label, NativeSelect } from './components/ui/index.js'
@@ -35,6 +35,18 @@ export function IntegrationsView({ me, catalog, integrations, onChanged }: {
   const canManage = can(me, 'Papyrus.Integration.Manage')
   const canAudit = can(me, 'Papyrus.Audit.View')
 
+  useEffect(() => {
+    if (!setupFor) return
+    const refreshed = integrations.find((integration) => integration.id === setupFor.id)
+    if (refreshed && refreshed.version !== setupFor.version) setSetupFor(refreshed)
+  }, [integrations, setupFor])
+
+  useEffect(() => {
+    if (!setupFor || setupFor.lastEvidenceAt) return
+    const timer = window.setInterval(() => { void onChanged() }, 2_000)
+    return () => window.clearInterval(timer)
+  }, [onChanged, setupFor])
+
   const transition = async (integration: IntegrationConfiguration, action: 'test' | 'submit' | 'activate' | 'disable') => {
     setBusy(`${integration.id}:${action}`); setError(undefined)
     try { await transitionIntegration(integration.id, action); await onChanged() }
@@ -52,6 +64,18 @@ export function IntegrationsView({ me, catalog, integrations, onChanged }: {
     setBusy(`${integration.id}:sync`); setError(undefined)
     try { await requestIntegrationSync(integration.id); await onChanged() }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to queue synchronization') }
+    finally { setBusy(undefined) }
+  }
+
+  const connectSource = async (entry: IntegrationCatalogEntry) => {
+    const existing = integrations.find((integration) => integration.catalogId === entry.id && integration.state !== 'disabled')
+    if (existing) { setSetupFor(existing); return }
+    setBusy(`${entry.id}:connect`); setError(undefined)
+    try {
+      const created = await createIntegration({ catalogId: entry.id, name: entry.name, settings: { ingestion: 'daemon_observation_api' } })
+      setSetupFor(created)
+      await onChanged()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to register observation source') }
     finally { setBusy(undefined) }
   }
 
@@ -81,7 +105,7 @@ export function IntegrationsView({ me, catalog, integrations, onChanged }: {
               {integration.state === 'draft' && canManage && <Button size="sm" disabled={Boolean(busy)} onClick={() => void transition(integration, 'test')}>Test configuration</Button>}
               {integration.state === 'tested' && canManage && <Button size="sm" disabled={Boolean(busy)} onClick={() => void transition(integration, 'submit')}>Submit</Button>}
               {integration.state === 'awaiting_approval' && canActivate && <Button className="primary" size="sm" disabled={Boolean(busy)} onClick={() => void transition(integration, 'activate')}>Activate</Button>}
-              {integration.state === 'active' && entry?.observationProtocol && canManage && <Button className="primary" size="sm" onClick={() => setSetupFor(integration)}>Ingestion setup</Button>}
+              {integration.state === 'active' && entry?.observationProtocol && canManage && <Button className="primary" size="sm" onClick={() => setSetupFor(integration)}>Open terminal</Button>}
               {integration.state === 'active' && entry && ['pull', 'hybrid'].includes(entry.syncMode) && canManage && <Button size="sm" disabled={Boolean(busy)} onClick={() => void syncNow(integration)}>Sync now</Button>}
               {integration.state !== 'disabled' && canManage && <Button variant="ghost" size="sm" disabled={Boolean(busy)} onClick={() => void transition(integration, 'disable')}>Disable</Button>}
               {canAudit && <Button variant="ghost" size="sm" onClick={() => void openEvents(integration)}>Audit</Button>}
@@ -96,16 +120,21 @@ export function IntegrationsView({ me, catalog, integrations, onChanged }: {
         <Button size="sm" variant={filter === 'all' ? 'reverse' : 'ghost'} onClick={() => setFilter('all')}>All</Button>
         {Object.entries(CLASS_LABELS).map(([value, label]) => <Button key={value} size="sm" variant={filter === value ? 'reverse' : 'ghost'} onClick={() => setFilter(value as IntegrationClass)}>{label}</Button>)}
       </div>
-      <div className="catalog-grid">{visibleCatalog.map((entry) => <Card className="catalog-card" key={entry.id} style={{ '--connector-accent': entry.accent } as CSSProperties}>
+      <div className="catalog-grid">{visibleCatalog.map((entry) => {
+        const configured = integrations.find((integration) => integration.catalogId === entry.id && integration.state !== 'disabled')
+        const sourceExpanded = Boolean(entry.observationProtocol && setupFor?.catalogId === entry.id)
+        return <Card className={`catalog-card${sourceExpanded ? ' source-expanded' : ''}`} key={entry.id} style={{ '--connector-accent': entry.accent } as CSSProperties}>
         <div className="catalog-card-head"><div className="connector-mark">{entry.initials}</div><Badge className={`risk-${entry.risk}`}>{entry.risk}</Badge></div>
         <p className="catalog-vendor">{entry.vendor}</p><h3>{entry.name}</h3><p>{entry.description}</p>
         <div className="capability-list">{entry.capabilities.slice(0, 3).map((capability) => <span key={capability}>{capability}</span>)}</div>
-        <div className="catalog-card-foot"><span>{CLASS_LABELS[entry.integrationClass]}</span><Button disabled={!canManage} onClick={() => setSelected(entry)}>{configuredIds.has(entry.id) ? 'Add another' : 'Configure'} →</Button></div>
-      </Card>)}</div>
+        {sourceExpanded && setupFor && <SourceIngestionPanel integration={setupFor} entry={entry} onClose={() => setSetupFor(undefined)} />}
+        <div className="catalog-card-foot"><span>{CLASS_LABELS[entry.integrationClass]}</span>{entry.observationProtocol
+          ? <Button className={configured ? 'primary' : undefined} disabled={!canManage || Boolean(busy)} onClick={() => void connectSource(entry)}>{busy === `${entry.id}:connect` ? 'Connecting…' : configured ? 'Open terminal' : 'Connect'} →</Button>
+          : <Button disabled={!canManage} onClick={() => setSelected(entry)}>{configuredIds.has(entry.id) ? 'Add another' : 'Configure'} →</Button>}</div>
+      </Card>})}</div>
     </section>
 
     <ConfigureIntegration entry={selected} open={Boolean(selected)} onClose={() => setSelected(undefined)} onCreated={async () => { setSelected(undefined); await onChanged() }} />
-    <PushSourceSetup key={setupFor?.id ?? 'closed'} integration={setupFor} entry={catalog.find((candidate) => candidate.id === setupFor?.catalogId)} onClose={() => setSetupFor(undefined)} />
     <Dialog open={Boolean(eventsFor)} onOpenChange={(open) => { if (!open) setEventsFor(undefined) }}><DialogHeader><div><p className="eyebrow">APPEND-ONLY HISTORY</p><h2>{eventsFor?.name}</h2></div><Button variant="ghost" onClick={() => setEventsFor(undefined)}>×</Button></DialogHeader><DialogContent>
       <div className="event-list">{events.length ? events.map((event) => <div key={event.sequence}><span>{event.sequence}</span><div><strong>{event.action}</strong><small>{new Date(event.occurredAt).toLocaleString()} · {event.actorOid}</small></div></div>) : <p className="empty-copy">No audit events available.</p>}</div>
     </DialogContent></Dialog>
@@ -229,9 +258,9 @@ tail -Fn0 "$SOURCE_NDJSON" | while IFS= read -r record; do
 done`
 }
 
-function PushSourceSetup({ integration, entry, onClose }: {
-  integration: IntegrationConfiguration | undefined
-  entry: IntegrationCatalogEntry | undefined
+function SourceIngestionPanel({ integration, entry, onClose }: {
+  integration: IntegrationConfiguration
+  entry: IntegrationCatalogEntry
   onClose: () => void
 }) {
   const schemas = entry?.observationProtocol?.schemas ?? []
@@ -244,7 +273,7 @@ function PushSourceSetup({ integration, entry, onClose }: {
       : mode === 'native' ? buildNativeObservationExample(entry, selectedSchema) : buildCanonicalObservationExample(entry, integration, selectedSchema),
     [entry, integration, mode, selectedSchema],
   )
-  if (!integration || !entry?.observationProtocol) return null
+  if (!entry.observationProtocol) return null
   const command = commandMode === 'stream' && mode === 'native'
     ? buildObservationTailCommand(integration, selectedSchema)
     : buildObservationCurlCommand(integration, payload)
@@ -253,24 +282,27 @@ function PushSourceSetup({ integration, entry, onClose }: {
     setCopied(true)
     window.setTimeout(() => setCopied(false), 1_500)
   }
-  return <Dialog open onOpenChange={(open) => { if (!open) onClose() }}><DialogHeader><div><p className="eyebrow">DAEMON INGESTION</p><h2>{integration.name}</h2></div><Button variant="ghost" onClick={onClose}>×</Button></DialogHeader><DialogContent>
-    <div className="source-setup-meta"><Badge>ACTIVE</Badge><code>/api/integrations/{integration.id}/observations</code></div>
+  return <section className="catalog-ingestion" aria-label={`${integration.name} ingestion setup`}>
+    <div className="catalog-ingestion-head"><div><p className="eyebrow">DAEMON INGESTION</p><h3>{integration.name}</h3></div><Button size="sm" variant="ghost" onClick={onClose}>Close ×</Button></div>
+    <div className="source-setup-meta"><Badge className={integration.lastEvidenceAt ? 'status-good' : 'state-tested'}>{integration.lastEvidenceAt ? 'RECEIVING' : 'WAITING FOR DATA'}</Badge><code>/api/integrations/{integration.id}/observations</code></div>
     <p className="source-setup-copy">This route is served by the current Papyrus daemon. The integration ID identifies the source; the selected schema controls deterministic normalization into Terrain.</p>
+    {!integration.lastEvidenceAt && <p className="source-polling"><span className="signal-loader"><i /><i /><i /></span>Polling the daemon for the first accepted observation…</p>}
+    {integration.lastEvidenceAt && <p className="source-polling receiving"><span className="dot good" />Last evidence received {new Date(integration.lastEvidenceAt).toLocaleString()}</p>}
     <div className="segmented source-mode" role="group" aria-label="Observation payload mode">
-      {schemas.length > 0 && <button className={mode === 'native' ? 'active' : ''} onClick={() => setMode('native')}>Source-native</button>}
-      <button className={mode === 'canonical' ? 'active' : ''} onClick={() => { setMode('canonical'); setCommandMode('test') }}>Canonical Terrain</button>
+      {schemas.length > 0 && <button type="button" className={mode === 'native' ? 'active' : ''} onClick={() => setMode('native')}>Source-native</button>}
+      <button type="button" className={mode === 'canonical' ? 'active' : ''} onClick={() => { setMode('canonical'); setCommandMode('test') }}>Canonical Terrain</button>
     </div>
     {schemas.length > 0 && <Label>{mode === 'native' ? 'Versioned source schema' : 'Canonical projection example'}<NativeSelect value={selectedSchema} onChange={(event) => setSelectedSchema(event.target.value)}>{schemas.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.label} · {candidate.id}</option>)}</NativeSelect><small>{schemas.find((candidate) => candidate.id === selectedSchema)?.description}</small></Label>}
     <div className="command-head"><div><strong>Connect this source</strong><small>Uses an Entra bearer token with Papyrus.Integration.Manage.</small></div><Button size="sm" onClick={() => void copy()}>{copied ? 'Copied' : 'Copy command'}</Button></div>
     <div className="terminal-shell">
       <div className="terminal-bar"><span className="terminal-lights" aria-hidden="true"><i /><i /><i /></span><div className="terminal-tabs" role="group" aria-label="Ingestion command">
-        {schemas.length > 0 && <button className={commandMode === 'stream' ? 'active' : ''} onClick={() => setCommandMode('stream')}>Stream NDJSON</button>}
-        <button className={commandMode === 'test' ? 'active' : ''} onClick={() => setCommandMode('test')}>Send one record</button>
+        {schemas.length > 0 && <button type="button" className={commandMode === 'stream' ? 'active' : ''} onClick={() => { setMode('native'); setCommandMode('stream') }}>Stream NDJSON</button>}
+        <button type="button" className={commandMode === 'test' ? 'active' : ''} onClick={() => setCommandMode('test')}>Send one record</button>
       </div></div>
       <pre className="source-command"><code>{command}</code></pre>
     </div>
     {commandMode === 'stream' && mode === 'native'
       ? <Alert className="source-boundary"><strong>Customer-owned bridge</strong><span>Point SOURCE_NDJSON at a JSON-lines export matching the selected schema. The command tails it continuously and sends each record to this daemon; Papyrus does not need credentials for the source system.</span></Alert>
       : <Alert className="source-boundary"><strong>One-record validation</strong><span>Run this against the daemon to validate authentication, schema acceptance, normalization, and Terrain projection before connecting a live stream.</span></Alert>}
-  </DialogContent><DialogFooter><Button onClick={onClose}>Done</Button></DialogFooter></Dialog>
+  </section>
 }

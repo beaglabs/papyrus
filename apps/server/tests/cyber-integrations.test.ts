@@ -26,16 +26,14 @@ describe('cyber integration lifecycle', () => {
     return { db, service, owner, viewer }
   }
 
-  it('requires Entra application roles and enforces draft, test, approval, activation', async () => {
+  it('requires Entra application roles and immediately registers observation sources', () => {
     const { db, service, owner, viewer } = setup()
     expect(() => service.createIntegration(viewer, 'zeek', { name: 'Zeek East', scope: 'east enclave', settings: {} }))
       .toThrow(/Papyrus\.Integration\.Manage/)
     const integration = service.createIntegration(owner, 'zeek', { name: 'Zeek East', scope: 'east enclave', settings: {} })
-    expect(integration.state).toBe('draft')
-    expect((await service.testIntegration(owner, integration.id)).state).toBe('tested')
-    expect(service.submitIntegration(owner, integration.id).state).toBe('awaiting_approval')
-    expect(service.activateIntegration(owner, integration.id).state).toBe('active')
-    expect(db.verifyEventChain()).toEqual({ valid: true, count: 4 })
+    expect(integration).toMatchObject({ state: 'active', health: 'unknown' })
+    expect(db.listEvents(integration.id)[0]?.action).toBe('ObservationSourceRegistered')
+    expect(db.verifyEventChain()).toEqual({ valid: true, count: 1 })
   })
 
   it('rejects inline connector secrets and stores only credential references', () => {
@@ -50,15 +48,12 @@ describe('cyber integration lifecycle', () => {
     expect(JSON.stringify(integration)).not.toContain('do-not-store')
   })
 
-  it('requires Security.Manage before activating high-risk connectors', async () => {
-    const { service, owner } = setup()
-    const integration = service.createIntegration(owner, 'microsoft-entra', { name: 'Entra terrain', scope: 'tenant', settings: {} })
-    await service.testIntegration(owner, integration.id)
-    service.submitIntegration(owner, integration.id)
+  it('does not put read-only high-risk observation sources through action approval', () => {
+    const { service } = setup()
     const integrationManager = {
       oid: 'manager', tenantId: 'tenant', displayName: 'Manager', roles: ['Papyrus.Integration.Manage' as const], groups: [], source: 'development' as const,
     }
-    expect(() => service.activateIntegration(integrationManager, integration.id)).toThrow(/Papyrus\.Security\.Manage/)
+    expect(service.createIntegration(integrationManager, 'microsoft-entra', { name: 'Entra terrain', settings: {} })).toMatchObject({ state: 'active', scope: 'daemon' })
   })
 
   it('keeps configuration-only tests unknown and refuses to activate a pull connector without a driver', async () => {

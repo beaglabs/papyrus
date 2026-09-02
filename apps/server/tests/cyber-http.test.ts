@@ -43,21 +43,19 @@ describe('cyber portal HTTP surface', () => {
     expect((await fetch(`${origin}/api/integrations/${created.id}/test`, { method: 'POST', body: '{}' })).status).toBe(200)
     expect((await fetch(`${origin}/api/integrations/${created.id}/submit`, { method: 'POST', body: '{}' })).status).toBe(200)
     expect((await fetch(`${origin}/api/integrations/${created.id}/activate`, { method: 'POST', body: '{}' })).status).toBe(200)
+    const observationBody = JSON.stringify({
+        sourceRecordId: 'zeek-1', observedAt: '2026-09-02T07:00:00Z', schema: 'zeek.conn@1',
+        payload: { uid: 'C1', 'id.orig_h': '10.0.0.12', 'id.orig_p': 51822, 'id.resp_h': '10.0.0.8', 'id.resp_p': 443, proto: 'tcp' },
+      })
     const observationResponse = await fetch(`${origin}/api/integrations/${created.id}/observations`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
-        sourceRecordId: 'zeek-1', observedAt: '2026-09-02T07:00:00Z', evidenceType: 'NetworkConnection', subject: 'connection:1', payload: { proto: 'tcp' },
-        terrain: {
-          entities: [
-            { externalId: 'host:1', kind: 'Device', label: 'Host 1' },
-            { externalId: 'ip:10.0.0.8', kind: 'IPAddress', label: '10.0.0.8' },
-          ],
-          relationships: [{ kind: 'connected_to', sourceExternalId: 'host:1', targetExternalId: 'ip:10.0.0.8' }],
-        },
-      }),
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: observationBody,
     })
-    expect(observationResponse.status).toBe(202)
+    expect(observationResponse.status).toBe(201)
+    expect((await fetch(`${origin}/api/integrations/${created.id}/observations`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: observationBody,
+    })).status).toBe(200)
     const terrainResponse = await fetch(`${origin}/api/terrain`)
     expect(terrainResponse.status).toBe(200)
-    expect(await terrainResponse.json()).toMatchObject({ observationCount: 1, entities: [{ label: 'Host 1' }, { label: '10.0.0.8' }], relationships: [{ kind: 'connected_to' }] })
+    expect(await terrainResponse.json()).toMatchObject({ observationCount: 1, entities: [{ label: '10.0.0.12' }, { label: '10.0.0.8' }], relationships: [{ kind: 'connected_to' }] })
   })
 })

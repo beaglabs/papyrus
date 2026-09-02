@@ -6,7 +6,7 @@ Papyrus is the governed customer-hosted envelope around a Starlings cyber-resili
 | --- | --- | --- |
 | Human connection | Teams commands, Exchange email, portal | Entra identity and app roles |
 | Machine connection | ACP clients and A2A peers | Connector credentials and scoped manifests |
-| Evidence | Defender, Sentinel, Zeek, Suricata, Sysmon, terrain sources | Read-only connector scope |
+| Evidence | Customer-pushed Defender, Sentinel, Zeek, Suricata, Sysmon, DNS, and inventory records | Read-only source scope |
 | Computation | Local observations, claims, contradiction handling, recovery | Starlings population rules |
 | Action | Firewall or response proposals and execution | Deterministic policy plus Entra approver |
 | Product | Configuration, licensing, health, audit | Papyrus daemon |
@@ -17,9 +17,9 @@ The portal is initiated either by normal Entra login or a short-lived link creat
 
 The canonical flow is:
 
-1. Pull connectors run as leased, resumable synchronization jobs; push connectors enter through the observation boundary.
-2. The daemon commits immutable source observations before advancing a connector checkpoint.
-3. Normalization projects evidence-backed entities and relationships into Terrain while retaining source and observation provenance.
+1. Customer-managed collectors and exports push records through the source-bound Observation API.
+2. The daemon validates the envelope and any selected versioned source schema without mutating existing evidence.
+3. An accepted canonical projection is validated directly, or a pinned deterministic source profile projects native fields; the immutable raw observation, schema provenance, and resulting Terrain evidence commit atomically.
 4. Starlings operators consume the durable observation boundary to form claims, request missing evidence, and resolve contradictions.
 5. The cyber twin retains the current terrain and confidence history.
 6. Potentially consequential output becomes an action proposal.
@@ -27,5 +27,7 @@ The canonical flow is:
 8. Every configuration and decision transition is auditable.
 
 Integration configuration is never Terrain. The graph contains only entities and relationships produced from observations. The connector identifier and source record identifier remain attached as provenance rather than appearing as synthetic graph nodes.
+
+Evidence and Terrain catalog entries are not promises that Papyrus can reach into a customer system. They are guided Observation API profiles: each exposes accepted schemas, a generated ingestion route, and customer-run push instructions. Human interfaces, agent protocols, controlled-action executors, and secret infrastructure retain separate integration boundaries because they do more than publish evidence.
 
 The same substrate can be tested under message loss, operator loss, partitions, contradictory evidence, and recovery without changing the product boundary.

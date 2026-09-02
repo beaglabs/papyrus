@@ -8,11 +8,19 @@ Each connector follows:
 
 A deterministic test checks manifest compatibility, endpoint policy, scope, and credential references. When a connector driver is registered, the same transition also performs its live reachability and authentication test. Without a driver it records `networkReachability: not_tested`, and health remains `unknown` rather than being reported as healthy.
 
-## Synchronization runtime
+## Observation API sources
 
-Pull and hybrid connectors execute through the daemon's database-backed worker. Jobs use leases, bounded exponential retry, durable cursors, and idempotent source record identifiers. An observation is committed before its checkpoint advances. A daemon restart or expired worker lease therefore resumes work without silently skipping evidence.
+Terrain and evidence catalog entries are customer-managed push profiles over one protocol. Configuring Zeek, Suricata, Sysmon, DNS, Asset Inventory, Microsoft Entra, Defender XDR, or Sentinel creates a source-bound route:
 
-Push connectors publish to `POST /api/integrations/:id/observations`. The first source-neutral adapter is the catalog's **Observation API** connector. Its payload can carry raw source data plus an optional normalized Terrain projection:
+`POST /api/integrations/:id/observations`
+
+The integration identifier establishes source provenance. Papyrus does not trust a caller-provided `source` field and does not poll these systems. The customer owns collection, export configuration, network routing, and source-system permissions.
+
+The **Custom Source** profile accepts customer-defined evidence and canonical Terrain projections. Curated profiles additionally accept versioned native schemas such as `zeek.conn@1`, `suricata.eve.alert@1`, and `asset.device@1`.
+
+### Canonical Terrain mode
+
+Customers that already know the desired topology can publish raw evidence and its projection together:
 
 ```json
 {
@@ -33,7 +41,37 @@ Push connectors publish to `POST /api/integrations/:id/observations`. The first 
 }
 ```
 
-`GET /api/terrain` returns the resulting entity/relationship snapshot. `POST /api/integrations/:id/sync` queues a pull connector immediately, and `GET /api/integrations/:id/sync-jobs` exposes its execution history.
+### Source-native mode
+
+A curated source can instead publish its native fields under a versioned `schema`:
+
+```json
+{
+  "sourceRecordId": "zeek-conn-918281",
+  "observedAt": "2026-09-02T07:00:00Z",
+  "schema": "zeek.conn@1",
+  "payload": {
+    "uid": "CTo78A11gLkU",
+    "id.orig_h": "10.0.0.12",
+    "id.orig_p": 51822,
+    "id.resp_h": "10.0.0.8",
+    "id.resp_p": 443,
+    "proto": "tcp"
+  }
+}
+```
+
+Papyrus retains the accepted raw record and schema provenance alongside the projection produced by the pinned deterministic normalizer. A record must use either `schema` or `terrain`, never both. Schemas are constrained by the configured source profile, so a Zeek integration cannot submit a Suricata schema. Invalid source-native records are rejected without partially mutating Terrain and can be corrected and retried under the same source record identifier.
+
+The active integration's **Push setup** dialog provides source-native and canonical examples plus a complete curl command. The generic endpoint currently accepts the caller's Entra bearer token and requires `Papyrus.Integration.Manage`; source-scoped non-human publishing credentials remain a production hardening slice.
+
+`GET /api/terrain` returns the resulting entity/relationship snapshot.
+
+## Pull synchronization runtime
+
+Operational integrations that genuinely require daemon-managed polling execute through the database-backed worker. Jobs use leases, bounded exponential retry, durable cursors, and idempotent source record identifiers. An observation is committed before its checkpoint advances. A daemon restart or expired worker lease therefore resumes work without silently skipping evidence.
+
+`POST /api/integrations/:id/sync` queues a pull connector immediately, and `GET /api/integrations/:id/sync-jobs` exposes its execution history. The current evidence and Terrain source profiles do not use this path.
 
 ## Authority
 

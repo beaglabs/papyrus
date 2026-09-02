@@ -31,12 +31,17 @@ const graphStyle: IGraphStyle<TerrainOrbNode, TerrainOrbEdge> = {
   },
 }
 
-export function TerrainView({ data, onOpenIntegrations }: { data: PortalData; onOpenIntegrations: () => void }) {
+export function TerrainView({ data, onOpenIntegrations, onRefresh }: { data: PortalData; onOpenIntegrations: () => void; onRefresh: () => Promise<void> }) {
   const topology = useMemo(() => buildTopology(data.terrain), [data.terrain])
   const [layout, setLayout] = useState<TerrainLayout>('force')
   const [selected, setSelected] = useState<TerrainOrbNode>()
   const stage = useRef<HTMLDivElement | null>(null)
   const orb = useRef<OrbViewType<TerrainOrbNode, TerrainOrbEdge> | null>(null)
+
+  useEffect(() => {
+    const timer = window.setInterval(() => { void onRefresh() }, 5_000)
+    return () => window.clearInterval(timer)
+  }, [onRefresh])
 
   useEffect(() => {
     if (!stage.current || topology.nodes.length === 0) return
@@ -90,6 +95,7 @@ export function TerrainView({ data, onOpenIntegrations }: { data: PortalData; on
         <div className="segmented" role="group" aria-label="Topology layout">
           {LAYOUTS.map((option) => <button key={option.id} className={layout === option.id ? 'active' : ''} onClick={() => setLayout(option.id)}>{option.label}</button>)}
         </div>
+        <Button onClick={() => void onRefresh()}>REFRESH</Button>
         <Button disabled={!topology.nodes.length} onClick={() => orb.current?.recenter()}>FIT</Button>
         <Button disabled={!topology.nodes.length} onClick={exportSvg}>EXPORT SVG</Button>
       </div>

@@ -130,9 +130,12 @@ export function createCyberServer(config: CyberConfig, service: CyberService, au
       const events = url.pathname.match(/^\/api\/integrations\/([^/]+)\/events$/)
       if (events && request.method === 'GET') return json(response, 200, { events: service.events(await principal(request, auth, service), decodeURIComponent(events[1] as string)) })
       const observations = url.pathname.match(/^\/api\/integrations\/([^/]+)\/observations$/)
-      if (observations && request.method === 'POST') return json(response, 202, service.ingestObservation(
-        await principal(request, auth, service), decodeURIComponent(observations[1] as string), await body(request),
-      ))
+      if (observations && request.method === 'POST') {
+        const result = service.ingestObservation(
+          await principal(request, auth, service), decodeURIComponent(observations[1] as string), await body(request),
+        )
+        return json(response, result.created ? 201 : 200, result)
+      }
       const sync = url.pathname.match(/^\/api\/integrations\/([^/]+)\/sync$/)
       if (sync && request.method === 'POST') return json(response, 202, service.requestSync(
         await principal(request, auth, service), decodeURIComponent(sync[1] as string),

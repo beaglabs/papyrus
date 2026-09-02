@@ -344,6 +344,27 @@ export type IntegrationState = (typeof INTEGRATION_STATES)[number]
 export type IntegrationAuthority = 'read_only' | 'bidirectional' | 'controlled_actions'
 export type IntegrationRisk = 'low' | 'moderate' | 'high' | 'critical'
 
+export interface ObservationSchemaProfile {
+  id: string
+  label: string
+  description: string
+  evidenceType: string
+  example: Record<string, unknown>
+  canonicalExample?: {
+    evidenceType: string
+    subject: string
+    terrain: {
+      entities: TerrainEntityInput[]
+      relationships?: TerrainRelationshipInput[]
+    }
+  }
+}
+
+export interface ObservationProtocolProfile {
+  acceptsCanonicalTerrain: boolean
+  schemas: ObservationSchemaProfile[]
+}
+
 export interface IntegrationCatalogEntry {
   id: string
   name: string
@@ -355,6 +376,7 @@ export interface IntegrationCatalogEntry {
   capabilities: string[]
   evidenceTypes: string[]
   syncMode: 'none' | 'pull' | 'push' | 'hybrid'
+  observationProtocol?: ObservationProtocolProfile
   authSchemes: Array<'entra' | 'certificate' | 'managed_identity' | 'oauth' | 'mTLS' | 'vault_reference' | 'none'>
   supportedProfiles: DeploymentProfile[]
   licenseFeature: string
@@ -420,6 +442,7 @@ export interface CyberObservation {
   sourceRecordId: string
   observedAt: string
   receivedAt: string
+  schema?: string
   evidenceType: string
   subject: string
   classification?: string
@@ -448,6 +471,7 @@ export interface TerrainRelationshipInput {
 export interface ObservationInput {
   sourceRecordId: string
   observedAt: string
+  schema?: string
   evidenceType: string
   subject: string
   classification?: string

@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { INTEGRATION_CATALOG } from '../src/cyber/catalog.js'
 import type { CyberConfig } from '../src/cyber/config.js'
 import { CyberDatabase } from '../src/cyber/database.js'
 import { CyberService } from '../src/cyber/service.js'
@@ -66,5 +67,17 @@ describe('cyber integration lifecycle', () => {
     expect(await service.testIntegration(owner, integration.id)).toMatchObject({ state: 'tested', health: 'unknown' })
     service.submitIntegration(owner, integration.id)
     expect(() => service.activateIntegration(owner, integration.id)).toThrow(/driver must be installed/i)
+  })
+
+  it('exposes evidence and terrain connectors as Observation API source profiles', () => {
+    const sources = INTEGRATION_CATALOG.filter((entry) => ['evidence_source', 'terrain_source'].includes(entry.integrationClass))
+    expect(sources.every((entry) => entry.syncMode === 'push' && entry.observationProtocol)).toBe(true)
+    for (const entry of sources) for (const schema of entry.observationProtocol?.schemas ?? []) {
+      expect(entry.evidenceTypes.length === 0 || entry.evidenceTypes.includes(schema.evidenceType)).toBe(true)
+      expect(schema.canonicalExample?.evidenceType).toBe(schema.evidenceType)
+    }
+    expect(INTEGRATION_CATALOG.find((entry) => entry.id === 'observation-api')).toMatchObject({ name: 'Custom Source' })
+    expect(INTEGRATION_CATALOG.find((entry) => entry.id === 'zeek')?.observationProtocol?.schemas.map((schema) => schema.id)).toContain('zeek.conn@1')
+    expect(INTEGRATION_CATALOG.find((entry) => entry.id === 'asset-inventory')?.observationProtocol?.schemas.map((schema) => schema.id)).toContain('asset.device@1')
   })
 })

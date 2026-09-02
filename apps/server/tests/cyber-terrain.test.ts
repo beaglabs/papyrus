@@ -10,7 +10,7 @@ describe('durable terrain observations', () => {
   const disposers: Array<() => void> = []
   afterEach(() => { while (disposers.length) disposers.pop()?.() })
 
-  async function setup() {
+  async function setup(catalogId = 'observation-api') {
     const dataDir = mkdtempSync(join(tmpdir(), 'papyrus-terrain-test-'))
     const db = new CyberDatabase(':memory:')
     const config: CyberConfig = {
@@ -20,7 +20,7 @@ describe('durable terrain observations', () => {
     }
     const service = new CyberService(db, config)
     const owner = { oid: 'owner', tenantId: 'tenant', displayName: 'Owner', roles: ['Papyrus.System.Owner' as const], groups: [], source: 'development' as const }
-    const integration = service.createIntegration(owner, 'observation-api', { name: 'Terrain ingest', scope: 'test', settings: {} })
+    const integration = service.createIntegration(owner, catalogId, { name: 'Terrain ingest', scope: 'test', settings: {} })
     await service.testIntegration(owner, integration.id)
     service.submitIntegration(owner, integration.id)
     service.activateIntegration(owner, integration.id)
@@ -70,5 +70,31 @@ describe('durable terrain observations', () => {
       terrain: { entities: [], relationships: [{ kind: 'connected_to', sourceExternalId: 'missing-a', targetExternalId: 'missing-b' }] },
     })).toThrow(/unknown entity/i)
     expect(service.terrainSnapshot(owner)).toMatchObject({ observationCount: 0, entities: [], relationships: [] })
+  })
+
+  it('normalizes a versioned source-native record and retains its schema', async () => {
+    const { service, owner, integration } = await setup('zeek')
+    const result = service.ingestObservation(owner, integration.id, {
+      sourceRecordId: 'zeek-native-1', observedAt: '2026-09-02T07:00:00Z', schema: 'zeek.conn@1',
+      payload: { uid: 'C1', 'id.orig_h': '10.0.0.12', 'id.orig_p': 51822, 'id.resp_h': '10.0.0.8', 'id.resp_p': 443, proto: 'tcp' },
+    })
+    expect(result).toMatchObject({ created: true, entities: 2, relationships: 1, observation: {
+      schema: 'zeek.conn@1', evidenceType: 'NetworkConnection', subject: 'connection:C1',
+    } })
+    expect(service.terrainSnapshot(owner)).toMatchObject({
+      entities: [{ externalId: 'ip:10.0.0.12' }, { externalId: 'ip:10.0.0.8' }],
+      relationships: [{ kind: 'connected_to', attributes: { sourcePort: 51822, destinationPort: 443, protocol: 'tcp' } }],
+    })
+  })
+
+  it('constrains source-native schemas and keeps canonical mode unambiguous', async () => {
+    const { service, owner, integration } = await setup('zeek')
+    const base = { sourceRecordId: 'bad-native', observedAt: '2026-09-02T07:00:00Z', payload: { value: 1 } }
+    expect(() => service.ingestObservation(owner, integration.id, base)).toThrow(/supported schema or a canonical Terrain projection/)
+    expect(() => service.ingestObservation(owner, integration.id, { ...base, schema: 'suricata.eve.flow@1' })).toThrow(/not supported by zeek/)
+    expect(() => service.ingestObservation(owner, integration.id, {
+      ...base, schema: 'zeek.conn@1', terrain: { entities: [], relationships: [] },
+    })).toThrow(/either a versioned source schema or a canonical Terrain projection/)
+    expect(service.terrainSnapshot(owner).observationCount).toBe(0)
   })
 })

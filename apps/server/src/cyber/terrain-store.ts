@@ -48,6 +48,7 @@ export class TerrainStore {
       sourceIntegrationId: integration.id,
       sourceRecordId: input.sourceRecordId,
       observedAt: input.observedAt,
+      ...(input.schema ? { schema: input.schema } : {}),
       evidenceType: input.evidenceType,
       subject: input.subject,
       classification: input.classification ?? null,
@@ -66,9 +67,9 @@ export class TerrainStore {
     let relationshipCount = 0
     this.db.sqlite.transaction(() => {
       this.db.sqlite.prepare(`INSERT INTO cyber_observations(
-        id,integration_id,source_record_id,observed_at,received_at,evidence_type,subject,classification,payload_json,terrain_json,sha256,processed_at
-      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-        observationId, integration.id, input.sourceRecordId, input.observedAt, receivedAt, input.evidenceType,
+        id,integration_id,source_record_id,observed_at,received_at,schema,evidence_type,subject,classification,payload_json,terrain_json,sha256,processed_at
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        observationId, integration.id, input.sourceRecordId, input.observedAt, receivedAt, input.schema ?? null, input.evidenceType,
         input.subject, input.classification ?? null, JSON.stringify(input.payload), JSON.stringify(input.terrain ?? null), contentHash, receivedAt,
       )
       const terrain = input.terrain
@@ -209,7 +210,8 @@ export class TerrainStore {
   private observation(row: Row): CyberObservation {
     return {
       id: String(row.id), sourceIntegrationId: String(row.integration_id), sourceRecordId: String(row.source_record_id),
-      observedAt: String(row.observed_at), receivedAt: String(row.received_at), evidenceType: String(row.evidence_type), subject: String(row.subject),
+      observedAt: String(row.observed_at), receivedAt: String(row.received_at), ...(row.schema ? { schema: String(row.schema) } : {}),
+      evidenceType: String(row.evidence_type), subject: String(row.subject),
       ...(row.classification ? { classification: String(row.classification) } : {}), payload: parseRecord(row.payload_json),
       provenance: { sourceRecordId: String(row.source_record_id), sha256: String(row.sha256) },
       ...(row.processed_at ? { processedAt: String(row.processed_at) } : {}),
@@ -255,6 +257,7 @@ export class TerrainStore {
         source_record_id TEXT NOT NULL,
         observed_at TEXT NOT NULL,
         received_at TEXT NOT NULL,
+        schema TEXT,
         evidence_type TEXT NOT NULL,
         subject TEXT NOT NULL,
         classification TEXT,
@@ -327,5 +330,11 @@ export class TerrainStore {
       CREATE INDEX IF NOT EXISTS cyber_sync_jobs_ready ON cyber_sync_jobs(status,run_after,created_at);
       CREATE UNIQUE INDEX IF NOT EXISTS cyber_sync_jobs_one_active ON cyber_sync_jobs(integration_id) WHERE status IN ('queued','running');
     `)
+    this.ensureColumn('cyber_observations', 'schema', 'TEXT')
+  }
+
+  private ensureColumn(table: string, column: string, definition: string): void {
+    const columns = this.db.sqlite.pragma(`table_info(${table})`) as Array<{ name: string }>
+    if (!columns.some((candidate) => candidate.name === column)) this.db.sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
   }
 }

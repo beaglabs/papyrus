@@ -1,15 +1,17 @@
 import type { DeploymentProfile, IntegrationCatalogEntry } from '@papyrus/contracts'
+import { observationProtocol } from './source-profiles.js'
 
 const CONNECTED: DeploymentProfile[] = ['commercial', 'government-il4', 'government-il6', 'gcc', 'gcch', 'dod', 'restricted']
 const ALL: DeploymentProfile[] = [...CONNECTED, 'disconnected']
 
 export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
   {
-    id: 'observation-api', name: 'Observation API', vendor: 'Papyrus', initials: 'OA', accent: '#ffcf33',
-    description: 'Source-neutral authenticated ingestion for normalized evidence, entities, and relationships from customer adapters.',
+    id: 'observation-api', name: 'Custom Source', vendor: 'Observation API', initials: 'CS', accent: '#ffcf33',
+    description: 'Source-neutral push ingestion for customer-defined evidence and canonical Terrain projections.',
     integrationClass: 'terrain_source', authority: 'read_only', risk: 'moderate',
-    capabilities: ['typed observation ingestion', 'entity provenance', 'relationship provenance'],
+    capabilities: ['custom JSON evidence', 'canonical Terrain projection', 'source provenance'],
     evidenceTypes: [], syncMode: 'push', authSchemes: ['entra', 'certificate', 'mTLS'],
+    observationProtocol: observationProtocol('observation-api'),
     supportedProfiles: ALL, licenseFeature: 'core',
   },
   {
@@ -30,26 +32,29 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
   },
   {
     id: 'microsoft-entra', name: 'Microsoft Entra ID', vendor: 'Microsoft', initials: 'ID', accent: '#ffae73',
-    description: 'Identity, group, role, application, and privilege terrain from the customer tenant.',
+    description: 'Customer-pushed identity, group, role, application, and privilege terrain exported from Microsoft Entra.',
     integrationClass: 'terrain_source', authority: 'read_only', risk: 'high',
-    capabilities: ['identity graph', 'group membership', 'application roles', 'privilege relationships'],
-    evidenceTypes: ['Identity', 'Privilege', 'TrustRelationship'], syncMode: 'pull', authSchemes: ['entra', 'certificate', 'managed_identity'],
+    capabilities: ['identity graph', 'group membership', 'customer-managed export'],
+    evidenceTypes: ['Identity', 'Privilege', 'TrustRelationship'], syncMode: 'push', authSchemes: ['entra', 'certificate', 'mTLS'],
+    observationProtocol: observationProtocol('microsoft-entra'),
     supportedProfiles: ['commercial', 'gcc', 'gcch', 'dod'], licenseFeature: 'security-connectors',
   },
   {
     id: 'defender-xdr', name: 'Microsoft Defender XDR', vendor: 'Microsoft', initials: 'DX', accent: '#71df98',
-    description: 'Endpoint, identity, process, vulnerability, and alert evidence with separately governed response actions.',
-    integrationClass: 'evidence_source', authority: 'bidirectional', risk: 'critical',
-    capabilities: ['endpoint evidence', 'alert ingestion', 'vulnerability evidence', 'controlled isolation'],
-    evidenceTypes: ['Device', 'Alert', 'Process', 'Vulnerability'], syncMode: 'pull', authSchemes: ['entra', 'certificate', 'managed_identity'],
+    description: 'Customer-pushed endpoint, identity, process, vulnerability, and alert evidence exported from Defender XDR.',
+    integrationClass: 'evidence_source', authority: 'read_only', risk: 'high',
+    capabilities: ['endpoint evidence', 'alert ingestion', 'customer-managed export'],
+    evidenceTypes: ['Device', 'Alert', 'Process', 'Vulnerability'], syncMode: 'push', authSchemes: ['entra', 'certificate', 'mTLS'],
+    observationProtocol: observationProtocol('defender-xdr'),
     supportedProfiles: ['commercial', 'gcc', 'gcch', 'dod'], licenseFeature: 'security-connectors',
   },
   {
     id: 'microsoft-sentinel', name: 'Microsoft Sentinel', vendor: 'Microsoft', initials: 'MS', accent: '#d7b7ff',
-    description: 'Incidents, analytics results, and normalized security events from an existing Sentinel deployment.',
+    description: 'Customer-pushed incidents, analytics results, and normalized events exported from Sentinel.',
     integrationClass: 'evidence_source', authority: 'read_only', risk: 'high',
-    capabilities: ['incident ingestion', 'analytics evidence', 'security event search'],
-    evidenceTypes: ['Incident', 'Alert', 'SecurityEvent'], syncMode: 'pull', authSchemes: ['entra', 'certificate', 'managed_identity'],
+    capabilities: ['incident ingestion', 'analytics evidence', 'customer-managed export'],
+    evidenceTypes: ['Incident', 'Alert', 'SecurityEvent'], syncMode: 'push', authSchemes: ['entra', 'certificate', 'mTLS'],
+    observationProtocol: observationProtocol('microsoft-sentinel'),
     supportedProfiles: ['commercial', 'gcc', 'gcch', 'dod'], licenseFeature: 'security-connectors',
   },
   {
@@ -58,6 +63,7 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
     integrationClass: 'evidence_source', authority: 'read_only', risk: 'low',
     capabilities: ['network metadata', 'protocol observations', 'certificate evidence'],
     evidenceTypes: ['NetworkConnection', 'ProtocolEvent', 'Certificate'], syncMode: 'push', authSchemes: ['mTLS', 'vault_reference', 'none'],
+    observationProtocol: observationProtocol('zeek'),
     supportedProfiles: ALL, licenseFeature: 'security-connectors',
   },
   {
@@ -66,6 +72,7 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
     integrationClass: 'evidence_source', authority: 'read_only', risk: 'low',
     capabilities: ['IDS alerts', 'network flows', 'protocol evidence'],
     evidenceTypes: ['Alert', 'NetworkFlow', 'ProtocolEvent'], syncMode: 'push', authSchemes: ['mTLS', 'vault_reference', 'none'],
+    observationProtocol: observationProtocol('suricata'),
     supportedProfiles: ALL, licenseFeature: 'security-connectors',
   },
   {
@@ -74,6 +81,25 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
     integrationClass: 'evidence_source', authority: 'read_only', risk: 'low',
     capabilities: ['process evidence', 'endpoint network evidence', 'registry observations'],
     evidenceTypes: ['Process', 'NetworkConnection', 'RegistryChange', 'FileEvent'], syncMode: 'push', authSchemes: ['certificate', 'mTLS', 'none'],
+    observationProtocol: observationProtocol('sysmon'),
+    supportedProfiles: ALL, licenseFeature: 'security-connectors',
+  },
+  {
+    id: 'dns-observation', name: 'DNS Resolver', vendor: 'Customer selected', initials: 'DN', accent: '#63d7ce',
+    description: 'Customer-pushed DNS queries and responses from an approved resolver or log pipeline.',
+    integrationClass: 'evidence_source', authority: 'read_only', risk: 'low',
+    capabilities: ['resolution evidence', 'domain infrastructure', 'resolver-independent schema'],
+    evidenceTypes: ['DNSResolution'], syncMode: 'push', authSchemes: ['certificate', 'mTLS', 'none'],
+    observationProtocol: observationProtocol('dns-observation'),
+    supportedProfiles: ALL, licenseFeature: 'security-connectors',
+  },
+  {
+    id: 'asset-inventory', name: 'Asset Inventory', vendor: 'Customer selected', initials: 'AI', accent: '#f3a6ff',
+    description: 'Customer-pushed device and address inventory from a CMDB, scheduled export, or approved system of record.',
+    integrationClass: 'terrain_source', authority: 'read_only', risk: 'low',
+    capabilities: ['device inventory', 'network addresses', 'canonical Terrain projection'],
+    evidenceTypes: ['AssetInventory'], syncMode: 'push', authSchemes: ['certificate', 'mTLS', 'none'],
+    observationProtocol: observationProtocol('asset-inventory'),
     supportedProfiles: ALL, licenseFeature: 'security-connectors',
   },
   {

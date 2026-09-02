@@ -16,6 +16,7 @@ import type { CyberConfig } from './config.js'
 import { CyberDatabase, type CreateIntegrationInput } from './database.js'
 import { hasAppRole } from './entra-auth.js'
 import type { IntegrationSyncRuntime } from './sync-worker.js'
+import { normalizeSourceRecord, SourceNormalizationError } from './source-profiles.js'
 import { SourceRecordConflictError, TerrainStore } from './terrain-store.js'
 
 export class CyberServiceError extends Error {
@@ -181,6 +182,9 @@ export class CyberService {
     return this.db.markTested(id, principal.oid, runtimeResult ? {
       result: 'connection_verified', networkReachability: 'verified', authentication: 'verified',
       message: runtimeResult.message, ...(runtimeResult.details ? { details: runtimeResult.details } : {}),
+    } : entry.observationProtocol ? {
+      result: 'configuration_verified', networkReachability: 'inbound_waiting',
+      message: 'Source profile, schema policy, scope, and credential references passed validation; health remains unknown until an observation is accepted.',
     } : {
       result: 'configuration_verified', networkReachability: 'not_tested',
       message: 'Manifest, scope, endpoint policy, and credential references passed deterministic validation; no connector driver is installed.',
@@ -237,19 +241,40 @@ export class CyberService {
     const integration = this.integration(id)
     if (integration.state !== 'active') throw new CyberServiceError(409, 'INTEGRATION_NOT_ACTIVE', 'Observations are accepted only from active integrations')
     const entry = catalogEntry(integration.catalogId)
-    const evidenceType = cleanText(value.evidenceType, 'evidenceType', 128)
-    if (entry?.evidenceTypes.length && !entry.evidenceTypes.includes(evidenceType)) throw new CyberServiceError(400, 'EVIDENCE_TYPE_NOT_ALLOWED', `${evidenceType} is not declared by this connector`)
+    if (!entry?.observationProtocol) throw new CyberServiceError(409, 'INTEGRATION_NOT_OBSERVATION_SOURCE', 'This integration does not accept Observation API records')
+    const sourceRecordId = cleanText(value.sourceRecordId, 'sourceRecordId', 1024)
+    const payload = record(value.payload, 'payload')
+    const schema = value.schema === undefined ? undefined : cleanText(value.schema, 'schema', 128)
     const terrainValue = value.terrain === undefined ? undefined : record(value.terrain, 'terrain')
+    if (schema && terrainValue) throw new CyberServiceError(400, 'NORMALIZATION_MODE_CONFLICT', 'Send either a versioned source schema or a canonical Terrain projection, not both')
+    if (!schema && !terrainValue && integration.catalogId !== 'observation-api') {
+      throw new CyberServiceError(400, 'NORMALIZATION_MODE_REQUIRED', 'This source requires a supported schema or a canonical Terrain projection')
+    }
+    let normalized: ReturnType<typeof normalizeSourceRecord> | undefined
+    if (schema) {
+      try { normalized = normalizeSourceRecord(integration.catalogId, schema, payload, sourceRecordId) }
+      catch (cause) {
+        if (cause instanceof SourceNormalizationError) throw new CyberServiceError(400, 'SOURCE_NORMALIZATION_FAILED', cause.message)
+        throw cause
+      }
+    }
+    const evidenceType = normalized?.evidenceType ?? cleanText(value.evidenceType, 'evidenceType', 128)
+    const subject = normalized?.subject ?? cleanText(value.subject, 'subject', 1024)
+    if (value.evidenceType !== undefined && normalized && cleanText(value.evidenceType, 'evidenceType', 128) !== evidenceType) {
+      throw new CyberServiceError(400, 'EVIDENCE_TYPE_MISMATCH', `Schema ${schema} produces ${evidenceType}`)
+    }
+    if (entry.evidenceTypes.length && !entry.evidenceTypes.includes(evidenceType)) throw new CyberServiceError(400, 'EVIDENCE_TYPE_NOT_ALLOWED', `${evidenceType} is not declared by this connector`)
     const entitiesValue = terrainValue?.entities ?? []
     const relationshipsValue = terrainValue?.relationships ?? []
     if (!Array.isArray(entitiesValue) || entitiesValue.length > 5_000) throw new CyberServiceError(400, 'INVALID_INPUT', 'terrain.entities must be an array with at most 5,000 entries')
     if (!Array.isArray(relationshipsValue) || relationshipsValue.length > 10_000) throw new CyberServiceError(400, 'INVALID_INPUT', 'terrain.relationships must be an array with at most 10,000 entries')
     const observation: ObservationInput = {
-      sourceRecordId: cleanText(value.sourceRecordId, 'sourceRecordId', 1024),
+      sourceRecordId,
       observedAt: timestamp(value.observedAt, 'observedAt'), evidenceType,
-      subject: cleanText(value.subject, 'subject', 1024), payload: record(value.payload, 'payload'),
+      subject, payload,
+      ...(schema ? { schema } : {}),
       ...(value.classification === undefined ? {} : { classification: cleanText(value.classification, 'classification', 128) }),
-      ...(terrainValue ? { terrain: {
+      ...(normalized?.terrain ? { terrain: normalized.terrain } : terrainValue ? { terrain: {
         entities: entitiesValue.map(terrainEntity), relationships: relationshipsValue.map(terrainRelationship),
       } } : {}),
     }

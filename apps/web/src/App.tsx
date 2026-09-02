@@ -66,7 +66,7 @@ export function App() {
       <main className="portal-main"><PortalHeader view={view} data={data} />
         {view === 'posture' && <PostureView data={data} onOpenIntegrations={() => navigate('integrations')} />}
         {view === 'integrations' && <IntegrationsView me={data.me} catalog={data.catalog} integrations={data.integrations} onChanged={refresh} />}
-        {view === 'terrain' && <TerrainView data={data} onOpenIntegrations={() => navigate('integrations')} />}
+        {view === 'terrain' && <TerrainView data={data} onOpenIntegrations={() => navigate('integrations')} onRefresh={refresh} />}
         {view === 'investigations' && <EmptyProductView eyebrow="COLLECTIVE ANALYSIS" title="Investigations" copy="Starlings investigations will assemble claims, contradictions, evidence, and attack hypotheses here—without creating chat sessions." />}
         {view === 'governance' && <GovernanceView data={data} />}
       </main>

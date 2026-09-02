@@ -31,4 +31,4 @@ Starlings may produce observations, claims, conflicts, and action proposals. It 
 - A host or database administrator can replace local state. Export the audit chain to independently controlled immutable storage for external tamper evidence.
 - Microsoft national-cloud support and tenant app approval vary by environment.
 - Papyrus is not a cross-domain solution, authorization to operate, or claim of GCC High, DoD, IL4, IL6, or SIPR accreditation.
-- Vendor connector drivers and the Starlings runtime adapter must receive their own threat modeling and verification as they are added.
+- Versioned source-profile normalizers, operational connector drivers, and the Starlings runtime adapter must receive their own threat modeling and verification as they are added.

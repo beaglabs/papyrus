@@ -10,11 +10,11 @@ A deterministic test checks manifest compatibility, endpoint policy, scope, and 
 
 ## Observation API sources
 
-Terrain and evidence catalog entries are customer-managed push profiles over one protocol. Configuring Zeek, Suricata, Sysmon, DNS, Asset Inventory, Microsoft Entra, Defender XDR, or Sentinel creates a source-bound route:
+The Papyrus daemon exposes one Observation API. Configuring Zeek, Suricata, Sysmon, DNS, Asset Inventory, Microsoft Entra, Defender XDR, or Sentinel registers a source identity, its allowed schemas, and a source-bound route inside that daemon:
 
 `POST /api/integrations/:id/observations`
 
-The integration identifier establishes source provenance. Papyrus does not trust a caller-provided `source` field and does not poll these systems. The customer owns collection, export configuration, network routing, and source-system permissions.
+Activation does not provision another service or endpoint. The integration identifier establishes source provenance. Papyrus does not trust a caller-provided `source` field and does not poll these systems. The customer owns collection, export configuration, network routing, and source-system permissions.
 
 The **Custom Source** profile accepts customer-defined evidence and canonical Terrain projections. Curated profiles additionally accept versioned native schemas such as `zeek.conn@1`, `suricata.eve.alert@1`, and `asset.device@1`.
 
@@ -63,7 +63,12 @@ A curated source can instead publish its native fields under a versioned `schema
 
 Papyrus retains the accepted raw record and schema provenance alongside the projection produced by the pinned deterministic normalizer. A record must use either `schema` or `terrain`, never both. Schemas are constrained by the configured source profile, so a Zeek integration cannot submit a Suricata schema. Invalid source-native records are rejected without partially mutating Terrain and can be corrected and retried under the same source record identifier.
 
-The active integration's **Push setup** dialog provides source-native and canonical examples plus a complete curl command. The generic endpoint currently accepts the caller's Entra bearer token and requires `Papyrus.Integration.Manage`; source-scoped non-human publishing credentials remain a production hardening slice.
+The active integration's **Ingestion setup** dialog provides two terminal workflows:
+
+- **Stream NDJSON** continuously tails a customer-produced JSON-lines file and wraps each record in the selected source schema before sending it to the daemon.
+- **Send one record** validates authentication, schema acceptance, normalization, and Terrain projection with a single example.
+
+The stream command is a bridge, not a collector: source-specific export configuration remains under customer control, and every input line must match the selected versioned schema. The daemon endpoint currently accepts the caller's Entra bearer token and requires `Papyrus.Integration.Manage`; source-scoped non-human publishing credentials remain a production hardening slice.
 
 `GET /api/terrain` returns the resulting entity/relationship snapshot.
 

@@ -144,7 +144,11 @@ p { color: var(--muted); line-height: 1.55; }
 .source-setup-copy { margin: 0 0 18px; color: #4f4b43; font-size: 13px; }
 .source-mode { width: fit-content; margin-bottom: 18px; }
 .command-head { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin: 22px 0 8px; }.command-head > div { display: grid; gap: 3px; }.command-head small { color: #666; font: 9px ui-monospace, monospace; }
-.source-command { max-height: 360px; margin: 0 0 18px; overflow: auto; padding: 16px; border: 2px solid #111; background: #111; color: var(--green); font: 10px/1.55 ui-monospace, monospace; white-space: pre; }
+.terminal-shell { margin: 0 0 18px; overflow: hidden; border: 2px solid #111; background: #111; }
+.terminal-bar { min-height: 34px; display: flex; align-items: center; justify-content: space-between; gap: 14px; border-bottom: 1px solid #454545; background: #262626; }
+.terminal-lights { display: flex; gap: 5px; padding-left: 11px; }.terminal-lights i { width: 7px; height: 7px; border: 1px solid #050505; border-radius: 50%; background: var(--rose); }.terminal-lights i:nth-child(2) { background: var(--yellow); }.terminal-lights i:nth-child(3) { background: var(--green); }
+.terminal-tabs { align-self: stretch; display: flex; }.terminal-tabs button { border: 0; border-left: 1px solid #454545; padding: 0 12px; background: transparent; color: #aaa; font: 800 9px ui-monospace, monospace; cursor: pointer; }.terminal-tabs button.active { background: #111; color: var(--green); }
+.source-command { max-height: 360px; margin: 0; overflow: auto; padding: 16px; background: #111; color: var(--green); font: 10px/1.55 ui-monospace, monospace; white-space: pre; }
 .event-list { display: grid; gap: 9px; }.event-list > div { display: flex; gap: 14px; padding: 12px; border: 1px solid #111; background: #fff; }.event-list > div > span { width: 34px; font: 700 11px ui-monospace, monospace; }.event-list div div { display: grid; gap: 5px; }.event-list small { color: #777; }
 
 .terrain-graph-card { padding: 0; overflow: hidden; }.terrain-toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; padding: 14px 17px; border-bottom: 2px solid #111; }.terrain-toolbar > span { color: #666; font: 10px ui-monospace, monospace; }

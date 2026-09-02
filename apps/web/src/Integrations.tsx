@@ -81,7 +81,7 @@ export function IntegrationsView({ me, catalog, integrations, onChanged }: {
               {integration.state === 'draft' && canManage && <Button size="sm" disabled={Boolean(busy)} onClick={() => void transition(integration, 'test')}>Test configuration</Button>}
               {integration.state === 'tested' && canManage && <Button size="sm" disabled={Boolean(busy)} onClick={() => void transition(integration, 'submit')}>Submit</Button>}
               {integration.state === 'awaiting_approval' && canActivate && <Button className="primary" size="sm" disabled={Boolean(busy)} onClick={() => void transition(integration, 'activate')}>Activate</Button>}
-              {integration.state === 'active' && entry?.observationProtocol && canManage && <Button className="primary" size="sm" onClick={() => setSetupFor(integration)}>Push setup</Button>}
+              {integration.state === 'active' && entry?.observationProtocol && canManage && <Button className="primary" size="sm" onClick={() => setSetupFor(integration)}>Ingestion setup</Button>}
               {integration.state === 'active' && entry && ['pull', 'hybrid'].includes(entry.syncMode) && canManage && <Button size="sm" disabled={Boolean(busy)} onClick={() => void syncNow(integration)}>Sync now</Button>}
               {integration.state !== 'disabled' && canManage && <Button variant="ghost" size="sm" disabled={Boolean(busy)} onClick={() => void transition(integration, 'disable')}>Disable</Button>}
               {canAudit && <Button variant="ghost" size="sm" onClick={() => void openEvents(integration)}>Audit</Button>}
@@ -126,7 +126,9 @@ function ConfigureIntegration({ entry, open, onClose, onCreated }: { entry: Inte
         scope: String(form.get('scope') ?? ''),
         ...(form.get('endpoint') ? { endpoint: String(form.get('endpoint')) } : {}),
         ...(form.get('credentialRef') ? { credentialRef: String(form.get('credentialRef')) } : {}),
-        settings: { dataHandling: String(form.get('dataHandling') ?? 'metadata_only'), deploymentBoundary: String(form.get('deploymentBoundary') ?? 'internal') },
+        settings: entry.observationProtocol
+          ? { ingestion: 'daemon_observation_api' }
+          : { dataHandling: String(form.get('dataHandling') ?? 'metadata_only') },
       })
       await onCreated()
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to configure integration') }
@@ -136,9 +138,8 @@ function ConfigureIntegration({ entry, open, onClose, onCreated }: { entry: Inte
     <DialogHeader><div><p className="eyebrow">NEW {CLASS_LABELS[entry.integrationClass].toUpperCase()}</p><h2>Configure {entry.name}</h2></div><Button type="button" variant="ghost" onClick={onClose}>×</Button></DialogHeader>
     <DialogContent>{error && <Alert className="error">{error}</Alert>}<div className="connector-intro"><div className="connector-mark" style={{ '--connector-accent': entry.accent } as CSSProperties}>{entry.initials}</div><p>{entry.description}</p></div>
       <div className="form-grid"><Label>Display name<Input name="name" required defaultValue={entry.name} /></Label><Label>Operational scope<Input name="scope" required placeholder="IL4 enterprise enclave" /></Label>{entry.observationProtocol
-        ? <Alert className="span-two source-boundary"><strong>Customer-managed push</strong><span>Papyrus creates a source-bound Observation API endpoint after activation. The customer controls collection, export, and network routing.</span></Alert>
-        : <><Label className="span-two">Endpoint<Input name="endpoint" type="url" placeholder="https://approved.internal.example/api" /><small>HTTPS is required outside loopback development.</small></Label><Label className="span-two">Credential reference<Input name="credentialRef" placeholder="keyvault://papyrus/connectors/example" /><small>Paste a vault, certificate, or managed-identity reference—never a secret.</small></Label></>}
-        <Label>Data handling<NativeSelect name="dataHandling" defaultValue={entry.observationProtocol ? 'normalized_evidence' : 'metadata_only'}><option value="metadata_only">Metadata only</option><option value="normalized_evidence">Normalized evidence</option><option value="customer_defined">Customer defined</option></NativeSelect></Label><Label>Deployment boundary<NativeSelect name="deploymentBoundary" defaultValue="internal"><option value="internal">Internal</option><option value="dmz_gateway">DMZ gateway</option><option value="azure_government">Azure Government</option></NativeSelect></Label></div>
+        ? <Alert className="span-two source-boundary"><strong>Daemon ingestion</strong><span>This registers a source identity and its allowed schemas inside this Papyrus daemon. It does not provision another service or external API endpoint.</span></Alert>
+        : <><Label className="span-two">Endpoint<Input name="endpoint" type="url" placeholder="https://approved.internal.example/api" /><small>HTTPS is required outside loopback development.</small></Label><Label className="span-two">Credential reference<Input name="credentialRef" placeholder="keyvault://papyrus/connectors/example" /><small>Paste a vault, certificate, or managed-identity reference—never a secret.</small></Label><Label>Data handling<NativeSelect name="dataHandling" defaultValue="metadata_only"><option value="metadata_only">Metadata only</option><option value="normalized_evidence">Normalized evidence</option><option value="customer_defined">Customer defined</option></NativeSelect></Label></>}</div>
       {entry.authority === 'controlled_actions' && <Alert className="authority-warning"><strong>Controlled-action connector</strong><span>Configuration does not grant execution authority. Activation requires the Papyrus.Security.Manage Entra role; individual actions require separate approval.</span></Alert>}
     </DialogContent><DialogFooter><Button type="button" variant="ghost" onClick={onClose}>Cancel</Button><Button className="primary" disabled={busy}>{busy ? 'Saving…' : 'Save draft'}</Button></DialogFooter>
   </form></Dialog>
@@ -180,16 +181,52 @@ export function buildNativeObservationExample(entry: IntegrationCatalogEntry, sc
 }
 
 export function buildObservationCurlCommand(integration: IntegrationConfiguration, payload: unknown): string {
-  return `export PAPYRUS_ORIGIN=https://papyrus.customer.example
+  return `export PAPYRUS_DAEMON_ORIGIN=https://papyrus-daemon.internal
 export PAPYRUS_ENTRA_TOKEN='replace-with-entra-access-token'
 
 curl --fail-with-body -X POST \\
   -H "Authorization: Bearer $PAPYRUS_ENTRA_TOKEN" \\
   -H "Content-Type: application/json" \\
-  "$PAPYRUS_ORIGIN/api/integrations/${integration.id}/observations" \\
+  "$PAPYRUS_DAEMON_ORIGIN/api/integrations/${integration.id}/observations" \\
   --data-binary @- <<'JSON'
 ${JSON.stringify(payload, null, 2)}
 JSON`
+}
+
+const SOURCE_SPOOL_PATHS: Record<string, string> = {
+  zeek: '/opt/zeek/logs/current/conn.log',
+  suricata: '/var/log/suricata/eve.json',
+  sysmon: '/var/lib/papyrus-ingest/sysmon.ndjson',
+  'dns-observation': '/var/lib/papyrus-ingest/dns.ndjson',
+  'asset-inventory': '/var/lib/papyrus-ingest/assets.ndjson',
+  'microsoft-entra': '/var/lib/papyrus-ingest/entra.ndjson',
+  'defender-xdr': '/var/lib/papyrus-ingest/defender.ndjson',
+  'microsoft-sentinel': '/var/lib/papyrus-ingest/sentinel.ndjson',
+}
+
+export function buildObservationTailCommand(integration: IntegrationConfiguration, schemaId: string): string {
+  const spoolPath = SOURCE_SPOOL_PATHS[integration.catalogId] ?? `/var/lib/papyrus-ingest/${integration.catalogId}.ndjson`
+  return `export PAPYRUS_DAEMON_ORIGIN=https://papyrus-daemon.internal
+export PAPYRUS_ENTRA_TOKEN='replace-with-entra-access-token'
+export SOURCE_NDJSON=${spoolPath}
+
+# Each input line must be one JSON object matching ${schemaId}.
+tail -Fn0 "$SOURCE_NDJSON" | while IFS= read -r record; do
+  observed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  source_record_id=$(printf '%s' "$record" | sha256sum | cut -d' ' -f1)
+
+  jq -cn \\
+    --arg sourceRecordId "$source_record_id" \\
+    --arg observedAt "$observed_at" \\
+    --arg schema "${schemaId}" \\
+    --argjson payload "$record" \\
+    '{sourceRecordId:$sourceRecordId,observedAt:$observedAt,schema:$schema,payload:$payload}' \\
+  | curl --fail-with-body --silent --show-error -X POST \\
+      -H "Authorization: Bearer $PAPYRUS_ENTRA_TOKEN" \\
+      -H "Content-Type: application/json" \\
+      "$PAPYRUS_DAEMON_ORIGIN/api/integrations/${integration.id}/observations" \\
+      --data-binary @-
+done`
 }
 
 function PushSourceSetup({ integration, entry, onClose }: {
@@ -199,6 +236,7 @@ function PushSourceSetup({ integration, entry, onClose }: {
 }) {
   const schemas = entry?.observationProtocol?.schemas ?? []
   const [mode, setMode] = useState<'native' | 'canonical'>(schemas.length ? 'native' : 'canonical')
+  const [commandMode, setCommandMode] = useState<'stream' | 'test'>(schemas.length ? 'stream' : 'test')
   const [selectedSchema, setSelectedSchema] = useState(schemas[0]?.id ?? '')
   const [copied, setCopied] = useState(false)
   const payload = useMemo(
@@ -207,22 +245,32 @@ function PushSourceSetup({ integration, entry, onClose }: {
     [entry, integration, mode, selectedSchema],
   )
   if (!integration || !entry?.observationProtocol) return null
-  const command = buildObservationCurlCommand(integration, payload)
+  const command = commandMode === 'stream' && mode === 'native'
+    ? buildObservationTailCommand(integration, selectedSchema)
+    : buildObservationCurlCommand(integration, payload)
   const copy = async () => {
     await navigator.clipboard.writeText(command)
     setCopied(true)
     window.setTimeout(() => setCopied(false), 1_500)
   }
-  return <Dialog open onOpenChange={(open) => { if (!open) onClose() }}><DialogHeader><div><p className="eyebrow">OBSERVATION API SOURCE</p><h2>{integration.name}</h2></div><Button variant="ghost" onClick={onClose}>×</Button></DialogHeader><DialogContent>
+  return <Dialog open onOpenChange={(open) => { if (!open) onClose() }}><DialogHeader><div><p className="eyebrow">DAEMON INGESTION</p><h2>{integration.name}</h2></div><Button variant="ghost" onClick={onClose}>×</Button></DialogHeader><DialogContent>
     <div className="source-setup-meta"><Badge>ACTIVE</Badge><code>/api/integrations/{integration.id}/observations</code></div>
-    <p className="source-setup-copy">Configure an approved customer-owned collector or export pipeline to POST observations here. The integration ID establishes source provenance.</p>
+    <p className="source-setup-copy">This route is served by the current Papyrus daemon. The integration ID identifies the source; the selected schema controls deterministic normalization into Terrain.</p>
     <div className="segmented source-mode" role="group" aria-label="Observation payload mode">
       {schemas.length > 0 && <button className={mode === 'native' ? 'active' : ''} onClick={() => setMode('native')}>Source-native</button>}
-      <button className={mode === 'canonical' ? 'active' : ''} onClick={() => setMode('canonical')}>Canonical Terrain</button>
+      <button className={mode === 'canonical' ? 'active' : ''} onClick={() => { setMode('canonical'); setCommandMode('test') }}>Canonical Terrain</button>
     </div>
     {schemas.length > 0 && <Label>{mode === 'native' ? 'Versioned source schema' : 'Canonical projection example'}<NativeSelect value={selectedSchema} onChange={(event) => setSelectedSchema(event.target.value)}>{schemas.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.label} · {candidate.id}</option>)}</NativeSelect><small>{schemas.find((candidate) => candidate.id === selectedSchema)?.description}</small></Label>}
-    <div className="command-head"><div><strong>Push test record</strong><small>Uses an Entra bearer token with Papyrus.Integration.Manage.</small></div><Button size="sm" onClick={() => void copy()}>{copied ? 'Copied' : 'Copy command'}</Button></div>
-    <pre className="source-command"><code>{command}</code></pre>
-    <Alert className="source-boundary"><strong>Customer-owned transport</strong><span>Papyrus does not poll this source. Accepted raw payloads retain provenance alongside their deterministic Terrain projections.</span></Alert>
+    <div className="command-head"><div><strong>Connect this source</strong><small>Uses an Entra bearer token with Papyrus.Integration.Manage.</small></div><Button size="sm" onClick={() => void copy()}>{copied ? 'Copied' : 'Copy command'}</Button></div>
+    <div className="terminal-shell">
+      <div className="terminal-bar"><span className="terminal-lights" aria-hidden="true"><i /><i /><i /></span><div className="terminal-tabs" role="group" aria-label="Ingestion command">
+        {schemas.length > 0 && <button className={commandMode === 'stream' ? 'active' : ''} onClick={() => setCommandMode('stream')}>Stream NDJSON</button>}
+        <button className={commandMode === 'test' ? 'active' : ''} onClick={() => setCommandMode('test')}>Send one record</button>
+      </div></div>
+      <pre className="source-command"><code>{command}</code></pre>
+    </div>
+    {commandMode === 'stream' && mode === 'native'
+      ? <Alert className="source-boundary"><strong>Customer-owned bridge</strong><span>Point SOURCE_NDJSON at a JSON-lines export matching the selected schema. The command tails it continuously and sends each record to this daemon; Papyrus does not need credentials for the source system.</span></Alert>
+      : <Alert className="source-boundary"><strong>One-record validation</strong><span>Run this against the daemon to validate authentication, schema acceptance, normalization, and Terrain projection before connecting a live stream.</span></Alert>}
   </DialogContent><DialogFooter><Button onClick={onClose}>Done</Button></DialogFooter></Dialog>
 }

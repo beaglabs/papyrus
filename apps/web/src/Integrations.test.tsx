@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { IntegrationCatalogEntry, IntegrationConfiguration } from '@papyrus/contracts'
-import { buildCanonicalObservationExample, buildNativeObservationExample, buildObservationCurlCommand } from './Integrations.js'
+import { buildCanonicalObservationExample, buildNativeObservationExample, buildObservationCurlCommand, buildObservationTailCommand } from './Integrations.js'
 
 const entry: IntegrationCatalogEntry = {
   id: 'zeek', name: 'Zeek', vendor: 'Open source', description: 'Network evidence', integrationClass: 'evidence_source',
@@ -40,7 +40,17 @@ describe('Observation API push setup', () => {
     const command = buildObservationCurlCommand(integration, buildNativeObservationExample(entry, 'zeek.conn@1'))
     expect(command).toContain('/api/integrations/integration-1042/observations')
     expect(command).toContain('Authorization: Bearer $PAPYRUS_ENTRA_TOKEN')
+    expect(command).toContain('PAPYRUS_DAEMON_ORIGIN')
     expect(command).toContain('"schema": "zeek.conn@1"')
+  })
+
+  it('generates a continuous NDJSON bridge into the daemon API', () => {
+    const command = buildObservationTailCommand(integration, 'zeek.conn@1')
+    expect(command).toContain('tail -Fn0 "$SOURCE_NDJSON"')
+    expect(command).toContain('SOURCE_NDJSON=/opt/zeek/logs/current/conn.log')
+    expect(command).toContain('--arg schema "zeek.conn@1"')
+    expect(command).toContain('/api/integrations/integration-1042/observations')
+    expect(command).not.toContain('papyrus.customer.example')
   })
 
   it('shows the equivalent pre-normalized canonical projection', () => {

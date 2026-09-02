@@ -148,7 +148,14 @@ export class EntraAuthService {
     })
     if (nonce && result.payload.nonce !== nonce) throw new EntraAuthError('INVALID_OIDC_NONCE', 'Entra token nonce does not match the login request')
     if (result.payload.tid !== this.config.entra.tenantId) throw new EntraAuthError('WRONG_ENTRA_TENANT', 'Entra token belongs to another tenant')
-    return principalFromClaims(result.payload, source)
+    const principal = principalFromClaims(result.payload, source)
+    if (principal.roles.length === 0) {
+      const presented = stringArray(result.payload.roles)
+      console.warn(presented.length
+        ? `[entra] token for ${principal.oid} carries roles Papyrus does not declare: ${presented.join(', ')}`
+        : `[entra] token for ${principal.oid} has no roles claim; assign a Papyrus app role on the enterprise application before sign-in`)
+    }
+    return principal
   }
 
   private verifyPortalCookie(token: string): PortalPrincipal | undefined {

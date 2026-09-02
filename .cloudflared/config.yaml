@@ -1,0 +1,11 @@
+tunnel: <YOUR_TUNNEL_ID>
+credentials-file: /Users/jdbohrman/.cloudflared/<YOUR_TUNNEL_ID>.json
+ingress:
+  - hostname: papyrus.yourdomain.com
+    service: https://localhost:3210
+    originRequest:
+      clientCertificate: /Users/jdbohrman/papyrus/certs/client.pem
+      clientCertificateKey: /Users/jdbohrman/papyrus/certs/client-key.pem
+      noTLSVerify: true
+      originServerName: localhost
+  - service: http_status:404

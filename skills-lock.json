@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "reagraph": {
+      "source": "reaviz/skills",
+      "sourceType": "github",
+      "skillPath": "reagraph/SKILL.md",
+      "computedHash": "fc5a7c36a433c3b15763e68cc0e828e236e333e4f9075e180e59eedfe519af79"
+    }
+  }
+}

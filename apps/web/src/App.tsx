@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import type { PortalData, PublicConfig } from './api.js'
 import { AuthenticationRequired, loadPortal, logout, publicConfig } from './api.js'
 import { IntegrationsView } from './Integrations.js'
+import { TerrainView } from './Terrain.js'
 import { Alert, Avatar, Badge, Button, Card, DropdownMenu, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from './components/ui/index.js'
 
 export type PortalView = 'posture' | 'terrain' | 'investigations' | 'integrations' | 'governance'
@@ -65,7 +66,7 @@ export function App() {
       <main className="portal-main"><PortalHeader view={view} data={data} />
         {view === 'posture' && <PostureView data={data} onOpenIntegrations={() => navigate('integrations')} />}
         {view === 'integrations' && <IntegrationsView me={data.me} catalog={data.catalog} integrations={data.integrations} onChanged={refresh} />}
-        {view === 'terrain' && <TerrainPreview />}
+        {view === 'terrain' && <TerrainView data={data} onOpenIntegrations={() => navigate('integrations')} />}
         {view === 'investigations' && <EmptyProductView eyebrow="COLLECTIVE ANALYSIS" title="Investigations" copy="Starlings investigations will assemble claims, contradictions, evidence, and attack hypotheses here—without creating chat sessions." />}
         {view === 'governance' && <GovernanceView data={data} />}
       </main>
@@ -107,10 +108,6 @@ function PostureView({ data, onOpenIntegrations }: { data: PortalData; onOpenInt
     <Card className="metric-card critical"><span className="metric-label">ACTION EXECUTORS</span><strong>{posture.actionExecutors}</strong><small>controlled authority</small></Card>
     <Card className="runtime-card"><div className="panel-head"><h2>Runtime boundary</h2><Badge>ENFORCED</Badge></div><dl className="facts"><div><dt>Identity</dt><dd>MICROSOFT ENTRA</dd></div><div><dt>Computation</dt><dd>STARLINGS</dd></div><div><dt>Topology</dt><dd>CUSTOMER-HOSTED</dd></div><div><dt>License</dt><dd>{data.overview.deployment.license.valid ? 'VALID' : 'ACTION REQUIRED'}</dd></div></dl></Card>
   </div>
-}
-
-function TerrainPreview() {
-  return <Card className="terrain-preview"><div className="terrain-toolbar"><Badge>LIVE TWIN</Badge><span>0 entities · 0 relationships · 0 unresolved claims</span></div><div className="terrain-canvas"><div className="terrain-node source">EVIDENCE</div><div className="terrain-node claims">CLAIMS</div><div className="terrain-node twin">CYBER TWIN</div><svg aria-hidden="true" viewBox="0 0 800 320"><path d="M130 160 C 260 40, 320 40, 405 150"/><path d="M250 260 C 320 220, 340 180, 405 150"/><path d="M405 150 C 540 90, 590 100, 680 160"/></svg><p>Connect terrain and evidence sources to begin forming the graph.</p></div></Card>
 }
 
 function GovernanceView({ data }: { data: PortalData }) {

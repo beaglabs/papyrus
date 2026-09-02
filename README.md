@@ -130,14 +130,18 @@ Authenticated portal clients use:
 - `POST /api/integrations/:id/activate`
 - `POST /api/integrations/:id/disable`
 - `GET /api/integrations/:id/events`
+- `POST /api/integrations/:id/observations`
+- `POST /api/integrations/:id/sync`
+- `GET /api/integrations/:id/sync-jobs`
+- `GET /api/terrain`
 
 Teams SSO tokens can be exchanged at `POST /api/auth/teams`; standard portal login uses Entra authorization code + PKCE through `/api/auth/entra/login`.
 
 ## Current experiment boundary
 
-This branch implements the Entra-native daemon, new portal shell, connector catalog, governed integration lifecycle, offline licensing, audit chain, and canonical `Observation`, `Claim`, and `ActionProposal` contracts.
+This branch implements the Entra-native daemon, new portal shell, connector catalog, governed integration lifecycle, offline licensing, audit chain, durable observations, database-leased sync workers, checkpoints, provenance-preserving Terrain storage, and the Orb 2D Terrain view.
 
-Live Teams command handling, Exchange mailbox polling, vendor telemetry drivers, and the Starlings process adapter are the next implementation slices. Their configuration and authority boundaries are represented now; the daemon does not pretend that saving a connector performs live network validation.
+Live Teams command handling, Exchange mailbox polling, vendor telemetry drivers, customer-vault resolvers, and the Starlings process adapter remain connector-specific implementation slices. Pull integrations cannot activate until their driver is registered, and configuration-only tests leave health unknown rather than pretending that saving a connector performed live network validation.
 
 ## Verification
 

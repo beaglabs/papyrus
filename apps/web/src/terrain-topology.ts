@@ -1,67 +1,72 @@
-import type { GraphEdge, GraphNode } from 'reagraph'
-import type { IntegrationClass, IntegrationConfiguration, IntegrationState } from '@papyrus/contracts'
-import type { PortalData } from './api.js'
+import type { IEdgeBase, INodeBase } from '@memgraph/orb'
+import type { TerrainEntity, TerrainRelationship, TerrainSnapshot } from '@papyrus/contracts'
 
-export interface TerrainNodeMeta {
-  kind: 'twin' | 'authority' | 'class' | 'integration'
-  integrationClass?: IntegrationClass
-  state?: IntegrationState
-  health?: IntegrationConfiguration['health']
-  risk?: IntegrationConfiguration['risk']
-  authority?: IntegrationConfiguration['authority']
-  scope?: string
-  endpoint?: string
+export interface TerrainOrbNode extends INodeBase {
+  id: string
+  label: string
+  kind: string
+  icon: string
+  color: string
+  confidence: number
+  firstSeen: string
+  lastSeen: string
+  attributes: Record<string, unknown>
+  sourceIntegrationIds: string[]
+  evidenceIds: string[]
 }
 
-export interface TerrainTopology { nodes: GraphNode[]; edges: GraphEdge[] }
-
-export const CLASS_META: Record<IntegrationClass, { label: string; icon: string; accent: string }> = {
-  human_interface: { label: 'Human interface', icon: '/icons/human-interface.svg', accent: '#82c9ff' },
-  evidence_source: { label: 'Evidence source', icon: '/icons/evidence.svg', accent: '#ffd36e' },
-  terrain_source: { label: 'Terrain source', icon: '/icons/terrain.svg', accent: '#ff9fb4' },
-  action_executor: { label: 'Action executor', icon: '/icons/executor.svg', accent: '#ff6b4a' },
-  agent_peer: { label: 'Agent peer', icon: '/icons/peer.svg', accent: '#c4f078' },
-  infrastructure: { label: 'Infrastructure', icon: '/icons/infrastructure.svg', accent: '#b9b2a6' },
+export interface TerrainOrbEdge extends IEdgeBase {
+  id: string
+  start: string
+  end: string
+  label: string
+  kind: string
+  confidence: number
+  firstSeen: string
+  lastSeen: string
+  attributes: Record<string, unknown>
+  sourceIntegrationIds: string[]
+  evidenceIds: string[]
 }
 
-export const DISABLED_FILL = '#b9b2a6'
-const RISK_BUMP: Record<IntegrationConfiguration['risk'], number> = { low: 0, moderate: 1, high: 2, critical: 3 }
+export interface TerrainTopology { nodes: TerrainOrbNode[]; edges: TerrainOrbEdge[] }
 
-export function buildTopology(data: PortalData): TerrainTopology {
-  const license = data.overview.deployment.license
-  const nodes: GraphNode[] = [
-    { id: 'twin', label: 'CYBER TWIN', subLabel: 'customer-hosted', icon: '/icons/twin.svg', fill: '#ff5f1f', size: 26, labelVisible: true, data: { kind: 'twin' } satisfies TerrainNodeMeta },
-    { id: 'authority:identity', label: 'MICROSOFT ENTRA', subLabel: 'identity authority', icon: '/icons/identity.svg', fill: '#82c9ff', size: 13, data: { kind: 'authority' } satisfies TerrainNodeMeta },
-    { id: 'authority:runtime', label: 'STARLINGS', subLabel: 'collective runtime', icon: '/icons/runtime.svg', fill: '#d7b7ff', size: 13, data: { kind: 'authority' } satisfies TerrainNodeMeta },
-    { id: 'authority:license', label: license.valid ? 'LICENSE ACTIVE' : 'ACTIVATION REQUIRED', subLabel: 'offline entitlement', icon: '/icons/license.svg', fill: license.valid ? '#71df98' : '#ffd36e', size: 13, data: { kind: 'authority' } satisfies TerrainNodeMeta },
-  ]
-  const edges: GraphEdge[] = [
-    { id: 'edge:authority:identity', source: 'authority:identity', target: 'twin', label: 'identity authority', arrowPlacement: 'end' },
-    { id: 'edge:authority:runtime', source: 'authority:runtime', target: 'twin', label: 'computation', arrowPlacement: 'end' },
-    { id: 'edge:authority:license', source: 'authority:license', target: 'twin', label: 'entitlement', arrowPlacement: 'end' },
-  ]
-  const byClass = new Map<IntegrationClass, IntegrationConfiguration[]>()
-  for (const integration of data.integrations) {
-    byClass.set(integration.integrationClass, [...(byClass.get(integration.integrationClass) ?? []), integration])
+export interface KindPresentation { icon: string; color: string; family: string }
+
+const PRESENTATION: Array<{ match: RegExp; value: KindPresentation }> = [
+  { match: /(identity|user|account|principal|group|role|privilege)/i, value: { icon: '/icons/identity.svg', color: '#82c9ff', family: 'Identity' } },
+  { match: /(alert|incident|finding|vulnerability|threat)/i, value: { icon: '/icons/evidence.svg', color: '#ff9f72', family: 'Finding' } },
+  { match: /(device|host|server|endpoint|router|firewall|workstation|asset)/i, value: { icon: '/icons/infrastructure.svg', color: '#71df98', family: 'Asset' } },
+  { match: /(ip|domain|dns|network|connection|flow|subnet|certificate|service)/i, value: { icon: '/icons/terrain.svg', color: '#ffd36e', family: 'Network' } },
+  { match: /(process|file|registry|software|application)/i, value: { icon: '/icons/runtime.svg', color: '#d7b7ff', family: 'Software' } },
+]
+
+export function presentationFor(kind: string): KindPresentation {
+  return PRESENTATION.find((entry) => entry.match.test(kind))?.value
+    ?? { icon: '/icons/twin.svg', color: '#b9b2a6', family: 'Other' }
+}
+
+export function buildTopology(snapshot: TerrainSnapshot): TerrainTopology {
+  const nodeIds = new Set(snapshot.entities.map((entity) => entity.id))
+  return {
+    nodes: snapshot.entities.map(node),
+    edges: snapshot.relationships.filter((relationship) => nodeIds.has(relationship.sourceId) && nodeIds.has(relationship.targetId)).map(edge),
   }
-  for (const [integrationClass, members] of byClass) {
-    const meta = CLASS_META[integrationClass]
-    const anchorId = `class:${integrationClass}`
-    nodes.push({ id: anchorId, label: meta.label.toUpperCase(), subLabel: `${members.length} connector${members.length === 1 ? '' : 's'}`, icon: meta.icon, fill: meta.accent, size: 16, data: { kind: 'class', integrationClass } satisfies TerrainNodeMeta })
-    edges.push({ id: `edge:${anchorId}`, source: anchorId, target: 'twin', label: meta.label.toLowerCase(), arrowPlacement: 'end' })
-    for (const integration of members) {
-      const accent = data.catalog.find((entry) => entry.id === integration.catalogId)?.accent ?? meta.accent
-      const active = integration.state === 'active'
-      nodes.push({
-        id: integration.id, label: integration.name.toUpperCase(), subLabel: integration.state.replaceAll('_', ' ').toUpperCase(),
-        icon: meta.icon, fill: integration.state === 'disabled' ? DISABLED_FILL : accent, size: 9 + RISK_BUMP[integration.risk],
-        data: {
-          kind: 'integration', integrationClass, state: integration.state, health: integration.health, risk: integration.risk, authority: integration.authority, scope: integration.scope,
-          ...(integration.endpoint ? { endpoint: integration.endpoint } : {}),
-        } satisfies TerrainNodeMeta,
-      })
-      edges.push({ id: `edge:${integration.id}`, source: integration.id, target: anchorId, label: integration.state.replaceAll('_', ' '), dashed: !active, arrowPlacement: 'end', ...(active ? {} : { fill: DISABLED_FILL }) })
-    }
+}
+
+function node(entity: TerrainEntity): TerrainOrbNode {
+  const presentation = presentationFor(entity.kind)
+  return {
+    id: entity.id, label: entity.label, kind: entity.kind, icon: presentation.icon, color: presentation.color,
+    confidence: entity.confidence, firstSeen: entity.firstSeen, lastSeen: entity.lastSeen, attributes: entity.attributes,
+    sourceIntegrationIds: entity.sourceIntegrationIds, evidenceIds: entity.evidenceIds,
   }
-  return { nodes, edges }
+}
+
+function edge(relationship: TerrainRelationship): TerrainOrbEdge {
+  return {
+    id: relationship.id, start: relationship.sourceId, end: relationship.targetId, label: relationship.kind, kind: relationship.kind,
+    confidence: relationship.confidence, firstSeen: relationship.firstSeen, lastSeen: relationship.lastSeen, attributes: relationship.attributes,
+    sourceIntegrationIds: relationship.sourceIntegrationIds, evidenceIds: relationship.evidenceIds,
+  }
 }

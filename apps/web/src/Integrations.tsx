@@ -1,6 +1,6 @@
 import { useMemo, useState, type CSSProperties, type FormEvent } from 'react'
 import type { EntraAppRole, IntegrationCatalogEntry, IntegrationClass, IntegrationConfiguration, IntegrationEvent, PortalPrincipal } from '@papyrus/contracts'
-import { createIntegration, integrationEvents, transitionIntegration } from './api.js'
+import { createIntegration, integrationEvents, requestIntegrationSync, transitionIntegration } from './api.js'
 import { Alert, Badge, Button, Card, Dialog, DialogContent, DialogFooter, DialogHeader, Input, Label, NativeSelect } from './components/ui/index.js'
 
 const CLASS_LABELS: Record<IntegrationClass, string> = {
@@ -47,6 +47,13 @@ export function IntegrationsView({ me, catalog, integrations, onChanged }: {
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to load integration events') }
   }
 
+  const syncNow = async (integration: IntegrationConfiguration) => {
+    setBusy(`${integration.id}:sync`); setError(undefined)
+    try { await requestIntegrationSync(integration.id); await onChanged() }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to queue synchronization') }
+    finally { setBusy(undefined) }
+  }
+
   return <div className="integrations-page">
     <section className="integration-summary">
       <div><span className="summary-number">{integrations.length}</span><span>configured</span></div>
@@ -67,12 +74,13 @@ export function IntegrationsView({ me, catalog, integrations, onChanged }: {
             ? can(me, 'Papyrus.Security.Manage') : canManage
           return <Card className="configured-row" key={integration.id}>
             <div className="connector-mark" style={{ '--connector-accent': entry?.accent ?? '#ece7d8' } as CSSProperties}>{entry?.initials ?? '??'}</div>
-            <div className="configured-main"><div className="configured-title"><h3>{integration.name}</h3><Badge className={`state-${integration.state}`}>{integration.state.replaceAll('_', ' ')}</Badge></div><p>{CLASS_LABELS[integration.integrationClass]} · {integration.scope}</p></div>
-            <div className="integration-health"><span className={`health-dot ${integration.health}`} />{integration.health}</div>
+            <div className="configured-main"><div className="configured-title"><h3>{integration.name}</h3><Badge className={`state-${integration.state}`}>{integration.state.replaceAll('_', ' ')}</Badge></div><p>{CLASS_LABELS[integration.integrationClass]} · {entry?.syncMode ?? 'none'} · {integration.scope}</p>{integration.lastSyncAt && <small>Last sync {new Date(integration.lastSyncAt).toLocaleString()}</small>}</div>
+            <div className="integration-health" title={integration.lastSyncError}><span className={`health-dot ${integration.health}`} />{integration.health}</div>
             <div className="configured-actions">
               {integration.state === 'draft' && canManage && <Button size="sm" disabled={Boolean(busy)} onClick={() => void transition(integration, 'test')}>Test configuration</Button>}
               {integration.state === 'tested' && canManage && <Button size="sm" disabled={Boolean(busy)} onClick={() => void transition(integration, 'submit')}>Submit</Button>}
               {integration.state === 'awaiting_approval' && canActivate && <Button className="primary" size="sm" disabled={Boolean(busy)} onClick={() => void transition(integration, 'activate')}>Activate</Button>}
+              {integration.state === 'active' && entry && ['pull', 'hybrid'].includes(entry.syncMode) && canManage && <Button size="sm" disabled={Boolean(busy)} onClick={() => void syncNow(integration)}>Sync now</Button>}
               {integration.state !== 'disabled' && canManage && <Button variant="ghost" size="sm" disabled={Boolean(busy)} onClick={() => void transition(integration, 'disable')}>Disable</Button>}
               {canAudit && <Button variant="ghost" size="sm" onClick={() => void openEvents(integration)}>Audit</Button>}
             </div>

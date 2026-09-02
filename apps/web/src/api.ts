@@ -4,6 +4,8 @@ import type {
   IntegrationEvent,
   PortalOverview,
   PortalPrincipal,
+  SyncJob,
+  TerrainSnapshot,
 } from '@papyrus/contracts'
 
 export interface PublicConfig {
@@ -21,6 +23,7 @@ export interface PortalData {
   overview: PortalOverview
   catalog: IntegrationCatalogEntry[]
   integrations: IntegrationConfiguration[]
+  terrain: TerrainSnapshot
 }
 
 export class ApiError extends Error {
@@ -49,13 +52,14 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 export async function loadPortal(): Promise<PortalData> {
   const config = await api<PublicConfig>('/api/config/public')
-  const [me, overview, catalog, integrations] = await Promise.all([
+  const [me, overview, catalog, integrations, terrain] = await Promise.all([
     api<PortalPrincipal>('/api/me'),
     api<PortalOverview>('/api/portal/overview'),
     api<{ integrations: IntegrationCatalogEntry[] }>('/api/integrations/catalog'),
     api<{ integrations: IntegrationConfiguration[] }>('/api/integrations'),
+    api<TerrainSnapshot>('/api/terrain'),
   ])
-  return { config, me, overview, catalog: catalog.integrations, integrations: integrations.integrations }
+  return { config, me, overview, catalog: catalog.integrations, integrations: integrations.integrations, terrain }
 }
 
 export async function publicConfig(): Promise<PublicConfig> { return api('/api/config/public') }
@@ -79,6 +83,10 @@ export async function transitionIntegration(id: string, action: 'test' | 'submit
 
 export async function integrationEvents(id: string): Promise<IntegrationEvent[]> {
   return (await api<{ events: IntegrationEvent[] }>(`/api/integrations/${encodeURIComponent(id)}/events`)).events
+}
+
+export async function requestIntegrationSync(id: string): Promise<SyncJob> {
+  return api(`/api/integrations/${encodeURIComponent(id)}/sync`, { method: 'POST', body: '{}' })
 }
 
 export async function logout(): Promise<void> { await api('/api/auth/logout', { method: 'POST', body: '{}' }) }

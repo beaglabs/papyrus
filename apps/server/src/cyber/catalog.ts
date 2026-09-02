@@ -5,11 +5,19 @@ const ALL: DeploymentProfile[] = [...CONNECTED, 'disconnected']
 
 export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
   {
+    id: 'observation-api', name: 'Observation API', vendor: 'Papyrus', initials: 'OA', accent: '#ffcf33',
+    description: 'Source-neutral authenticated ingestion for normalized evidence, entities, and relationships from customer adapters.',
+    integrationClass: 'terrain_source', authority: 'read_only', risk: 'moderate',
+    capabilities: ['typed observation ingestion', 'entity provenance', 'relationship provenance'],
+    evidenceTypes: [], syncMode: 'push', authSchemes: ['entra', 'certificate', 'mTLS'],
+    supportedProfiles: ALL, licenseFeature: 'core',
+  },
+  {
     id: 'microsoft-teams', name: 'Microsoft Teams', vendor: 'Microsoft', initials: 'MT', accent: '#8f9cff',
     description: 'Government-cloud operator commands, Adaptive Cards, notifications, and portal launches.',
     integrationClass: 'human_interface', authority: 'bidirectional', risk: 'moderate',
     capabilities: ['slash commands', 'adaptive cards', 'portal launch', 'proactive notifications'],
-    evidenceTypes: ['HumanContext', 'OperatorRequest'], authSchemes: ['entra', 'certificate'],
+    evidenceTypes: ['HumanContext', 'OperatorRequest'], syncMode: 'hybrid', authSchemes: ['entra', 'certificate'],
     supportedProfiles: ['commercial', 'gcc', 'gcch', 'dod'], licenseFeature: 'teams',
   },
   {
@@ -17,7 +25,7 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
     description: 'Monitored mailbox ingestion and sanitized incident notifications through Microsoft Graph or on-premises Exchange.',
     integrationClass: 'human_interface', authority: 'bidirectional', risk: 'moderate',
     capabilities: ['mailbox polling', 'incident notifications', 'human context'],
-    evidenceTypes: ['HumanContext', 'OperatorRequest'], authSchemes: ['entra', 'certificate', 'managed_identity'],
+    evidenceTypes: ['HumanContext', 'OperatorRequest'], syncMode: 'pull', authSchemes: ['entra', 'certificate', 'managed_identity'],
     supportedProfiles: ALL, licenseFeature: 'email',
   },
   {
@@ -25,7 +33,7 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
     description: 'Identity, group, role, application, and privilege terrain from the customer tenant.',
     integrationClass: 'terrain_source', authority: 'read_only', risk: 'high',
     capabilities: ['identity graph', 'group membership', 'application roles', 'privilege relationships'],
-    evidenceTypes: ['Identity', 'Privilege', 'TrustRelationship'], authSchemes: ['entra', 'certificate', 'managed_identity'],
+    evidenceTypes: ['Identity', 'Privilege', 'TrustRelationship'], syncMode: 'pull', authSchemes: ['entra', 'certificate', 'managed_identity'],
     supportedProfiles: ['commercial', 'gcc', 'gcch', 'dod'], licenseFeature: 'security-connectors',
   },
   {
@@ -33,7 +41,7 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
     description: 'Endpoint, identity, process, vulnerability, and alert evidence with separately governed response actions.',
     integrationClass: 'evidence_source', authority: 'bidirectional', risk: 'critical',
     capabilities: ['endpoint evidence', 'alert ingestion', 'vulnerability evidence', 'controlled isolation'],
-    evidenceTypes: ['Device', 'Alert', 'Process', 'Vulnerability'], authSchemes: ['entra', 'certificate', 'managed_identity'],
+    evidenceTypes: ['Device', 'Alert', 'Process', 'Vulnerability'], syncMode: 'pull', authSchemes: ['entra', 'certificate', 'managed_identity'],
     supportedProfiles: ['commercial', 'gcc', 'gcch', 'dod'], licenseFeature: 'security-connectors',
   },
   {
@@ -41,7 +49,7 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
     description: 'Incidents, analytics results, and normalized security events from an existing Sentinel deployment.',
     integrationClass: 'evidence_source', authority: 'read_only', risk: 'high',
     capabilities: ['incident ingestion', 'analytics evidence', 'security event search'],
-    evidenceTypes: ['Incident', 'Alert', 'SecurityEvent'], authSchemes: ['entra', 'certificate', 'managed_identity'],
+    evidenceTypes: ['Incident', 'Alert', 'SecurityEvent'], syncMode: 'pull', authSchemes: ['entra', 'certificate', 'managed_identity'],
     supportedProfiles: ['commercial', 'gcc', 'gcch', 'dod'], licenseFeature: 'security-connectors',
   },
   {
@@ -49,7 +57,7 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
     description: 'Network connection, protocol, file, certificate, and behavioral observations from local sensors.',
     integrationClass: 'evidence_source', authority: 'read_only', risk: 'low',
     capabilities: ['network metadata', 'protocol observations', 'certificate evidence'],
-    evidenceTypes: ['NetworkConnection', 'ProtocolEvent', 'Certificate'], authSchemes: ['mTLS', 'vault_reference', 'none'],
+    evidenceTypes: ['NetworkConnection', 'ProtocolEvent', 'Certificate'], syncMode: 'push', authSchemes: ['mTLS', 'vault_reference', 'none'],
     supportedProfiles: ALL, licenseFeature: 'security-connectors',
   },
   {
@@ -57,7 +65,7 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
     description: 'IDS alerts, network flows, and protocol events from local EVE JSON streams.',
     integrationClass: 'evidence_source', authority: 'read_only', risk: 'low',
     capabilities: ['IDS alerts', 'network flows', 'protocol evidence'],
-    evidenceTypes: ['Alert', 'NetworkFlow', 'ProtocolEvent'], authSchemes: ['mTLS', 'vault_reference', 'none'],
+    evidenceTypes: ['Alert', 'NetworkFlow', 'ProtocolEvent'], syncMode: 'push', authSchemes: ['mTLS', 'vault_reference', 'none'],
     supportedProfiles: ALL, licenseFeature: 'security-connectors',
   },
   {
@@ -65,7 +73,7 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
     description: 'Process, network, registry, image-load, and file observations from Windows endpoints.',
     integrationClass: 'evidence_source', authority: 'read_only', risk: 'low',
     capabilities: ['process evidence', 'endpoint network evidence', 'registry observations'],
-    evidenceTypes: ['Process', 'NetworkConnection', 'RegistryChange', 'FileEvent'], authSchemes: ['certificate', 'mTLS', 'none'],
+    evidenceTypes: ['Process', 'NetworkConnection', 'RegistryChange', 'FileEvent'], syncMode: 'push', authSchemes: ['certificate', 'mTLS', 'none'],
     supportedProfiles: ALL, licenseFeature: 'security-connectors',
   },
   {
@@ -73,7 +81,7 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
     description: 'Vendor-neutral executor for simulated and explicitly approved route or policy changes.',
     integrationClass: 'action_executor', authority: 'controlled_actions', risk: 'critical',
     capabilities: ['block route', 'quarantine segment', 'revoke temporary rule'],
-    evidenceTypes: ['ActionResult', 'NetworkPolicy'], authSchemes: ['certificate', 'mTLS', 'vault_reference'],
+    evidenceTypes: ['ActionResult', 'NetworkPolicy'], syncMode: 'none', authSchemes: ['certificate', 'mTLS', 'vault_reference'],
     supportedProfiles: ALL, licenseFeature: 'action-executors',
   },
   {
@@ -81,7 +89,7 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
     description: 'Capability-advertised peer agents connected at the Papyrus boundary, never as the Starlings substrate.',
     integrationClass: 'agent_peer', authority: 'bidirectional', risk: 'high',
     capabilities: ['agent card discovery', 'typed handoff', 'peer requests'],
-    evidenceTypes: ['PeerClaim', 'PeerRequest'], authSchemes: ['mTLS', 'oauth'],
+    evidenceTypes: ['PeerClaim', 'PeerRequest'], syncMode: 'push', authSchemes: ['mTLS', 'oauth'],
     supportedProfiles: CONNECTED, licenseFeature: 'agent-peers',
   },
   {
@@ -89,7 +97,7 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
     description: 'Programmatic client access for approved cyber-twin investigations and operator capabilities.',
     integrationClass: 'agent_peer', authority: 'bidirectional', risk: 'high',
     capabilities: ['typed investigation request', 'evidence subscription', 'artifact delivery'],
-    evidenceTypes: ['PeerRequest', 'PeerClaim'], authSchemes: ['mTLS', 'oauth'],
+    evidenceTypes: ['PeerRequest', 'PeerClaim'], syncMode: 'push', authSchemes: ['mTLS', 'oauth'],
     supportedProfiles: ALL, licenseFeature: 'agent-peers',
   },
   {
@@ -97,7 +105,7 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
     description: 'Credential references and short-lived secret retrieval without storing connector secrets in Papyrus.',
     integrationClass: 'infrastructure', authority: 'read_only', risk: 'high',
     capabilities: ['credential references', 'secret rotation', 'short-lived credentials'],
-    evidenceTypes: [], authSchemes: ['managed_identity', 'certificate', 'mTLS'],
+    evidenceTypes: [], syncMode: 'none', authSchemes: ['managed_identity', 'certificate', 'mTLS'],
     supportedProfiles: ALL, licenseFeature: 'core',
   },
 ]

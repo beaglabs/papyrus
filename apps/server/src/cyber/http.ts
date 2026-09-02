@@ -13,7 +13,7 @@ class HttpError extends Error {
 
 function securityHeaders(response: ServerResponse): void {
   response.setHeader('cache-control', 'no-store')
-  response.setHeader('content-security-policy', "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'self' https://*.teams.microsoft.com https://*.cloud.microsoft")
+  response.setHeader('content-security-policy', "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self'; worker-src 'self' blob:; frame-ancestors 'self' https://*.teams.microsoft.com https://*.cloud.microsoft")
   response.setHeader('cross-origin-opener-policy', 'same-origin-allow-popups')
   response.setHeader('referrer-policy', 'no-referrer')
   response.setHeader('x-content-type-options', 'nosniff')
@@ -106,6 +106,7 @@ export function createCyberServer(config: CyberConfig, service: CyberService, au
       if (url.pathname === '/api/portal/overview' && request.method === 'GET') return json(response, 200, service.overview(await principal(request, auth, service)))
       if (url.pathname === '/api/integrations/catalog' && request.method === 'GET') return json(response, 200, { integrations: service.catalog(await principal(request, auth, service)) })
       if (url.pathname === '/api/integrations' && request.method === 'GET') return json(response, 200, { integrations: service.integrations(await principal(request, auth, service)) })
+      if (url.pathname === '/api/terrain' && request.method === 'GET') return json(response, 200, service.terrainSnapshot(await principal(request, auth, service)))
       if (url.pathname === '/api/integrations' && request.method === 'POST') {
         const input = await body(request)
         return json(response, 201, service.createIntegration(await principal(request, auth, service), input.catalogId, input))
@@ -120,7 +121,7 @@ export function createCyberServer(config: CyberConfig, service: CyberService, au
       if (action && request.method === 'POST') {
         const actor = await principal(request, auth, service)
         const id = decodeURIComponent(action[1] as string)
-        if (action[2] === 'test') return json(response, 200, service.testIntegration(actor, id))
+        if (action[2] === 'test') return json(response, 200, await service.testIntegration(actor, id))
         if (action[2] === 'submit') return json(response, 200, service.submitIntegration(actor, id))
         if (action[2] === 'activate') return json(response, 200, service.activateIntegration(actor, id))
         const input = await body(request)
@@ -128,6 +129,18 @@ export function createCyberServer(config: CyberConfig, service: CyberService, au
       }
       const events = url.pathname.match(/^\/api\/integrations\/([^/]+)\/events$/)
       if (events && request.method === 'GET') return json(response, 200, { events: service.events(await principal(request, auth, service), decodeURIComponent(events[1] as string)) })
+      const observations = url.pathname.match(/^\/api\/integrations\/([^/]+)\/observations$/)
+      if (observations && request.method === 'POST') return json(response, 202, service.ingestObservation(
+        await principal(request, auth, service), decodeURIComponent(observations[1] as string), await body(request),
+      ))
+      const sync = url.pathname.match(/^\/api\/integrations\/([^/]+)\/sync$/)
+      if (sync && request.method === 'POST') return json(response, 202, service.requestSync(
+        await principal(request, auth, service), decodeURIComponent(sync[1] as string),
+      ))
+      const jobs = url.pathname.match(/^\/api\/integrations\/([^/]+)\/sync-jobs$/)
+      if (jobs && request.method === 'GET') return json(response, 200, { jobs: service.syncJobs(
+        await principal(request, auth, service), decodeURIComponent(jobs[1] as string),
+      ) })
 
       if (url.pathname.startsWith('/api/')) throw new HttpError(404, 'NOT_FOUND', 'API route not found')
       return servePortal(response, url.pathname)

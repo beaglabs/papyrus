@@ -354,6 +354,7 @@ export interface IntegrationCatalogEntry {
   risk: IntegrationRisk
   capabilities: string[]
   evidenceTypes: string[]
+  syncMode: 'none' | 'pull' | 'push' | 'hybrid'
   authSchemes: Array<'entra' | 'certificate' | 'managed_identity' | 'oauth' | 'mTLS' | 'vault_reference' | 'none'>
   supportedProfiles: DeploymentProfile[]
   licenseFeature: string
@@ -375,6 +376,8 @@ export interface IntegrationConfiguration {
   settings: Record<string, string | number | boolean>
   health: 'unknown' | 'healthy' | 'degraded' | 'unreachable'
   lastEvidenceAt?: string
+  lastSyncAt?: string
+  lastSyncError?: string
   lastTestedAt?: string
   createdByOid: string
   createdAt: string
@@ -414,6 +417,7 @@ export interface PortalOverview {
 export interface CyberObservation {
   id: string
   sourceIntegrationId: string
+  sourceRecordId: string
   observedAt: string
   receivedAt: string
   evidenceType: string
@@ -421,6 +425,93 @@ export interface CyberObservation {
   classification?: string
   payload: Record<string, unknown>
   provenance: { sourceRecordId?: string; sha256: string }
+  processedAt?: string
+}
+
+export interface TerrainEntityInput {
+  externalId: string
+  kind: string
+  label: string
+  attributes?: Record<string, unknown>
+  confidence?: number
+}
+
+export interface TerrainRelationshipInput {
+  externalId?: string
+  kind: string
+  sourceExternalId: string
+  targetExternalId: string
+  attributes?: Record<string, unknown>
+  confidence?: number
+}
+
+export interface ObservationInput {
+  sourceRecordId: string
+  observedAt: string
+  evidenceType: string
+  subject: string
+  classification?: string
+  payload: Record<string, unknown>
+  terrain?: {
+    entities: TerrainEntityInput[]
+    relationships?: TerrainRelationshipInput[]
+  }
+}
+
+export interface TerrainEntity {
+  id: string
+  externalId: string
+  kind: string
+  label: string
+  attributes: Record<string, unknown>
+  confidence: number
+  firstSeen: string
+  lastSeen: string
+  sourceIntegrationIds: string[]
+  evidenceIds: string[]
+}
+
+export interface TerrainRelationship {
+  id: string
+  externalId: string
+  kind: string
+  sourceId: string
+  targetId: string
+  attributes: Record<string, unknown>
+  confidence: number
+  firstSeen: string
+  lastSeen: string
+  sourceIntegrationIds: string[]
+  evidenceIds: string[]
+}
+
+export interface TerrainSnapshot {
+  generatedAt: string
+  entities: TerrainEntity[]
+  relationships: TerrainRelationship[]
+  observationCount: number
+  unresolvedClaims: number
+}
+
+export interface SyncJob {
+  id: string
+  integrationId: string
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+  attempt: number
+  runAfter: string
+  lockedBy?: string
+  lockedAt?: string
+  startedAt?: string
+  completedAt?: string
+  error?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SyncCheckpoint {
+  integrationId: string
+  cursor?: string
+  updatedAt: string
 }
 
 export interface CyberClaim {

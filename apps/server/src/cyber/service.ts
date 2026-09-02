@@ -2,14 +2,21 @@ import type {
   EntraAppRole,
   IntegrationConfiguration,
   IntegrationEvent,
+  ObservationInput,
   PortalOverview,
   PortalPrincipal,
+  SyncJob,
+  TerrainEntityInput,
+  TerrainRelationshipInput,
+  TerrainSnapshot,
 } from '@papyrus/contracts'
 import { LicenseService } from '../license.js'
 import { catalogEntry, INTEGRATION_CATALOG } from './catalog.js'
 import type { CyberConfig } from './config.js'
 import { CyberDatabase, type CreateIntegrationInput } from './database.js'
 import { hasAppRole } from './entra-auth.js'
+import type { IntegrationSyncRuntime } from './sync-worker.js'
+import { SourceRecordConflictError, TerrainStore } from './terrain-store.js'
 
 export class CyberServiceError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message) }
@@ -58,11 +65,56 @@ function optionalCredentialReference(value: unknown): string | undefined {
   return reference
 }
 
+function record(value: unknown, name: string): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new CyberServiceError(400, 'INVALID_INPUT', `${name} must be an object`)
+  return value as Record<string, unknown>
+}
+
+function timestamp(value: unknown, name: string): string {
+  const text = cleanText(value, name, 64)
+  const date = new Date(text)
+  if (Number.isNaN(date.getTime())) throw new CyberServiceError(400, 'INVALID_INPUT', `${name} must be an ISO-8601 timestamp`)
+  return date.toISOString()
+}
+
+function confidence(value: unknown, path: string): number | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) throw new CyberServiceError(400, 'INVALID_INPUT', `${path} must be between zero and one`)
+  return value
+}
+
+function terrainEntity(value: unknown, index: number): TerrainEntityInput {
+  const item = record(value, `terrain.entities[${index}]`)
+  const score = confidence(item.confidence, `terrain.entities[${index}].confidence`)
+  return {
+    externalId: cleanText(item.externalId, `terrain.entities[${index}].externalId`, 1024),
+    kind: cleanText(item.kind, `terrain.entities[${index}].kind`, 128),
+    label: cleanText(item.label, `terrain.entities[${index}].label`, 512),
+    ...(item.attributes === undefined ? {} : { attributes: record(item.attributes, `terrain.entities[${index}].attributes`) }),
+    ...(score === undefined ? {} : { confidence: score }),
+  }
+}
+
+function terrainRelationship(value: unknown, index: number): TerrainRelationshipInput {
+  const item = record(value, `terrain.relationships[${index}]`)
+  const score = confidence(item.confidence, `terrain.relationships[${index}].confidence`)
+  return {
+    ...(item.externalId === undefined ? {} : { externalId: cleanText(item.externalId, `terrain.relationships[${index}].externalId`, 1024) }),
+    kind: cleanText(item.kind, `terrain.relationships[${index}].kind`, 128),
+    sourceExternalId: cleanText(item.sourceExternalId, `terrain.relationships[${index}].sourceExternalId`, 1024),
+    targetExternalId: cleanText(item.targetExternalId, `terrain.relationships[${index}].targetExternalId`, 1024),
+    ...(item.attributes === undefined ? {} : { attributes: record(item.attributes, `terrain.relationships[${index}].attributes`) }),
+    ...(score === undefined ? {} : { confidence: score }),
+  }
+}
+
 export class CyberService {
   readonly license: LicenseService
+  readonly terrain: TerrainStore
 
-  constructor(readonly db: CyberDatabase, readonly config: CyberConfig) {
+  constructor(readonly db: CyberDatabase, readonly config: CyberConfig, terrain?: TerrainStore, readonly syncRuntime?: IntegrationSyncRuntime) {
     this.license = new LicenseService(db, config.dataDir, config.profile, config.licenseAuthorities, config.licenseRequired)
+    this.terrain = terrain ?? new TerrainStore(db)
   }
 
   overview(principal: PortalPrincipal): PortalOverview {
@@ -112,7 +164,7 @@ export class CyberService {
     return this.db.createIntegration(entry, create, principal.oid)
   }
 
-  testIntegration(principal: PortalPrincipal, id: string): IntegrationConfiguration {
+  async testIntegration(principal: PortalPrincipal, id: string): Promise<IntegrationConfiguration> {
     requireRole(principal, 'Papyrus.Integration.Manage')
     const integration = this.integration(id)
     const entry = catalogEntry(integration.catalogId)
@@ -121,11 +173,18 @@ export class CyberService {
     if (!entry.authSchemes.includes('none') && !integration.credentialRef && !entry.authSchemes.includes('entra')) requirements.push('credential reference or Entra application binding')
     if (['a2a-peer', 'acp-client', 'firewall-executor'].includes(entry.id) && !integration.endpoint) requirements.push('HTTPS endpoint')
     if (requirements.length) throw new CyberServiceError(409, 'CONFIGURATION_INCOMPLETE', `Configuration test requires ${requirements.join(' and ')}`)
-    return this.db.markTested(id, principal.oid, {
-      result: 'configuration_verified',
-      networkReachability: 'not_tested',
-      message: 'Manifest, scope, endpoint policy, and credential references passed deterministic validation.',
-    })
+    const runtimeResult = await this.syncRuntime?.test(integration)
+    if (runtimeResult && (!runtimeResult.reachable || !runtimeResult.authenticated)) {
+      this.db.recordSyncFailure(id, runtimeResult.message)
+      throw new CyberServiceError(409, 'CONNECTOR_TEST_FAILED', runtimeResult.message)
+    }
+    return this.db.markTested(id, principal.oid, runtimeResult ? {
+      result: 'connection_verified', networkReachability: 'verified', authentication: 'verified',
+      message: runtimeResult.message, ...(runtimeResult.details ? { details: runtimeResult.details } : {}),
+    } : {
+      result: 'configuration_verified', networkReachability: 'not_tested',
+      message: 'Manifest, scope, endpoint policy, and credential references passed deterministic validation; no connector driver is installed.',
+    }, Boolean(runtimeResult))
   }
 
   submitIntegration(principal: PortalPrincipal, id: string): IntegrationConfiguration {
@@ -139,13 +198,73 @@ export class CyberService {
     requireRole(principal, integration.risk === 'high' || integration.risk === 'critical' || integration.authority === 'controlled_actions'
       ? 'Papyrus.Security.Manage'
       : 'Papyrus.Integration.Manage')
-    return this.db.activate(id, principal.oid)
+    const entry = catalogEntry(integration.catalogId)
+    if (entry && ['pull', 'hybrid'].includes(entry.syncMode) && !this.syncRuntime?.supports(integration)) {
+      throw new CyberServiceError(409, 'CONNECTOR_DRIVER_UNAVAILABLE', 'A connector driver must be installed before this pull integration can be activated')
+    }
+    const activated = this.db.activate(id, principal.oid)
+    if (entry && ['pull', 'hybrid'].includes(entry.syncMode)) this.syncRuntime?.enqueue(activated)
+    return activated
   }
 
   disableIntegration(principal: PortalPrincipal, id: string, reason?: unknown): IntegrationConfiguration {
     const integration = this.integration(id)
     requireRole(principal, integration.authority === 'controlled_actions' ? 'Papyrus.Security.Manage' : 'Papyrus.Integration.Manage')
-    return this.db.disable(id, principal.oid, reason === undefined ? undefined : cleanText(reason, 'reason', 512))
+    const disabled = this.db.disable(id, principal.oid, reason === undefined ? undefined : cleanText(reason, 'reason', 512))
+    this.syncRuntime?.cancel(id)
+    return disabled
+  }
+
+  requestSync(principal: PortalPrincipal, id: string): SyncJob {
+    requireRole(principal, 'Papyrus.Integration.Manage')
+    const integration = this.integration(id)
+    if (integration.state !== 'active') throw new CyberServiceError(409, 'INTEGRATION_NOT_ACTIVE', 'Only active integrations can be synchronized')
+    const entry = catalogEntry(integration.catalogId)
+    if (!entry || !['pull', 'hybrid'].includes(entry.syncMode)) throw new CyberServiceError(409, 'INTEGRATION_NOT_PULL_BASED', 'This integration receives pushed observations and does not run scheduled synchronization')
+    const job = this.syncRuntime?.enqueue(integration)
+    if (!job) throw new CyberServiceError(409, 'CONNECTOR_DRIVER_UNAVAILABLE', 'A connector driver is not installed for this integration')
+    return job
+  }
+
+  syncJobs(principal: PortalPrincipal, id: string): SyncJob[] {
+    requireRole(principal, 'Papyrus.Integration.View')
+    this.integration(id)
+    return this.terrain.listJobs(id)
+  }
+
+  ingestObservation(principal: PortalPrincipal, id: string, value: Record<string, unknown>) {
+    requireRole(principal, 'Papyrus.Integration.Manage')
+    const integration = this.integration(id)
+    if (integration.state !== 'active') throw new CyberServiceError(409, 'INTEGRATION_NOT_ACTIVE', 'Observations are accepted only from active integrations')
+    const entry = catalogEntry(integration.catalogId)
+    const evidenceType = cleanText(value.evidenceType, 'evidenceType', 128)
+    if (entry?.evidenceTypes.length && !entry.evidenceTypes.includes(evidenceType)) throw new CyberServiceError(400, 'EVIDENCE_TYPE_NOT_ALLOWED', `${evidenceType} is not declared by this connector`)
+    const terrainValue = value.terrain === undefined ? undefined : record(value.terrain, 'terrain')
+    const entitiesValue = terrainValue?.entities ?? []
+    const relationshipsValue = terrainValue?.relationships ?? []
+    if (!Array.isArray(entitiesValue) || entitiesValue.length > 5_000) throw new CyberServiceError(400, 'INVALID_INPUT', 'terrain.entities must be an array with at most 5,000 entries')
+    if (!Array.isArray(relationshipsValue) || relationshipsValue.length > 10_000) throw new CyberServiceError(400, 'INVALID_INPUT', 'terrain.relationships must be an array with at most 10,000 entries')
+    const observation: ObservationInput = {
+      sourceRecordId: cleanText(value.sourceRecordId, 'sourceRecordId', 1024),
+      observedAt: timestamp(value.observedAt, 'observedAt'), evidenceType,
+      subject: cleanText(value.subject, 'subject', 1024), payload: record(value.payload, 'payload'),
+      ...(value.classification === undefined ? {} : { classification: cleanText(value.classification, 'classification', 128) }),
+      ...(terrainValue ? { terrain: {
+        entities: entitiesValue.map(terrainEntity), relationships: relationshipsValue.map(terrainRelationship),
+      } } : {}),
+    }
+    try { return this.terrain.ingest(integration, observation) }
+    catch (cause) {
+      if (cause instanceof SourceRecordConflictError) throw new CyberServiceError(409, 'SOURCE_RECORD_CONFLICT', cause.message)
+      if (cause instanceof Error && /references an unknown entity/.test(cause.message)) throw new CyberServiceError(400, 'UNKNOWN_TERRAIN_ENTITY', cause.message)
+      throw cause
+    }
+  }
+
+  terrainSnapshot(principal: PortalPrincipal): TerrainSnapshot {
+    this.requirePortalAccess(principal)
+    requireRole(principal, 'Papyrus.Integration.View')
+    return this.terrain.snapshot()
   }
 
   events(principal: PortalPrincipal, id: string): IntegrationEvent[] {

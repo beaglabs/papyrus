@@ -17,11 +17,15 @@ The portal is initiated either by normal Entra login or a short-lived link creat
 
 The canonical flow is:
 
-1. Connectors emit typed observations with provenance.
-2. Starlings operators form claims, request missing evidence, and resolve contradictions.
-3. The cyber twin retains the current terrain and confidence history.
-4. Potentially consequential output becomes an action proposal.
-5. Policy and an appropriately assigned Entra principal decide whether the action is released.
-6. Every configuration and decision transition is auditable.
+1. Pull connectors run as leased, resumable synchronization jobs; push connectors enter through the observation boundary.
+2. The daemon commits immutable source observations before advancing a connector checkpoint.
+3. Normalization projects evidence-backed entities and relationships into Terrain while retaining source and observation provenance.
+4. Starlings operators consume the durable observation boundary to form claims, request missing evidence, and resolve contradictions.
+5. The cyber twin retains the current terrain and confidence history.
+6. Potentially consequential output becomes an action proposal.
+7. Policy and an appropriately assigned Entra principal decide whether the action is released.
+8. Every configuration and decision transition is auditable.
+
+Integration configuration is never Terrain. The graph contains only entities and relationships produced from observations. The connector identifier and source record identifier remain attached as provenance rather than appearing as synthetic graph nodes.
 
 The same substrate can be tested under message loss, operator loss, partitions, contradictory evidence, and recovery without changing the product boundary.

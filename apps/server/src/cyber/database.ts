@@ -11,7 +11,7 @@ import type {
 
 type Row = Record<string, unknown>
 
-function canonical(value: unknown): string {
+export function canonical(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
   return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(',')}}`
@@ -62,12 +62,12 @@ export class CyberDatabase {
     return (this.sqlite.prepare('SELECT * FROM cyber_integrations ORDER BY updated_at DESC').all() as Row[]).map((row) => this.integration(row))
   }
 
-  markTested(id: string, actorOid: string, result: Record<string, unknown>): IntegrationConfiguration {
+  markTested(id: string, actorOid: string, result: Record<string, unknown>, connectionVerified = false): IntegrationConfiguration {
     const integration = this.requireIntegration(id)
     if (!['draft', 'tested', 'degraded', 'disabled'].includes(integration.state)) throw new Error(`Integration cannot be tested from ${integration.state}`)
     const now = new Date().toISOString()
-    this.sqlite.prepare("UPDATE cyber_integrations SET state='tested',health='healthy',last_tested_at=?,updated_at=?,version=version+1 WHERE id=?")
-      .run(now, now, id)
+    this.sqlite.prepare("UPDATE cyber_integrations SET state='tested',health=?,last_tested_at=?,updated_at=?,version=version+1 WHERE id=?")
+      .run(connectionVerified ? 'healthy' : 'unknown', now, now, id)
     this.appendEvent(id, actorOid, 'IntegrationTested', result)
     return this.getIntegration(id) as IntegrationConfiguration
   }
@@ -94,6 +94,27 @@ export class CyberDatabase {
     this.transition(id, 'disabled')
     this.appendEvent(id, actorOid, 'IntegrationDisabled', { ...(reason ? { reason } : {}) })
     return this.getIntegration(id) as IntegrationConfiguration
+  }
+
+  recordSyncSuccess(id: string, evidenceAt?: string): void {
+    const now = new Date().toISOString()
+    this.sqlite.prepare(`UPDATE cyber_integrations SET health='healthy',last_sync_at=?,last_sync_error=NULL,
+      last_evidence_at=CASE WHEN ? IS NULL THEN last_evidence_at
+        WHEN last_evidence_at IS NULL OR last_evidence_at < ? THEN ? ELSE last_evidence_at END,
+      updated_at=?,version=version+1 WHERE id=?`).run(now, evidenceAt ?? null, evidenceAt ?? null, evidenceAt ?? null, now, id)
+  }
+
+  recordSyncFailure(id: string, message: string): void {
+    const now = new Date().toISOString()
+    this.sqlite.prepare("UPDATE cyber_integrations SET health='degraded',last_sync_at=?,last_sync_error=?,updated_at=?,version=version+1 WHERE id=?")
+      .run(now, message.slice(0, 2048), now, id)
+  }
+
+  recordEvidence(id: string, observedAt: string): void {
+    const now = new Date().toISOString()
+    this.sqlite.prepare(`UPDATE cyber_integrations SET health='healthy',last_evidence_at=CASE
+      WHEN last_evidence_at IS NULL OR last_evidence_at < ? THEN ? ELSE last_evidence_at END,
+      updated_at=?,version=version+1 WHERE id=?`).run(observedAt, observedAt, now, id)
   }
 
   listEvents(integrationId: string): IntegrationEvent[] {
@@ -169,6 +190,8 @@ export class CyberDatabase {
       settings: JSON.parse(String(row.settings_json)) as IntegrationConfiguration['settings'],
       health: row.health as IntegrationConfiguration['health'],
       ...(row.last_evidence_at ? { lastEvidenceAt: String(row.last_evidence_at) } : {}),
+      ...(row.last_sync_at ? { lastSyncAt: String(row.last_sync_at) } : {}),
+      ...(row.last_sync_error ? { lastSyncError: String(row.last_sync_error) } : {}),
       ...(row.last_tested_at ? { lastTestedAt: String(row.last_tested_at) } : {}),
       createdByOid: String(row.created_by_oid), createdAt: String(row.created_at), updatedAt: String(row.updated_at), version: Number(row.version),
     }
@@ -191,6 +214,8 @@ export class CyberDatabase {
         health TEXT NOT NULL CHECK(health IN ('unknown','healthy','degraded','unreachable')),
         last_evidence_at TEXT,
         last_tested_at TEXT,
+        last_sync_at TEXT,
+        last_sync_error TEXT,
         created_by_oid TEXT NOT NULL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
@@ -215,5 +240,13 @@ export class CyberDatabase {
         id INTEGER PRIMARY KEY CHECK(id = 1), document_json TEXT NOT NULL, activated_at TEXT NOT NULL
       );
     `)
+    this.ensureColumn('cyber_integrations', 'last_sync_at', 'TEXT')
+    this.ensureColumn('cyber_integrations', 'last_sync_error', 'TEXT')
+  }
+
+
+  private ensureColumn(table: string, column: string, definition: string): void {
+    const columns = this.sqlite.pragma(`table_info(${table})`) as Array<{ name: string }>
+    if (!columns.some((candidate) => candidate.name === column)) this.sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
   }
 }

@@ -41,5 +41,23 @@ describe('cyber portal HTTP surface', () => {
     expect(created.state).toBe('draft')
     expect((await fetch(`${origin}/api/sessions`)).status).toBe(404)
     expect((await fetch(`${origin}/api/integrations/${created.id}/test`, { method: 'POST', body: '{}' })).status).toBe(200)
+    expect((await fetch(`${origin}/api/integrations/${created.id}/submit`, { method: 'POST', body: '{}' })).status).toBe(200)
+    expect((await fetch(`${origin}/api/integrations/${created.id}/activate`, { method: 'POST', body: '{}' })).status).toBe(200)
+    const observationResponse = await fetch(`${origin}/api/integrations/${created.id}/observations`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+        sourceRecordId: 'zeek-1', observedAt: '2026-09-02T07:00:00Z', evidenceType: 'NetworkConnection', subject: 'connection:1', payload: { proto: 'tcp' },
+        terrain: {
+          entities: [
+            { externalId: 'host:1', kind: 'Device', label: 'Host 1' },
+            { externalId: 'ip:10.0.0.8', kind: 'IPAddress', label: '10.0.0.8' },
+          ],
+          relationships: [{ kind: 'connected_to', sourceExternalId: 'host:1', targetExternalId: 'ip:10.0.0.8' }],
+        },
+      }),
+    })
+    expect(observationResponse.status).toBe(202)
+    const terrainResponse = await fetch(`${origin}/api/terrain`)
+    expect(terrainResponse.status).toBe(200)
+    expect(await terrainResponse.json()).toMatchObject({ observationCount: 1, entities: [{ label: 'Host 1' }, { label: '10.0.0.8' }], relationships: [{ kind: 'connected_to' }] })
   })
 })

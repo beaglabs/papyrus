@@ -1,144 +1,126 @@
-import { useMemo, useRef, useState, type RefObject } from 'react'
-import type { GraphCanvasRef, GraphNode, NodeRendererProps, Theme } from 'reagraph'
-import { GraphCanvas, Sphere, SphereWithIcon, lightTheme, useSelection } from 'reagraph'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { IEdgeLineStyle, IGraphStyle, NodeShapeType, OrbView as OrbViewType } from '@memgraph/orb'
 import type { PortalData } from './api.js'
-import { buildTopology, CLASS_META, type TerrainNodeMeta } from './terrain-topology.js'
+import { buildTopology, presentationFor, type TerrainOrbEdge, type TerrainOrbNode } from './terrain-topology.js'
 import { Badge, Button, Card } from './components/ui/index.js'
 
-const terrainTheme: Theme = {
-  ...lightTheme,
-  canvas: { background: '#f5f1e8', fog: '#f5f1e8' },
-  node: {
-    ...lightTheme.node,
-    fill: '#111111',
-    activeFill: '#ff5f1f',
-    label: {
-      ...lightTheme.node.label, color: '#111111', activeColor: '#111111', stroke: '#f5f1e8',
-      backgroundColor: '#fffdf8', backgroundOpacity: 0.9, padding: 1.6, radius: 0.12, strokeColor: '#111111', strokeWidth: 0.28,
-    },
-  },
-  edge: { ...lightTheme.edge, fill: '#a89f8d', activeFill: '#111111', label: { ...lightTheme.edge.label, color: '#68655f', activeColor: '#111111' } },
-  arrow: { fill: '#a89f8d', activeFill: '#111111' },
-  ring: { fill: '#111111', activeFill: '#ff5f1f' },
-  lasso: { background: 'rgba(255, 95, 31, 0.08)', border: '1px dashed #ff5f1f' },
-}
-
 const LAYOUTS = [
-  { id: 'forceDirected3d', label: 'FORCE 3D' },
-  { id: 'concentric3d', label: 'CONCENTRIC 3D' },
+  { id: 'force', label: 'FORCE' },
+  { id: 'hierarchical', label: 'HIERARCHY' },
+  { id: 'circular', label: 'CIRCULAR' },
 ] as const
 type TerrainLayout = (typeof LAYOUTS)[number]['id']
 
-const KIND_COPY: Record<TerrainNodeMeta['kind'], string> = {
-  twin: 'CYBER RESILIENCE TWIN', authority: 'DEPLOYMENT AUTHORITY', class: 'CONNECTOR CLASS', integration: 'CONNECTOR',
+const graphStyle: IGraphStyle<TerrainOrbNode, TerrainOrbEdge> = {
+  getNodeStyle(node) {
+    const data = node.getData()
+    return {
+      color: data.color, colorHover: '#ffcf33', colorSelected: '#ff5f1f', borderColor: '#111111', borderColorHover: '#111111',
+      borderColorSelected: '#111111', borderWidth: 2, borderWidthSelected: 4, size: 18, shape: 'circle' as NodeShapeType,
+      imageUrl: data.icon, imageUrlSelected: data.icon, label: data.label.toUpperCase(), fontColor: '#111111', fontBackgroundColor: '#fffdf8',
+      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12, shadowColor: '#111111', shadowSize: 0,
+    }
+  },
+  getEdgeStyle(edge) {
+    const data = edge.getData()
+    return {
+      color: '#8f897c', colorHover: '#111111', colorSelected: '#ff5f1f', width: 1.5, widthHover: 2.5, widthSelected: 3,
+      label: data.label.toUpperCase(), fontColor: '#5f5a51', fontBackgroundColor: '#f5f1e8', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+      fontSize: 10, arrowSize: 8, lineStyle: { type: 'solid' } as IEdgeLineStyle,
+    }
+  },
 }
 
 export function TerrainView({ data, onOpenIntegrations }: { data: PortalData; onOpenIntegrations: () => void }) {
-  const topology = useMemo(() => buildTopology(data), [data])
-  const [layout, setLayout] = useState<TerrainLayout>('forceDirected3d')
-  const graphRef = useRef<GraphCanvasRef | null>(null)
-  const { selections, actives, onNodeClick, onCanvasClick } = useSelection({
-    ref: graphRef, nodes: topology.nodes, edges: topology.edges, type: 'single', pathHoverType: 'out',
-  })
-  const selected = topology.nodes.find((node) => selections.includes(node.id))
-  const selectedMeta = selected?.data as TerrainNodeMeta | undefined
+  const topology = useMemo(() => buildTopology(data.terrain), [data.terrain])
+  const [layout, setLayout] = useState<TerrainLayout>('force')
+  const [selected, setSelected] = useState<TerrainOrbNode>()
+  const stage = useRef<HTMLDivElement | null>(null)
+  const orb = useRef<OrbViewType<TerrainOrbNode, TerrainOrbEdge> | null>(null)
 
-  const exportImage = () => {
-    const url = graphRef.current?.exportCanvas()
-    if (!url) return
+  useEffect(() => {
+    if (!stage.current || topology.nodes.length === 0) return
+    let view: OrbViewType<TerrainOrbNode, TerrainOrbEdge> | undefined
+    let cancelled = false
+    void import('@memgraph/orb').then(({ OrbEventType, OrbView, RendererType }) => {
+      if (cancelled || !stage.current) return
+      view = new OrbView<TerrainOrbNode, TerrainOrbEdge>(stage.current, {
+      render: {
+        type: RendererType.CANVAS, backgroundColor: 'rgba(0,0,0,0)', labelsIsEnabled: true, labelsOnEventIsEnabled: true,
+        shadowIsEnabled: false, fitZoomMargin: 80, minZoom: 0.08, maxZoom: 5,
+      },
+      layout: {
+        type: layout,
+        options: layout === 'force'
+          ? { links: { distance: 150, strength: 0.65, iterations: 2 }, manyBody: { strength: -420, distanceMin: 25, distanceMax: 900, theta: 0.9 } }
+          : layout === 'hierarchical'
+            ? { orientation: 'vertical', nodeGap: 70, levelGap: 130, treeGap: 90 }
+            : { radius: Math.max(180, topology.nodes.length * 16), centerX: 0, centerY: 0 },
+      },
+      zoomFitTransitionMs: 300,
+    })
+      view.data.setDefaultStyle(graphStyle)
+      view.data.setup(topology)
+      view.events.on(OrbEventType.NODE_CLICK, ({ node }) => setSelected(node.getData()))
+      view.events.on(OrbEventType.MOUSE_CLICK, ({ subject }) => { if (!subject) setSelected(undefined) })
+      view.render(() => view?.recenter())
+      orb.current = view
+    })
+    return () => { cancelled = true; view?.destroy(); if (orb.current === view) orb.current = null }
+  }, [layout, topology])
+
+  const exportSvg = () => {
+    const svg = orb.current?.getSVG({})
+    if (!svg) return
+    const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }))
     const link = document.createElement('a')
-    link.href = url
-    link.download = 'papyrus-cyber-terrain.png'
-    link.click()
+    link.href = url; link.download = 'papyrus-cyber-terrain.svg'; document.body.appendChild(link); link.click(); link.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 0)
   }
 
-  const legend = topology.nodes.flatMap((node) => {
-    const meta = node.data as TerrainNodeMeta | undefined
-    return meta?.kind === 'class' && meta.integrationClass ? [{ id: node.id, meta: CLASS_META[meta.integrationClass] }] : []
-  })
+  const legend = [...new Map(topology.nodes.map((node) => {
+    const presentation = presentationFor(node.kind)
+    return [presentation.family, presentation] as const
+  })).entries()]
 
   return <Card className="terrain-graph-card">
-    <div className="terrain-toolbar"><Badge>LIVE TWIN</Badge>
-      <span>{topology.nodes.length} entities · {topology.edges.length} relationships · 0 unresolved claims</span>
+    <div className="terrain-toolbar"><Badge>{topology.nodes.length ? 'LIVE TERRAIN' : 'NO TERRAIN DATA'}</Badge>
+      <span>{topology.nodes.length} entities · {topology.edges.length} relationships · {data.terrain.observationCount} observations · {data.terrain.unresolvedClaims} unresolved claims</span>
       <div className="terrain-controls">
         <div className="segmented" role="group" aria-label="Topology layout">
           {LAYOUTS.map((option) => <button key={option.id} className={layout === option.id ? 'active' : ''} onClick={() => setLayout(option.id)}>{option.label}</button>)}
         </div>
-        <Button onClick={() => graphRef.current?.fitNodesInView()}>FIT</Button>
-        <Button onClick={exportImage}>EXPORT PNG</Button>
+        <Button disabled={!topology.nodes.length} onClick={() => orb.current?.recenter()}>FIT</Button>
+        <Button disabled={!topology.nodes.length} onClick={exportSvg}>EXPORT SVG</Button>
       </div>
     </div>
     <div className="terrain-stage">
-      <GraphCanvas
-        ref={graphRef}
-        nodes={topology.nodes}
-        edges={topology.edges}
-        theme={terrainTheme}
-        layoutType={layout}
-        cameraMode="orbit"
-        animated
-        labelType="all"
-        labelFontUrl="/fonts/Roboto-Regular.ttf"
-        selections={selections}
-        actives={actives}
-        onNodeClick={(node) => onNodeClick?.(node)}
-        onCanvasClick={(event) => onCanvasClick?.(event)}
-        renderNode={renderTerrainNode}
-        contextMenu={(event) => <TerrainContextMenu target={event.data} onClose={event.onClose} graphRef={graphRef} onOpenIntegrations={onOpenIntegrations} />}
-        glOptions={{ preserveDrawingBuffer: true }}
-      />
-      <div className="terrain-legend">
-        <span><i style={{ background: '#ff5f1f' }} />CYBER TWIN</span>
-        {legend.map((entry) => <span key={entry.id}><i style={{ background: entry.meta.accent }} />{entry.meta.label.toUpperCase()}</span>)}
-      </div>
-      {selected && selectedMeta && <TerrainDetail node={selected} meta={selectedMeta} onOpenIntegrations={onOpenIntegrations} />}
-      {data.integrations.length === 0 && <p className="terrain-hint">Connect terrain and evidence sources to begin forming the graph.</p>}
+      {topology.nodes.length > 0 ? <div ref={stage} className="terrain-orb" aria-label="Cyber terrain graph" /> : <TerrainEmpty onOpenIntegrations={onOpenIntegrations} />}
+      {legend.length > 0 && <div className="terrain-legend">{legend.map(([family, presentation]) => <span key={family}><i style={{ background: presentation.color }} />{family.toUpperCase()}</span>)}</div>}
+      {selected && <TerrainDetail node={selected} onClose={() => setSelected(undefined)} />}
     </div>
   </Card>
 }
 
-function renderTerrainNode({ node, ...rest }: NodeRendererProps) {
-  return node.icon ? <SphereWithIcon {...rest} node={node} image={node.icon} /> : <Sphere {...rest} node={node} />
-}
-
-function TerrainContextMenu({ target, onClose, graphRef, onOpenIntegrations }: {
-  target: TerrainContextMenuTarget
-  onClose: () => void
-  graphRef: RefObject<GraphCanvasRef | null>
-  onOpenIntegrations: () => void
-}) {
-  const meta = (target.data ?? undefined) as TerrainNodeMeta | undefined
-  const edge = 'source' in target ? target : undefined
-  const center = () => {
-    if (edge) graphRef.current?.centerGraph([edge.source, edge.target])
-    else graphRef.current?.centerGraph([target.id])
-    onClose()
-  }
-  return <div className="terrain-context-menu">
-    <p className="eyebrow">{meta ? KIND_COPY[meta.kind] : edge ? 'EVIDENCE LINK' : 'TOPOLOGY'}</p>
-    <strong>{(target.label ?? target.id).toString().toUpperCase()}</strong>
-    <button onClick={center}>Center camera</button>
-    <button onClick={() => { void navigator.clipboard?.writeText(target.id); onClose() }}>Copy identifier</button>
-    {meta?.kind === 'integration' && <button onClick={() => { onClose(); onOpenIntegrations() }}>Open in Integrations →</button>}
-    <button onClick={onClose}>Dismiss</button>
+function TerrainEmpty({ onOpenIntegrations }: { onOpenIntegrations: () => void }) {
+  return <div className="terrain-empty"><span aria-hidden="true">⌘</span><h2>No observed topology</h2>
+    <p>Terrain begins when an active connector publishes evidence. Integration configuration and deployment metadata are never rendered as entities.</p>
+    <Button className="primary" onClick={onOpenIntegrations}>Configure integrations →</Button>
   </div>
 }
 
-type TerrainContextMenuTarget = Parameters<NonNullable<Parameters<typeof GraphCanvas>[0]['contextMenu']>>[0]['data']
-
-function TerrainDetail({ node, meta, onOpenIntegrations }: { node: GraphNode; meta: TerrainNodeMeta; onOpenIntegrations: () => void }) {
+function TerrainDetail({ node, onClose }: { node: TerrainOrbNode; onClose: () => void }) {
   return <aside className="terrain-detail">
-    <p className="eyebrow">{KIND_COPY[meta.kind]}</p>
-    <h3>{node.label ?? node.id}</h3>
-    {node.subLabel && <span className="terrain-detail-sub">{node.subLabel}</span>}
-    {meta.kind === 'integration' && <dl className="facts">
-      <div><dt>State</dt><dd>{(meta.state ?? '').replaceAll('_', ' ').toUpperCase()}</dd></div>
-      <div><dt>Health</dt><dd>{(meta.health ?? 'unknown').toUpperCase()}</dd></div>
-      <div><dt>Risk</dt><dd>{(meta.risk ?? '').toUpperCase()}</dd></div>
-      <div><dt>Authority</dt><dd>{(meta.authority ?? '').replaceAll('_', ' ').toUpperCase()}</dd></div>
-      <div><dt>Scope</dt><dd>{meta.scope}</dd></div>
-      {meta.endpoint && <div><dt>Endpoint</dt><dd>{meta.endpoint}</dd></div>}
-    </dl>}
-    {meta.kind === 'integration' && <Button className="primary" onClick={onOpenIntegrations}>Open in Integrations →</Button>}
+    <div className="terrain-detail-head"><p className="eyebrow">{node.kind.toUpperCase()}</p><Button variant="ghost" aria-label="Close details" onClick={onClose}>×</Button></div>
+    <h3>{node.label}</h3>
+    <span className="terrain-detail-sub">{node.id.slice(0, 16)}…</span>
+    <dl className="facts">
+      <div><dt>Confidence</dt><dd>{Math.round(node.confidence * 100)}%</dd></div>
+      <div><dt>First seen</dt><dd>{new Date(node.firstSeen).toLocaleString()}</dd></div>
+      <div><dt>Last seen</dt><dd>{new Date(node.lastSeen).toLocaleString()}</dd></div>
+      <div><dt>Sources</dt><dd>{node.sourceIntegrationIds.length}</dd></div>
+      <div><dt>Evidence</dt><dd>{node.evidenceIds.length}</dd></div>
+    </dl>
+    {Object.keys(node.attributes).length > 0 && <div className="terrain-attributes"><p className="eyebrow">ATTRIBUTES</p>{Object.entries(node.attributes).slice(0, 12).map(([key, value]) => <div key={key}><span>{key}</span><strong>{String(value)}</strong></div>)}</div>}
   </aside>
 }

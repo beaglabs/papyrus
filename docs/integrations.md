@@ -69,14 +69,14 @@ A curated source can instead publish its native fields under a versioned `schema
 
 Papyrus retains the accepted raw record and schema provenance alongside the projection produced by the pinned deterministic normalizer. A record must use either `schema` or `terrain`, never both. Schemas are constrained by the configured source profile, so a Zeek integration cannot submit a Suricata schema. Invalid source-native records are rejected without partially mutating Terrain and can be corrected and retried under the same source record identifier.
 
-The catalog modal provides two terminal workflows:
+The catalog modal exposes two **advanced validation workflows**:
 
-- **Stream NDJSON** continuously tails a customer-produced JSON-lines file and wraps each record in the selected source schema before sending it to the daemon.
-- **Send one record** validates authentication, schema acceptance, normalization, and Terrain projection with a single example.
+- **Validate one record** checks authentication, schema acceptance, normalization, and Terrain projection with a single example.
+- **Developer NDJSON bridge** tails a customer-produced JSON-lines file and wraps each record in the selected source schema. It is for custom integration development and controlled troubleshooting, not sustained collection.
 
-The stream command is a bridge, not a collector: source-specific export configuration remains under customer control, and every input line must match the selected versioned schema. When the modal opens, the authenticated portal session requests a one-hour daemon-signed ingestion token scoped to that integration. The generated command receives it as `PAPYRUS_INGEST_TOKEN`; the browser never exposes or copies the user's Entra access token. A token cannot publish to another integration, and disabling or deleting its integration makes the route reject observations.
+The bridge is not a Papyrus collector. Source-specific export configuration, buffering, retry, and operating permissions remain under customer control. When the modal opens, the authenticated portal session requests a one-hour daemon-signed ingestion token scoped to that integration. The generated command receives it as `PAPYRUS_INGEST_TOKEN`; the browser never exposes or copies the user's Entra access token. A token cannot publish to another integration, and disabling or deleting its integration makes the route reject observations.
 
-Long-running unattended collectors should ultimately use customer-approved workload identity or mTLS rather than repeatedly issuing interactive setup tokens.
+For production telemetry, prefer a native SIEM, EDR, OTEL, email, or OT connector. Long-running custom producers must use a customer-approved workload identity or mTLS, durable local spooling, batching, checkpointing, bounded retry, and a dead-letter/health path rather than repeatedly issuing interactive setup tokens.
 
 Deleting an integration tombstones its configuration and invalidates its ingestion route. Previously accepted evidence and its append-only provenance remain in Terrain; deletion does not rewrite historical evidence.
 

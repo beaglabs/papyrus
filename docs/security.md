@@ -28,8 +28,19 @@ Starlings may produce observations, claims, conflicts, and action proposals. It 
 - Configuration and lifecycle events are append-only and SHA-256 hash chained.
 - A configuration test validates deterministic policy and manifest requirements; it does not claim live network reachability.
 
+## Sandboxed execution
+
+Agent code execution is a security boundary, so it fails closed and never degrades quietly.
+
+- **Linux with Bubblewrap (`bwrap`) only.** macOS and Windows have execution switched off. Sandboxing on macOS would depend on Seatbelt (`sandbox-exec`), which Apple has deprecated; shipping it would advertise a guarantee that cannot be stood behind.
+- **No unisolated fallback.** If `bwrap` is absent, or the platform is not Linux, execution is disabled and the daemon logs the specific reason. It does not proceed without isolation.
+- **Network is always denied**, stated explicitly rather than inherited from a library default that could change.
+- **Approve and deny are not agent tools.** `approveProposal`, `denyProposal`, and `executeAction` are rejected at the tool-dispatch layer. They remain human actions taken with the operator's own Entra session against the action ledger, which re-checks the `Papyrus.Action.Approve` role server-side. An agent may propose; it cannot release.
+- **Web content is a claim source, never an authority source.** Fetched content can populate claims and evidence. It cannot by itself authorize an action. This keeps untrusted input, sensitive data, and the ability to act from combining into a single exploitable path.
+
 ## Honest limitations
 
+- Sandboxed execution requires Linux and Bubblewrap. On other hosts the rest of the daemon is fully functional, but agent code execution is off.
 - A host or database administrator can replace local state. Export the audit chain to independently controlled immutable storage for external tamper evidence.
 - Microsoft national-cloud support and tenant app approval vary by environment.
 - Papyrus is not a cross-domain solution, authorization to operate, or claim of GCC High, DoD, IL4, IL6, or SIPR accreditation.

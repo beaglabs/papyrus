@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { IEdgeLineStyle, IGraphStyle, NodeShapeType, OrbView as OrbViewType } from '@memgraph/orb'
-import type { PortalData } from './api.js'
+import type { TerrainSnapshot } from '@papyrus/contracts'
 import { buildTopology, presentationFor, type TerrainOrbEdge, type TerrainOrbNode } from './terrain-topology.js'
 import { Badge, Button, Card } from './components/ui/index.js'
 
@@ -31,17 +31,29 @@ const graphStyle: IGraphStyle<TerrainOrbNode, TerrainOrbEdge> = {
   },
 }
 
-export function TerrainView({ data, onOpenIntegrations, onRefresh }: { data: PortalData; onOpenIntegrations: () => void; onRefresh: () => Promise<void> }) {
-  const topology = useMemo(() => buildTopology(data.terrain), [data.terrain])
+export interface TerrainViewProps {
+  terrain: TerrainSnapshot
+  /**
+   * Portal surfaces poll for fresh evidence. Chat surfaces render the single
+   * snapshot a tool returned and must not start a timer per rendered card.
+   */
+  autoRefresh?: boolean
+  onOpenIntegrations?: () => void
+  onRefresh?: () => Promise<void>
+}
+
+export function TerrainView({ terrain, autoRefresh = false, onOpenIntegrations, onRefresh }: TerrainViewProps) {
+  const topology = useMemo(() => buildTopology(terrain), [terrain])
   const [layout, setLayout] = useState<TerrainLayout>('force')
   const [selected, setSelected] = useState<TerrainOrbNode>()
   const stage = useRef<HTMLDivElement | null>(null)
   const orb = useRef<OrbViewType<TerrainOrbNode, TerrainOrbEdge> | null>(null)
 
   useEffect(() => {
+    if (!autoRefresh || !onRefresh) return
     const timer = window.setInterval(() => { void onRefresh() }, 5_000)
     return () => window.clearInterval(timer)
-  }, [onRefresh])
+  }, [autoRefresh, onRefresh])
 
   useEffect(() => {
     if (!stage.current || topology.nodes.length === 0) return
@@ -90,28 +102,28 @@ export function TerrainView({ data, onOpenIntegrations, onRefresh }: { data: Por
 
   return <Card className="terrain-graph-card">
     <div className="terrain-toolbar"><Badge>{topology.nodes.length ? 'LIVE TERRAIN' : 'NO TERRAIN DATA'}</Badge>
-      <span>{topology.nodes.length} entities · {topology.edges.length} relationships · {data.terrain.observationCount} observations · {data.terrain.unresolvedClaims} unresolved claims</span>
+      <span>{topology.nodes.length} entities · {topology.edges.length} relationships · {terrain.observationCount} observations · {terrain.unresolvedClaims} unresolved claims</span>
       <div className="terrain-controls">
         <div className="segmented" role="group" aria-label="Topology layout">
           {LAYOUTS.map((option) => <button key={option.id} className={layout === option.id ? 'active' : ''} onClick={() => setLayout(option.id)}>{option.label}</button>)}
         </div>
-        <Button onClick={() => void onRefresh()}>REFRESH</Button>
+        {onRefresh && <Button onClick={() => void onRefresh()}>REFRESH</Button>}
         <Button disabled={!topology.nodes.length} onClick={() => orb.current?.recenter()}>FIT</Button>
         <Button disabled={!topology.nodes.length} onClick={exportSvg}>EXPORT SVG</Button>
       </div>
     </div>
     <div className="terrain-stage">
-      {topology.nodes.length > 0 ? <div ref={stage} className="terrain-orb" aria-label="Cyber terrain graph" /> : <TerrainEmpty onOpenIntegrations={onOpenIntegrations} />}
+      {topology.nodes.length > 0 ? <div ref={stage} className="terrain-orb" aria-label="Cyber terrain graph" /> : <TerrainEmpty {...(onOpenIntegrations ? { onOpenIntegrations } : {})} />}
       {legend.length > 0 && <div className="terrain-legend">{legend.map(([family, presentation]) => <span key={family}><i style={{ background: presentation.color }} />{family.toUpperCase()}</span>)}</div>}
       {selected && <TerrainDetail node={selected} onClose={() => setSelected(undefined)} />}
     </div>
   </Card>
 }
 
-function TerrainEmpty({ onOpenIntegrations }: { onOpenIntegrations: () => void }) {
+function TerrainEmpty({ onOpenIntegrations }: { onOpenIntegrations?: () => void }) {
   return <div className="terrain-empty"><span aria-hidden="true">⌘</span><h2>No observed topology</h2>
     <p>Terrain begins when an active connector publishes evidence. Integration configuration and deployment metadata are never rendered as entities.</p>
-    <Button className="primary" onClick={onOpenIntegrations}>Configure integrations →</Button>
+    {onOpenIntegrations && <Button className="primary" onClick={onOpenIntegrations}>Configure integrations →</Button>}
   </div>
 }
 

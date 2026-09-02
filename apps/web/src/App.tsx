@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import type { PortalData, PublicConfig } from './api.js'
 import { AuthenticationRequired, loadPortal, logout, publicConfig } from './api.js'
 import { IntegrationsView } from './Integrations.js'
+import { InvestigationsView } from './Investigations.js'
 import { TerrainView } from './Terrain.js'
 import { Alert, Avatar, Badge, Button, Card, DropdownMenu, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from './components/ui/index.js'
 
@@ -66,8 +67,8 @@ export function App() {
       <main className="portal-main"><PortalHeader view={view} data={data} />
         {view === 'posture' && <PostureView data={data} onOpenIntegrations={() => navigate('integrations')} />}
         {view === 'integrations' && <IntegrationsView me={data.me} catalog={data.catalog} integrations={data.integrations} onChanged={refresh} />}
-        {view === 'terrain' && <TerrainView data={data} onOpenIntegrations={() => navigate('integrations')} onRefresh={refresh} />}
-        {view === 'investigations' && <EmptyProductView eyebrow="COLLECTIVE ANALYSIS" title="Investigations" copy="Starlings investigations will assemble claims, contradictions, evidence, and attack hypotheses here—without creating chat sessions." />}
+        {view === 'terrain' && <TerrainView terrain={data.terrain} autoRefresh onOpenIntegrations={() => navigate('integrations')} onRefresh={refresh} />}
+        {view === 'investigations' && <InvestigationsView me={data.me} investigations={data.investigations} proposals={data.proposals} onChanged={refresh} />}
         {view === 'governance' && <GovernanceView data={data} />}
       </main>
     </div>

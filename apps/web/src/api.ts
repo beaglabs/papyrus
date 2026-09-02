@@ -1,4 +1,7 @@
 import type {
+  CyberActionProposal,
+  CyberActionReceipt,
+  CyberInvestigation,
   IntegrationCatalogEntry,
   IntegrationConfiguration,
   IntegrationEvent,
@@ -24,6 +27,8 @@ export interface PortalData {
   catalog: IntegrationCatalogEntry[]
   integrations: IntegrationConfiguration[]
   terrain: TerrainSnapshot
+  investigations: CyberInvestigation[]
+  proposals: CyberActionProposal[]
 }
 
 export class ApiError extends Error {
@@ -52,14 +57,16 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 export async function loadPortal(): Promise<PortalData> {
   const config = await api<PublicConfig>('/api/config/public')
-  const [me, overview, catalog, integrations, terrain] = await Promise.all([
+  const [me, overview, catalog, integrations, terrain, investigations, proposals] = await Promise.all([
     api<PortalPrincipal>('/api/me'),
     api<PortalOverview>('/api/portal/overview'),
     api<{ integrations: IntegrationCatalogEntry[] }>('/api/integrations/catalog'),
     api<{ integrations: IntegrationConfiguration[] }>('/api/integrations'),
     api<TerrainSnapshot>('/api/terrain'),
+    api<{ investigations: CyberInvestigation[] }>('/api/investigations'),
+    api<{ proposals: CyberActionProposal[] }>('/api/proposals'),
   ])
-  return { config, me, overview, catalog: catalog.integrations, integrations: integrations.integrations, terrain }
+  return { config, me, overview, catalog: catalog.integrations, integrations: integrations.integrations, terrain, investigations: investigations.investigations, proposals: proposals.proposals }
 }
 
 export async function publicConfig(): Promise<PublicConfig> { return api('/api/config/public') }
@@ -98,3 +105,15 @@ export async function requestIntegrationSync(id: string): Promise<SyncJob> {
 }
 
 export async function logout(): Promise<void> { await api('/api/auth/logout', { method: 'POST', body: '{}' }) }
+
+export async function approveProposal(id: string): Promise<CyberActionProposal> {
+  return api(`/api/proposals/${encodeURIComponent(id)}/approve`, { method: 'POST', body: '{}' })
+}
+
+export async function denyProposal(id: string, reason?: string): Promise<CyberActionProposal> {
+  return api(`/api/proposals/${encodeURIComponent(id)}/deny`, { method: 'POST', body: JSON.stringify(reason ? { reason } : {}) })
+}
+
+export async function listReceipts(): Promise<CyberActionReceipt[]> {
+  return (await api<{ receipts: CyberActionReceipt[] }>('/api/receipts')).receipts
+}

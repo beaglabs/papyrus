@@ -11,6 +11,9 @@ import type {
 
 type Row = Record<string, unknown>
 
+/** Decisions the action ledger records against an executor integration. */
+export type ActionDecisionKind = 'ActionProposed' | 'ActionApproved' | 'ActionDenied' | 'ActionExecuted' | 'ActionFailed'
+
 export function canonical(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
@@ -110,6 +113,16 @@ export class CyberDatabase {
   recordIngestionTokenIssued(id: string, actorOid: string, expiresAt: string): void {
     this.requireIntegration(id)
     this.appendEvent(id, actorOid, 'IngestionTokenIssued', { expiresAt, scope: 'observations:write' })
+  }
+
+  /**
+   * Append an action-ledger decision to the same append-only SHA-256 chain used
+   * for integration lifecycle events, so who proposed, approved, denied, and
+   * executed an operational action is auditable end to end.
+   */
+  recordActionEvent(integrationId: string, actorOid: string, action: ActionDecisionKind, data: Record<string, unknown>): void {
+    this.requireIntegration(integrationId)
+    this.appendEvent(integrationId, actorOid, action, data)
   }
 
   recordSyncSuccess(id: string, evidenceAt?: string): void {

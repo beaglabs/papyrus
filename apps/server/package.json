@@ -8,7 +8,7 @@
     "start": "node dist/index.js",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run tests/cyber-*.test.ts",
+    "test": "vitest run tests/cyber-*.test.ts tests/cyber-smoke.test.ts",
     "lint": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

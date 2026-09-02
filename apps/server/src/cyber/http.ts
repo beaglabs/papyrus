@@ -161,6 +161,61 @@ export function createCyberServer(config: CyberConfig, service: CyberService, au
         await principal(request, auth, service), decodeURIComponent(jobs[1] as string),
       ) })
 
+      // ─── Investigations ────────────────────────────────────────────
+      if (url.pathname === '/api/investigations' && request.method === 'GET') {
+        return json(response, 200, { investigations: service.listInvestigations(await principal(request, auth, service)) })
+      }
+      if (url.pathname === '/api/investigations' && request.method === 'POST') {
+        const input = await body(request)
+        return json(response, 201, service.createInvestigation(
+          await principal(request, auth, service),
+          typeof input.title === 'string' ? input.title : '',
+          (typeof input.trigger === 'string' ? input.trigger : 'manual') as 'email' | 'teams' | 'manual' | 'signal' | 'schedule',
+          typeof input.triggerIntegrationId === 'string' ? input.triggerIntegrationId : undefined,
+          typeof input.triggerMessageId === 'string' ? input.triggerMessageId : undefined,
+          typeof input.mastraThreadId === 'string' ? input.mastraThreadId : undefined,
+        ))
+      }
+      const investigationMatch = url.pathname.match(/^\/api\/investigations\/([^/]+)$/)
+      if (investigationMatch && request.method === 'GET') {
+        return json(response, 200, service.getInvestigation(await principal(request, auth, service), decodeURIComponent(investigationMatch[1] as string)))
+      }
+      const proposalsMatch = url.pathname.match(/^\/api\/investigations\/([^/]+)\/proposals$/)
+      if (proposalsMatch && request.method === 'GET') {
+        return json(response, 200, { proposals: service.listProposals(await principal(request, auth, service), decodeURIComponent(proposalsMatch[1] as string)) })
+      }
+
+      // ─── Action Proposals ─────────────────────────────────────────
+      if (url.pathname === '/api/proposals' && request.method === 'GET') {
+        return json(response, 200, { proposals: service.listProposals(await principal(request, auth, service)) })
+      }
+      if (url.pathname === '/api/proposals' && request.method === 'POST') {
+        const input = await body(request)
+        return json(response, 201, service.createProposal(
+          await principal(request, auth, service),
+          typeof input.investigationId === 'string' ? input.investigationId : '',
+          typeof input.executorIntegrationId === 'string' ? input.executorIntegrationId : '',
+          typeof input.action === 'string' ? input.action : '',
+          typeof input.target === 'string' ? input.target : '',
+          Array.isArray(input.rationaleClaimIds) ? input.rationaleClaimIds as string[] : [],
+          input.parameters && typeof input.parameters === 'object' && !Array.isArray(input.parameters) ? input.parameters as Record<string, unknown> : undefined,
+          typeof input.expiresAt === 'string' ? input.expiresAt : undefined,
+        ))
+      }
+      const proposalAction = url.pathname.match(/^\/api\/proposals\/([^/]+)\/(approve|deny)$/)
+      if (proposalAction && request.method === 'POST') {
+        const actor = await principal(request, auth, service)
+        const id = decodeURIComponent(proposalAction[1] as string)
+        if (proposalAction[2] === 'approve') return json(response, 200, service.approveProposal(actor, id))
+        const input = await body(request)
+        return json(response, 200, service.denyProposal(actor, id, typeof input.reason === 'string' ? input.reason : undefined))
+      }
+
+      // ─── Action Receipts ──────────────────────────────────────────
+      if (url.pathname === '/api/receipts' && request.method === 'GET') {
+        return json(response, 200, { receipts: service.listReceipts(await principal(request, auth, service)) })
+      }
+
       if (url.pathname.startsWith('/api/')) throw new HttpError(404, 'NOT_FOUND', 'API route not found')
       return servePortal(response, url.pathname)
     } catch (cause) {

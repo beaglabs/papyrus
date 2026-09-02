@@ -176,8 +176,13 @@ function ConfigureIntegration({ entry, open, onClose, onCreated }: { entry: Inte
         ...(form.get('endpoint') ? { endpoint: String(form.get('endpoint')) } : {}),
         ...(form.get('credentialRef') ? { credentialRef: String(form.get('credentialRef')) } : {}),
         settings: entry.observationProtocol
-          ? { ingestion: 'daemon_observation_api' }
-          : { dataHandling: String(form.get('dataHandling') ?? 'metadata_only') },
+          ? { ingestion: 'advanced_custom_observation_api' }
+          : entry.id === 'exchange-email'
+            ? {
+                mailbox: String(form.get('mailbox') ?? ''),
+                dataHandling: String(form.get('dataHandling') ?? 'metadata_only'),
+              }
+            : { dataHandling: String(form.get('dataHandling') ?? 'metadata_only') },
       })
       await onCreated()
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to configure integration') }
@@ -187,8 +192,8 @@ function ConfigureIntegration({ entry, open, onClose, onCreated }: { entry: Inte
     <DialogHeader><div><p className="eyebrow">NEW {CLASS_LABELS[entry.integrationClass].toUpperCase()}</p><h2>Configure {entry.name}</h2></div><Button type="button" variant="ghost" onClick={onClose}>×</Button></DialogHeader>
     <DialogContent>{error && <Alert className="error">{error}</Alert>}<div className="connector-intro"><div className="connector-mark" style={{ '--connector-accent': entry.accent } as CSSProperties}>{entry.initials}</div><p>{entry.description}</p></div>
       <div className="form-grid"><Label>Display name<Input name="name" required defaultValue={entry.name} /></Label><Label>Operational scope<Input name="scope" required placeholder="IL4 enterprise enclave" /></Label>{entry.observationProtocol
-        ? <Alert className="span-two source-boundary"><strong>Daemon ingestion</strong><span>This registers a source identity and its allowed schemas inside this Papyrus daemon. It does not provision another service or external API endpoint.</span></Alert>
-        : <><Label className="span-two">Endpoint<Input name="endpoint" type="url" placeholder="https://approved.internal.example/api" /><small>HTTPS is required outside loopback development.</small></Label><Label className="span-two">Credential reference<Input name="credentialRef" placeholder="keyvault://papyrus/connectors/example" /><small>Paste a vault, certificate, or managed-identity reference—never a secret.</small></Label><Label>Data handling<NativeSelect name="dataHandling" defaultValue="metadata_only"><option value="metadata_only">Metadata only</option><option value="normalized_evidence">Normalized evidence</option><option value="customer_defined">Customer defined</option></NativeSelect></Label></>}</div>
+        ? <Alert className="span-two source-boundary"><strong>Advanced custom ingestion</strong><span>This registers a custom source identity and allowed schemas inside this daemon. Use it for validated custom or legacy producers; it is not Papyrus's primary production collection path.</span></Alert>
+        : <>{entry.id === 'exchange-email' && <Label className="span-two">Monitored mailbox<Input name="mailbox" type="email" required placeholder="soc@example.mil" /><small>Mailbox address used for Microsoft Graph delta sync and approved outbound notifications.</small></Label>}<Label className="span-two">Endpoint<Input name="endpoint" type="url" placeholder="https://approved.internal.example/api" /><small>HTTPS is required outside loopback development. Microsoft Graph uses the deployment cloud endpoint automatically.</small></Label><Label className="span-two">Credential reference<Input name="credentialRef" placeholder="keyvault://papyrus/connectors/example" /><small>Paste a vault, certificate, or managed-identity reference—never a secret.</small></Label><Label>Data handling<NativeSelect name="dataHandling" defaultValue="metadata_only"><option value="metadata_only">Metadata only</option><option value="normalized_evidence">Normalized evidence</option><option value="customer_defined">Customer defined</option></NativeSelect></Label></>}</div>
       {entry.authority === 'controlled_actions' && <Alert className="authority-warning"><strong>Controlled-action connector</strong><span>Configuration does not grant execution authority. Activation requires the Papyrus.Security.Manage Entra role; individual actions require separate approval.</span></Alert>}
     </DialogContent><DialogFooter><Button type="button" variant="ghost" onClick={onClose}>Cancel</Button><Button className="primary" disabled={busy}>{busy ? 'Saving…' : 'Save draft'}</Button></DialogFooter>
   </form></Dialog>
@@ -317,8 +322,9 @@ function SourceIngestionModal({ integration, entry, onClose, onDelete }: {
     setCopied(true)
     window.setTimeout(() => setCopied(false), 1_500)
   }
-  return <Dialog open onOpenChange={(open) => { if (!open) onClose() }}><DialogHeader><div><p className="eyebrow">DAEMON INGESTION</p><h2>{integration.name}</h2></div><Button variant="ghost" onClick={onClose}>×</Button></DialogHeader><DialogContent>
+  return <Dialog open onOpenChange={(open) => { if (!open) onClose() }}><DialogHeader><div><p className="eyebrow">ADVANCED CUSTOM INGESTION</p><h2>{integration.name}</h2></div><Button variant="ghost" onClick={onClose}>×</Button></DialogHeader><DialogContent>
     <div className="source-setup-meta"><Badge className={integration.lastEvidenceAt ? 'status-good' : 'state-tested'}>{integration.lastEvidenceAt ? 'RECEIVING' : 'WAITING FOR DATA'}</Badge><code>/api/integrations/{integration.id}/observations</code></div>
+    <Alert className="source-boundary"><strong>Validation and custom-source bridge</strong><span>Use this route for a bespoke or legacy producer and to validate one record. It is not the primary production telemetry path; use a native SIEM, EDR, OTEL, or other supported connector whenever one is available.</span></Alert>
     <p className="source-setup-copy">This route is served by the current Papyrus daemon. The integration ID identifies the source; the selected schema controls deterministic normalization into Terrain.</p>
     {!integration.lastEvidenceAt && <p className="source-polling"><span className="signal-loader"><i /><i /><i /></span>Polling the daemon for the first accepted observation…</p>}
     {integration.lastEvidenceAt && <p className="source-polling receiving"><span className="dot good" />Last evidence received {new Date(integration.lastEvidenceAt).toLocaleString()}</p>}
@@ -328,11 +334,11 @@ function SourceIngestionModal({ integration, entry, onClose, onDelete }: {
     </div>
     {schemas.length > 0 && <Label>{mode === 'native' ? 'Versioned source schema' : 'Canonical projection example'}<NativeSelect value={selectedSchema} onChange={(event) => setSelectedSchema(event.target.value)}>{schemas.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.label} · {candidate.id}</option>)}</NativeSelect><small>{schemas.find((candidate) => candidate.id === selectedSchema)?.description}</small></Label>}
     {credentialError && <Alert className="error">{credentialError}</Alert>}
-    <div className="command-head"><div><strong>Connect this source</strong><small>{credential ? `Source-scoped token expires ${new Date(credential.expiresAt).toLocaleTimeString()}.` : 'Issuing a source-scoped ingestion token…'}</small></div><Button size="sm" disabled={!credential} onClick={() => void copy()}>{copied ? 'Copied' : credential ? 'Copy command' : 'Preparing…'}</Button></div>
+    <div className="command-head"><div><strong>{commandMode === 'test' ? 'Validate one record' : 'Developer stream bridge'}</strong><small>{credential ? `Source-scoped token expires ${new Date(credential.expiresAt).toLocaleTimeString()}; not for unattended production collection.` : 'Issuing a source-scoped ingestion token…'}</small></div><Button size="sm" disabled={!credential} onClick={() => void copy()}>{copied ? 'Copied' : credential ? 'Copy command' : 'Preparing…'}</Button></div>
     <div className="terminal-shell">
       <div className="terminal-bar"><span className="terminal-lights" aria-hidden="true"><i /><i /><i /></span><div className="terminal-tabs" role="group" aria-label="Ingestion command">
-        {schemas.length > 0 && <button type="button" className={commandMode === 'stream' ? 'active' : ''} onClick={() => { setMode('native'); setCommandMode('stream') }}>Stream NDJSON</button>}
-        <button type="button" className={commandMode === 'test' ? 'active' : ''} onClick={() => setCommandMode('test')}>Send one record</button>
+        {schemas.length > 0 && <button type="button" className={commandMode === 'stream' ? 'active' : ''} onClick={() => { setMode('native'); setCommandMode('stream') }}>Developer NDJSON bridge</button>}
+        <button type="button" className={commandMode === 'test' ? 'active' : ''} onClick={() => setCommandMode('test')}>Validate one record</button>
       </div></div>
       <pre className="source-command"><code>{command}</code></pre>
     </div>

@@ -35,6 +35,7 @@ Teams / Email / ACP / A2A / Security Connectors
 - **Secrets:** Connector configuration accepts customer-vault, certificate, or managed-identity references. Inline tokens, passwords, client secrets, and private keys are rejected.
 - **Licensing:** The existing deployment-bound, signed, offline license format remains. No Beag cloud callback is required.
 - **Runtime independence:** Teams and email are adapters. Disabling them does not disable the cyber twin.
+- **Sandboxed execution:** Agent code runs only on Linux under Bubblewrap, with network denied. On any other host execution is off, and the daemon reports why rather than falling back to unisolated execution.
 
 ## Portal
 
@@ -71,7 +72,7 @@ Entra is authoritative. Roles are read from validated token claims and are not c
 
 ## Local development
 
-Node.js 24 and pnpm 11 are required.
+Node.js 24 and pnpm 11 are required. macOS and Windows are fine for development — the daemon, portal, connectors, and action ledger all run there. Agent code execution does not: it is Linux-only and enforced with Bubblewrap, and it turns itself off with an explicit log line anywhere else. See [docs/deployment.md](docs/deployment.md#platform-requirements).
 
 ```bash
 pnpm install --frozen-lockfile
@@ -139,9 +140,13 @@ Teams SSO tokens can be exchanged at `POST /api/auth/teams`; standard portal log
 
 ## Current experiment boundary
 
-This branch implements the Entra-native daemon, new portal shell, governed integration lifecycle, offline licensing, audit chain, customer-managed Observation API source profiles, deterministic native-schema normalization, durable observations, database-leased sync workers, provenance-preserving Terrain storage, and the Orb 2D Terrain view.
+This branch implements the Entra-native daemon, new portal shell, governed integration lifecycle, offline licensing, audit chain, customer-managed Observation API source profiles, deterministic native-schema normalization, durable observations, database-leased sync workers, provenance-preserving Terrain storage, the Orb 2D Terrain view, and the durable agent foundation: a database-leased signal outbox, read-only investigation tools, a Linux/Bubblewrap sandbox policy, and the LibSQL-backed Mastra bridge.
 
-Evidence and Terrain entries are daemon-owned Observation API source profiles rather than vendor drivers. Selecting **Connect** registers them active immediately, opens the terminal modal, mints a one-hour source-scoped ingestion token, and polls the daemon until evidence arrives. Waiting sources remain in the catalog rather than appearing as operational; the customer owns collection, export, and network routing. Long-running workload identity/mTLS, live Teams command handling, Exchange mailbox polling, customer-vault resolvers, and the Starlings process adapter remain connector-specific implementation slices. Pull integrations cannot activate until their driver is registered, and configuration-only tests leave health unknown rather than pretending that saving a connector performed live network validation.
+The Mastra bridge is **wired but not yet live**. `apps/server/src/cyber/mastra/runtime.ts` feature-detects `@mastra/core` and `@mastra/libsql` through dynamic import: with them absent, signals are durably recorded in `cyber_signal_outbox` and the daemon reports that they will drain once the packages are installed. Nothing is silently dropped, and no behavior is claimed by an uninstalled dependency.
+
+The Mastra surface it touches was verified by reading the published `@mastra/core` 1.63.2 type declarations rather than assumed. That check found two real defects, both fixed: `sendSignal` takes two positional arguments (a signal and a `resourceId`/`threadId` target) and returns an `accepted` promise reporting `wake`/`deliver`/`persist`/`discard`/`blocked` — so the runtime now refuses to acknowledge a signal the agent discarded, which would otherwise have silently dropped evidence. And `model` is a required Agent option, so an unconfigured deployment no longer constructs a broken agent; it retains signals until `PAPYRUS_INVESTIGATION_MODEL` is set. Installing `@mastra/core @mastra/libsql` and running a live end-to-end delivery remains the outstanding step.
+
+The Observation API is an advanced custom-ingestion contract, not the primary production collection workflow. Selecting **Connect** registers a source identity and opens a one-record validation/developer bridge that mints a one-hour source-scoped token. Production telemetry should use native SIEM, EDR, OTEL, email, or OT connectors; unattended custom producers require customer-approved workload identity or mTLS plus durable spooling and batching. Waiting custom sources remain in the catalog rather than appearing as operational. Exchange now has a Microsoft Graph delta-polling and send-mail boundary, but customer deployments must supply the approved vault/workload-identity credential resolver before it performs external calls. Live Teams command handling, additional native security connectors, the customer-vault resolver, and the Starlings process adapter remain implementation slices. Pull integrations cannot activate until their driver is registered, and configuration-only tests leave health unknown rather than pretending that saving a connector performed live network validation.
 
 ## Verification
 

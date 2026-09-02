@@ -550,15 +550,100 @@ export interface CyberClaim {
   publishedAt: string
 }
 
+export interface CyberInvestigation {
+  id: string
+  title: string
+  trigger: 'email' | 'teams' | 'manual' | 'signal' | 'schedule'
+  triggerIntegrationId?: string
+  triggerMessageId?: string
+  mastraThreadId?: string
+  status: 'open' | 'analyzing' | 'action_proposed' | 'awaiting_approval' | 'executing' | 'resolved' | 'abandoned'
+  summary?: string
+  claimIds: string[]
+  proposalIds: string[]
+  createdAt: string
+  updatedAt: string
+}
+
 export interface CyberActionProposal {
   id: string
+  investigationId: string
   proposedByOperatorId: string
   executorIntegrationId: string
   action: string
   target: string
+  parameters?: Record<string, unknown>
   rationaleClaimIds: string[]
   simulationId?: string
-  status: 'proposed' | 'approved' | 'denied' | 'executed' | 'failed'
+  status: 'proposed' | 'approved' | 'denied' | 'expired' | 'executing' | 'executed' | 'failed'
   requiredRole: 'Papyrus.Action.Approve'
+  approvedByOid?: string
+  approvedAt?: string
+  deniedByOid?: string
+  deniedAt?: string
+  denialReason?: string
+  expiresAt?: string
+  idempotencyKey: string
   proposedAt: string
+  decidedAt?: string
+}
+
+export interface CyberActionJob {
+  id: string
+  proposalId: string
+  investigationId: string
+  executorIntegrationId: string
+  action: string
+  target: string
+  parameters?: Record<string, unknown>
+  idempotencyKey: string
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+  attempt: number
+  maxAttempts: number
+  lockedBy?: string
+  lockedAt?: string
+  leaseExpiresAt?: string
+  startedAt?: string
+  completedAt?: string
+  error?: string
+  /** When set, the job must not be claimed until this instant (retry backoff). */
+  runAfter?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CyberActionAttempt {
+  id: string
+  jobId: string
+  attempt: number
+  workerId: string
+  startedAt: string
+  completedAt?: string
+  success: boolean
+  error?: string
+  resultJson?: string
+}
+
+export interface CyberActionReceipt {
+  id: string
+  jobId: string
+  proposalId: string
+  investigationId: string
+  executorIntegrationId: string
+  action: string
+  target: string
+  result: 'success' | 'partial' | 'failure'
+  message: string
+  evidenceObservationId?: string
+  executedAt: string
+}
+
+export interface CyberSignal {
+  id: string
+  type: 'new_claim' | 'contradiction' | 'evidence_threshold' | 'approval_decision' | 'execution_receipt' | 'investigation_created' | 'action_proposed' | 'stale_investigation' | 'posture_review'
+  investigationId?: string
+  proposalId?: string
+  claimId?: string
+  payload: Record<string, unknown>
+  emittedAt: string
 }

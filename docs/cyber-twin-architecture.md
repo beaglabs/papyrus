@@ -31,3 +31,15 @@ Integration configuration is never Terrain. The graph contains only entities and
 Evidence and Terrain catalog entries are not promises that Papyrus can reach into a customer system. They are guided Observation API profiles: each exposes accepted schemas, a generated ingestion route, and customer-run push instructions. Human interfaces, agent protocols, controlled-action executors, and secret infrastructure retain separate integration boundaries because they do more than publish evidence.
 
 The same substrate can be tested under message loss, operator loss, partitions, contradictory evidence, and recovery without changing the product boundary.
+
+## Durable agent plane
+
+Investigation work is driven by durable signals, not by in-memory events. Terrain and investigation changes are written to a leased `cyber_signal_outbox` table and drained into the agent harness by a periodic worker. A signal is acked only after delivery succeeds and retried with exponential backoff otherwise.
+
+Three properties follow, and they are the reason the outbox exists rather than an event emitter:
+
+- **Restart safety.** A daemon that dies mid-delivery leaves the signal `pending`. The next start drains it. Nothing is lost to a process boundary.
+- **Idempotent thread binding.** An investigation binds to one agent thread, once. Rebinding the same thread is a no-op; rebinding a different thread is refused, so a restart cannot silently split one investigation across two threads.
+- **Graceful absence.** If the agent harness is not installed, signals accumulate durably and the daemon says so. An uninstalled dependency degrades a capability; it does not drop data or fake success.
+
+The agent sees read-only investigation tools. Actions remain on the human path described in step 7: the agent proposes, and an Entra-authorized operator releases.

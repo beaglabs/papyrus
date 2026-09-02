@@ -1,4 +1,7 @@
 import type {
+  CyberActionProposal,
+  CyberActionReceipt,
+  CyberInvestigation,
   EntraAppRole,
   IntegrationConfiguration,
   IntegrationEvent,
@@ -15,6 +18,8 @@ import { catalogEntry, INTEGRATION_CATALOG } from './catalog.js'
 import type { CyberConfig } from './config.js'
 import { CyberDatabase, type CreateIntegrationInput } from './database.js'
 import { hasAppRole } from './entra-auth.js'
+import type { ActionStore } from './action-store.js'
+import type { ActionExecutorRegistry, ActionWorker } from './action-worker.js'
 import type { IntegrationSyncRuntime } from './sync-worker.js'
 import { normalizeSourceRecord, SourceNormalizationError } from './source-profiles.js'
 import { SourceRecordConflictError, TerrainStore } from './terrain-store.js'
@@ -112,10 +117,20 @@ function terrainRelationship(value: unknown, index: number): TerrainRelationship
 export class CyberService {
   readonly license: LicenseService
   readonly terrain: TerrainStore
+  readonly actions: ActionStore | undefined
 
-  constructor(readonly db: CyberDatabase, readonly config: CyberConfig, terrain?: TerrainStore, readonly syncRuntime?: IntegrationSyncRuntime) {
+  constructor(
+    readonly db: CyberDatabase,
+    readonly config: CyberConfig,
+    terrain?: TerrainStore,
+    readonly syncRuntime?: IntegrationSyncRuntime,
+    actionStore?: ActionStore,
+    readonly executorRegistry?: ActionExecutorRegistry,
+    readonly actionWorker?: ActionWorker,
+  ) {
     this.license = new LicenseService(db, config.dataDir, config.profile, config.licenseAuthorities, config.licenseRequired)
     this.terrain = terrain ?? new TerrainStore(db)
+    this.actions = actionStore
   }
 
   overview(principal: PortalPrincipal): PortalOverview {
@@ -323,6 +338,154 @@ export class CyberService {
     requireRole(principal, 'Papyrus.Audit.View')
     this.integration(id)
     return this.db.listEvents(id)
+  }
+
+  // ─── Investigations ──────────────────────────────────────────────
+
+  listInvestigations(principal: PortalPrincipal): CyberInvestigation[] {
+    this.requirePortalAccess(principal)
+    if (!this.actions) return []
+    return this.actions.listInvestigations()
+  }
+
+  getInvestigation(principal: PortalPrincipal, id: string): CyberInvestigation {
+    this.requirePortalAccess(principal)
+    if (!this.actions) throw new CyberServiceError(404, 'NOT_FOUND', 'Action store not initialized')
+    const investigation = this.actions.getInvestigation(id)
+    if (!investigation) throw new CyberServiceError(404, 'INVESTIGATION_NOT_FOUND', 'Investigation not found')
+    return investigation
+  }
+
+  createInvestigation(
+    principal: PortalPrincipal,
+    title: string,
+    trigger: CyberInvestigation['trigger'],
+    triggerIntegrationId?: string,
+    triggerMessageId?: string,
+    mastraThreadId?: string,
+  ): CyberInvestigation {
+    this.requirePortalAccess(principal)
+    if (!this.actions) throw new CyberServiceError(503, 'ACTION_STORE_UNAVAILABLE', 'Action store is not initialized')
+    return this.actions.createInvestigation({
+      title: cleanText(title, 'title', 512),
+      trigger,
+      ...(triggerIntegrationId ? { triggerIntegrationId: cleanText(triggerIntegrationId, 'triggerIntegrationId', 128) } : {}),
+      ...(triggerMessageId ? { triggerMessageId: cleanText(triggerMessageId, 'triggerMessageId', 512) } : {}),
+      ...(mastraThreadId ? { mastraThreadId: cleanText(mastraThreadId, 'mastraThreadId', 512) } : {}),
+    })
+  }
+
+  // ─── Action Proposals ───────────────────────────────────────────
+
+  listProposals(principal: PortalPrincipal, investigationId?: string): CyberActionProposal[] {
+    this.requirePortalAccess(principal)
+    if (!this.actions) return []
+    return this.actions.listProposals(investigationId)
+  }
+
+  createProposal(
+    principal: PortalPrincipal,
+    investigationId: string,
+    executorIntegrationId: string,
+    action: string,
+    target: string,
+    rationaleClaimIds: string[],
+    parameters?: Record<string, unknown>,
+    expiresAt?: string,
+  ): CyberActionProposal {
+    // Proposing an operational action drives a live integration, so it carries
+    // the same management role as the rest of the integration surface rather
+    // than being open to any assigned portal role.
+    requireRole(principal, 'Papyrus.Integration.Manage')
+    if (!this.actions) throw new CyberServiceError(503, 'ACTION_STORE_UNAVAILABLE', 'Action store is not initialized')
+    const investigation = this.actions.getInvestigation(investigationId)
+    if (!investigation) throw new CyberServiceError(404, 'INVESTIGATION_NOT_FOUND', 'Investigation not found')
+    const executor = this.requireExecutable(executorIntegrationId)
+    const proposal = this.actions.createProposal({
+      investigationId, proposedByOperatorId: principal.oid,
+      executorIntegrationId: cleanText(executorIntegrationId, 'executorIntegrationId', 128),
+      action: cleanText(action, 'action', 256),
+      target: cleanText(target, 'target', 1024),
+      ...(parameters ? { parameters: record(parameters, 'parameters') } : {}),
+      rationaleClaimIds,
+      ...(expiresAt ? { expiresAt: timestamp(expiresAt, 'expiresAt') } : {}),
+    })
+    this.db.recordActionEvent(executor.id, principal.oid, 'ActionProposed', {
+      proposalId: proposal.id, investigationId, action: proposal.action, target: proposal.target,
+      rationaleClaimIds: proposal.rationaleClaimIds,
+    })
+    return proposal
+  }
+
+  approveProposal(principal: PortalPrincipal, proposalId: string): CyberActionProposal {
+    requireRole(principal, 'Papyrus.Action.Approve')
+    if (!this.actions) throw new CyberServiceError(503, 'ACTION_STORE_UNAVAILABLE', 'Action store is not initialized')
+    const proposal = this.actions.getProposal(proposalId)
+    if (!proposal) throw new CyberServiceError(404, 'PROPOSAL_NOT_FOUND', 'Action proposal not found')
+    // An approval that cannot produce executable work is refused rather than
+    // recorded, so the ledger never holds an authorized action with nothing
+    // able to run it.
+    this.requireExecutable(proposal.executorIntegrationId)
+    if (!this.actionWorker) throw new CyberServiceError(503, 'ACTION_WORKER_UNAVAILABLE', 'Action worker is not running; approvals cannot be executed')
+    try {
+      const approved = this.actions.approveProposal(proposalId, principal.oid)
+      const job = this.actions.enqueueJob(approved, this.actionWorker.defaultMaxAttempts)
+      this.db.recordActionEvent(approved.executorIntegrationId, principal.oid, 'ActionApproved', {
+        proposalId: approved.id, investigationId: approved.investigationId, jobId: job.id,
+        action: approved.action, target: approved.target,
+        idempotencyKey: approved.idempotencyKey,
+      })
+      return approved
+    } catch (cause) {
+      throw new CyberServiceError(409, 'PROPOSAL_STATE_ERROR', cause instanceof Error ? cause.message : 'Cannot approve proposal')
+    }
+  }
+
+  denyProposal(principal: PortalPrincipal, proposalId: string, reason?: string): CyberActionProposal {
+    requireRole(principal, 'Papyrus.Action.Approve')
+    if (!this.actions) throw new CyberServiceError(503, 'ACTION_STORE_UNAVAILABLE', 'Action store is not initialized')
+    const proposal = this.actions.getProposal(proposalId)
+    if (!proposal) throw new CyberServiceError(404, 'PROPOSAL_NOT_FOUND', 'Action proposal not found')
+    try {
+      const denied = this.actions.denyProposal(proposalId, principal.oid, reason)
+      this.db.recordActionEvent(denied.executorIntegrationId, principal.oid, 'ActionDenied', {
+        proposalId: denied.id, investigationId: denied.investigationId,
+        action: denied.action, target: denied.target,
+        ...(denied.denialReason ? { reason: denied.denialReason } : {}),
+      })
+      return denied
+    } catch (cause) {
+      throw new CyberServiceError(409, 'PROPOSAL_STATE_ERROR', cause instanceof Error ? cause.message : 'Cannot deny proposal')
+    }
+  }
+
+  /**
+   * Resolve an integration that is allowed to execute actions, is currently
+   * active, and has an installed executor for its connector type. The same rule
+   * governs proposing and approving, so an action can never enter the ledger
+   * against an integration that is unable to carry it out.
+   */
+  private requireExecutable(executorIntegrationId: string): IntegrationConfiguration {
+    const executor = this.db.getIntegration(executorIntegrationId)
+    if (!executor) throw new CyberServiceError(404, 'INTEGRATION_NOT_FOUND', 'Executor integration not found')
+    // Exchange is a bidirectional human adapter: it can receive evidence and
+    // also carry an explicitly approved notification. Other executors must be
+    // declared action-capable by their catalog authority/class.
+    const isApprovedEmailExecutor = executor.catalogId === 'exchange-email'
+    if (!isApprovedEmailExecutor && executor.integrationClass !== 'action_executor' && executor.authority !== 'controlled_actions') {
+      throw new CyberServiceError(400, 'NOT_AN_EXECUTOR', 'The specified integration is not an action executor')
+    }
+    if (executor.state !== 'active') throw new CyberServiceError(409, 'EXECUTOR_NOT_ACTIVE', 'Executor integration must be active')
+    if (!this.executorRegistry?.has(executor.catalogId)) {
+      throw new CyberServiceError(409, 'EXECUTOR_UNAVAILABLE', `No action executor is installed for ${executor.catalogId}`)
+    }
+    return executor
+  }
+
+  listReceipts(principal: PortalPrincipal, investigationId?: string): CyberActionReceipt[] {
+    this.requirePortalAccess(principal)
+    if (!this.actions) return []
+    return this.actions.listReceipts(investigationId)
   }
 
   requirePortalAccess(principal: PortalPrincipal): void {

@@ -194,3 +194,35 @@ p { color: var(--muted); line-height: 1.55; }
   .form-grid { grid-template-columns: 1fr; }.span-two { grid-column: auto; } [data-slot="dialog-overlay"] { padding: 10px; }.handling-banner span { display: none; }
   .command-head { align-items: stretch; flex-direction: column; }.source-setup-meta { align-items: flex-start; flex-direction: column; }.source-setup-meta code { width: 100%; }
 }
+
+/* ─── Investigations ────────────────────────────────────────────── */
+.investigations-list { display: flex; flex-direction: column; gap: 16px; }
+.investigation-card { padding: 20px; }
+.investigation-card.has-action { border-color: var(--main); border-width: 2px; box-shadow: 4px 4px 0 var(--main); }
+.investigation-header { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.investigation-title-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.investigation-title-row h3 { margin: 0; flex: 1; }
+.investigation-meta { color: var(--muted); font-size: 12px; }
+.investigation-summary { margin: 8px 0; }
+
+.action-flag { color: var(--main); font-size: 20px; line-height: 1; }
+.action-flag-small { color: var(--main); font-size: 14px; }
+
+.proposals-section { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #ddd; }
+.proposal-item { padding: 12px; background: rgba(255, 95, 31, 0.04); border: 1px solid #e0ddd5; border-radius: var(--radius); display: flex; flex-direction: column; gap: 4px; }
+.proposal-header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.proposal-target { font-size: 11px; color: var(--muted); background: #f5f1e8; padding: 2px 6px; border-radius: 3px; }
+.proposal-rationale { color: var(--muted); font-size: 11px; }
+.proposal-denial { color: var(--rose); font-size: 11px; }
+.proposal-receipt { display: flex; align-items: center; gap: 6px; }
+.proposal-receipt small { color: var(--muted); font-size: 11px; }
+.proposal-actions { display: flex; gap: 8px; margin-top: 4px; }
+.approval-hint { color: var(--muted); font-size: 11px; font-style: italic; }
+.no-proposals { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
+
+.badge.status-info { background: var(--blue); color: #111; }
+.badge.status-good { background: var(--green); color: #111; }
+.badge.status-warning { background: var(--yellow); color: #111; }
+.badge.status-critical { background: var(--main); color: #fff; }
+.badge.status-error { background: var(--rose); color: #111; }
+.badge.status-neutral { background: #e0ddd5; color: var(--muted); }

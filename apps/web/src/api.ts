@@ -1,27 +1,26 @@
-import type { AdminOverview, ApprovedSource, ApprovedSourceKind, SourceSearchResult, Approval, Artifact, Attachment, Elicitation, Invitation, McpServer, Principal, ResearchSource, Role, Session, SessionEvent, SessionRun } from '@papyrus/contracts'
+import type {
+  IntegrationCatalogEntry,
+  IntegrationConfiguration,
+  IntegrationEvent,
+  PortalOverview,
+  PortalPrincipal,
+} from '@papyrus/contracts'
 
-export interface Health {
-  topology: 'on-premises'
+export interface PublicConfig {
+  organizationName: string
   profile: string
-  cedar: string
-  bootstrapRequired: boolean
-  branding: {
-    organizationName: string
-    organizationDomain?: string
-    logoUrl?: string
-  }
+  cloud: 'Public' | 'USGov' | 'USGovDoD'
+  entraConfigured: boolean
+  developmentIdentity: boolean
+  loginUrl: string
 }
 
-export interface AuthenticationChallenge {
-  error: 'authentication_required'
-  code: 'UNAUTHENTICATED'
-  methods: Array<'oidc' | 'mtls' | 'mtls-proxy'>
-  login_url?: string
-}
-
-export interface ShellData {
-  me: Principal
-  health: Health
+export interface PortalData {
+  config: PublicConfig
+  me: PortalPrincipal
+  overview: PortalOverview
+  catalog: IntegrationCatalogEntry[]
+  integrations: IntegrationConfiguration[]
 }
 
 export class ApiError extends Error {
@@ -29,212 +28,57 @@ export class ApiError extends Error {
 }
 
 export class AuthenticationRequired extends ApiError {
-  constructor(readonly challenge: AuthenticationChallenge, readonly health: Health) {
-    super(401, challenge.code, 'Authentication required')
-  }
-}
-
-export class EnrollmentRequired extends ApiError {
-  constructor(readonly health: Health) {
-    super(403, 'INVITATION_REQUIRED', 'No pending identity matches this organizational identity')
-  }
+  constructor() { super(401, 'ENTRA_AUTHENTICATION_REQUIRED', 'Microsoft Entra authentication is required') }
 }
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
-    headers: { 'content-type': 'application/json', ...init?.headers },
     credentials: 'same-origin',
+    headers: { accept: 'application/json', ...(init?.body ? { 'content-type': 'application/json' } : {}), ...init?.headers },
   })
   const result = await response.json().catch(() => null) as T | { error?: string; code?: string }
   if (!response.ok) {
-    if (response.status === 401) window.dispatchEvent(new CustomEvent('papyrus:unauthenticated'))
-    const message = result && typeof result === 'object' && 'error' in result && typeof result.error === 'string'
-      ? result.error
-      : `Request failed (${response.status})`
-    const code = result && typeof result === 'object' && 'code' in result && typeof result.code === 'string'
-      ? result.code
-      : 'REQUEST_FAILED'
+    if (response.status === 401) throw new AuthenticationRequired()
+    const message = result && typeof result === 'object' && 'error' in result && typeof result.error === 'string' ? result.error : `Request failed (${response.status})`
+    const code = result && typeof result === 'object' && 'code' in result && typeof result.code === 'string' ? result.code : 'REQUEST_FAILED'
     throw new ApiError(response.status, code, message)
   }
   return result as T
 }
 
-export async function loadShell(): Promise<ShellData> {
-  const health = await api<Health>('/api/health')
-  const meResponse = await fetch('/api/me', { credentials: 'same-origin', headers: { accept: 'application/json' } })
-  if (meResponse.status === 401) {
-    const challenge = await meResponse.json() as AuthenticationChallenge
-    throw new AuthenticationRequired(challenge, health)
-  }
-  if (meResponse.status === 403) {
-    const failure = await meResponse.json().catch(() => null) as { code?: string } | null
-    if (failure?.code === 'INVITATION_REQUIRED') throw new EnrollmentRequired(health)
-  }
-  if (!meResponse.ok) throw new ApiError(meResponse.status, 'IDENTITY_FAILED', 'Unable to load identity')
-  const me = await meResponse.json() as Principal
-  return { me, health }
+export async function loadPortal(): Promise<PortalData> {
+  const config = await api<PublicConfig>('/api/config/public')
+  const [me, overview, catalog, integrations] = await Promise.all([
+    api<PortalPrincipal>('/api/me'),
+    api<PortalOverview>('/api/portal/overview'),
+    api<{ integrations: IntegrationCatalogEntry[] }>('/api/integrations/catalog'),
+    api<{ integrations: IntegrationConfiguration[] }>('/api/integrations'),
+  ])
+  return { config, me, overview, catalog: catalog.integrations, integrations: integrations.integrations }
 }
 
-export async function logout(): Promise<void> {
-  await api('/api/auth/logout', { method: 'POST' })
+export async function publicConfig(): Promise<PublicConfig> { return api('/api/config/public') }
+
+export async function createIntegration(input: {
+  catalogId: string
+  name: string
+  endpoint?: string
+  scope: string
+  credentialRef?: string
+  settings: Record<string, string | number | boolean>
+}): Promise<IntegrationConfiguration> {
+  return api('/api/integrations', { method: 'POST', body: JSON.stringify(input) })
 }
 
-export interface SessionPage {
-  sessions: Session[]
-  nextCursor?: string
-}
-
-export async function sessionPage(cursor?: string): Promise<SessionPage> {
-  const query = new URLSearchParams({ limit: '50' })
-  if (cursor) query.set('cursor', cursor)
-  return api(`/api/sessions?${query}`)
-}
-
-export async function createSession(title: string): Promise<Session> {
-  return api('/api/sessions', { method: 'POST', body: JSON.stringify({ title }) })
-}
-
-export async function sessionEvents(sessionId: string): Promise<SessionEvent[]> {
-  const events: SessionEvent[] = []
-  let after = 0
-  for (;;) {
-    const page = await api<{ events: SessionEvent[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/events?after=${after}&limit=1000`)
-    events.push(...page.events)
-    if (page.events.length < 1000) return events
-    after = page.events.at(-1)?.sequence ?? after
-  }
-}
-
-export async function promptSession(sessionId: string, prompt: string, attachmentIds: string[] = []): Promise<{ run: SessionRun }> {
-  return api(`/api/sessions/${encodeURIComponent(sessionId)}/prompts`, { method: 'POST', body: JSON.stringify({ prompt, attachmentIds }) })
-}
-
-export async function sessionAttachments(sessionId: string): Promise<Attachment[]> {
-  return (await api<{ attachments: Attachment[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/attachments`)).attachments
-}
-
-export async function uploadAttachment(sessionId: string, file: File): Promise<Attachment> {
-  return api(`/api/sessions/${encodeURIComponent(sessionId)}/attachments`, {
-    method: 'POST', body: file,
-    headers: { 'content-type': file.type || 'application/octet-stream', 'x-papyrus-file-name': encodeURIComponent(file.name) },
+export async function transitionIntegration(id: string, action: 'test' | 'submit' | 'activate' | 'disable', reason?: string): Promise<IntegrationConfiguration> {
+  return api(`/api/integrations/${encodeURIComponent(id)}/${action}`, {
+    method: 'POST', body: JSON.stringify(reason ? { reason } : {}),
   })
 }
 
-export async function cancelSession(sessionId: string): Promise<{ cancelled: boolean }> {
-  return api(`/api/sessions/${encodeURIComponent(sessionId)}/cancel`, { method: 'POST' })
+export async function integrationEvents(id: string): Promise<IntegrationEvent[]> {
+  return (await api<{ events: IntegrationEvent[] }>(`/api/integrations/${encodeURIComponent(id)}/events`)).events
 }
 
-export async function resumeSession(sessionId: string): Promise<Session> {
-  return api(`/api/sessions/${encodeURIComponent(sessionId)}/resume`, { method: 'POST' })
-}
-
-export async function deleteSession(sessionId: string): Promise<void> {
-  await api(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE' })
-}
-
-export async function sessionRuns(sessionId: string): Promise<SessionRun[]> {
-  return (await api<{ runs: SessionRun[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/runs`)).runs
-}
-
-export interface MastraGoal { objective?: string; status?: string; completed?: boolean; [key: string]: unknown }
-export async function sessionGoal(sessionId: string): Promise<MastraGoal | null> {
-  return (await api<{ goal: MastraGoal | null }>(`/api/sessions/${encodeURIComponent(sessionId)}/goal`)).goal
-}
-export async function setSessionGoal(sessionId: string, objective: string): Promise<MastraGoal> {
-  return (await api<{ goal: MastraGoal }>(`/api/sessions/${encodeURIComponent(sessionId)}/goal`, { method: 'PUT', body: JSON.stringify({ objective }) })).goal
-}
-export async function clearSessionGoal(sessionId: string): Promise<void> {
-  await api(`/api/sessions/${encodeURIComponent(sessionId)}/goal`, { method: 'DELETE' })
-}
-export async function sendBrowserInput(sessionId: string, input: Record<string, unknown>): Promise<void> {
-  await api(`/api/sessions/${encodeURIComponent(sessionId)}/browser/input`, { method: 'POST', body: JSON.stringify(input) })
-}
-
-export async function sessionArtifacts(sessionId: string): Promise<Artifact[]> {
-  return (await api<{ artifacts: Artifact[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/artifacts`)).artifacts
-}
-
-export async function sessionApprovals(sessionId: string): Promise<Approval[]> {
-  return (await api<{ approvals: Approval[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/approvals`)).approvals
-}
-
-export async function decideApproval(sessionId: string, approvalId: string, decision: 'approved' | 'denied', reason?: string): Promise<Approval> {
-  return api(`/api/sessions/${encodeURIComponent(sessionId)}/approvals/${encodeURIComponent(approvalId)}/decision`, {
-    method: 'POST', body: JSON.stringify({ decision, ...(reason?.trim() ? { reason: reason.trim() } : {}) }),
-  })
-}
-
-export async function sessionElicitations(sessionId: string): Promise<Elicitation[]> {
-  return (await api<{ elicitations: Elicitation[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/elicitations`)).elicitations
-}
-
-export async function respondElicitation(sessionId: string, elicitationId: string, response: Record<string, unknown>): Promise<Elicitation> {
-  return api(`/api/sessions/${encodeURIComponent(sessionId)}/elicitations/${encodeURIComponent(elicitationId)}/response`, { method: 'POST', body: JSON.stringify(response) })
-}
-
-export async function sessionSources(sessionId: string): Promise<ResearchSource[]> {
-  return (await api<{ sources: ResearchSource[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/sources`)).sources
-}
-
-export async function researchSources(): Promise<ResearchSource[]> {
-  return (await api<{ sources: ResearchSource[] }>('/api/sources')).sources
-}
-
-export async function adminOverview(): Promise<AdminOverview> { return api('/api/admin/overview') }
-export async function createInvitation(input: {
-  identityValue: string
-  displayName: string
-  email?: string
-  role: Role
-}): Promise<Invitation> {
-  return api('/api/invitations', { method: 'POST', body: JSON.stringify(input) })
-}
-
-export async function cancelInvitation(invitationId: string): Promise<Invitation> {
-  return api(`/api/invitations/${encodeURIComponent(invitationId)}`, { method: 'DELETE' })
-}
-
-export async function addUserRole(userId: string, role: Role): Promise<Principal> {
-  return api(`/api/users/${encodeURIComponent(userId)}/roles`, { method: 'POST', body: JSON.stringify({ role }) })
-}
-export async function revokeUserSessions(userId: string): Promise<void> {
-  await api(`/api/users/${encodeURIComponent(userId)}/revoke-sessions`, { method: 'POST' })
-}
-export async function addMcpServer(name: string, endpoint: string): Promise<{ server: McpServer; authorizationUrl?: string }> {
-  return api('/api/mcp/servers', { method: 'POST', body: JSON.stringify({ name, endpoint }) })
-}
-export async function retryMcpServer(serverId: string): Promise<{ server: McpServer; authorizationUrl?: string }> {
-  return api(`/api/mcp/servers/${encodeURIComponent(serverId)}/retry`, { method: 'POST' })
-}
-export async function saveMcpOauthClient(input: { issuer: string; clientId: string; clientSecret?: string; scopes?: string }): Promise<void> {
-  await api('/api/mcp/oauth/clients', { method: 'PUT', body: JSON.stringify(input) })
-}
-export async function deleteMcpOauthClient(issuer: string): Promise<void> {
-  await api(`/api/mcp/oauth/clients/${encodeURIComponent(issuer)}`, { method: 'DELETE' })
-}
-export async function deleteMcpServer(serverId: string): Promise<void> {
-  await api(`/api/mcp/servers/${encodeURIComponent(serverId)}`, { method: 'DELETE' })
-}
-export async function setMcpServerEnabled(serverId: string, enabled: boolean): Promise<McpServer> {
-  return api(`/api/mcp/servers/${encodeURIComponent(serverId)}/state`, { method: 'POST', body: JSON.stringify({ enabled }) })
-}
-export async function revokeToolGrant(grantId: string): Promise<void> {
-  await api(`/api/mcp/grants/${encodeURIComponent(grantId)}`, { method: 'DELETE' })
-}
-
-export async function approvedSources(): Promise<ApprovedSource[]> {
-  return (await api<{sources: ApprovedSource[]}>('/api/sources')).sources
-}
-export async function searchApprovedSources(query: string): Promise<SourceSearchResult[]> {
-  return (await api<{results: SourceSearchResult[]}>(`/api/sources/search?q=${encodeURIComponent(query)}`)).results
-}
-export async function createApprovedSource(input: {name:string;kind:ApprovedSourceKind;locator:string;mode:'snapshot'|'live'}): Promise<ApprovedSource> {
-  return api('/api/admin/sources',{method:'POST',body:JSON.stringify(input)})
-}
-export async function assignApprovedSource(sourceId:string,userId:string,assigned:boolean): Promise<void> {
-  await api(`/api/admin/sources/${encodeURIComponent(sourceId)}/assignments/${encodeURIComponent(userId)}`,{method:'PUT',body:JSON.stringify({assigned})})
-}
-export async function ingestApprovedSource(sourceId:string,input:{uri:string;title:string;mediaType:string;content:string}): Promise<void> {
-  await api(`/api/admin/sources/${encodeURIComponent(sourceId)}/documents`,{method:'POST',body:JSON.stringify(input)})
-}
+export async function logout(): Promise<void> { await api('/api/auth/logout', { method: 'POST', body: '{}' }) }

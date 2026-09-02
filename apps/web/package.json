@@ -11,9 +11,6 @@
     "lint": "tsc -b --pretty false"
   },
   "dependencies": {
-    "@mastra/client-js": "^1.42.0",
-    "@mastra/react": "^1.4.5",
-    "@mcp-ui/client": "^7.1.1",
     "@papyrus/contracts": "workspace:*",
     "@vitejs/plugin-react": "6.0.5",
     "react": "19.2.3",

@@ -1,31 +1,19 @@
-import { AuthService } from './auth.js'
-import { loadConfig } from './config.js'
-import { PapyrusDatabase } from './db.js'
-import { createGatewayServer } from './gateway.js'
-import { createPapyrusServer } from './http.js'
-import { createPapyrusMastra } from './mastra/server.js'
-import { PapyrusService } from './service.js'
+import { loadCyberConfig } from './cyber/config.js'
+import { CyberDatabase } from './cyber/database.js'
+import { EntraAuthService } from './cyber/entra-auth.js'
+import { createCyberServer } from './cyber/http.js'
+import { CyberService } from './cyber/service.js'
 
-const config = loadConfig()
-const database = new PapyrusDatabase(config.databasePath)
-const auth = new AuthService(config, database)
-const { mastra, workspaces } = createPapyrusMastra(config, database)
-const service = new PapyrusService(database, config, mastra, workspaces)
-const server = createPapyrusServer(config, service, auth)
-const gateway = config.gateway ? createGatewayServer(config, service, auth) : undefined
+const config = loadCyberConfig()
+const database = new CyberDatabase(config.databasePath)
+const auth = new EntraAuthService(config)
+const service = new CyberService(database, config)
+const server = createCyberServer(config, service, auth)
 
 server.listen(config.port, config.host, () => {
-  console.log(`Papyrus ${config.mode} server listening at ${config.publicOrigin}`)
-  console.log(`Profile: ${config.profile}; deployment: ${service.license.deploymentId}`)
+  console.log(`Papyrus Cyber Twin listening at ${config.publicOrigin}`)
+  console.log(`Profile: ${config.profile}; Entra cloud: ${config.cloud}; deployment: ${service.license.deploymentId}`)
 })
-
-if (gateway && config.gateway) {
-  gateway.listen(config.gateway.port, config.gateway.host, () => {
-    const protocol = config.gateway!.tls ? 'https' : 'http'
-    const host = config.gateway!.host.includes(':') && !config.gateway!.host.startsWith('[') ? `[${config.gateway!.host}]` : config.gateway!.host
-    console.log(`Papyrus ACP Streamable HTTP listening at ${protocol}://${host}:${config.gateway!.port}/acp`)
-  })
-}
 
 let stopping = false
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
@@ -35,10 +23,8 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 async function shutdown(): Promise<void> {
   if (stopping) return
   stopping = true
-  await service.shutdown()
   server.closeAllConnections()
-  gateway?.closeAllConnections()
-  await Promise.all([closeServer(server), ...(gateway ? [closeServer(gateway)] : [])])
+  await closeServer(server)
   database.close()
   process.exit(0)
 }

@@ -1,195 +1,122 @@
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { api, AuthenticationRequired, EnrollmentRequired, loadShell, logout, type AuthenticationChallenge, type Health, type ShellData } from './api.js'
-import { SessionHarness } from './Sessions.js'
-import { SourcesView } from './Sources.js'
-import { AdminView } from './Admin.js'
-import { Alert, Avatar, Badge, Button, Card, DropdownMenu, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, Input } from './components/ui/index.js'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import type { PortalData, PublicConfig } from './api.js'
+import { AuthenticationRequired, loadPortal, logout, publicConfig } from './api.js'
+import { IntegrationsView } from './Integrations.js'
+import { Alert, Avatar, Badge, Button, Card, DropdownMenu, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from './components/ui/index.js'
 
-type View = 'home' | 'sessions' | 'sources' | 'administration'
-type AppState =
-  | { phase: 'loading' }
-  | { phase: 'signed-out'; health: Health; challenge: AuthenticationChallenge }
-  | { phase: 'enrollment-required'; health: Health }
-  | { phase: 'ready'; data: ShellData }
-  | { phase: 'error'; message: string }
+export type PortalView = 'posture' | 'terrain' | 'investigations' | 'integrations' | 'governance'
+type AppState = { phase: 'loading' } | { phase: 'signed-out'; config: PublicConfig } | { phase: 'ready'; data: PortalData } | { phase: 'error'; message: string }
 
-function Logo() {
-  return <div className="brand"><span className="brand-mark" aria-hidden="true">P</span><span>PAPYRUS</span></div>
+const ROUTES: Record<PortalView, string> = {
+  posture: '/portal', terrain: '/portal/terrain', investigations: '/portal/investigations',
+  integrations: '/portal/integrations', governance: '/portal/governance',
 }
 
-function OrganizationMark({ health }: { health: Health }) {
-  const [failed, setFailed] = useState(false)
-  const name = health.branding.organizationName
-  return <Avatar className="organization-mark">{health.branding.logoUrl && !failed
-    ? <img src={health.branding.logoUrl} alt={`${name} logo`} referrerPolicy="no-referrer" onError={() => setFailed(true)} />
-    : <span aria-hidden="true">{initials(name)}</span>}</Avatar>
+function viewFromPath(): PortalView {
+  return (Object.entries(ROUTES).find(([, route]) => window.location.pathname === route)?.[0] as PortalView | undefined) ?? 'posture'
 }
 
-function UserAvatar({ name, pictureUrl }: { name: string; pictureUrl?: string }) {
-  const [failed, setFailed] = useState(false)
-  return <Avatar className="avatar">{pictureUrl && !failed
-    ? <img src={pictureUrl} alt="" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
-    : <span aria-hidden="true">{initials(name)}</span>}</Avatar>
-}
-
-function HandlingBanner({ profile }: { profile: string }) {
-  const government = profile.startsWith('government')
-  return <div className={`handling-banner ${government ? 'government' : 'commercial'}`} role="status">
-    <strong>{profileLabel(profile)}</strong>
-    <span>{government ? 'AUTHORIZED USE ONLY · FOLLOW ORGANIZATION HANDLING REQUIREMENTS' : 'COMMERCIAL DEPLOYMENT'}</span>
-  </div>
-}
+function Logo() { return <div className="brand"><span className="brand-mark" aria-hidden="true">P</span><span>PAPYRUS</span></div> }
+function initials(name: string) { return name.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') }
+function profileLabel(profile: string) { return ({ gcc: 'GCC', gcch: 'GCC HIGH', dod: 'DOD', restricted: 'RESTRICTED', disconnected: 'DISCONNECTED' } as Record<string, string>)[profile] ?? profile.toUpperCase() }
 
 export function App() {
   const [state, setState] = useState<AppState>({ phase: 'loading' })
-  const [view, setView] = useState<View>('home')
-  const [newSessionRequest, setNewSessionRequest] = useState(0)
+  const [view, setView] = useState<PortalView>(viewFromPath)
 
   const refresh = useCallback(async () => {
-    setState({ phase: 'loading' })
-    try {
-      setState({ phase: 'ready', data: await loadShell() })
-    } catch (cause) {
-      if (cause instanceof AuthenticationRequired) setState({ phase: 'signed-out', health: cause.health, challenge: cause.challenge })
-      else if (cause instanceof EnrollmentRequired) setState({ phase: 'enrollment-required', health: cause.health })
-      else setState({ phase: 'error', message: cause instanceof Error ? cause.message : 'Unable to open Papyrus' })
+    try { setState({ phase: 'ready', data: await loadPortal() }) }
+    catch (cause) {
+      if (cause instanceof AuthenticationRequired) {
+        try { setState({ phase: 'signed-out', config: await publicConfig() }) }
+        catch { setState({ phase: 'error', message: 'Unable to load deployment configuration' }) }
+      } else setState({ phase: 'error', message: cause instanceof Error ? cause.message : 'Unable to open Papyrus Cyber Twin' })
     }
   }, [])
 
   useEffect(() => { void refresh() }, [refresh])
   useEffect(() => {
-    const unauthenticated = () => { void refresh() }
-    window.addEventListener('papyrus:unauthenticated', unauthenticated)
-    return () => window.removeEventListener('papyrus:unauthenticated', unauthenticated)
-  }, [refresh])
+    const navigate = () => setView(viewFromPath())
+    window.addEventListener('popstate', navigate)
+    return () => window.removeEventListener('popstate', navigate)
+  }, [])
 
-  if (state.phase === 'loading') return <main className="center"><Logo /><p className="eyebrow">OPENING GOVERNED WORKSPACE…</p></main>
-  if (state.phase === 'error') return <main className="center login"><Logo /><p className="eyebrow">PAPYRUS IS UNAVAILABLE</p><h1>Unable to open<br />the control plane.</h1><Alert className="error">{state.message}</Alert><Button className="primary" onClick={() => void refresh()}>Try again →</Button></main>
-  if (state.phase === 'signed-out') return <SignedOut health={state.health} challenge={state.challenge} />
-  if (state.phase === 'enrollment-required') return <EnrollmentMissing health={state.health} />
-  if (state.data.me.roles.length === 0) return <><HandlingBanner profile={state.data.health.profile} />{state.data.health.bootstrapRequired
-    ? <Bootstrap me={state.data.me.displayName} onDone={refresh} />
-    : <AccessPending me={state.data.me.displayName} />}</>
-
-  const signOut = async () => {
-    await logout()
-    // Replace the entire authenticated application state after the server has
-    // revoked the token and expired the cookie. This also closes EventSource
-    // connections owned by the session harness.
-    window.location.replace('/')
+  const navigate = (next: PortalView) => {
+    window.history.pushState({}, '', ROUTES[next]); setView(next)
   }
 
-  const openNewSession = () => {
-    setView('sessions')
-    setNewSessionRequest((current) => current + 1)
-  }
+  if (state.phase === 'loading') return <main className="center portal-loading"><Logo /><div className="signal-loader"><span /><span /><span /></div><p className="eyebrow">OPENING CYBER TERRAIN…</p></main>
+  if (state.phase === 'error') return <main className="center login"><Logo /><p className="eyebrow">DAEMON UNAVAILABLE</p><h1>Unable to open<br />the cyber twin.</h1><Alert className="error">{state.message}</Alert><Button className="primary" onClick={() => { setState({ phase: 'loading' }); void refresh() }}>Try again →</Button></main>
+  if (state.phase === 'signed-out') return <SignedOut config={state.config} />
 
+  const data = state.data
+  const signOut = async () => { await logout(); window.location.replace('/portal') }
   return <>
-    <HandlingBanner profile={state.data.health.profile} />
-    <div className="shell with-handling-banner">
-      <aside className="app-sidebar">
-        <Logo />
-        <div className="classification">{profileLabel(state.data.health.profile)}</div>
-        <PrimaryNavigation view={view} canAdmin={state.data.me.roles.some((role) => role === 'Owner' || role === 'Admin')} onNavigate={setView} onNewSession={openNewSession} />
-        <div id="session-history-rail" className="session-history-rail" />
-        <div className="runtime-status"><span className="dot good" />Policy enforcement active</div>
-        <div className="sidebar-account">
-          <DropdownMenu className="account-menu" trigger={<div className="account-trigger-content">
-            <UserAvatar name={state.data.me.displayName} {...(state.data.me.pictureUrl ? { pictureUrl: state.data.me.pictureUrl } : {})} />
-            <span className="account-copy"><strong>{state.data.me.displayName}</strong><small>{state.data.me.authMethod.toUpperCase()} · {state.data.me.roles.join(' · ')}</small></span>
-            <span className="account-menu-mark" aria-hidden="true">•••</span>
-          </div>}>
-            <DropdownMenuLabel className="account-menu-label"><strong>{state.data.me.displayName}</strong><span>{state.data.me.authMethod.toUpperCase()} · {state.data.me.roles.join(' · ')}</span></DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem disabled><span>Settings</span><small>Coming later</small></DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem className="danger-item" onClick={() => void signOut()}>Sign out</DropdownMenuItem>
-          </DropdownMenu>
-        </div>
+    <div className="handling-banner government"><strong>{profileLabel(data.config.profile)}</strong><span>AUTHORIZED USE ONLY · CUSTOMER-HOSTED CYBER RESILIENCE TWIN</span></div>
+    <div className="portal-shell with-handling-banner">
+      <aside className="portal-sidebar"><Logo /><div className="classification">{profileLabel(data.config.profile)} · {data.config.cloud}</div>
+        <PrimaryNavigation view={view} onNavigate={navigate} />
+        <div className="runtime-panel"><span className="runtime-label">COLLECTIVE RUNTIME</span><strong><span className="dot good" />Starlings online</strong><small>Entra authority active</small></div>
+        <DropdownMenu className="account-menu" trigger={<div className="account-trigger-content"><Avatar className="avatar">{initials(data.me.displayName)}</Avatar><span className="account-copy"><strong>{data.me.displayName}</strong><small>ENTRA · {data.me.roles.length} ROLES</small></span><span>•••</span></div>}>
+          <DropdownMenuLabel><strong>{data.me.displayName}</strong><span>{data.me.preferredUsername ?? data.me.oid}</span></DropdownMenuLabel><DropdownMenuSeparator />
+          <DropdownMenuItem disabled>Roles managed in Microsoft Entra</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem className="danger-item" onClick={() => void signOut()}>Sign out</DropdownMenuItem>
+        </DropdownMenu>
       </aside>
-      <main>
-        {view !== 'sessions' && <header><div><p className="eyebrow">GOVERNED AGENT WORKSPACE</p><h1>{viewTitle(view)}</h1></div></header>}
-        <div className="session-workspace" hidden={view !== 'sessions'}>
-          <SessionHarness newSessionRequest={newSessionRequest} onActivate={() => setView('sessions')} />
-        </div>
-        {view !== 'sessions' && <ShellView view={view} data={state.data} onNewSession={openNewSession} />}
+      <main className="portal-main"><PortalHeader view={view} data={data} />
+        {view === 'posture' && <PostureView data={data} onOpenIntegrations={() => navigate('integrations')} />}
+        {view === 'integrations' && <IntegrationsView me={data.me} catalog={data.catalog} integrations={data.integrations} onChanged={refresh} />}
+        {view === 'terrain' && <TerrainPreview />}
+        {view === 'investigations' && <EmptyProductView eyebrow="COLLECTIVE ANALYSIS" title="Investigations" copy="Starlings investigations will assemble claims, contradictions, evidence, and attack hypotheses here—without creating chat sessions." />}
+        {view === 'governance' && <GovernanceView data={data} />}
       </main>
     </div>
   </>
 }
 
-function SignedOut({ health, challenge }: { health: Health; challenge: AuthenticationChallenge }) {
-  const government = health.profile.startsWith('government')
-  const oidc = !government && challenge.methods.includes('oidc') && challenge.login_url
-  if (!government) {
-    return <><HandlingBanner profile={health.profile} /><main className="center login auth-entry tenant-login">
-      <OrganizationMark health={health} />
-      <p className="eyebrow">ORGANIZATIONAL ACCESS</p>
-      <h1>Welcome to<br />{health.branding.organizationName}.</h1>
-      <p>Continue with your organization-managed identity. Papyrus never receives your provider password.</p>
-      <div className="auth-grid">
-        {oidc && <a className="primary" href={challenge.login_url}>Continue with {health.branding.organizationName} →</a>}
-        {challenge.methods.includes('mtls-proxy') && <Card className="profile-card"><strong>Trusted identity gateway</strong><p>Open Papyrus through your organization’s authorized access gateway.</p></Card>}
-        {challenge.methods.length === 0 && <div className="error">This deployment has no configured organizational OIDC provider.</div>}
-      </div>
-      <Logo />
-      {health.branding.logoUrl && <a className="logo-attribution" href="https://logo.dev" rel="noreferrer">Logos provided by Logo.dev</a>}
-    </main></>
+function SignedOut({ config }: { config: PublicConfig }) {
+  return <><div className="handling-banner government"><strong>{profileLabel(config.profile)}</strong><span>MICROSOFT ENTRA AUTHORITY</span></div><main className="center login cyber-login"><Logo /><p className="eyebrow">CUSTOMER-HOSTED CYBER RESILIENCE</p><h1>Your terrain.<br />Your authority.</h1><p>Papyrus accepts identity and application roles from your Microsoft Entra tenant. It does not maintain a parallel user directory.</p>{config.entraConfigured
+    ? <a className="primary" href={`/api/auth/entra/login?returnTo=${encodeURIComponent(window.location.pathname.startsWith('/portal') ? window.location.pathname : '/portal')}`}>Continue with Microsoft Entra →</a>
+    : <Alert className="error">This deployment does not have Microsoft Entra configured.</Alert>}<div className="login-facts"><span>{config.organizationName}</span><span>{profileLabel(config.profile)}</span><span>{config.cloud}</span></div></main></>
+}
+
+export function PrimaryNavigation({ view, onNavigate }: { view: PortalView; onNavigate: (view: PortalView) => void }) {
+  const items: Array<{ view: PortalView; icon: string; label: string }> = [
+    { view: 'posture', icon: '◫', label: 'Posture' }, { view: 'terrain', icon: '⌘', label: 'Cyber terrain' },
+    { view: 'investigations', icon: '◎', label: 'Investigations' }, { view: 'integrations', icon: '↗', label: 'Integrations' },
+    { view: 'governance', icon: '◇', label: 'Governance' },
+  ]
+  return <nav aria-label="Primary navigation">{items.map((item) => <Button variant="ghost" key={item.view} className={view === item.view ? 'active' : ''} onClick={() => onNavigate(item.view)}><span aria-hidden="true">{item.icon}</span>{item.label}</Button>)}</nav>
+}
+
+function PortalHeader({ view, data }: { view: PortalView; data: PortalData }) {
+  const copy: Record<PortalView, [string, string]> = {
+    posture: ['CYBER RESILIENCE TWIN', 'Operational posture'], terrain: ['EVIDENCE-BACKED TOPOLOGY', 'Cyber terrain'],
+    investigations: ['DISTRIBUTED REASONING', 'Investigations'], integrations: ['CONNECTION AND EVIDENCE PLANE', 'Integrations'],
+    governance: ['IDENTITY, LICENSING AND AUDIT', 'Governance'],
   }
-  return <><HandlingBanner profile={health.profile} /><main className="center login auth-entry"><Logo /><p className="eyebrow">GOVERNED AGENT WORKSPACE</p><h1>Identity before<br />authority.</h1><p>Papyrus binds every session, tool request, and policy decision to an authenticated organizational identity.</p><div className="auth-grid">
-    <Card className="profile-card"><strong>CAC/PIV authentication</strong><p>Insert your card, select its authentication certificate when prompted, then reload this page.</p><Button className="secondary" onClick={() => window.location.reload()}>Retry certificate authentication</Button></Card>
-    {challenge.methods.includes('mtls-proxy') && <Card className="profile-card"><strong>Trusted identity gateway</strong><p>Open Papyrus through your organization’s authorized access gateway.</p></Card>}
-  </div></main></>
+  return <header className="portal-header"><div><p className="eyebrow">{copy[view][0]}</p><h1>{copy[view][1]}</h1></div><div className="header-status"><span><i className="dot good" />DAEMON HEALTHY</span><small>{data.config.organizationName}</small></div></header>
 }
 
-function EnrollmentMissing({ health }: { health: Health }) {
-  const government = health.profile.startsWith('government')
-  return <><HandlingBanner profile={health.profile} /><main className="center login">
-    {government ? <Logo /> : <OrganizationMark health={health} />}
-    <p className="eyebrow">IDENTITY VERIFIED · ENROLLMENT REQUIRED</p>
-    <h1>No pending identity<br />matched your login.</h1>
-    <p>{government
-      ? 'Ask an Owner or Admin to create a pending CAC/PIV identity using your EDIPI, UPN, PIV UUID, FASC-N, or certificate mapping.'
-      : `Ask an Owner or Admin to invite your organizational email to ${health.branding.organizationName}.`}</p>
-    <Button className="secondary" onClick={() => window.location.reload()}>Try again</Button>
-  </main></>
+function PostureView({ data, onOpenIntegrations }: { data: PortalData; onOpenIntegrations: () => void }) {
+  const posture = data.overview.posture
+  return <div className="posture-grid">
+    <Card className="posture-hero"><div><p className="eyebrow">CURRENT ASSESSMENT</p><Badge className="status-good">OBSERVING</Badge></div><h2>Cyber terrain is waiting for evidence.</h2><p>Connect operator interfaces and security sources. Starlings will treat every record as evidence—not authoritative truth—and make disagreement visible.</p><Button className="primary" onClick={onOpenIntegrations}>Configure integrations →</Button><div className="terrain-lines" aria-hidden="true"><span /><span /><span /><span /></div></Card>
+    <Card className="metric-card"><span className="metric-label">INTEGRATIONS</span><strong>{posture.integrations}</strong><small>{posture.healthy} healthy</small></Card>
+    <Card className="metric-card warning"><span className="metric-label">AWAITING APPROVAL</span><strong>{posture.awaitingApproval}</strong><small>Entra-governed activation</small></Card>
+    <Card className="metric-card"><span className="metric-label">EVIDENCE SOURCES</span><strong>{posture.evidenceSources}</strong><small>local observations</small></Card>
+    <Card className="metric-card critical"><span className="metric-label">ACTION EXECUTORS</span><strong>{posture.actionExecutors}</strong><small>controlled authority</small></Card>
+    <Card className="runtime-card"><div className="panel-head"><h2>Runtime boundary</h2><Badge>ENFORCED</Badge></div><dl className="facts"><div><dt>Identity</dt><dd>MICROSOFT ENTRA</dd></div><div><dt>Computation</dt><dd>STARLINGS</dd></div><div><dt>Topology</dt><dd>CUSTOMER-HOSTED</dd></div><div><dt>License</dt><dd>{data.overview.deployment.license.valid ? 'VALID' : 'ACTION REQUIRED'}</dd></div></dl></Card>
+  </div>
 }
 
-function Bootstrap({ me, onDone }: { me: string; onDone: () => Promise<void> }) {
-  const [error, setError] = useState<string>()
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault(); const form = new FormData(event.currentTarget)
-    try { await api('/api/bootstrap', { method: 'POST', body: JSON.stringify({ secret: form.get('secret') }) }); await onDone() }
-    catch (cause) { setError(cause instanceof Error ? cause.message : 'Bootstrap failed') }
-  }
-  return <main className="center login"><Logo /><p className="eyebrow">ONE-TIME DEPLOYMENT BOOTSTRAP</p><h1>Establish the Owner.</h1><p>Signed in as {me}. Enter the installation bootstrap secret. Bootstrap closes permanently after success.</p><form className="stack" onSubmit={submit}><Input name="secret" type="password" required autoComplete="off" placeholder="Bootstrap secret" /><Button className="primary">Become deployment Owner →</Button></form>{error && <div className="error">{error}</div>}</main>
+function TerrainPreview() {
+  return <Card className="terrain-preview"><div className="terrain-toolbar"><Badge>LIVE TWIN</Badge><span>0 entities · 0 relationships · 0 unresolved claims</span></div><div className="terrain-canvas"><div className="terrain-node source">EVIDENCE</div><div className="terrain-node claims">CLAIMS</div><div className="terrain-node twin">CYBER TWIN</div><svg aria-hidden="true" viewBox="0 0 800 320"><path d="M130 160 C 260 40, 320 40, 405 150"/><path d="M250 260 C 320 220, 340 180, 405 150"/><path d="M405 150 C 540 90, 590 100, 680 160"/></svg><p>Connect terrain and evidence sources to begin forming the graph.</p></div></Card>
 }
 
-function AccessPending({ me }: { me: string }) {
-  return <main className="center login"><Logo /><p className="eyebrow">ACCESS PENDING</p><h1>Identity verified.<br />Authority required.</h1><p>{me}, an Owner or Admin must assign your fixed role before you can enter Papyrus.</p></main>
+function GovernanceView({ data }: { data: PortalData }) {
+  return <div className="governance-grid"><Card><p className="eyebrow">IDENTITY AUTHORITY</p><h2>Microsoft Entra ID</h2><p>Users, groups, and application roles are assigned in the customer tenant. Papyrus maintains no invitation or local role database.</p><div className="role-list">{data.me.roles.map((role) => <Badge key={role}>{role.replace('Papyrus.', '')}</Badge>)}</div></Card><Card><p className="eyebrow">OFFLINE ENTITLEMENT</p><h2>{data.overview.deployment.license.valid ? 'License active' : 'Activation required'}</h2><p>Licensing remains deployment-bound and locally verified. No Beag cloud callback is required.</p><code>{data.overview.deployment.license.deploymentId.slice(0, 24)}…</code></Card><Card><p className="eyebrow">OPERATIONAL GUARANTEE</p><h2>Claims before actions</h2><p>Starlings may propose an operational action. Only deterministic policy and an Entra-authorized approver can release it to an executor.</p></Card></div>
 }
 
-function ShellView({ view, data, onNewSession }: { view: Exclude<View, 'sessions'>; data: ShellData; onNewSession: () => void }) {
-  if (view === 'home') return <section className="grid-two wide-left"><Card className="panel hero-panel"><p className="eyebrow">CONTROL PLANE READY</p><h2>Begin governed work from one durable session.</h2><p>Every prompt, runtime event, cancellation, and policy decision remains bound to your authenticated identity.</p><Button className="primary" onClick={onNewSession}>Start a session →</Button></Card><DeploymentFacts data={data} /></section>
-  if (view === 'sources') return <SourcesView />
-  if (view === 'administration') return <AdminView me={data.me} />
-  return <Card className="panel placeholder"><span>STACK PREVIEW</span><h2>{viewTitle(view)}</h2></Card>
+function EmptyProductView({ eyebrow, title, copy, children }: { eyebrow: string; title: string; copy: string; children?: ReactNode }) {
+  return <Card className="empty-product"><p className="eyebrow">{eyebrow}</p><span className="empty-product-mark">◎</span><h2>{title}</h2><p>{copy}</p>{children}</Card>
 }
-
-function DeploymentFacts({ data }: { data: ShellData }) {
-  return <Card className="panel"><div className="panel-head"><h2>Deployment</h2><Badge className="status-good">ENFORCED</Badge></div><dl className="facts"><div><dt>Policy</dt><dd>Cedar {data.health.cedar}</dd></div><div><dt>Topology</dt><dd>ON-PREMISES</dd></div><div><dt>Identity</dt><dd>{data.me.authMethod.toUpperCase()}</dd></div><div><dt>Runtime</dt><dd>PAPYRUS</dd></div></dl></Card>
-}
-
-export function PrimaryNavigation({ view, canAdmin, onNavigate, onNewSession }: { view: View; canAdmin: boolean; onNavigate: (view: View) => void; onNewSession: () => void }) {
-  return <nav aria-label="Primary navigation">
-    <NavButton active={false} onClick={onNewSession}><span aria-hidden="true">＋</span> New Chat</NavButton>
-    <NavButton active={view === 'home'} onClick={() => onNavigate('home')}>Overview</NavButton>
-    <NavButton active={view === 'sources'} onClick={() => onNavigate('sources')}>Sources</NavButton>
-    {canAdmin && <NavButton active={view === 'administration'} onClick={() => onNavigate('administration')}>Administration</NavButton>}
-  </nav>
-}
-
-function NavButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) { return <Button variant="ghost" className={active ? 'active' : ''} onClick={onClick}>{children}</Button> }
-function profileLabel(profile: string) { return ({ commercial: 'COMMERCIAL', 'government-il4': 'DoD IL4', 'government-il6': 'DoD IL6' } as Record<string, string>)[profile] ?? profile.toUpperCase() }
-function viewTitle(view: View) { return ({ home: 'Operational overview', sessions: 'Sessions', sources: 'Sources', administration: 'Administration' })[view] }
-function initials(name: string) { return name.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') }

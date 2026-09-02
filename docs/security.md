@@ -1,24 +1,34 @@
-# Security model and current limitations
+# Cyber twin security model
 
-## Enforced invariants
+## Identity and authority
 
-- protected application operations are evaluated by the embedded, versioned Cedar policy bundle;
-- authorization is deny-by-default;
-- Owner bootstrap requires an installation secret and can succeed only once;
-- Admins cannot assign Owner or Admin roles;
-- session creation requires assignment to both the workspace and goose runtime;
-- Users can prompt only sessions they own;
-- goose receives only workspace-authorized MCP proxy endpoints;
-- audit rows cannot be updated or deleted through SQLite because database triggers reject both operations;
-- audit events are hash-chained over a canonical envelope; and
-- model credentials stay in the server process environment.
+Microsoft Entra ID is the only human identity and role authority. Papyrus validates issuer, tenant, audience, signature, expiry, and OIDC nonce where applicable. Accepted audiences are the application client ID and its `api://` form. Only declared Papyrus application roles are honored.
+
+There is no local user database, password login, invitation flow, bootstrap owner, or Papyrus role assignment. Removing an Entra assignment removes authority when the Microsoft token and short-lived portal cookie expire. Deployments requiring faster revocation should use appropriately short Entra token lifetimes and boundary revocation controls.
+
+## Operational safety
+
+Identity authorization and cyber-action safety are separate:
+
+- Entra determines who may configure, approve, or inspect.
+- Connector lifecycle policy determines whether a connector can become active.
+- Action-capable connectors require `Papyrus.Security.Manage`.
+- Individual consequential actions are represented as proposals and require explicit policy/approval before execution.
+
+Starlings may produce observations, claims, conflicts, and action proposals. It does not bypass the deterministic release boundary.
+
+## Connector invariants
+
+- Inline passwords, secrets, private keys, API keys, and tokens are rejected.
+- Configurations store only customer-vault, certificate, or managed-identity references.
+- Non-loopback endpoints require HTTPS.
+- Connector activation follows draft, tested, approval, and active states.
+- Configuration and lifecycle events are append-only and SHA-256 hash chained.
+- A configuration test validates deterministic policy and manifest requirements; it does not claim live network reachability.
 
 ## Honest limitations
 
-- A database administrator can replace the database. Signed audit checkpoints (`GET /api/audit/checkpoint`) provide exportable tamper evidence, but independently controlled immutable storage is still the operator's responsibility.
-- CAC trust and revocation quality depend on deployment-provided trust bundles and boundary operations.
-- OIDC login sessions are signed, time-limited, and server-side revocable: role changes and explicit revocation bump a per-user token version, immediately invalidating outstanding sessions.
-- The goose adapter starts a fresh ACP process for a prompt turn. Durable ACP conversation resume depends on goose session lifecycle support and is not represented as complete.
-- The MCP proxy supports stateless HTTP JSON-RPC only.
-- The UI exposes the implemented administration surfaces but does not yet cover every assignment and MCP configuration operation; those operations are available through the API.
-- No part of Papyrus constitutes a cross-domain solution or an authorization to operate.
+- A host or database administrator can replace local state. Export the audit chain to independently controlled immutable storage for external tamper evidence.
+- Microsoft national-cloud support and tenant app approval vary by environment.
+- Papyrus is not a cross-domain solution, authorization to operate, or claim of GCC High, DoD, IL4, IL6, or SIPR accreditation.
+- Vendor connector drivers and the Starlings runtime adapter must receive their own threat modeling and verification as they are added.

@@ -10,6 +10,21 @@ const catalog = [
   { icon: '⌁', title: 'Custom gateway', description: 'Any approved provider implementing the OpenAI-compatible chat contract.', prompt: 'Configure a custom Papyrus model gateway. Ask me for the endpoint, model, and credential reference.' },
 ]
 
+const directSetupRequest = {
+  fields: [
+    { name: 'name', label: 'Display name', kind: 'text', required: true, placeholder: 'Local operations model' },
+    { name: 'gatewayKind', label: 'Gateway type', kind: 'select', required: true, options: [{ label: 'OpenAI-compatible', value: 'openai-compatible' }, { label: 'Azure OpenAI / Entra', value: 'azure-openai' }, { label: 'Ollama / local', value: 'ollama' }, { label: 'Custom compatible gateway', value: 'custom' }] },
+    { name: 'provider', label: 'Provider name', kind: 'text', required: true, placeholder: 'openai-compatible', help: 'Stable provider label used in the gateway catalog.' },
+    { name: 'model', label: 'Model ID', kind: 'text', required: true, placeholder: 'qwen3-32b' },
+    { name: 'baseUrl', label: 'Base URL', kind: 'url', required: true, placeholder: 'https://inference.example.gov/v1', help: 'HTTPS is required outside loopback development.' },
+    { name: 'authScheme', label: 'Authentication', kind: 'select', required: true, options: [{ label: 'No authentication', value: 'none' }, { label: 'API key reference', value: 'api_key' }, { label: 'Microsoft Entra / managed identity', value: 'entra' }, { label: 'Customer credential reference', value: 'credential_ref' }] },
+    { name: 'credentialRef', label: 'Credential reference', kind: 'credential_reference', required: false, placeholder: 'env://OPENAI_API_KEY', help: 'Reference only; raw secret material never enters chat or Papyrus.' },
+    { name: 'scope', label: 'Deployment scope', kind: 'text', required: true, placeholder: 'Organization or enclave' },
+    { name: 'makeDefault', label: 'Use as default', kind: 'select', required: true, options: [{ label: 'Make default', value: 'true' }, { label: 'Keep current default', value: 'false' }] },
+  ],
+  note: 'The daemon validates the endpoint, records only non-secret metadata, tests the gateway, and can make it the active Papyrus model.',
+}
+
 export function ModelsView({ profiles, onAskAgent, onChanged, canManage }: {
   profiles: ModelProfile[]
   onAskAgent: (prompt: string) => void
@@ -36,6 +51,7 @@ export function ModelsView({ profiles, onAskAgent, onChanged, canManage }: {
   return <div className="models-view">
     <section className="surface-intro"><div><p className="eyebrow">CUSTOMER MODEL GATEWAYS</p><h2>Models</h2><p>Choose where Papyrus inference runs. Profiles are durable daemon metadata; the UI stores only a credential reference, never an API key or token.</p></div><Button className="primary" onClick={() => onAskAgent('Configure a Papyrus model gateway. Ask me for the endpoint, model, authentication mode, and credential reference, then test it before making it default.')}>Configure with agent →</Button></section>
     {error && <Alert className="error">{error}</Alert>}
+    {canManage && <section className="portal-section"><div className="section-heading"><div><p className="eyebrow">FIRST-RUN SETUP</p><h2>Connect a model gateway</h2></div><Badge>NO CHAT REQUIRED</Badge></div><ModelGatewayCard request={directSetupRequest} onChanged={onChanged} /></section>}
     <section className="portal-section"><div className="section-heading"><div><p className="eyebrow">ACTIVE PROFILES</p><h2>Configured gateways</h2></div><Badge>{profiles.length}</Badge></div>
       {profiles.length === 0 ? <Card className="empty-integration"><span>◎</span><div><h3>No model gateway configured</h3><p>Use the agent-guided form to connect an approved hosted, Azure, or local model endpoint.</p></div></Card> : <div className="model-profile-list">{profiles.map((profile) => <ModelProfileCard key={profile.id} profile={profile} busy={busy} canManage={canManage} onAction={action} />)}</div>}
     </section>

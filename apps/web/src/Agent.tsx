@@ -96,7 +96,7 @@ function Chat({ session, status, initial, input, setInput, historyError, canAppr
 
   return <div className="agent-surface">
     <div className="agent-session-head"><div><p className="eyebrow">DURABLE SESSION</p><h2>{session.title}</h2></div><div className="agent-badges"><Badge>{status.mode.toUpperCase()}</Badge><Badge className={status.durable ? 'status-good' : ''}>{status.durable ? 'DURABLE' : 'OFFLINE'}</Badge></div></div>
-    {!status.agentReady && <Alert className="agent-config-alert"><strong>Agent model not configured</strong><span>Open <a href="/portal/models">Models</a> to configure an approved gateway. Legacy <code>PAPYRUS_AGENT_MODEL</code> values are imported once as a bootstrap fallback.</span></Alert>}
+    {!status.agentReady && <Alert className="agent-config-alert"><strong>Agent model not configured</strong><span>Open <a href="/portal/models">Models</a> to configure an approved gateway using the first-run form. Chat unlocks after the daemon has a tested model profile.</span></Alert>}
     {historyError && <Alert className="error">{historyError}</Alert>}
     <div className="message-list" aria-live="polite">
       {messages.length === 0 && <Welcome />}

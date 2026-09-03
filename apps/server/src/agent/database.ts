@@ -28,6 +28,34 @@ export interface CreateIntegrationInput {
   settings: Record<string, string | number | boolean>
 }
 
+export interface ModelProviderConfiguration {
+  id: string
+  slug: string
+  name: string
+  baseUrl: string
+  credentialRef?: string
+  models: string[]
+  createdByOid: string
+  createdAt: string
+  updatedAt: string
+  version: number
+}
+
+export interface ModelAssignmentConfiguration {
+  providerId: string
+  model: string
+  updatedByOid: string
+  updatedAt: string
+}
+
+export interface CreateModelProviderInput {
+  slug: string
+  name: string
+  baseUrl: string
+  credentialRef?: string
+  models: string[]
+}
+
 export class CyberDatabase {
   readonly sqlite: InstanceType<typeof Database>
 
@@ -155,6 +183,72 @@ export class CyberDatabase {
       }))
   }
 
+  createModelProvider(input: CreateModelProviderInput, actorOid: string): ModelProviderConfiguration {
+    const now = new Date().toISOString()
+    const id = randomUUID()
+    this.sqlite.prepare(`INSERT INTO cyber_model_providers(
+      id,slug,name,base_url,credential_ref,models_json,created_by_oid,created_at,updated_at,version
+    ) VALUES(?,?,?,?,?,?,?,?,?,1)`).run(
+      id, input.slug, input.name, input.baseUrl, input.credentialRef ?? null, JSON.stringify(input.models), actorOid, now, now,
+    )
+    this.appendModelEvent(actorOid, 'ModelProviderCreated', { providerId: id, slug: input.slug, baseUrl: input.baseUrl })
+    return this.getModelProvider(id) as ModelProviderConfiguration
+  }
+
+  updateModelProvider(id: string, input: CreateModelProviderInput, actorOid: string): ModelProviderConfiguration {
+    this.requireModelProvider(id)
+    this.sqlite.prepare('UPDATE cyber_model_providers SET slug=?,name=?,base_url=?,credential_ref=?,models_json=?,updated_at=?,version=version+1 WHERE id=?')
+      .run(input.slug, input.name, input.baseUrl, input.credentialRef ?? null, JSON.stringify(input.models), new Date().toISOString(), id)
+    this.appendModelEvent(actorOid, 'ModelProviderUpdated', { providerId: id, slug: input.slug, baseUrl: input.baseUrl })
+    return this.getModelProvider(id) as ModelProviderConfiguration
+  }
+
+  deleteModelProvider(id: string, actorOid: string): void {
+    const provider = this.requireModelProvider(id)
+    this.sqlite.prepare('DELETE FROM cyber_model_providers WHERE id=?').run(id)
+    this.appendModelEvent(actorOid, 'ModelProviderDeleted', { providerId: id, slug: provider.slug })
+  }
+
+  getModelProvider(id: string): ModelProviderConfiguration | undefined {
+    const row = this.sqlite.prepare('SELECT * FROM cyber_model_providers WHERE id=?').get(id) as Row | undefined
+    return row ? this.modelProvider(row) : undefined
+  }
+
+  getModelProviderBySlug(slug: string): ModelProviderConfiguration | undefined {
+    const row = this.sqlite.prepare('SELECT * FROM cyber_model_providers WHERE slug=?').get(slug) as Row | undefined
+    return row ? this.modelProvider(row) : undefined
+  }
+
+  listModelProviders(): ModelProviderConfiguration[] {
+    return (this.sqlite.prepare('SELECT * FROM cyber_model_providers ORDER BY name').all() as Row[]).map((row) => this.modelProvider(row))
+  }
+
+  assignAgentModel(providerId: string, model: string, actorOid: string): ModelAssignmentConfiguration {
+    this.requireModelProvider(providerId)
+    const now = new Date().toISOString()
+    this.sqlite.prepare(`INSERT INTO cyber_model_assignment(id,provider_id,model,updated_by_oid,updated_at) VALUES(1,?,?,?,?)
+      ON CONFLICT(id) DO UPDATE SET provider_id=excluded.provider_id,model=excluded.model,updated_by_oid=excluded.updated_by_oid,updated_at=excluded.updated_at`)
+      .run(providerId, model, actorOid, now)
+    this.appendModelEvent(actorOid, 'AgentModelAssigned', { providerId, model })
+    return this.getAgentModelAssignment() as ModelAssignmentConfiguration
+  }
+
+  clearAgentModelAssignment(actorOid: string): void {
+    const existing = this.getAgentModelAssignment()
+    if (!existing) return
+    this.sqlite.prepare('DELETE FROM cyber_model_assignment WHERE id=1').run()
+    this.appendModelEvent(actorOid, 'AgentModelAssignmentCleared', { previousProviderId: existing.providerId, previousModel: existing.model })
+  }
+
+  getAgentModelAssignment(): ModelAssignmentConfiguration | undefined {
+    const row = this.sqlite.prepare('SELECT * FROM cyber_model_assignment WHERE id=1').get() as Row | undefined
+    if (!row) return undefined
+    return {
+      providerId: String(row.provider_id), model: String(row.model),
+      updatedByOid: String(row.updated_by_oid), updatedAt: String(row.updated_at),
+    }
+  }
+
   posture(): { integrations: number; healthy: number; degraded: number; awaitingApproval: number; evidenceSources: number; actionExecutors: number } {
     const rows = this.sqlite.prepare(`SELECT
       count(*) integrations,
@@ -209,6 +303,33 @@ export class CyberDatabase {
     this.sqlite.prepare(`INSERT INTO cyber_integration_events(
       sequence,integration_id,actor_oid,action,occurred_at,data_json,previous_hash,hash
     ) VALUES(?,?,?,?,?,?,?,?)`).run(sequence, integrationId, actorOid, action, occurredAt, JSON.stringify(data), previousHash, hash)
+  }
+
+  private appendModelEvent(actorOid: string, action: string, data: Record<string, unknown>): void {
+    const previous = this.sqlite.prepare('SELECT sequence,hash FROM cyber_model_events ORDER BY sequence DESC LIMIT 1').get() as Row | undefined
+    const sequence = Number(previous?.sequence ?? 0) + 1
+    const previousHash = previous ? String(previous.hash) : '0'.repeat(64)
+    const occurredAt = new Date().toISOString()
+    const payload = { sequence, actorOid, action, occurredAt, data, previousHash }
+    const hash = createHash('sha256').update(canonical(payload)).digest('hex')
+    this.sqlite.prepare(`INSERT INTO cyber_model_events(
+      sequence,actor_oid,action,occurred_at,data_json,previous_hash,hash
+    ) VALUES(?,?,?,?,?,?,?)`).run(sequence, actorOid, action, occurredAt, JSON.stringify(data), previousHash, hash)
+  }
+
+  private requireModelProvider(id: string): ModelProviderConfiguration {
+    const provider = this.getModelProvider(id)
+    if (!provider) throw new Error('Model provider not found')
+    return provider
+  }
+
+  private modelProvider(row: Row): ModelProviderConfiguration {
+    return {
+      id: String(row.id), slug: String(row.slug), name: String(row.name), baseUrl: String(row.base_url),
+      ...(row.credential_ref ? { credentialRef: String(row.credential_ref) } : {}),
+      models: JSON.parse(String(row.models_json)) as string[],
+      createdByOid: String(row.created_by_oid), createdAt: String(row.created_at), updatedAt: String(row.updated_at), version: Number(row.version),
+    }
   }
 
   private integration(row: Row): IntegrationConfiguration {
@@ -270,6 +391,38 @@ export class CyberDatabase {
       CREATE TABLE IF NOT EXISTS licenses (
         id INTEGER PRIMARY KEY CHECK(id = 1), document_json TEXT NOT NULL, activated_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS cyber_model_providers (
+        id TEXT PRIMARY KEY,
+        slug TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        base_url TEXT NOT NULL,
+        credential_ref TEXT,
+        models_json TEXT NOT NULL,
+        created_by_oid TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        version INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS cyber_model_assignment (
+        id INTEGER PRIMARY KEY CHECK(id = 1),
+        provider_id TEXT NOT NULL REFERENCES cyber_model_providers(id),
+        model TEXT NOT NULL,
+        updated_by_oid TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS cyber_model_events (
+        sequence INTEGER PRIMARY KEY,
+        actor_oid TEXT NOT NULL,
+        action TEXT NOT NULL,
+        occurred_at TEXT NOT NULL,
+        data_json TEXT NOT NULL,
+        previous_hash TEXT NOT NULL,
+        hash TEXT NOT NULL UNIQUE
+      );
+      CREATE TRIGGER IF NOT EXISTS cyber_model_events_no_update BEFORE UPDATE ON cyber_model_events
+      BEGIN SELECT RAISE(ABORT, 'cyber model events are append-only'); END;
+      CREATE TRIGGER IF NOT EXISTS cyber_model_events_no_delete BEFORE DELETE ON cyber_model_events
+      BEGIN SELECT RAISE(ABORT, 'cyber model events are append-only'); END;
     `)
     this.ensureColumn('cyber_integrations', 'last_sync_at', 'TEXT')
     this.ensureColumn('cyber_integrations', 'last_sync_error', 'TEXT')

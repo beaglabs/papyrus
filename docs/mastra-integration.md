@@ -5,8 +5,8 @@ inference. Re-check these against the installed version before relying on them â
 the export surface has moved between Mastra releases, which is why `runtime.ts`
 imports the harness dynamically and feature-detects everything.
 
-Nothing here requires Mastra to be installed. To re-verify without touching the
-workspace's dependency tree:
+Mastra is installed in the server workspace. To independently re-verify the
+published API surface:
 
 ```bash
 mkdir -p /tmp/mastra-probe && cd /tmp/mastra-probe
@@ -21,6 +21,10 @@ tar xzf mastra-core-<version>.tgz && mv package mastra-core-<version>
 | --- | --- | --- |
 | `Agent` | `@mastra/core/agent` | Also re-exported from `@mastra/core` |
 | `createTool` | `@mastra/core/tools` | |
+| `Memory` | `@mastra/memory` | Uses the same `LibSQLStore` as the Mastra instance |
+| `handleChatStream` | `@mastra/ai-sdk` | Portal transport uses AI SDK UI v7 |
+| `WebhookSignalProvider` | `@mastra/core/signals` | HTTP mounting and subscription rehydration remain Papyrus responsibilities |
+| `createEventedAgent` | `@mastra/core/agent/durable` | Wraps the Papyrus agent for durable execution |
 | `LocalSandbox`, `LocalSandboxOptions` | `@mastra/core/workspace` | |
 | `Workspace`, `WorkspaceConfig` | `@mastra/core/workspace` | There is no `@mastra/core/sandbox` subpath; sandbox types live under `workspace` |
 
@@ -33,13 +37,44 @@ Optional: `tools`, `workspace`, `memory`, `description`, `durable`.
 Two traps:
 
 - **`model` is required.** Omitting it throws at construction. Papyrus reads
-  `PAPYRUS_INVESTIGATION_MODEL` and, when it is unset, does not build an agent at
+  `PAPYRUS_AGENT_MODEL` (with the old investigation name accepted temporarily) and, when it is unset, does not build an agent at
   all â€” signals accumulate in the outbox instead. Choosing a model is the
   customer's decision; `disconnected` and `restricted` profiles cannot reach a
   hosted provider, so there is no sensible default.
-- **`memory` expects a `MastraMemory`, not a store.** Passing a `LibSQLStore`
-  there is wrong. Storage belongs on the `Mastra` instance
-  (`new Mastra({ storage })`), which is what gives threads durability.
+- **`memory` expects a `MastraMemory`, not a store.** Papyrus constructs
+  `Memory({ storage })`, passes that to the agent, and also attaches the same
+  `LibSQLStore` to `new Mastra({ storage })`.
+
+## AI SDK UI transport
+
+`POST /api/agent/chat` uses `handleChatStream({ version: 'v7' })` and returns an
+AI SDK UI message stream. Because Mastra Memory is enabled, the server sends only
+the newest user message to the run and supplies `memory.thread` and
+`memory.resource`; replaying the browser's entire history would duplicate stored
+turns and can reorder tool results.
+
+Tool output is UI data. Plugin tools return `plugin_connection_request` objects,
+which the browser renders as a secure form, while `fetchUrlPreview` returns a
+`url_preview` card. Credential references submit directly to the daemon and are
+never copied into the follow-up model message.
+
+## Webhook signals
+
+`WebhookSignalProvider` does not mount an HTTP route or persist its in-process
+subscriptions. Papyrus owns `/api/signals/:sourceId/webhook`, authenticates it
+with a source-scoped token, writes the event to `cyber_signal_outbox`, and drains
+it through the provider. Signal-session subscriptions are reconstructed from
+Mastra thread metadata after daemon restart.
+
+## Background work and schedules
+
+The daemon calls `mastra.startWorkers()` after registration and
+`mastra.shutdown()` during graceful shutdown. This is required: storing a
+schedule definition without a scheduler worker would make the Scheduled UI
+look functional while nothing ever fires. Background tasks run in the
+single-daemon `full` mode with bounded global/per-agent concurrency. The URL
+preview tool opts into background execution with a 15-second timeout and one
+retry; configuration and action-suggestion tools remain foreground operations.
 
 ## `Workspace` and `LocalSandbox`
 

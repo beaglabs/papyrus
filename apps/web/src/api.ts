@@ -1,15 +1,14 @@
 import type {
   CyberActionProposal,
   CyberActionReceipt,
-  CyberInvestigation,
   IntegrationCatalogEntry,
   IntegrationConfiguration,
   IntegrationEvent,
   PortalOverview,
   PortalPrincipal,
   SyncJob,
-  TerrainSnapshot,
 } from '@papyrus/contracts'
+import type { UIMessage } from 'ai'
 
 export interface PublicConfig {
   organizationName: string
@@ -26,9 +25,47 @@ export interface PortalData {
   overview: PortalOverview
   catalog: IntegrationCatalogEntry[]
   integrations: IntegrationConfiguration[]
-  terrain: TerrainSnapshot
-  investigations: CyberInvestigation[]
-  proposals: CyberActionProposal[]
+  agent: AgentStatus
+  sessions: AgentSession[]
+  schedules: AgentSchedule[]
+  workflows: WorkflowSummary[]
+}
+
+export interface AgentStatus {
+  ready: boolean
+  agentReady: boolean
+  durable: boolean
+  model: string | null
+  mode: 'starlings' | 'centralized'
+  signalBacklog: Record<'pending' | 'delivering' | 'delivered' | 'failed', number>
+}
+
+export interface AgentSession {
+  id: string
+  title: string
+  createdAt: string
+  updatedAt: string
+  attention: boolean
+  kind: 'operator_session' | 'signal_session' | string
+}
+
+export interface AgentSchedule {
+  id: string
+  name?: string
+  cron: string
+  prompt: string
+  timezone?: string
+  threadId?: string
+  status: 'active' | 'paused'
+  nextFireAt: number
+  lastFireAt?: number
+}
+
+export interface WorkflowSummary {
+  id: string
+  name: string
+  description: string
+  trigger: string
 }
 
 export class ApiError extends Error {
@@ -57,16 +94,16 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 export async function loadPortal(): Promise<PortalData> {
   const config = await api<PublicConfig>('/api/config/public')
-  const [me, overview, catalog, integrations, terrain, investigations, proposals] = await Promise.all([
+  const [me, overview, plugins, agent, sessions, schedules, workflows] = await Promise.all([
     api<PortalPrincipal>('/api/me'),
     api<PortalOverview>('/api/portal/overview'),
-    api<{ integrations: IntegrationCatalogEntry[] }>('/api/integrations/catalog'),
-    api<{ integrations: IntegrationConfiguration[] }>('/api/integrations'),
-    api<TerrainSnapshot>('/api/terrain'),
-    api<{ investigations: CyberInvestigation[] }>('/api/investigations'),
-    api<{ proposals: CyberActionProposal[] }>('/api/proposals'),
+    api<{ catalog: IntegrationCatalogEntry[]; configured: IntegrationConfiguration[] }>('/api/plugins'),
+    api<AgentStatus>('/api/agent/status'),
+    api<{ sessions: AgentSession[] }>('/api/sessions'),
+    api<{ schedules: AgentSchedule[] }>('/api/schedules'),
+    api<{ workflows: WorkflowSummary[] }>('/api/workflows'),
   ])
-  return { config, me, overview, catalog: catalog.integrations, integrations: integrations.integrations, terrain, investigations: investigations.investigations, proposals: proposals.proposals }
+  return { config, me, overview, catalog: plugins.catalog, integrations: plugins.configured, agent, sessions: sessions.sessions, schedules: schedules.schedules, workflows: workflows.workflows }
 }
 
 export async function publicConfig(): Promise<PublicConfig> { return api('/api/config/public') }
@@ -80,6 +117,48 @@ export async function createIntegration(input: {
   settings: Record<string, string | number | boolean>
 }): Promise<IntegrationConfiguration> {
   return api('/api/integrations', { method: 'POST', body: JSON.stringify(input) })
+}
+
+export async function connectPlugin(input: Parameters<typeof createIntegration>[0]): Promise<{ plugin: IntegrationConfiguration; notice?: string }> {
+  return api('/api/plugins/connect', { method: 'POST', body: JSON.stringify(input) })
+}
+
+export async function createSession(title = 'New session'): Promise<AgentSession> {
+  return api('/api/sessions', { method: 'POST', body: JSON.stringify({ title }) })
+}
+
+export async function deleteSession(id: string): Promise<void> {
+  await api(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+export async function sessionMessages(id: string): Promise<UIMessage[]> {
+  return (await api<{ messages: UIMessage[] }>(`/api/sessions/${encodeURIComponent(id)}/messages`)).messages
+}
+
+export async function setSessionAttention(id: string, attention: boolean): Promise<void> {
+  await api(`/api/sessions/${encodeURIComponent(id)}/attention`, { method: 'POST', body: JSON.stringify({ attention }) })
+}
+
+export async function createSessionProposal(id: string, input: {
+  executorIntegrationId: string
+  action: string
+  target: string
+  rationaleClaimIds?: string[]
+  parameters?: Record<string, unknown>
+}): Promise<CyberActionProposal> {
+  return api(`/api/sessions/${encodeURIComponent(id)}/proposals`, { method: 'POST', body: JSON.stringify(input) })
+}
+
+export async function createSchedule(input: { name: string; cron: string; prompt: string; timezone?: string; threadId?: string }): Promise<AgentSchedule> {
+  return api('/api/schedules', { method: 'POST', body: JSON.stringify(input) })
+}
+
+export async function deleteSchedule(id: string): Promise<void> {
+  await api(`/api/schedules/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+export async function runWorkflow(id: string, input: Record<string, unknown>): Promise<unknown> {
+  return api(`/api/workflows/${encodeURIComponent(id)}/runs`, { method: 'POST', body: JSON.stringify(input) })
 }
 
 export async function transitionIntegration(id: string, action: 'test' | 'submit' | 'activate' | 'disable', reason?: string): Promise<IntegrationConfiguration> {

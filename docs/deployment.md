@@ -1,4 +1,4 @@
-# Cyber twin deployment
+# Papyrus daemon deployment
 
 Papyrus runs as a customer-hosted, single-deployment daemon. Teams, Exchange, ACP, A2A peers, and security products connect to the daemon; none is required for the runtime to remain available.
 
@@ -46,13 +46,13 @@ Papyrus resolves execution policy at startup from `process.platform` and a PATH 
 
 ## Agent configuration
 
-The investigation agent needs a model, and choosing one is the customer's decision — `disconnected` and `restricted` profiles cannot reach a hosted provider at all. Papyrus will not guess a default.
+The agent needs a model, and choosing one is the customer's decision — `disconnected` and `restricted` profiles cannot reach a hosted provider at all. Papyrus will not guess a default.
 
 ```bash
-export PAPYRUS_INVESTIGATION_MODEL='openai/gpt-4o'   # or any Mastra model id your deployment can reach
+export PAPYRUS_AGENT_MODEL='openai/gpt-5'   # or any Mastra model id your deployment can reach
 ```
 
-Without it the agent is not registered. The daemon starts normally, sandboxed execution is unaffected, and signals accumulate durably in `cyber_signal_outbox` until a model is configured — then they drain. Nothing is dropped while unconfigured.
+Without it the agent is not registered. Mastra storage, session history, workflows, and plugin configuration still start normally, while signals accumulate durably in `cyber_signal_outbox`. Nothing is dropped while unconfigured.
 
 Storage for durable threads is LibSQL at `<data-dir>/mastra.db`, created alongside the main database.
 

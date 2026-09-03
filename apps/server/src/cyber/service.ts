@@ -263,7 +263,9 @@ export class CyberService {
     const integration = this.integration(id)
     if (integration.state !== 'active') throw new CyberServiceError(409, 'INTEGRATION_NOT_ACTIVE', 'Ingestion credentials are issued only for active integrations')
     const entry = catalogEntry(integration.catalogId)
-    if (!entry?.observationProtocol) throw new CyberServiceError(409, 'INTEGRATION_NOT_OBSERVATION_SOURCE', 'This integration does not accept Observation API records')
+    if (!entry || (!entry.observationProtocol && !['push', 'hybrid'].includes(entry.syncMode))) {
+      throw new CyberServiceError(409, 'INTEGRATION_NOT_SIGNAL_SOURCE', 'This plugin does not accept pushed observations or signals')
+    }
   }
 
   recordIngestionTokenIssued(principal: PortalPrincipal, id: string, expiresAt: string): void {

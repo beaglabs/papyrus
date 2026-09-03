@@ -12,8 +12,6 @@
   },
   "dependencies": {
     "@ai-sdk/react": "^4.0.92",
-    "@mastra/ai-sdk": "^1.10.0",
-    "@memgraph/orb": "^1.0.2",
     "@papyrus/contracts": "workspace:*",
     "@vitejs/plugin-react": "6.0.5",
     "ai": "^7.0.89",

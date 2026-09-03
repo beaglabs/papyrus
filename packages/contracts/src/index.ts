@@ -640,7 +640,7 @@ export interface CyberActionReceipt {
 
 export interface CyberSignal {
   id: string
-  type: 'new_claim' | 'contradiction' | 'evidence_threshold' | 'approval_decision' | 'execution_receipt' | 'investigation_created' | 'action_proposed' | 'stale_investigation' | 'posture_review'
+  type: 'new_claim' | 'contradiction' | 'evidence_threshold' | 'approval_decision' | 'execution_receipt' | 'investigation_created' | 'action_proposed' | 'stale_investigation' | 'posture_review' | 'external_signal'
   investigationId?: string
   proposalId?: string
   claimId?: string

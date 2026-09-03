@@ -64,6 +64,11 @@ export class ActionStore {
     return row ? this.investigation(row) : undefined
   }
 
+  getInvestigationByThreadId(threadId: string): CyberInvestigation | undefined {
+    const row = this.db.sqlite.prepare('SELECT * FROM cyber_investigations WHERE mastra_thread_id=?').get(threadId) as Row | undefined
+    return row ? this.investigation(row) : undefined
+  }
+
   listInvestigations(): CyberInvestigation[] {
     return (this.db.sqlite.prepare('SELECT * FROM cyber_investigations ORDER BY updated_at DESC').all() as Row[])
       .map((row) => this.investigation(row))

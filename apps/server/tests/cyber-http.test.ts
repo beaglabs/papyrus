@@ -7,12 +7,15 @@ import { CyberDatabase } from '../src/cyber/database.js'
 import { EntraAuthService } from '../src/cyber/entra-auth.js'
 import { createCyberServer } from '../src/cyber/http.js'
 import { CyberService } from '../src/cyber/service.js'
+import { ActionStore } from '../src/cyber/action-store.js'
+import { TerrainStore } from '../src/cyber/terrain-store.js'
+import { MastraRuntime } from '../src/cyber/mastra/runtime.js'
 
 describe('cyber portal HTTP surface', () => {
   const disposers: Array<() => Promise<void> | void> = []
   afterEach(async () => { while (disposers.length) await disposers.pop()?.() })
 
-  it('exposes the Entra principal and integration lifecycle without session routes', async () => {
+  it('exposes durable sessions, plugins, and the source lifecycle', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'papyrus-cyber-http-'))
     const db = new CyberDatabase(':memory:')
     const config: CyberConfig = {
@@ -23,13 +26,17 @@ describe('cyber portal HTTP surface', () => {
         oid: 'owner', tenantId: 'tenant', displayName: 'Owner', roles: ['Papyrus.System.Owner'], groups: [], source: 'development',
       },
     }
-    const service = new CyberService(db, config)
-    const server = createCyberServer(config, service, new EntraAuthService(config))
+    const terrain = new TerrainStore(db)
+    const actionStore = new ActionStore(db)
+    const service = new CyberService(db, config, terrain, undefined, actionStore)
+    const mastra = new MastraRuntime(config, actionStore, terrain, service)
+    await mastra.start()
+    const server = createCyberServer(config, service, new EntraAuthService(config), mastra)
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
     const address = server.address()
     if (!address || typeof address === 'string') throw new Error('Expected TCP listener')
     const origin = `http://127.0.0.1:${address.port}`
-    disposers.push(async () => { await new Promise<void>((resolve) => server.close(() => resolve())); db.close(); rmSync(dataDir, { recursive: true, force: true }) })
+    disposers.push(async () => { await new Promise<void>((resolve) => server.close(() => resolve())); await mastra.stop(); db.close(); rmSync(dataDir, { recursive: true, force: true }) })
 
     expect(await (await fetch(`${origin}/api/me`)).json()).toMatchObject({ oid: 'owner', roles: ['Papyrus.System.Owner'] })
     const createdResponse = await fetch(`${origin}/api/integrations`, {
@@ -39,11 +46,22 @@ describe('cyber portal HTTP surface', () => {
     expect(createdResponse.status).toBe(201)
     const created = await createdResponse.json() as { id: string; state: string }
     expect(created.state).toBe('active')
-    expect((await fetch(`${origin}/api/sessions`)).status).toBe(404)
+    const sessionResponse = await fetch(`${origin}/api/sessions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: 'Operator task' }) })
+    expect(sessionResponse.status).toBe(201)
+    const session = await sessionResponse.json() as { id: string; title: string }
+    expect(session.title).toBe('Operator task')
+    expect(await (await fetch(`${origin}/api/sessions`)).json()).toMatchObject({ sessions: [{ id: session.id, title: 'Operator task' }] })
+    expect(await (await fetch(`${origin}/api/plugins`)).json()).toMatchObject({ configured: [{ id: created.id }], catalog: expect.any(Array) })
     const tokenResponse = await fetch(`${origin}/api/integrations/${created.id}/ingestion-token`, { method: 'POST', body: '{}' })
     expect(tokenResponse.status).toBe(201)
     const credential = await tokenResponse.json() as { token: string; expiresAt: string }
     expect(credential.token).toMatch(/^pap_ing_/)
+    const signalResponse = await fetch(`${origin}/api/signals/${created.id}/webhook`, {
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${credential.token}` },
+      body: JSON.stringify({ kind: 'smoke', summary: 'Connector smoke event' }),
+    })
+    expect(signalResponse.status).toBe(202)
+    expect(await signalResponse.json()).toMatchObject({ accepted: true, sessionId: `papyrus-signal-${created.id}` })
     const observationBody = JSON.stringify({
         sourceRecordId: 'zeek-1', observedAt: '2026-09-02T07:00:00Z', schema: 'zeek.conn@1',
         payload: { uid: 'C1', 'id.orig_h': '10.0.0.12', 'id.orig_p': 51822, 'id.resp_h': '10.0.0.8', 'id.resp_p': 443, proto: 'tcp' },

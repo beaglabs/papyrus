@@ -12,9 +12,15 @@
     "lint": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@mastra/ai-sdk": "1.10.0",
+    "@mastra/core": "1.63.2",
+    "@mastra/libsql": "1.22.2",
+    "@mastra/memory": "1.28.1",
     "@papyrus/contracts": "workspace:*",
+    "ai": "7.0.89",
     "jose": "6.2.9",
-    "libsql": "^0.5.29"
+    "libsql": "^0.5.29",
+    "zod": "4.5.4"
   },
   "devDependencies": {
     "@types/node": "24.10.1",

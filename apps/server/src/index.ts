@@ -23,7 +23,9 @@ const executorRegistry = new ActionExecutorRegistry()
 const worker = new SyncWorker(database, terrain, connectors)
 const actionWorker = new ActionWorker(database, actionStore, executorRegistry, config)
 const service = new CyberService(database, config, terrain, worker, actionStore, executorRegistry, actionWorker)
-const server = createCyberServer(config, service, auth)
+const mastraRuntime = new MastraRuntime(config, actionStore, terrain, service)
+await mastraRuntime.start()
+const server = createCyberServer(config, service, auth, mastraRuntime)
 
 // Exchange shares one Graph client boundary for inbound mailbox delta sync and
 // approved outbound mail. The default client deliberately refuses to resolve
@@ -31,16 +33,12 @@ const server = createCyberServer(config, service, auth)
 connectors.register('exchange-email', new ExchangeEmailDriver(graph))
 executorRegistry.register('exchange-email', new EmailExecutor(database, graph))
 
-// Initialize Mastra runtime (local development mode)
-const mastraRuntime = new MastraRuntime(config, actionStore, terrain, service)
-mastraRuntime.start().catch((cause) => console.error('[mastra] failed to start', cause))
-
 server.listen(config.port, config.host, () => {
   worker.start()
   actionWorker.start()
-  console.log(`Papyrus Cyber Twin listening at ${config.publicOrigin}`)
+  console.log(`Papyrus daemon listening at ${config.publicOrigin}`)
   console.log(`Profile: ${config.profile}; Entra cloud: ${config.cloud}; deployment: ${service.license.deploymentId}`)
-  console.log(`Investigation runtime: ${mastraRuntime.mode}`)
+  console.log(`Agent runtime: ${mastraRuntime.mode}`)
 })
 
 let stopping = false

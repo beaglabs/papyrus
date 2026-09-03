@@ -6,6 +6,7 @@ import type { EntraAppRole, PortalPrincipal, SignedLicense } from '@papyrus/cont
 import type { CyberConfig } from './config.js'
 import { EntraAuthError, EntraAuthService, hasAppRole } from './entra-auth.js'
 import { CyberService, CyberServiceError } from './service.js'
+import { MastraRuntime, MastraRuntimeError } from './mastra/runtime.js'
 
 class HttpError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message) }
@@ -59,7 +60,7 @@ async function principal(request: IncomingMessage, auth: EntraAuthService, servi
   return value
 }
 
-export function createCyberServer(config: CyberConfig, service: CyberService, auth: EntraAuthService): Server {
+export function createCyberServer(config: CyberConfig, service: CyberService, auth: EntraAuthService, mastra: MastraRuntime): Server {
   const handler = async (request: IncomingMessage, response: ServerResponse) => {
     const requestId = crypto.randomUUID()
     response.setHeader('x-request-id', requestId)
@@ -104,6 +105,120 @@ export function createCyberServer(config: CyberConfig, service: CyberService, au
 
       if (url.pathname === '/api/me' && request.method === 'GET') return json(response, 200, await principal(request, auth, service))
       if (url.pathname === '/api/portal/overview' && request.method === 'GET') return json(response, 200, service.overview(await principal(request, auth, service)))
+      if (url.pathname === '/api/agent/status' && request.method === 'GET') {
+        await principal(request, auth, service)
+        return json(response, 200, mastra.status)
+      }
+      if (url.pathname === '/api/sessions' && request.method === 'GET') {
+        await principal(request, auth, service)
+        return json(response, 200, { sessions: await mastra.listSessions() })
+      }
+      if (url.pathname === '/api/sessions' && request.method === 'POST') {
+        await principal(request, auth, service)
+        const input = await body(request)
+        return json(response, 201, await mastra.createSession(typeof input.title === 'string' ? input.title : 'New session'))
+      }
+      const sessionMessages = url.pathname.match(/^\/api\/sessions\/([^/]+)\/messages$/)
+      if (sessionMessages && request.method === 'GET') {
+        await principal(request, auth, service)
+        return json(response, 200, { messages: await mastra.sessionMessages(decodeURIComponent(sessionMessages[1] as string)) })
+      }
+      const sessionAttention = url.pathname.match(/^\/api\/sessions\/([^/]+)\/attention$/)
+      if (sessionAttention && request.method === 'POST') {
+        await principal(request, auth, service)
+        const input = await body(request)
+        await mastra.setSessionAttention(decodeURIComponent(sessionAttention[1] as string), input.attention !== false)
+        return json(response, 200, { updated: true })
+      }
+      const sessionProposals = url.pathname.match(/^\/api\/sessions\/([^/]+)\/proposals$/)
+      if (sessionProposals && request.method === 'POST') {
+        const actor = await principal(request, auth, service)
+        const threadId = decodeURIComponent(sessionProposals[1] as string)
+        await mastra.setSessionAttention(threadId, true)
+        const investigation = mastra.investigationForSession(threadId)
+        const input = await body(request)
+        return json(response, 201, service.createProposal(
+          actor, investigation.id, requiredString(input.executorIntegrationId, 'executorIntegrationId', 128),
+          requiredString(input.action, 'action', 256), requiredString(input.target, 'target', 1024),
+          Array.isArray(input.rationaleClaimIds) ? input.rationaleClaimIds.filter((value): value is string => typeof value === 'string') : [],
+          input.parameters && typeof input.parameters === 'object' && !Array.isArray(input.parameters) ? input.parameters as Record<string, unknown> : undefined,
+        ))
+      }
+      const sessionResource = url.pathname.match(/^\/api\/sessions\/([^/]+)$/)
+      if (sessionResource && request.method === 'DELETE') {
+        await principal(request, auth, service)
+        await mastra.deleteSession(decodeURIComponent(sessionResource[1] as string))
+        securityHeaders(response); response.writeHead(204); return response.end()
+      }
+      if (url.pathname === '/api/agent/chat' && request.method === 'POST') {
+        await principal(request, auth, service)
+        const input = await body(request)
+        const streamed = await mastra.chat(requiredString(input.threadId, 'threadId', 256), input)
+        await pipeWebResponse(response, streamed)
+        return
+      }
+      if (url.pathname === '/api/plugins' && request.method === 'GET') {
+        const actor = await principal(request, auth, service)
+        return json(response, 200, { catalog: service.catalog(actor), configured: service.integrations(actor) })
+      }
+      if (url.pathname === '/api/plugins/connect' && request.method === 'POST') {
+        const actor = await principal(request, auth, service)
+        const input = await body(request)
+        const rawSettings = input.settings && typeof input.settings === 'object' && !Array.isArray(input.settings)
+          ? input.settings as Record<string, unknown> : {}
+        let plugin = service.createIntegration(actor, input.catalogId, {
+          name: input.name, scope: input.scope, endpoint: input.endpoint, credentialRef: input.credentialRef,
+          settings: rawSettings,
+        })
+        if (plugin.state === 'draft') {
+          try {
+            plugin = await service.testIntegration(actor, plugin.id)
+            plugin = service.submitIntegration(actor, plugin.id)
+          } catch (cause) {
+            service.deleteIntegration(actor, plugin.id)
+            throw cause
+          }
+          try {
+            plugin = service.activateIntegration(actor, plugin.id)
+          } catch (cause) {
+            service.deleteIntegration(actor, plugin.id)
+            throw cause
+          }
+        }
+        return json(response, 201, { plugin })
+      }
+      if (url.pathname === '/api/schedules' && request.method === 'GET') {
+        await principal(request, auth, service)
+        return json(response, 200, { schedules: await mastra.listSchedules() })
+      }
+      if (url.pathname === '/api/schedules' && request.method === 'POST') {
+        const actor = await principal(request, auth, service)
+        requireRole(actor, 'Papyrus.Integration.Manage')
+        const input = await body(request)
+        return json(response, 201, await mastra.createSchedule({
+          name: requiredString(input.name, 'name', 120), cron: requiredString(input.cron, 'cron', 120),
+          prompt: requiredString(input.prompt, 'prompt', 10_000),
+          ...(typeof input.timezone === 'string' && input.timezone ? { timezone: input.timezone } : {}),
+          ...(typeof input.threadId === 'string' && input.threadId ? { threadId: input.threadId } : {}),
+        }))
+      }
+      const scheduleResource = url.pathname.match(/^\/api\/schedules\/([^/]+)$/)
+      if (scheduleResource && request.method === 'DELETE') {
+        const actor = await principal(request, auth, service)
+        requireRole(actor, 'Papyrus.Integration.Manage')
+        await mastra.deleteSchedule(decodeURIComponent(scheduleResource[1] as string))
+        securityHeaders(response); response.writeHead(204); return response.end()
+      }
+      if (url.pathname === '/api/workflows' && request.method === 'GET') {
+        await principal(request, auth, service)
+        return json(response, 200, { workflows: mastra.listWorkflows() })
+      }
+      const workflowRun = url.pathname.match(/^\/api\/workflows\/([^/]+)\/runs$/)
+      if (workflowRun && request.method === 'POST') {
+        const actor = await principal(request, auth, service)
+        requireRole(actor, 'Papyrus.Integration.Manage')
+        return json(response, 202, await mastra.runWorkflow(decodeURIComponent(workflowRun[1] as string), await body(request)))
+      }
       if (url.pathname === '/api/integrations/catalog' && request.method === 'GET') return json(response, 200, { integrations: service.catalog(await principal(request, auth, service)) })
       if (url.pathname === '/api/integrations' && request.method === 'GET') return json(response, 200, { integrations: service.integrations(await principal(request, auth, service)) })
       if (url.pathname === '/api/terrain' && request.method === 'GET') return json(response, 200, service.terrainSnapshot(await principal(request, auth, service)))
@@ -151,6 +266,13 @@ export function createCyberServer(config: CyberConfig, service: CyberService, au
           ? service.ingestObservationWithScopedCredential(id, input)
           : service.ingestObservation(await principal(request, auth, service), id, input)
         return json(response, result.created ? 201 : 200, result)
+      }
+      const signalWebhook = url.pathname.match(/^\/api\/signals\/([^/]+)\/webhook$/)
+      if (signalWebhook && request.method === 'POST') {
+        const id = decodeURIComponent(signalWebhook[1] as string)
+        if (!auth.verifyIngestionRequest(request, id)) throw new HttpError(401, 'SIGNAL_AUTHENTICATION_REQUIRED', 'A source-scoped bearer token is required')
+        const headers = Object.fromEntries(Object.entries(request.headers).flatMap(([name, value]) => typeof value === 'string' ? [[name, value]] : []))
+        return json(response, 202, await mastra.acceptWebhook(id, await body(request), headers))
       }
       const sync = url.pathname.match(/^\/api\/integrations\/([^/]+)\/sync$/)
       if (sync && request.method === 'POST') return json(response, 202, service.requestSync(
@@ -219,7 +341,7 @@ export function createCyberServer(config: CyberConfig, service: CyberService, au
       if (url.pathname.startsWith('/api/')) throw new HttpError(404, 'NOT_FOUND', 'API route not found')
       return servePortal(response, url.pathname)
     } catch (cause) {
-      const failure = cause instanceof HttpError || cause instanceof CyberServiceError
+      const failure = cause instanceof HttpError || cause instanceof CyberServiceError || cause instanceof MastraRuntimeError
         ? cause
         : cause instanceof EntraAuthError
           ? new HttpError(401, cause.code, cause.message)
@@ -234,6 +356,25 @@ export function createCyberServer(config: CyberConfig, service: CyberService, au
     ...(config.tls.caPath ? { ca: readFileSync(config.tls.caPath) } : {}),
     minVersion: 'TLSv1.2',
   }, handler)
+}
+
+async function pipeWebResponse(response: ServerResponse, source: Response): Promise<void> {
+  securityHeaders(response)
+  const headers: Record<string, string> = {}
+  source.headers.forEach((value, key) => { headers[key] = value })
+  response.writeHead(source.status, headers)
+  if (!source.body) { response.end(); return }
+  const reader = source.body.getReader()
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (!response.write(Buffer.from(value))) await new Promise<void>((resolve) => response.once('drain', resolve))
+    }
+    response.end()
+  } finally {
+    reader.releaseLock()
+  }
 }
 
 function servePortal(response: ServerResponse, pathname: string): void {

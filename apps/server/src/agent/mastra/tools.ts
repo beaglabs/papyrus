@@ -1,4 +1,4 @@
-import type { CyberActionProposal, CyberInvestigation, TerrainSnapshot } from '@papyrus/contracts'
+import type { AgentActionProposal, AgentInvestigation, TerrainSnapshot } from '@papyrus/contracts'
 import type { ActionStore } from '../action-store.js'
 import type { TerrainStore } from '../terrain-store.js'
 
@@ -30,7 +30,7 @@ export interface ToolDescriptor {
 export const INVESTIGATION_TOOLS = {
   terrainQuery: {
     name: 'terrainQuery',
-    description: 'Return the current cyber terrain: observed entities, relationships, observation count, and unresolved claims.',
+    description: 'Return the current agent terrain: observed entities, relationships, observation count, and unresolved claims.',
     authority: 'read_only',
   },
   listInvestigations: {
@@ -72,7 +72,7 @@ export function terrainQuery(context: InvestigationToolContext): TerrainSnapshot
   return context.terrain.snapshot()
 }
 
-export function listInvestigations(context: InvestigationToolContext): CyberInvestigation[] {
+export function listInvestigations(context: InvestigationToolContext): AgentInvestigation[] {
   return context.actionStore.listInvestigations()
 }
 
@@ -80,7 +80,7 @@ export interface ListProposalsArgs {
   investigationId?: string | undefined
 }
 
-export function listProposals(context: InvestigationToolContext, args: ListProposalsArgs = {}): CyberActionProposal[] {
+export function listProposals(context: InvestigationToolContext, args: ListProposalsArgs = {}): AgentActionProposal[] {
   const investigationId = typeof args.investigationId === 'string' && args.investigationId.length > 0
     ? args.investigationId
     : undefined
@@ -89,7 +89,7 @@ export function listProposals(context: InvestigationToolContext, args: ListPropo
     : context.actionStore.listProposals()
 }
 
-export type InvestigationToolResult = TerrainSnapshot | CyberInvestigation[] | CyberActionProposal[]
+export type InvestigationToolResult = TerrainSnapshot | AgentInvestigation[] | AgentActionProposal[]
 
 /** Dispatch by tool name. Returns undefined for unknown tools rather than guessing. */
 export function runInvestigationTool(

@@ -120,7 +120,7 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
   },
   {
     id: 'acp-client', name: 'ACP Client', vendor: 'Open protocol', initials: 'AC', accent: '#f0b1ff',
-    description: 'Programmatic client access for approved cyber-twin investigations and operator capabilities.',
+    description: 'Programmatic client access for approved agent-twin investigations and operator capabilities.',
     integrationClass: 'agent_peer', authority: 'bidirectional', risk: 'high',
     capabilities: ['typed investigation request', 'evidence subscription', 'artifact delivery'],
     evidenceTypes: ['PeerRequest', 'PeerClaim'], syncMode: 'push', authSchemes: ['mTLS', 'oauth'],

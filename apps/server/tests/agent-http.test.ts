@@ -2,23 +2,23 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { CyberConfig } from '../src/agent/config.js'
-import { CyberDatabase } from '../src/agent/database.js'
+import type { AgentConfig } from '../src/agent/config.js'
+import { AgentDatabase } from '../src/agent/database.js'
 import { EntraAuthService } from '../src/agent/entra-auth.js'
-import { createCyberServer } from '../src/agent/http.js'
-import { CyberService } from '../src/agent/service.js'
+import { createAgentServer } from '../src/agent/http.js'
+import { AgentService } from '../src/agent/service.js'
 import { ActionStore } from '../src/agent/action-store.js'
 import { TerrainStore } from '../src/agent/terrain-store.js'
 import { MastraRuntime } from '../src/agent/mastra/runtime.js'
 
-describe('cyber portal HTTP surface', () => {
+describe('agent portal HTTP surface', () => {
   const disposers: Array<() => Promise<void> | void> = []
   afterEach(async () => { while (disposers.length) await disposers.pop()?.() })
 
   it('exposes durable sessions, plugins, and the source lifecycle', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'papyrus-cyber-http-'))
-    const db = new CyberDatabase(':memory:')
-    const config: CyberConfig = {
+    const dataDir = mkdtempSync(join(tmpdir(), 'papyrus-agent-http-'))
+    const db = new AgentDatabase(':memory:')
+    const config: AgentConfig = {
       mode: 'local', profile: 'gcc', host: '127.0.0.1', port: 0, publicOrigin: 'http://127.0.0.1:3210',
       dataDir, databasePath: ':memory:', portalSecret: 'portal-secret-at-least-thirty-two-characters',
       organizationName: 'Example Agency', cloud: 'Public', licenseRequired: false, licenseAuthorities: {},
@@ -28,10 +28,10 @@ describe('cyber portal HTTP surface', () => {
     }
     const terrain = new TerrainStore(db)
     const actionStore = new ActionStore(db)
-    const service = new CyberService(db, config, terrain, undefined, actionStore)
+    const service = new AgentService(db, config, terrain, undefined, actionStore)
     const mastra = new MastraRuntime(config, actionStore, terrain, service)
     await mastra.start()
-    const server = createCyberServer(config, service, new EntraAuthService(config), mastra)
+    const server = createAgentServer(config, service, new EntraAuthService(config), mastra)
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
     const address = server.address()
     if (!address || typeof address === 'string') throw new Error('Expected TCP listener')

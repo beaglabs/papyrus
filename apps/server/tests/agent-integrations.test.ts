@@ -3,23 +3,23 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { INTEGRATION_CATALOG } from '../src/agent/catalog.js'
-import type { CyberConfig } from '../src/agent/config.js'
-import { CyberDatabase } from '../src/agent/database.js'
-import { CyberService } from '../src/agent/service.js'
+import type { AgentConfig } from '../src/agent/config.js'
+import { AgentDatabase } from '../src/agent/database.js'
+import { AgentService } from '../src/agent/service.js'
 
-describe('cyber integration lifecycle', () => {
+describe('agent integration lifecycle', () => {
   const disposers: Array<() => void> = []
   afterEach(() => { while (disposers.length) disposers.pop()?.() })
 
   function setup() {
-    const dataDir = mkdtempSync(join(tmpdir(), 'papyrus-cyber-test-'))
-    const db = new CyberDatabase(':memory:')
-    const config: CyberConfig = {
+    const dataDir = mkdtempSync(join(tmpdir(), 'papyrus-agent-test-'))
+    const db = new AgentDatabase(':memory:')
+    const config: AgentConfig = {
       mode: 'local', profile: 'gcc', host: '127.0.0.1', port: 3210, publicOrigin: 'http://127.0.0.1:3210',
       dataDir, databasePath: ':memory:', portalSecret: 'portal-secret-at-least-thirty-two-characters',
       organizationName: 'Example Agency', cloud: 'Public', licenseRequired: false, licenseAuthorities: {},
     }
-    const service = new CyberService(db, config)
+    const service = new AgentService(db, config)
     const owner = { oid: 'owner-oid', tenantId: 'tenant', displayName: 'Owner', roles: ['Papyrus.System.Owner' as const], groups: [], source: 'development' as const }
     const viewer = { oid: 'viewer-oid', tenantId: 'tenant', displayName: 'Viewer', roles: ['Papyrus.Integration.View' as const], groups: [], source: 'development' as const }
     disposers.push(() => { db.close(); rmSync(dataDir, { recursive: true, force: true }) })
@@ -61,8 +61,8 @@ describe('cyber integration lifecycle', () => {
     const integration = service.createIntegration(owner, 'zeek', { name: 'Temporary Zeek', settings: {} })
     service.deleteIntegration(owner, integration.id)
     expect(service.integrations(owner)).toEqual([])
-    expect(db.sqlite.prepare('SELECT state,deleted_at FROM cyber_integrations WHERE id=?').get(integration.id)).toMatchObject({ state: 'disabled' })
-    expect(db.sqlite.prepare('SELECT action FROM cyber_integration_events WHERE integration_id=? ORDER BY sequence DESC LIMIT 1').get(integration.id)).toMatchObject({ action: 'IntegrationDeleted' })
+    expect(db.sqlite.prepare('SELECT state,deleted_at FROM agent_integrations WHERE id=?').get(integration.id)).toMatchObject({ state: 'disabled' })
+    expect(db.sqlite.prepare('SELECT action FROM agent_integration_events WHERE integration_id=? ORDER BY sequence DESC LIMIT 1').get(integration.id)).toMatchObject({ action: 'IntegrationDeleted' })
     expect(db.verifyEventChain()).toEqual({ valid: true, count: 2 })
   })
 

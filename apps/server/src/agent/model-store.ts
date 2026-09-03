@@ -6,7 +6,7 @@ import type {
   ModelProfile,
   ModelProfileState,
 } from '@papyrus/contracts'
-import { CyberDatabase } from './database.js'
+import { AgentDatabase } from './database.js'
 
 type Row = Record<string, unknown>
 
@@ -30,7 +30,7 @@ export class ModelProfileError extends Error {
 }
 
 export class ModelStore {
-  constructor(readonly db: CyberDatabase) { this.migrate() }
+  constructor(readonly db: AgentDatabase) { this.migrate() }
 
   list(): ModelProfile[] {
     return (this.db.sqlite.prepare('SELECT * FROM papyrus_model_profiles WHERE deleted_at IS NULL ORDER BY is_default DESC, updated_at DESC').all() as Row[]).map((row) => this.profile(row))

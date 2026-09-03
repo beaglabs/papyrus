@@ -1,6 +1,6 @@
-# Cyber twin architecture
+# Agent twin architecture
 
-Papyrus is the governed customer-hosted envelope around a Starlings cyber-resilience population.
+Papyrus is the governed customer-hosted envelope around a Starlings agent-resilience population.
 
 | Plane | Responsibility | Authority |
 | --- | --- | --- |
@@ -21,7 +21,7 @@ The canonical flow is:
 2. The daemon validates the envelope and any selected versioned source schema without mutating existing evidence.
 3. An accepted canonical projection is validated directly, or a pinned deterministic source profile projects native fields; the immutable raw observation, schema provenance, and resulting Terrain evidence commit atomically.
 4. Starlings operators consume the durable observation boundary to form claims, request missing evidence, and resolve contradictions.
-5. The cyber twin retains the current terrain and confidence history.
+5. The agent twin retains the current terrain and confidence history.
 6. Potentially consequential output becomes an action proposal.
 7. Policy and an appropriately assigned Entra principal decide whether the action is released.
 8. Every configuration and decision transition is auditable.
@@ -34,7 +34,7 @@ The same substrate can be tested under message loss, operator loss, partitions, 
 
 ## Durable agent plane
 
-Investigation work is driven by durable signals, not by in-memory events. Terrain and investigation changes are written to a leased `cyber_signal_outbox` table and drained into the agent harness by a periodic worker. A signal is acked only after delivery succeeds and retried with exponential backoff otherwise.
+Investigation work is driven by durable signals, not by in-memory events. Terrain and investigation changes are written to a leased `agent_signal_outbox` table and drained into the agent harness by a periodic worker. A signal is acked only after delivery succeeds and retried with exponential backoff otherwise.
 
 Three properties follow, and they are the reason the outbox exists rather than an event emitter:
 

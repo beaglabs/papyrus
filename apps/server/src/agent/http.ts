@@ -2,10 +2,10 @@ import { readFileSync } from 'node:fs'
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { createServer as createHttpsServer } from 'node:https'
 import { extname, join, normalize } from 'node:path'
-import { MODEL_AUTH_SCHEMES, MODEL_GATEWAY_KINDS, type EntraAppRole, type ModelAuthScheme, type ModelGatewayKind, type PortalPrincipal, type SignedLicense } from '@papyrus/contracts'
-import type { CyberConfig } from './config.js'
+import type { EntraAppRole, PortalPrincipal, SignedLicense } from '@papyrus/contracts'
+import type { AgentConfig } from './config.js'
 import { EntraAuthError, EntraAuthService, hasAppRole } from './entra-auth.js'
-import { CyberService, CyberServiceError } from './service.js'
+import { AgentService, AgentServiceError } from './service.js'
 import { MastraRuntime, MastraRuntimeError } from './mastra/runtime.js'
 import { ModelProfileError } from './model-store.js'
 
@@ -54,14 +54,14 @@ function requireRole(principal: PortalPrincipal, role: EntraAppRole): void {
   if (!hasAppRole(principal, role)) throw new HttpError(403, 'ENTRA_ROLE_REQUIRED', `${role} is required`)
 }
 
-async function principal(request: IncomingMessage, auth: EntraAuthService, service: CyberService): Promise<PortalPrincipal> {
+async function principal(request: IncomingMessage, auth: EntraAuthService, service: AgentService): Promise<PortalPrincipal> {
   const value = await auth.authenticate(request)
   if (!value) throw new HttpError(401, 'ENTRA_AUTHENTICATION_REQUIRED', 'Microsoft Entra authentication is required')
   service.requirePortalAccess(value)
   return value
 }
 
-export function createCyberServer(config: CyberConfig, service: CyberService, auth: EntraAuthService, mastra: MastraRuntime): Server {
+export function createAgentServer(config: AgentConfig, service: AgentService, auth: EntraAuthService, mastra: MastraRuntime): Server {
   const handler = async (request: IncomingMessage, response: ServerResponse) => {
     const requestId = crypto.randomUUID()
     response.setHeader('x-request-id', requestId)
@@ -69,7 +69,7 @@ export function createCyberServer(config: CyberConfig, service: CyberService, au
     try {
       if (url.pathname === '/api/health' && request.method === 'GET') {
         return json(response, 200, {
-          status: 'ok', product: 'Papyrus Cyber Twin', topology: 'customer-hosted', profile: config.profile,
+          status: 'ok', product: 'Papyrus Agent Twin', topology: 'customer-hosted', profile: config.profile,
           identityAuthority: 'Microsoft Entra ID', organizationName: config.organizationName,
         })
       }
@@ -379,7 +379,7 @@ export function createCyberServer(config: CyberConfig, service: CyberService, au
       if (url.pathname.startsWith('/api/')) throw new HttpError(404, 'NOT_FOUND', 'API route not found')
       return servePortal(response, url.pathname)
     } catch (cause) {
-      const failure = cause instanceof HttpError || cause instanceof CyberServiceError || cause instanceof MastraRuntimeError
+      const failure = cause instanceof HttpError || cause instanceof AgentServiceError || cause instanceof MastraRuntimeError
         ? cause
         : cause instanceof ModelProfileError
           ? new HttpError(400, cause.code, cause.message)

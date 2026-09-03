@@ -72,7 +72,7 @@ for the underlying gateway contract and provider/model ID format.
 
 `WebhookSignalProvider` does not mount an HTTP route or persist its in-process
 subscriptions. Papyrus owns `/api/signals/:sourceId/webhook`, authenticates it
-with a source-scoped token, writes the event to `cyber_signal_outbox`, and drains
+with a source-scoped token, writes the event to `agent_signal_outbox`, and drains
 it through the provider. Signal-session subscriptions are reconstructed from
 Mastra thread metadata after daemon restart.
 

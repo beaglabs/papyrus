@@ -1,6 +1,6 @@
 import type {
-  CyberActionProposal,
-  CyberActionReceipt,
+  AgentActionProposal,
+  AgentActionReceipt,
   IntegrationCatalogEntry,
   IntegrationConfiguration,
   IntegrationEvent,
@@ -148,7 +148,7 @@ export async function createSessionProposal(id: string, input: {
   target: string
   rationaleClaimIds?: string[]
   parameters?: Record<string, unknown>
-}): Promise<CyberActionProposal> {
+}): Promise<AgentActionProposal> {
   return api(`/api/sessions/${encodeURIComponent(id)}/proposals`, { method: 'POST', body: JSON.stringify(input) })
 }
 
@@ -208,14 +208,14 @@ export async function requestIntegrationSync(id: string): Promise<SyncJob> {
 
 export async function logout(): Promise<void> { await api('/api/auth/logout', { method: 'POST', body: '{}' }) }
 
-export async function approveProposal(id: string): Promise<CyberActionProposal> {
+export async function approveProposal(id: string): Promise<AgentActionProposal> {
   return api(`/api/proposals/${encodeURIComponent(id)}/approve`, { method: 'POST', body: '{}' })
 }
 
-export async function denyProposal(id: string, reason?: string): Promise<CyberActionProposal> {
+export async function denyProposal(id: string, reason?: string): Promise<AgentActionProposal> {
   return api(`/api/proposals/${encodeURIComponent(id)}/deny`, { method: 'POST', body: JSON.stringify(reason ? { reason } : {}) })
 }
 
-export async function listReceipts(): Promise<CyberActionReceipt[]> {
-  return (await api<{ receipts: CyberActionReceipt[] }>('/api/receipts')).receipts
+export async function listReceipts(): Promise<AgentActionReceipt[]> {
+  return (await api<{ receipts: AgentActionReceipt[] }>('/api/receipts')).receipts
 }

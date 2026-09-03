@@ -1,6 +1,6 @@
 import type { IncomingMessage } from 'node:http'
 import { describe, expect, it } from 'vitest'
-import type { CyberConfig } from '../src/agent/config.js'
+import type { AgentConfig } from '../src/agent/config.js'
 import { EntraAuthService, hasAppRole, principalFromClaims } from '../src/agent/entra-auth.js'
 
 describe('Entra-native portal identity', () => {
@@ -8,14 +8,14 @@ describe('Entra-native portal identity', () => {
     const principal = principalFromClaims({
       oid: '11111111-1111-1111-1111-111111111111',
       tid: '22222222-2222-2222-2222-222222222222',
-      name: 'Cyber Analyst',
+      name: 'Agent Analyst',
       preferred_username: 'analyst@example.mil',
       roles: ['Papyrus.Integration.View', 'Unrelated.Role'],
       groups: ['group-1'],
     }, 'teams-sso')
     expect(principal).toEqual({
       oid: '11111111-1111-1111-1111-111111111111', tenantId: '22222222-2222-2222-2222-222222222222',
-      displayName: 'Cyber Analyst', preferredUsername: 'analyst@example.mil', roles: ['Papyrus.Integration.View'],
+      displayName: 'Agent Analyst', preferredUsername: 'analyst@example.mil', roles: ['Papyrus.Integration.View'],
       groups: ['group-1'], source: 'teams-sso',
     })
     expect(hasAppRole(principal, 'Papyrus.Integration.Manage')).toBe(false)
@@ -28,7 +28,7 @@ describe('Entra-native portal identity', () => {
   })
 
   it('issues expiring ingestion tokens bound to one integration route', () => {
-    const config: CyberConfig = {
+    const config: AgentConfig = {
       mode: 'local', profile: 'gcc', host: '127.0.0.1', port: 3210, publicOrigin: 'https://127.0.0.1:3210',
       dataDir: '/tmp/papyrus-auth-test', databasePath: ':memory:', portalSecret: 'portal-secret-at-least-thirty-two-characters',
       organizationName: 'Example Agency', cloud: 'Public', licenseRequired: false, licenseAuthorities: {},

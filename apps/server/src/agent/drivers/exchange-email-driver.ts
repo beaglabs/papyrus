@@ -16,7 +16,7 @@ function recipients(values: Array<{ emailAddress?: { address?: string; name?: st
  * Pulls Microsoft Graph mailbox delta pages and converts email into a compact,
  * auditable HumanContext observation. It intentionally stores preview metadata
  * rather than full message bodies: a connector must be explicitly extended
- * before it moves arbitrary mailbox content into the cyber twin.
+ * before it moves arbitrary mailbox content into the agent twin.
  */
 export class ExchangeEmailDriver implements ConnectorDriver {
   constructor(private readonly graph: MicrosoftGraphClient) {}

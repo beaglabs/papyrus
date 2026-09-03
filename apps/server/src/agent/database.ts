@@ -56,7 +56,7 @@ export interface CreateModelProviderInput {
   models: string[]
 }
 
-export class CyberDatabase {
+export class AgentDatabase {
   readonly sqlite: InstanceType<typeof Database>
 
   constructor(path: string) {
@@ -74,7 +74,7 @@ export class CyberDatabase {
     const now = new Date().toISOString()
     const id = randomUUID()
     const initialState: IntegrationState = entry.observationProtocol ? 'active' : 'draft'
-    this.sqlite.prepare(`INSERT INTO cyber_integrations(
+    this.sqlite.prepare(`INSERT INTO agent_integrations(
       id,catalog_id,name,integration_class,authority,risk,state,endpoint,scope,credential_ref,settings_json,
       health,created_by_oid,created_at,updated_at,version
     ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)`).run(
@@ -88,19 +88,19 @@ export class CyberDatabase {
   }
 
   getIntegration(id: string): IntegrationConfiguration | undefined {
-    const row = this.sqlite.prepare('SELECT * FROM cyber_integrations WHERE id=? AND deleted_at IS NULL').get(id) as Row | undefined
+    const row = this.sqlite.prepare('SELECT * FROM agent_integrations WHERE id=? AND deleted_at IS NULL').get(id) as Row | undefined
     return row ? this.integration(row) : undefined
   }
 
   listIntegrations(): IntegrationConfiguration[] {
-    return (this.sqlite.prepare('SELECT * FROM cyber_integrations WHERE deleted_at IS NULL ORDER BY updated_at DESC').all() as Row[]).map((row) => this.integration(row))
+    return (this.sqlite.prepare('SELECT * FROM agent_integrations WHERE deleted_at IS NULL ORDER BY updated_at DESC').all() as Row[]).map((row) => this.integration(row))
   }
 
   markTested(id: string, actorOid: string, result: Record<string, unknown>, connectionVerified = false): IntegrationConfiguration {
     const integration = this.requireIntegration(id)
     if (!['draft', 'tested', 'degraded', 'disabled'].includes(integration.state)) throw new Error(`Integration cannot be tested from ${integration.state}`)
     const now = new Date().toISOString()
-    this.sqlite.prepare("UPDATE cyber_integrations SET state='tested',health=?,last_tested_at=?,updated_at=?,version=version+1 WHERE id=?")
+    this.sqlite.prepare("UPDATE agent_integrations SET state='tested',health=?,last_tested_at=?,updated_at=?,version=version+1 WHERE id=?")
       .run(connectionVerified ? 'healthy' : 'unknown', now, now, id)
     this.appendEvent(id, actorOid, 'IntegrationTested', result)
     return this.getIntegration(id) as IntegrationConfiguration
@@ -134,7 +134,7 @@ export class CyberDatabase {
     const integration = this.requireIntegration(id)
     const now = new Date().toISOString()
     this.appendEvent(id, actorOid, 'IntegrationDeleted', { previousState: integration.state, evidenceRetained: true })
-    this.sqlite.prepare("UPDATE cyber_integrations SET state='disabled',deleted_at=?,updated_at=?,version=version+1 WHERE id=?")
+    this.sqlite.prepare("UPDATE agent_integrations SET state='disabled',deleted_at=?,updated_at=?,version=version+1 WHERE id=?")
       .run(now, now, id)
   }
 
@@ -155,7 +155,7 @@ export class CyberDatabase {
 
   recordSyncSuccess(id: string, evidenceAt?: string): void {
     const now = new Date().toISOString()
-    this.sqlite.prepare(`UPDATE cyber_integrations SET health='healthy',last_sync_at=?,last_sync_error=NULL,
+    this.sqlite.prepare(`UPDATE agent_integrations SET health='healthy',last_sync_at=?,last_sync_error=NULL,
       last_evidence_at=CASE WHEN ? IS NULL THEN last_evidence_at
         WHEN last_evidence_at IS NULL OR last_evidence_at < ? THEN ? ELSE last_evidence_at END,
       updated_at=?,version=version+1 WHERE id=?`).run(now, evidenceAt ?? null, evidenceAt ?? null, evidenceAt ?? null, now, id)
@@ -163,19 +163,19 @@ export class CyberDatabase {
 
   recordSyncFailure(id: string, message: string): void {
     const now = new Date().toISOString()
-    this.sqlite.prepare("UPDATE cyber_integrations SET health='degraded',last_sync_at=?,last_sync_error=?,updated_at=?,version=version+1 WHERE id=?")
+    this.sqlite.prepare("UPDATE agent_integrations SET health='degraded',last_sync_at=?,last_sync_error=?,updated_at=?,version=version+1 WHERE id=?")
       .run(now, message.slice(0, 2048), now, id)
   }
 
   recordEvidence(id: string, observedAt: string): void {
     const now = new Date().toISOString()
-    this.sqlite.prepare(`UPDATE cyber_integrations SET health='healthy',last_evidence_at=CASE
+    this.sqlite.prepare(`UPDATE agent_integrations SET health='healthy',last_evidence_at=CASE
       WHEN last_evidence_at IS NULL OR last_evidence_at < ? THEN ? ELSE last_evidence_at END,
       updated_at=?,version=version+1 WHERE id=?`).run(observedAt, observedAt, now, id)
   }
 
   listEvents(integrationId: string): IntegrationEvent[] {
-    return (this.sqlite.prepare('SELECT * FROM cyber_integration_events WHERE integration_id=? ORDER BY sequence DESC').all(integrationId) as Row[])
+    return (this.sqlite.prepare('SELECT * FROM agent_integration_events WHERE integration_id=? ORDER BY sequence DESC').all(integrationId) as Row[])
       .map((row) => ({
         sequence: Number(row.sequence), integrationId: String(row.integration_id), actorOid: String(row.actor_oid),
         action: String(row.action), occurredAt: String(row.occurred_at), data: JSON.parse(String(row.data_json)) as Record<string, unknown>,
@@ -186,7 +186,7 @@ export class CyberDatabase {
   createModelProvider(input: CreateModelProviderInput, actorOid: string): ModelProviderConfiguration {
     const now = new Date().toISOString()
     const id = randomUUID()
-    this.sqlite.prepare(`INSERT INTO cyber_model_providers(
+    this.sqlite.prepare(`INSERT INTO agent_model_providers(
       id,slug,name,base_url,credential_ref,models_json,created_by_oid,created_at,updated_at,version
     ) VALUES(?,?,?,?,?,?,?,?,?,1)`).run(
       id, input.slug, input.name, input.baseUrl, input.credentialRef ?? null, JSON.stringify(input.models), actorOid, now, now,
@@ -197,7 +197,7 @@ export class CyberDatabase {
 
   updateModelProvider(id: string, input: CreateModelProviderInput, actorOid: string): ModelProviderConfiguration {
     this.requireModelProvider(id)
-    this.sqlite.prepare('UPDATE cyber_model_providers SET slug=?,name=?,base_url=?,credential_ref=?,models_json=?,updated_at=?,version=version+1 WHERE id=?')
+    this.sqlite.prepare('UPDATE agent_model_providers SET slug=?,name=?,base_url=?,credential_ref=?,models_json=?,updated_at=?,version=version+1 WHERE id=?')
       .run(input.slug, input.name, input.baseUrl, input.credentialRef ?? null, JSON.stringify(input.models), new Date().toISOString(), id)
     this.appendModelEvent(actorOid, 'ModelProviderUpdated', { providerId: id, slug: input.slug, baseUrl: input.baseUrl })
     return this.getModelProvider(id) as ModelProviderConfiguration
@@ -205,28 +205,28 @@ export class CyberDatabase {
 
   deleteModelProvider(id: string, actorOid: string): void {
     const provider = this.requireModelProvider(id)
-    this.sqlite.prepare('DELETE FROM cyber_model_providers WHERE id=?').run(id)
+    this.sqlite.prepare('DELETE FROM agent_model_providers WHERE id=?').run(id)
     this.appendModelEvent(actorOid, 'ModelProviderDeleted', { providerId: id, slug: provider.slug })
   }
 
   getModelProvider(id: string): ModelProviderConfiguration | undefined {
-    const row = this.sqlite.prepare('SELECT * FROM cyber_model_providers WHERE id=?').get(id) as Row | undefined
+    const row = this.sqlite.prepare('SELECT * FROM agent_model_providers WHERE id=?').get(id) as Row | undefined
     return row ? this.modelProvider(row) : undefined
   }
 
   getModelProviderBySlug(slug: string): ModelProviderConfiguration | undefined {
-    const row = this.sqlite.prepare('SELECT * FROM cyber_model_providers WHERE slug=?').get(slug) as Row | undefined
+    const row = this.sqlite.prepare('SELECT * FROM agent_model_providers WHERE slug=?').get(slug) as Row | undefined
     return row ? this.modelProvider(row) : undefined
   }
 
   listModelProviders(): ModelProviderConfiguration[] {
-    return (this.sqlite.prepare('SELECT * FROM cyber_model_providers ORDER BY name').all() as Row[]).map((row) => this.modelProvider(row))
+    return (this.sqlite.prepare('SELECT * FROM agent_model_providers ORDER BY name').all() as Row[]).map((row) => this.modelProvider(row))
   }
 
   assignAgentModel(providerId: string, model: string, actorOid: string): ModelAssignmentConfiguration {
     this.requireModelProvider(providerId)
     const now = new Date().toISOString()
-    this.sqlite.prepare(`INSERT INTO cyber_model_assignment(id,provider_id,model,updated_by_oid,updated_at) VALUES(1,?,?,?,?)
+    this.sqlite.prepare(`INSERT INTO agent_model_assignment(id,provider_id,model,updated_by_oid,updated_at) VALUES(1,?,?,?,?)
       ON CONFLICT(id) DO UPDATE SET provider_id=excluded.provider_id,model=excluded.model,updated_by_oid=excluded.updated_by_oid,updated_at=excluded.updated_at`)
       .run(providerId, model, actorOid, now)
     this.appendModelEvent(actorOid, 'AgentModelAssigned', { providerId, model })
@@ -236,12 +236,12 @@ export class CyberDatabase {
   clearAgentModelAssignment(actorOid: string): void {
     const existing = this.getAgentModelAssignment()
     if (!existing) return
-    this.sqlite.prepare('DELETE FROM cyber_model_assignment WHERE id=1').run()
+    this.sqlite.prepare('DELETE FROM agent_model_assignment WHERE id=1').run()
     this.appendModelEvent(actorOid, 'AgentModelAssignmentCleared', { previousProviderId: existing.providerId, previousModel: existing.model })
   }
 
   getAgentModelAssignment(): ModelAssignmentConfiguration | undefined {
-    const row = this.sqlite.prepare('SELECT * FROM cyber_model_assignment WHERE id=1').get() as Row | undefined
+    const row = this.sqlite.prepare('SELECT * FROM agent_model_assignment WHERE id=1').get() as Row | undefined
     if (!row) return undefined
     return {
       providerId: String(row.provider_id), model: String(row.model),
@@ -257,7 +257,7 @@ export class CyberDatabase {
       sum(CASE WHEN state='awaiting_approval' THEN 1 ELSE 0 END) awaiting_approval,
       sum(CASE WHEN integration_class='evidence_source' THEN 1 ELSE 0 END) evidence_sources,
       sum(CASE WHEN integration_class='action_executor' OR authority='controlled_actions' THEN 1 ELSE 0 END) action_executors
-      FROM cyber_integrations
+      FROM agent_integrations
       WHERE deleted_at IS NULL
         AND (integration_class NOT IN ('evidence_source','terrain_source') OR last_evidence_at IS NOT NULL)`).get() as Row
     return {
@@ -268,7 +268,7 @@ export class CyberDatabase {
   }
 
   verifyEventChain(): { valid: boolean; count: number } {
-    const rows = this.sqlite.prepare('SELECT * FROM cyber_integration_events ORDER BY sequence').all() as Row[]
+    const rows = this.sqlite.prepare('SELECT * FROM agent_integration_events ORDER BY sequence').all() as Row[]
     let previousHash = '0'.repeat(64)
     for (const row of rows) {
       const payload = {
@@ -289,30 +289,30 @@ export class CyberDatabase {
   }
 
   private transition(id: string, state: IntegrationState): void {
-    this.sqlite.prepare('UPDATE cyber_integrations SET state=?,updated_at=?,version=version+1 WHERE id=?')
+    this.sqlite.prepare('UPDATE agent_integrations SET state=?,updated_at=?,version=version+1 WHERE id=?')
       .run(state, new Date().toISOString(), id)
   }
 
   private appendEvent(integrationId: string, actorOid: string, action: string, data: Record<string, unknown>): void {
-    const previous = this.sqlite.prepare('SELECT sequence,hash FROM cyber_integration_events ORDER BY sequence DESC LIMIT 1').get() as Row | undefined
+    const previous = this.sqlite.prepare('SELECT sequence,hash FROM agent_integration_events ORDER BY sequence DESC LIMIT 1').get() as Row | undefined
     const sequence = Number(previous?.sequence ?? 0) + 1
     const previousHash = previous ? String(previous.hash) : '0'.repeat(64)
     const occurredAt = new Date().toISOString()
     const payload = { sequence, integrationId, actorOid, action, occurredAt, data, previousHash }
     const hash = createHash('sha256').update(canonical(payload)).digest('hex')
-    this.sqlite.prepare(`INSERT INTO cyber_integration_events(
+    this.sqlite.prepare(`INSERT INTO agent_integration_events(
       sequence,integration_id,actor_oid,action,occurred_at,data_json,previous_hash,hash
     ) VALUES(?,?,?,?,?,?,?,?)`).run(sequence, integrationId, actorOid, action, occurredAt, JSON.stringify(data), previousHash, hash)
   }
 
   private appendModelEvent(actorOid: string, action: string, data: Record<string, unknown>): void {
-    const previous = this.sqlite.prepare('SELECT sequence,hash FROM cyber_model_events ORDER BY sequence DESC LIMIT 1').get() as Row | undefined
+    const previous = this.sqlite.prepare('SELECT sequence,hash FROM agent_model_events ORDER BY sequence DESC LIMIT 1').get() as Row | undefined
     const sequence = Number(previous?.sequence ?? 0) + 1
     const previousHash = previous ? String(previous.hash) : '0'.repeat(64)
     const occurredAt = new Date().toISOString()
     const payload = { sequence, actorOid, action, occurredAt, data, previousHash }
     const hash = createHash('sha256').update(canonical(payload)).digest('hex')
-    this.sqlite.prepare(`INSERT INTO cyber_model_events(
+    this.sqlite.prepare(`INSERT INTO agent_model_events(
       sequence,actor_oid,action,occurred_at,data_json,previous_hash,hash
     ) VALUES(?,?,?,?,?,?,?)`).run(sequence, actorOid, action, occurredAt, JSON.stringify(data), previousHash, hash)
   }
@@ -351,7 +351,7 @@ export class CyberDatabase {
 
   private migrate(): void {
     this.sqlite.exec(`
-      CREATE TABLE IF NOT EXISTS cyber_integrations (
+      CREATE TABLE IF NOT EXISTS agent_integrations (
         id TEXT PRIMARY KEY,
         catalog_id TEXT NOT NULL,
         name TEXT NOT NULL,
@@ -373,10 +373,10 @@ export class CyberDatabase {
         updated_at TEXT NOT NULL,
         version INTEGER NOT NULL
       );
-      CREATE INDEX IF NOT EXISTS cyber_integrations_state ON cyber_integrations(state,updated_at DESC);
-      CREATE TABLE IF NOT EXISTS cyber_integration_events (
+      CREATE INDEX IF NOT EXISTS agent_integrations_state ON agent_integrations(state,updated_at DESC);
+      CREATE TABLE IF NOT EXISTS agent_integration_events (
         sequence INTEGER PRIMARY KEY,
-        integration_id TEXT NOT NULL REFERENCES cyber_integrations(id),
+        integration_id TEXT NOT NULL REFERENCES agent_integrations(id),
         actor_oid TEXT NOT NULL,
         action TEXT NOT NULL,
         occurred_at TEXT NOT NULL,
@@ -384,14 +384,14 @@ export class CyberDatabase {
         previous_hash TEXT NOT NULL,
         hash TEXT NOT NULL UNIQUE
       );
-      CREATE TRIGGER IF NOT EXISTS cyber_events_no_update BEFORE UPDATE ON cyber_integration_events
-      BEGIN SELECT RAISE(ABORT, 'cyber integration events are append-only'); END;
-      CREATE TRIGGER IF NOT EXISTS cyber_events_no_delete BEFORE DELETE ON cyber_integration_events
-      BEGIN SELECT RAISE(ABORT, 'cyber integration events are append-only'); END;
+      CREATE TRIGGER IF NOT EXISTS agent_events_no_update BEFORE UPDATE ON agent_integration_events
+      BEGIN SELECT RAISE(ABORT, 'agent integration events are append-only'); END;
+      CREATE TRIGGER IF NOT EXISTS agent_events_no_delete BEFORE DELETE ON agent_integration_events
+      BEGIN SELECT RAISE(ABORT, 'agent integration events are append-only'); END;
       CREATE TABLE IF NOT EXISTS licenses (
         id INTEGER PRIMARY KEY CHECK(id = 1), document_json TEXT NOT NULL, activated_at TEXT NOT NULL
       );
-      CREATE TABLE IF NOT EXISTS cyber_model_providers (
+      CREATE TABLE IF NOT EXISTS agent_model_providers (
         id TEXT PRIMARY KEY,
         slug TEXT NOT NULL UNIQUE,
         name TEXT NOT NULL,
@@ -403,14 +403,14 @@ export class CyberDatabase {
         updated_at TEXT NOT NULL,
         version INTEGER NOT NULL
       );
-      CREATE TABLE IF NOT EXISTS cyber_model_assignment (
+      CREATE TABLE IF NOT EXISTS agent_model_assignment (
         id INTEGER PRIMARY KEY CHECK(id = 1),
-        provider_id TEXT NOT NULL REFERENCES cyber_model_providers(id),
+        provider_id TEXT NOT NULL REFERENCES agent_model_providers(id),
         model TEXT NOT NULL,
         updated_by_oid TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
-      CREATE TABLE IF NOT EXISTS cyber_model_events (
+      CREATE TABLE IF NOT EXISTS agent_model_events (
         sequence INTEGER PRIMARY KEY,
         actor_oid TEXT NOT NULL,
         action TEXT NOT NULL,
@@ -419,14 +419,14 @@ export class CyberDatabase {
         previous_hash TEXT NOT NULL,
         hash TEXT NOT NULL UNIQUE
       );
-      CREATE TRIGGER IF NOT EXISTS cyber_model_events_no_update BEFORE UPDATE ON cyber_model_events
-      BEGIN SELECT RAISE(ABORT, 'cyber model events are append-only'); END;
-      CREATE TRIGGER IF NOT EXISTS cyber_model_events_no_delete BEFORE DELETE ON cyber_model_events
-      BEGIN SELECT RAISE(ABORT, 'cyber model events are append-only'); END;
+      CREATE TRIGGER IF NOT EXISTS agent_model_events_no_update BEFORE UPDATE ON agent_model_events
+      BEGIN SELECT RAISE(ABORT, 'agent model events are append-only'); END;
+      CREATE TRIGGER IF NOT EXISTS agent_model_events_no_delete BEFORE DELETE ON agent_model_events
+      BEGIN SELECT RAISE(ABORT, 'agent model events are append-only'); END;
     `)
-    this.ensureColumn('cyber_integrations', 'last_sync_at', 'TEXT')
-    this.ensureColumn('cyber_integrations', 'last_sync_error', 'TEXT')
-    this.ensureColumn('cyber_integrations', 'deleted_at', 'TEXT')
+    this.ensureColumn('agent_integrations', 'last_sync_at', 'TEXT')
+    this.ensureColumn('agent_integrations', 'last_sync_error', 'TEXT')
+    this.ensureColumn('agent_integrations', 'deleted_at', 'TEXT')
   }
 
 

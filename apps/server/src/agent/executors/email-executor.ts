@@ -1,5 +1,5 @@
 import type { IntegrationConfiguration } from '@papyrus/contracts'
-import type { CyberDatabase } from '../database.js'
+import type { AgentDatabase } from '../database.js'
 import { exchangeMailbox, type MicrosoftGraphClient } from '../graph-client.js'
 import type { ActionResult, ActionExecutor, ActionExecutorContext } from '../action-worker.js'
 
@@ -38,7 +38,7 @@ function content(job: ActionExecutorContext['job']): { subject: string; body: st
  * authorization, queueing, and idempotency are handled by the action ledger.
  */
 export class EmailExecutor implements ActionExecutor {
-  constructor(private readonly db: CyberDatabase, private readonly graph: MicrosoftGraphClient) {}
+  constructor(private readonly db: AgentDatabase, private readonly graph: MicrosoftGraphClient) {}
 
   async test(context: ActionExecutorContext): Promise<{ reachable: boolean; authenticated: boolean; message: string }> {
     const integration = this.integration(context.proposal.executorIntegrationId)

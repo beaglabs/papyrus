@@ -8,7 +8,7 @@
 
 </div>
 
-> This is the `experiment/cyber-twin-terrain-runtime` product-reset branch. Entra remains the identity authority; the product surface is now a Mastra-native agent runtime rather than a cyber-twin dashboard.
+> This is the `experiment/agent-twin-terrain-runtime` product-reset branch. Entra remains the identity authority; the product surface is now a Mastra-native agent runtime rather than a agent-twin dashboard.
 
 Papyrus is a licensed daemon for durable, event-driven agent work. Mastra owns sessions, memory, schedules, workflows, and signal delivery. Starlings remains the heterogeneous collective-computation substrate. Teams, Exchange email, ACP, A2A, and customer systems are plugins around that core.
 
@@ -159,7 +159,7 @@ Teams SSO tokens can be exchanged at `POST /api/auth/teams`; standard portal log
 
 This branch implements the Entra-native daemon, offline licensing, governed plugin lifecycle, action ledger and leased executor worker, Mastra LibSQL memory, durable evented agent registration, session history, native schedules, a signal-intake workflow, WebhookSignalProvider delivery backed by a database-leased outbox, agent-rendered plugin configuration cards, and guarded URL previews.
 
-Mastra is now a server dependency. Its storage starts even when no model is configured, so session and workflow state remain available. Configure durable model profiles from the **Models** tab or ask the agent to open its secure model-gateway form. `PAPYRUS_AGENT_MODEL` remains a one-time bootstrap fallback for existing deployments; the daemon stores endpoint/model metadata and a credential reference, never a raw API key. When no profile is active, the daemon refuses chat and keeps incoming signals in `cyber_signal_outbox`; it does not invent a default provider or discard events.
+Mastra is now a server dependency. Its storage starts even when no model is configured, so session and workflow state remain available. When `PAPYRUS_AGENT_MODEL` is absent, the daemon refuses chat and keeps incoming signals in `agent_signal_outbox`; it does not invent a default provider or discard events.
 
 `fetchUrlPreview` permits HTTPS by default, follows redirects only after re-validation, limits response size, and rejects credentials, loopback, link-local, metadata, private, and reserved destinations. Reviewed internal hosts can be enumerated with `PAPYRUS_FETCH_ALLOWED_HOSTS`.
 

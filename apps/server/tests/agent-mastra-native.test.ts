@@ -2,23 +2,21 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { CyberConfig } from '../src/agent/config.js'
+import type { AgentConfig } from '../src/agent/config.js'
 import { ActionStore } from '../src/agent/action-store.js'
-import { CyberDatabase } from '../src/agent/database.js'
+import { AgentDatabase } from '../src/agent/database.js'
 import { INTEGRATION_CATALOG } from '../src/agent/catalog.js'
 import { fetchUrlPreview, UnsafeFetchTargetError } from '../src/agent/mastra/fetch-preview.js'
-import { connectionRequest, modelGatewayRequest, pluginToolId } from '../src/agent/mastra/plugin-tools.js'
+import { connectionRequest, pluginToolId } from '../src/agent/mastra/plugin-tools.js'
 import { MastraRuntime } from '../src/agent/mastra/runtime.js'
-import { PapyrusModelGateway } from '../src/agent/model-gateway.js'
-import { ModelStore } from '../src/agent/model-store.js'
-import { CyberService } from '../src/agent/service.js'
+import { AgentService } from '../src/agent/service.js'
 import { TerrainStore } from '../src/agent/terrain-store.js'
 
 describe('Mastra-native product surface', () => {
   const disposers: Array<() => Promise<void> | void> = []
   afterEach(async () => { while (disposers.length) await disposers.pop()?.(); vi.unstubAllGlobals() })
 
-  function config(dataDir: string): CyberConfig {
+  function config(dataDir: string): AgentConfig {
     return {
       mode: 'local', profile: 'gcc', host: '127.0.0.1', port: 3210, publicOrigin: 'http://127.0.0.1:3210',
       dataDir, databasePath: ':memory:', portalSecret: 'portal-secret-at-least-thirty-two-characters',
@@ -27,10 +25,10 @@ describe('Mastra-native product surface', () => {
   }
 
   function runtime(dataDir: string) {
-    const db = new CyberDatabase(':memory:')
+    const db = new AgentDatabase(':memory:')
     const terrain = new TerrainStore(db)
     const actions = new ActionStore(db)
-    const service = new CyberService(db, config(dataDir), terrain, undefined, actions)
+    const service = new AgentService(db, config(dataDir), terrain, undefined, actions)
     return { db, subject: new MastraRuntime(config(dataDir), actions, terrain, service), service }
   }
 
@@ -56,7 +54,7 @@ describe('Mastra-native product surface', () => {
   })
 
   it('persists model profiles without storing secret material', () => {
-    const db = new CyberDatabase(':memory:')
+    const db = new AgentDatabase(':memory:')
     disposers.push(() => db.close())
     const store = new ModelStore(db)
     const profile = store.create({ name: 'Test gateway', gatewayKind: 'openai-compatible', provider: 'openai', model: 'gpt-test', baseUrl: 'https://inference.example.gov/v1', authScheme: 'credential_ref', credentialRef: 'env://PAPYRUS_TEST_MODEL_KEY', scope: 'test', capabilities: ['chat'] }, 'owner', true)
@@ -67,7 +65,7 @@ describe('Mastra-native product surface', () => {
   })
 
   it('resolves an env credential only through the Papyrus gateway', async () => {
-    const db = new CyberDatabase(':memory:')
+    const db = new AgentDatabase(':memory:')
     disposers.push(() => db.close())
     const store = new ModelStore(db)
     const profile = store.create({ name: 'Gateway auth test', gatewayKind: 'openai-compatible', provider: 'openai', model: 'gpt-test', baseUrl: 'https://inference.example.gov/v1', authScheme: 'credential_ref', credentialRef: 'env://PAPYRUS_TEST_MODEL_KEY', scope: 'test' }, 'owner', true)

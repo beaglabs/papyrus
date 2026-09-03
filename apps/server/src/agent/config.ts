@@ -4,7 +4,7 @@ import { ENTRA_APP_ROLES, PROFILES } from '@papyrus/contracts'
 
 export type EntraCloud = 'Public' | 'USGov' | 'USGovDoD'
 
-export interface CyberConfig {
+export interface AgentConfig {
   mode: ServerMode
   profile: DeploymentProfile
   host: string
@@ -87,7 +87,7 @@ function developmentPrincipal(value: string | undefined): PortalPrincipal | unde
   }
 }
 
-export function loadCyberConfig(env: NodeJS.ProcessEnv = process.env): CyberConfig {
+export function loadAgentConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
   const mode = (env.PAPYRUS_MODE ?? 'local') as ServerMode
   if (!['local', 'persistent'].includes(mode)) throw new Error(`Unsupported PAPYRUS_MODE ${mode}`)
   const selectedProfile = profile(env.PAPYRUS_PROFILE)
@@ -106,8 +106,8 @@ export function loadCyberConfig(env: NodeJS.ProcessEnv = process.env): CyberConf
     throw new Error('Local development requires Entra configuration or PAPYRUS_DEV_ENTRA_PRINCIPAL')
   }
   const authority = tenantId ? `${authorityHost(cloud)}/${encodeURIComponent(tenantId)}/v2.0` : undefined
-  const dataDir = resolve(env.PAPYRUS_DATA_DIR ?? './papyrus-cyber-data')
-  const databasePath = mode === 'local' && env.PAPYRUS_DATABASE_PATH === ':memory:' ? ':memory:' : resolve(env.PAPYRUS_DATABASE_PATH ?? `${dataDir}/cyber.db`)
+  const dataDir = resolve(env.PAPYRUS_DATA_DIR ?? './papyrus-agent-data')
+  const databasePath = mode === 'local' && env.PAPYRUS_DATABASE_PATH === ':memory:' ? ':memory:' : resolve(env.PAPYRUS_DATABASE_PATH ?? `${dataDir}/agent.db`)
   const certPath = env.PAPYRUS_TLS_CERT?.trim()
   const keyPath = env.PAPYRUS_TLS_KEY?.trim()
   if (Boolean(certPath) !== Boolean(keyPath)) throw new Error('PAPYRUS_TLS_CERT and PAPYRUS_TLS_KEY must be configured together')
@@ -121,7 +121,7 @@ export function loadCyberConfig(env: NodeJS.ProcessEnv = process.env): CyberConf
     dataDir,
     databasePath,
     portalSecret: required('PAPYRUS_PORTAL_SECRET', env.PAPYRUS_PORTAL_SECRET),
-    organizationName: env.PAPYRUS_ORGANIZATION_NAME?.trim() || 'Customer Cyber Operations',
+    organizationName: env.PAPYRUS_ORGANIZATION_NAME?.trim() || 'Customer Agent Operations',
     cloud,
     ...(tenantId && clientId && authority ? { entra: {
       tenantId,

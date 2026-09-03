@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { IntegrationConfiguration, ObservationInput, SyncJob } from '@papyrus/contracts'
-import { CyberDatabase } from './database.js'
+import { AgentDatabase } from './database.js'
 import { TerrainStore } from './terrain-store.js'
 
 export interface ConnectorContext {
@@ -70,7 +70,7 @@ export class SyncWorker implements IntegrationSyncRuntime {
   private running = false
 
   constructor(
-    readonly db: CyberDatabase,
+    readonly db: AgentDatabase,
     readonly terrain: TerrainStore,
     readonly registry: ConnectorRegistry,
     options: SyncWorkerOptions = {},

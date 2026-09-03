@@ -1,5 +1,5 @@
 import type { IntegrationConfiguration } from '@papyrus/contracts'
-import type { CyberConfig } from './config.js'
+import type { AgentConfig } from './config.js'
 
 /**
  * Deliberately small Microsoft Graph boundary.
@@ -84,7 +84,7 @@ export function exchangeMailbox(integration: IntegrationConfiguration): string {
   return mailbox.trim()
 }
 
-function graphOrigin(cloud: CyberConfig['cloud']): string {
+function graphOrigin(cloud: AgentConfig['cloud']): string {
   return cloud === 'Public' ? 'https://graph.microsoft.com' : 'https://graph.microsoft.us'
 }
 
@@ -100,7 +100,7 @@ function graphError(response: Response, body: string): Error {
  */
 export class HttpMicrosoftGraphClient implements MicrosoftGraphClient {
   constructor(
-    private readonly config: CyberConfig,
+    private readonly config: AgentConfig,
     private readonly credentials: GraphCredentialResolver = new UnconfiguredGraphCredentialResolver(),
     private readonly request: typeof fetch = fetch,
   ) {}

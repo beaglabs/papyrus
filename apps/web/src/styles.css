@@ -177,7 +177,7 @@ p { color: var(--muted); line-height: 1.55; }
 .nb-dropdown-item { width: 100%; border: 0; background: transparent; padding: 11px 13px; text-align: left; cursor: pointer; }.nb-dropdown-item:hover { background: #eee9dd; }.nb-dropdown-item:disabled { color: #777; }.danger-item { color: #a31333; }
 
 .center { min-height: 100vh; display: grid; place-content: center; justify-items: start; gap: 16px; max-width: 760px; margin: auto; padding: 60px 30px; }
-.center .brand { margin-bottom: 30px; }.login h1 { font-size: clamp(52px, 8vw, 88px); }.login > p:not(.eyebrow) { max-width: 620px; font-size: 18px; }.cyber-login .primary { display: inline-block; color: #111; text-decoration: none; }
+.center .brand { margin-bottom: 30px; }.login h1 { font-size: clamp(52px, 8vw, 88px); }.login > p:not(.eyebrow) { max-width: 620px; font-size: 18px; }.agent-login .primary { display: inline-block; color: #111; text-decoration: none; }
 .login-facts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 22px; }.login-facts span { padding: 6px 8px; border: 1px solid #111; font: 10px ui-monospace, monospace; }
 .signal-loader { display: flex; gap: 7px; }.signal-loader span { width: 8px; height: 8px; border: 1px solid #111; background: var(--main); animation: pulse 1.2s infinite alternate; }.signal-loader span:nth-child(2) { animation-delay: .2s; }.signal-loader span:nth-child(3) { animation-delay: .4s; }
 @keyframes pulse { to { transform: translateY(-7px); background: var(--green); } }

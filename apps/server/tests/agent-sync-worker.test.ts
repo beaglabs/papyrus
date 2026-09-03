@@ -2,9 +2,9 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { CyberConfig } from '../src/agent/config.js'
-import { CyberDatabase } from '../src/agent/database.js'
-import { CyberService } from '../src/agent/service.js'
+import type { AgentConfig } from '../src/agent/config.js'
+import { AgentDatabase } from '../src/agent/database.js'
+import { AgentService } from '../src/agent/service.js'
 import { ConnectorRegistry, SyncWorker, type ConnectorDriver } from '../src/agent/sync-worker.js'
 import { TerrainStore } from '../src/agent/terrain-store.js'
 
@@ -14,16 +14,16 @@ describe('connector synchronization worker', () => {
 
   async function setup(driver: ConnectorDriver, options: ConstructorParameters<typeof SyncWorker>[3] = {}) {
     const dataDir = mkdtempSync(join(tmpdir(), 'papyrus-sync-test-'))
-    const db = new CyberDatabase(':memory:')
+    const db = new AgentDatabase(':memory:')
     const terrain = new TerrainStore(db)
     const registry = new ConnectorRegistry().register('exchange-email', driver)
     const worker = new SyncWorker(db, terrain, registry, options)
-    const config: CyberConfig = {
+    const config: AgentConfig = {
       mode: 'local', profile: 'gcc', host: '127.0.0.1', port: 3210, publicOrigin: 'http://127.0.0.1:3210',
       dataDir, databasePath: ':memory:', portalSecret: 'portal-secret-at-least-thirty-two-characters',
       organizationName: 'Example Agency', cloud: 'Public', licenseRequired: false, licenseAuthorities: {},
     }
-    const service = new CyberService(db, config, terrain, worker)
+    const service = new AgentService(db, config, terrain, worker)
     const owner = { oid: 'owner', tenantId: 'tenant', displayName: 'Owner', roles: ['Papyrus.System.Owner' as const], groups: [], source: 'development' as const }
     const created = service.createIntegration(owner, 'exchange-email', { name: 'Mailbox', scope: 'operations', settings: {} })
     await service.testIntegration(owner, created.id)

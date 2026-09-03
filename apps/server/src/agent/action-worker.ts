@@ -1,13 +1,13 @@
 import { randomUUID } from 'node:crypto'
-import type { CyberActionJob, CyberActionReceipt, CyberActionProposal } from '@papyrus/contracts'
-import type { CyberConfig } from './config.js'
-import type { CyberDatabase } from './database.js'
+import type { AgentActionJob, AgentActionReceipt, AgentActionProposal } from '@papyrus/contracts'
+import type { AgentConfig } from './config.js'
+import type { AgentDatabase } from './database.js'
 import { ActionStore } from './action-store.js'
 
 export interface ActionExecutorContext {
-  job: CyberActionJob
-  proposal: CyberActionProposal
-  config: CyberConfig
+  job: AgentActionJob
+  proposal: AgentActionProposal
+  config: AgentConfig
   signal: AbortSignal
 }
 
@@ -59,10 +59,10 @@ export class ActionWorker {
   private running = false
 
   constructor(
-    readonly db: CyberDatabase,
+    readonly db: AgentDatabase,
     readonly store: ActionStore,
     readonly registry: ActionExecutorRegistry,
-    readonly config: CyberConfig,
+    readonly config: AgentConfig,
     options: ActionWorkerOptions = {},
   ) {
     this.pollMs = options.pollMs ?? 2_000
@@ -93,7 +93,7 @@ export class ActionWorker {
    * cannot park an approved action for longer than an operator would wait.
    * Attempt 1 → base, attempt 2 → 2×base, attempt 3 → 4×base, …
    */
-  nextRetryDelayMs(job: Pick<CyberActionJob, 'attempt'>): number {
+  nextRetryDelayMs(job: Pick<AgentActionJob, 'attempt'>): number {
     const exponent = Math.max(0, job.attempt - 1)
     return Math.min(this.retryBaseMs * (2 ** exponent), this.retryCapMs)
   }

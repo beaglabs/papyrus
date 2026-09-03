@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import type { CyberSignal } from '@papyrus/contracts'
-import type { CyberDatabase } from '../database.js'
+import type { AgentSignal } from '@papyrus/contracts'
+import type { AgentDatabase } from '../database.js'
 
 /**
  * Durable signal outbox.
@@ -18,7 +18,7 @@ export type SignalStatus = 'pending' | 'delivering' | 'delivered' | 'failed'
 
 export interface SignalRecord {
   id: string
-  type: CyberSignal['type']
+  type: AgentSignal['type']
   investigationId?: string
   proposalId?: string
   claimId?: string
@@ -35,7 +35,7 @@ export interface SignalRecord {
 }
 
 export interface EnqueueSignalInput {
-  type: CyberSignal['type']
+  type: AgentSignal['type']
   investigationId?: string
   proposalId?: string
   claimId?: string
@@ -46,7 +46,7 @@ export const DEFAULT_SIGNAL_MAX_ATTEMPTS = 5
 
 export class SignalOutbox {
   constructor(
-    readonly db: CyberDatabase,
+    readonly db: AgentDatabase,
     readonly maxAttempts: number = DEFAULT_SIGNAL_MAX_ATTEMPTS,
   ) {
     this.migrate()
@@ -55,7 +55,7 @@ export class SignalOutbox {
   enqueue(input: EnqueueSignalInput, now = new Date()): SignalRecord {
     const stamp = now.toISOString()
     const id = randomUUID()
-    this.db.sqlite.prepare(`INSERT INTO cyber_signal_outbox(
+    this.db.sqlite.prepare(`INSERT INTO agent_signal_outbox(
       id,type,investigation_id,proposal_id,claim_id,payload_json,status,attempts,max_attempts,created_at,updated_at
     ) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(
       id,
@@ -74,7 +74,7 @@ export class SignalOutbox {
   }
 
   get(id: string): SignalRecord | undefined {
-    const row = this.db.sqlite.prepare('SELECT * FROM cyber_signal_outbox WHERE id=?').get(id) as Row | undefined
+    const row = this.db.sqlite.prepare('SELECT * FROM agent_signal_outbox WHERE id=?').get(id) as Row | undefined
     return row ? this.record(row) : undefined
   }
 
@@ -83,19 +83,19 @@ export class SignalOutbox {
     const stamp = now.toISOString()
     const leaseExpiresAt = new Date(now.getTime() + leaseMs).toISOString()
     return this.db.sqlite.transaction(() => {
-      this.db.sqlite.prepare(`UPDATE cyber_signal_outbox
+      this.db.sqlite.prepare(`UPDATE agent_signal_outbox
         SET status='pending',locked_by=NULL,lease_expires_at=NULL,updated_at=?
         WHERE status='delivering' AND lease_expires_at IS NOT NULL AND lease_expires_at<=?`).run(stamp, stamp)
 
       const rows = this.db.sqlite.prepare(
-        "SELECT id FROM cyber_signal_outbox WHERE status='pending' AND attempts<max_attempts ORDER BY created_at LIMIT ?",
+        "SELECT id FROM agent_signal_outbox WHERE status='pending' AND attempts<max_attempts ORDER BY created_at LIMIT ?",
       ).all(limit) as Row[]
 
       const claimed: SignalRecord[] = []
       for (const row of rows) {
         const id = String(row['id'])
         this.db.sqlite.prepare(
-          "UPDATE cyber_signal_outbox SET status='delivering',locked_by=?,lease_expires_at=?,attempts=attempts+1,updated_at=? WHERE id=? AND status='pending'",
+          "UPDATE agent_signal_outbox SET status='delivering',locked_by=?,lease_expires_at=?,attempts=attempts+1,updated_at=? WHERE id=? AND status='pending'",
         ).run(workerId, leaseExpiresAt, stamp, id)
         const record = this.get(id)
         if (record) claimed.push(record)
@@ -107,7 +107,7 @@ export class SignalOutbox {
   ack(id: string, now = new Date()): void {
     const stamp = now.toISOString()
     this.db.sqlite.prepare(
-      `UPDATE cyber_signal_outbox
+      `UPDATE agent_signal_outbox
        SET status='delivered',delivered_at=?,locked_by=NULL,lease_expires_at=NULL,error=NULL,updated_at=?
        WHERE id=?`,
     ).run(stamp, stamp, id)
@@ -116,7 +116,7 @@ export class SignalOutbox {
   /** Return a leased signal to pending, or fail it once attempts are exhausted. */
   fail(id: string, error: string, now = new Date()): void {
     const stamp = now.toISOString()
-    this.db.sqlite.prepare(`UPDATE cyber_signal_outbox
+    this.db.sqlite.prepare(`UPDATE agent_signal_outbox
       SET status = CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'pending' END,
           error=?,locked_by=NULL,lease_expires_at=NULL,updated_at=?
       WHERE id=?`).run(error, stamp, id)
@@ -124,21 +124,21 @@ export class SignalOutbox {
 
   pending(limit = 100): SignalRecord[] {
     const rows = this.db.sqlite.prepare(
-      "SELECT * FROM cyber_signal_outbox WHERE status='pending' ORDER BY created_at LIMIT ?",
+      "SELECT * FROM agent_signal_outbox WHERE status='pending' ORDER BY created_at LIMIT ?",
     ).all(limit) as Row[]
     return rows.map((row) => this.record(row))
   }
 
   byInvestigation(investigationId: string): SignalRecord[] {
     const rows = this.db.sqlite.prepare(
-      'SELECT * FROM cyber_signal_outbox WHERE investigation_id=? ORDER BY created_at',
+      'SELECT * FROM agent_signal_outbox WHERE investigation_id=? ORDER BY created_at',
     ).all(investigationId) as Row[]
     return rows.map((row) => this.record(row))
   }
 
   counts(): Record<SignalStatus, number> {
     const rows = this.db.sqlite.prepare(
-      'SELECT status, COUNT(*) AS n FROM cyber_signal_outbox GROUP BY status',
+      'SELECT status, COUNT(*) AS n FROM agent_signal_outbox GROUP BY status',
     ).all() as Row[]
     const result: Record<SignalStatus, number> = { pending: 0, delivering: 0, delivered: 0, failed: 0 }
     for (const row of rows) result[String(row['status']) as SignalStatus] = Number(row['n'] ?? 0)
@@ -158,7 +158,7 @@ export class SignalOutbox {
     }
     return {
       id: String(row['id']),
-      type: row['type'] as CyberSignal['type'],
+      type: row['type'] as AgentSignal['type'],
       ...(row['investigation_id'] ? { investigationId: String(row['investigation_id']) } : {}),
       ...(row['proposal_id'] ? { proposalId: String(row['proposal_id']) } : {}),
       ...(row['claim_id'] ? { claimId: String(row['claim_id']) } : {}),
@@ -177,7 +177,7 @@ export class SignalOutbox {
 
   private migrate(): void {
     this.db.sqlite.exec(`
-      CREATE TABLE IF NOT EXISTS cyber_signal_outbox (
+      CREATE TABLE IF NOT EXISTS agent_signal_outbox (
         id TEXT PRIMARY KEY,
         type TEXT NOT NULL,
         investigation_id TEXT,
@@ -194,8 +194,8 @@ export class SignalOutbox {
         delivered_at TEXT,
         error TEXT
       );
-      CREATE INDEX IF NOT EXISTS cyber_signal_outbox_status ON cyber_signal_outbox(status,created_at);
-      CREATE INDEX IF NOT EXISTS cyber_signal_outbox_investigation ON cyber_signal_outbox(investigation_id,created_at);
+      CREATE INDEX IF NOT EXISTS agent_signal_outbox_status ON agent_signal_outbox(status,created_at);
+      CREATE INDEX IF NOT EXISTS agent_signal_outbox_investigation ON agent_signal_outbox(investigation_id,created_at);
     `)
   }
 }

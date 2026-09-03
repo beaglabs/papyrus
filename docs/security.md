@@ -1,4 +1,4 @@
-# Cyber twin security model
+# Agent twin security model
 
 ## Identity and authority
 
@@ -8,7 +8,7 @@ There is no local user database, password login, invitation flow, bootstrap owne
 
 ## Operational safety
 
-Identity authorization and cyber-action safety are separate:
+Identity authorization and agent-action safety are separate:
 
 - Entra determines who may configure, approve, or inspect.
 - Connector lifecycle policy determines whether a connector can become active.

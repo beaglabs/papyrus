@@ -55,7 +55,11 @@ export PAPYRUS_MODEL_BASE_URL='https://api.openai.com/v1'
 export PAPYRUS_MODEL_CREDENTIAL_REF='env://OPENAI_API_KEY'
 ```
 
-Without it the agent is not registered. Mastra storage, session history, workflows, and plugin configuration still start normally, while signals accumulate durably in `cyber_signal_outbox`. Nothing is dropped while unconfigured. The Models tab stores only gateway metadata and a customer-owned credential reference; it never stores raw key material.
+<<<<<<< Updated upstream
+Without it the agent is not registered. Mastra storage, session history, workflows, and plugin configuration still start normally, while signals accumulate durably in `agent_signal_outbox`. Nothing is dropped while unconfigured. The Models tab stores only gateway metadata and a customer-owned credential reference; it never stores raw key material.
+=======
+Without it the agent is not registered. Mastra storage, session history, workflows, and plugin configuration still start normally, while signals accumulate durably in `agent_signal_outbox`. Nothing is dropped while unconfigured.
+>>>>>>> Stashed changes
 
 Storage for durable threads is LibSQL at `<data-dir>/mastra.db`, created alongside the main database.
 

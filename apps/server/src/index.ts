@@ -1,8 +1,8 @@
-import { loadCyberConfig } from './agent/config.js'
-import { CyberDatabase } from './agent/database.js'
+import { loadAgentConfig } from './agent/config.js'
+import { AgentDatabase } from './agent/database.js'
 import { EntraAuthService } from './agent/entra-auth.js'
-import { createCyberServer } from './agent/http.js'
-import { CyberService } from './agent/service.js'
+import { createAgentServer } from './agent/http.js'
+import { AgentService } from './agent/service.js'
 import { ActionExecutorRegistry, ActionWorker } from './agent/action-worker.js'
 import { ActionStore } from './agent/action-store.js'
 import { ConnectorRegistry, SyncWorker } from './agent/sync-worker.js'
@@ -12,8 +12,8 @@ import { ExchangeEmailDriver } from './agent/drivers/exchange-email-driver.js'
 import { HttpMicrosoftGraphClient } from './agent/graph-client.js'
 import { MastraRuntime } from './agent/mastra/runtime.js'
 
-const config = loadCyberConfig()
-const database = new CyberDatabase(config.databasePath)
+const config = loadAgentConfig()
+const database = new AgentDatabase(config.databasePath)
 const auth = new EntraAuthService(config)
 const terrain = new TerrainStore(database)
 const connectors = new ConnectorRegistry()
@@ -22,10 +22,10 @@ const actionStore = new ActionStore(database)
 const executorRegistry = new ActionExecutorRegistry()
 const worker = new SyncWorker(database, terrain, connectors)
 const actionWorker = new ActionWorker(database, actionStore, executorRegistry, config)
-const service = new CyberService(database, config, terrain, worker, actionStore, executorRegistry, actionWorker)
+const service = new AgentService(database, config, terrain, worker, actionStore, executorRegistry, actionWorker)
 const mastraRuntime = new MastraRuntime(config, actionStore, terrain, service)
 await mastraRuntime.start()
-const server = createCyberServer(config, service, auth, mastraRuntime)
+const server = createAgentServer(config, service, auth, mastraRuntime)
 
 // Exchange shares one Graph client boundary for inbound mailbox delta sync and
 // approved outbound mail. The default client deliberately refuses to resolve

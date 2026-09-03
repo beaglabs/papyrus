@@ -2,9 +2,9 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { CyberConfig } from '../src/agent/config.js'
+import type { AgentConfig } from '../src/agent/config.js'
 import { ActionStore, ThreadConflictError } from '../src/agent/action-store.js'
-import { CyberDatabase } from '../src/agent/database.js'
+import { AgentDatabase } from '../src/agent/database.js'
 import { MastraRuntime } from '../src/agent/mastra/runtime.js'
 import {
   assertUsableSandbox,
@@ -23,14 +23,14 @@ import {
   runInvestigationTool,
   terrainQuery,
 } from '../src/agent/mastra/tools.js'
-import { CyberService } from '../src/agent/service.js'
+import { AgentService } from '../src/agent/service.js'
 import { ConnectorRegistry, SyncWorker } from '../src/agent/sync-worker.js'
 import { TerrainStore } from '../src/agent/terrain-store.js'
 
 const CAN_RUN_ALL = () => true
 const CAN_RUN_NONE = () => false
 
-function config(): CyberConfig {
+function config(): AgentConfig {
   return {
     mode: 'local', profile: 'gcc', host: '127.0.0.1', port: 3210, publicOrigin: 'http://127.0.0.1:3210',
     dataDir: mkdtempSync(join(tmpdir(), 'papyrus-mastra-')),
@@ -44,7 +44,7 @@ describe('signal outbox', () => {
   afterEach(() => { while (disposers.length) disposers.pop()?.() })
 
   function outbox(maxAttempts = 5) {
-    const db = new CyberDatabase(':memory:')
+    const db = new AgentDatabase(':memory:')
     disposers.push(() => db.close())
     return new SignalOutbox(db, maxAttempts)
   }
@@ -208,7 +208,7 @@ describe('investigation tools', () => {
   afterEach(() => { while (disposers.length) disposers.pop()?.() })
 
   function context() {
-    const db = new CyberDatabase(':memory:')
+    const db = new AgentDatabase(':memory:')
     disposers.push(() => db.close())
     const actionStore = new ActionStore(db)
     const terrain = new TerrainStore(db)
@@ -254,12 +254,12 @@ describe('mastra runtime without the harness installed', () => {
 
   async function runtime() {
     const cfg = config()
-    const db = new CyberDatabase(':memory:')
+    const db = new AgentDatabase(':memory:')
     const terrain = new TerrainStore(db)
     const actionStore = new ActionStore(db)
     const connectors = new ConnectorRegistry()
     const syncWorker = new SyncWorker(db, terrain, connectors)
-    const service = new CyberService(db, cfg, terrain, syncWorker, actionStore)
+    const service = new AgentService(db, cfg, terrain, syncWorker, actionStore)
     disposers.push(() => db.close(), () => rmSync(cfg.dataDir, { recursive: true, force: true }))
     const subject = new MastraRuntime(cfg, actionStore, terrain, service)
     await subject.start()
@@ -353,12 +353,12 @@ describe('signal delivery contract', () => {
 
   async function runtime() {
     const cfg = config()
-    const db = new CyberDatabase(':memory:')
+    const db = new AgentDatabase(':memory:')
     const terrain = new TerrainStore(db)
     const actionStore = new ActionStore(db)
     const connectors = new ConnectorRegistry()
     const syncWorker = new SyncWorker(db, terrain, connectors)
-    const service = new CyberService(db, cfg, terrain, syncWorker, actionStore)
+    const service = new AgentService(db, cfg, terrain, syncWorker, actionStore)
     disposers.push(() => db.close(), () => rmSync(cfg.dataDir, { recursive: true, force: true }))
     const subject = new MastraRuntime(cfg, actionStore, terrain, service)
     await subject.start()
@@ -474,7 +474,7 @@ describe('investigation thread binding', () => {
   afterEach(() => { while (disposers.length) disposers.pop()?.() })
 
   it('binds idempotently and refuses to rebind to a different thread', () => {
-    const db = new CyberDatabase(':memory:')
+    const db = new AgentDatabase(':memory:')
     disposers.push(() => db.close())
     const store = new ActionStore(db)
     const investigation = store.createInvestigation({ title: 'Phish', trigger: 'email' })

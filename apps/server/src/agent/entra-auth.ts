@@ -3,7 +3,7 @@ import type { IncomingMessage } from 'node:http'
 import type { EntraAppRole, PortalPrincipal } from '@papyrus/contracts'
 import { ENTRA_APP_ROLES } from '@papyrus/contracts'
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose'
-import type { CyberConfig } from './config.js'
+import type { AgentConfig } from './config.js'
 
 interface OidcDiscovery {
   authorization_endpoint: string
@@ -64,7 +64,7 @@ export class EntraAuthService {
   private cachedDiscovery?: OidcDiscovery
   private jwks?: ReturnType<typeof createRemoteJWKSet>
 
-  constructor(private readonly config: CyberConfig) {}
+  constructor(private readonly config: AgentConfig) {}
 
   async authenticate(request: IncomingMessage): Promise<PortalPrincipal | undefined> {
     if (this.config.developmentPrincipal) return this.config.developmentPrincipal

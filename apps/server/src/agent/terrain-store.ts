@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import type {
-  CyberObservation,
+  AgentObservation,
   IntegrationConfiguration,
   ObservationInput,
   SyncCheckpoint,
@@ -11,7 +11,7 @@ import type {
   TerrainRelationshipInput,
   TerrainSnapshot,
 } from '@papyrus/contracts'
-import { canonical, CyberDatabase } from './database.js'
+import { canonical, AgentDatabase } from './database.js'
 
 type Row = Record<string, unknown>
 
@@ -29,7 +29,7 @@ function mergeRecord(current: unknown, next: Record<string, unknown> | undefined
 }
 
 export interface IngestResult {
-  observation: CyberObservation
+  observation: AgentObservation
   created: boolean
   entities: number
   relationships: number
@@ -40,7 +40,7 @@ export class SourceRecordConflictError extends Error {
 }
 
 export class TerrainStore {
-  constructor(readonly db: CyberDatabase) { this.migrate() }
+  constructor(readonly db: AgentDatabase) { this.migrate() }
 
   ingest(integration: IntegrationConfiguration, input: ObservationInput): IngestResult {
     const receivedAt = new Date().toISOString()
@@ -55,7 +55,7 @@ export class TerrainStore {
       payload: input.payload,
       terrain: input.terrain ?? null,
     })
-    const existing = this.db.sqlite.prepare('SELECT * FROM cyber_observations WHERE integration_id=? AND source_record_id=?')
+    const existing = this.db.sqlite.prepare('SELECT * FROM agent_observations WHERE integration_id=? AND source_record_id=?')
       .get(integration.id, input.sourceRecordId) as Row | undefined
     if (existing) {
       if (String(existing.sha256) !== contentHash) throw new SourceRecordConflictError()
@@ -66,7 +66,7 @@ export class TerrainStore {
     let entityCount = 0
     let relationshipCount = 0
     this.db.sqlite.transaction(() => {
-      this.db.sqlite.prepare(`INSERT INTO cyber_observations(
+      this.db.sqlite.prepare(`INSERT INTO agent_observations(
         id,integration_id,source_record_id,observed_at,received_at,schema,evidence_type,subject,classification,payload_json,terrain_json,sha256,processed_at
       ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
         observationId, integration.id, input.sourceRecordId, input.observedAt, receivedAt, input.schema ?? null, input.evidenceType,
@@ -87,7 +87,7 @@ export class TerrainStore {
     })()
     this.db.recordEvidence(integration.id, input.observedAt)
     return {
-      observation: this.getObservation(observationId) as CyberObservation,
+      observation: this.getObservation(observationId) as AgentObservation,
       created: true,
       entities: entityCount,
       relationships: relationshipCount,
@@ -97,31 +97,31 @@ export class TerrainStore {
   snapshot(): TerrainSnapshot {
     const entities = (this.db.sqlite.prepare('SELECT * FROM terrain_entities ORDER BY kind,label,id').all() as Row[]).map((row) => this.entity(row))
     const relationships = (this.db.sqlite.prepare('SELECT * FROM terrain_relationships ORDER BY kind,id').all() as Row[]).map((row) => this.relationship(row))
-    const count = this.db.sqlite.prepare('SELECT count(*) count FROM cyber_observations').get() as Row
+    const count = this.db.sqlite.prepare('SELECT count(*) count FROM agent_observations').get() as Row
     return {
       generatedAt: new Date().toISOString(), entities, relationships,
       observationCount: Number(count.count ?? 0), unresolvedClaims: 0,
     }
   }
 
-  getObservation(id: string): CyberObservation | undefined {
-    const row = this.db.sqlite.prepare('SELECT * FROM cyber_observations WHERE id=?').get(id) as Row | undefined
+  getObservation(id: string): AgentObservation | undefined {
+    const row = this.db.sqlite.prepare('SELECT * FROM agent_observations WHERE id=?').get(id) as Row | undefined
     return row ? this.observation(row) : undefined
   }
 
   enqueueSync(integrationId: string, runAfter = new Date().toISOString()): SyncJob {
     const now = new Date().toISOString()
-    this.db.sqlite.prepare(`INSERT OR IGNORE INTO cyber_sync_jobs(
+    this.db.sqlite.prepare(`INSERT OR IGNORE INTO agent_sync_jobs(
       id,integration_id,status,attempt,run_after,created_at,updated_at
     ) VALUES(?,?,'queued',0,?,?,?)`).run(randomUUID(), integrationId, runAfter, now, now)
-    const row = this.db.sqlite.prepare("SELECT * FROM cyber_sync_jobs WHERE integration_id=? AND status IN ('queued','running') ORDER BY created_at LIMIT 1")
+    const row = this.db.sqlite.prepare("SELECT * FROM agent_sync_jobs WHERE integration_id=? AND status IN ('queued','running') ORDER BY created_at LIMIT 1")
       .get(integrationId) as Row
     return this.job(row)
   }
 
   cancelSync(integrationId: string): void {
     const now = new Date().toISOString()
-    this.db.sqlite.prepare("UPDATE cyber_sync_jobs SET status='cancelled',completed_at=?,updated_at=?,locked_by=NULL,locked_at=NULL,lease_expires_at=NULL WHERE integration_id=? AND status IN ('queued','running')")
+    this.db.sqlite.prepare("UPDATE agent_sync_jobs SET status='cancelled',completed_at=?,updated_at=?,locked_by=NULL,locked_at=NULL,lease_expires_at=NULL WHERE integration_id=? AND status IN ('queued','running')")
       .run(now, now, integrationId)
   }
 
@@ -129,49 +129,49 @@ export class TerrainStore {
     const timestamp = now.toISOString()
     const expiredBefore = timestamp
     return this.db.sqlite.transaction(() => {
-      this.db.sqlite.prepare(`UPDATE cyber_sync_jobs SET status='queued',locked_by=NULL,locked_at=NULL,lease_expires_at=NULL,updated_at=?
+      this.db.sqlite.prepare(`UPDATE agent_sync_jobs SET status='queued',locked_by=NULL,locked_at=NULL,lease_expires_at=NULL,updated_at=?
         WHERE status='running' AND lease_expires_at IS NOT NULL AND lease_expires_at<=?`).run(timestamp, expiredBefore)
-      const candidate = this.db.sqlite.prepare("SELECT id FROM cyber_sync_jobs WHERE status='queued' AND run_after<=? ORDER BY run_after,created_at LIMIT 1")
+      const candidate = this.db.sqlite.prepare("SELECT id FROM agent_sync_jobs WHERE status='queued' AND run_after<=? ORDER BY run_after,created_at LIMIT 1")
         .get(timestamp) as Row | undefined
       if (!candidate) return undefined
       const leaseExpiresAt = new Date(now.getTime() + leaseMs).toISOString()
-      const result = this.db.sqlite.prepare(`UPDATE cyber_sync_jobs SET status='running',attempt=attempt+1,locked_by=?,locked_at=?,
+      const result = this.db.sqlite.prepare(`UPDATE agent_sync_jobs SET status='running',attempt=attempt+1,locked_by=?,locked_at=?,
         lease_expires_at=?,started_at=COALESCE(started_at,?),updated_at=? WHERE id=? AND status='queued'`)
         .run(workerId, timestamp, leaseExpiresAt, timestamp, timestamp, String(candidate.id))
       if (result.changes !== 1) return undefined
-      return this.job(this.db.sqlite.prepare('SELECT * FROM cyber_sync_jobs WHERE id=?').get(String(candidate.id)) as Row)
+      return this.job(this.db.sqlite.prepare('SELECT * FROM agent_sync_jobs WHERE id=?').get(String(candidate.id)) as Row)
     })()
   }
 
   completeSync(jobId: string): void {
     const now = new Date().toISOString()
-    this.db.sqlite.prepare("UPDATE cyber_sync_jobs SET status='completed',completed_at=?,updated_at=?,locked_by=NULL,locked_at=NULL,lease_expires_at=NULL,error=NULL WHERE id=? AND status='running'")
+    this.db.sqlite.prepare("UPDATE agent_sync_jobs SET status='completed',completed_at=?,updated_at=?,locked_by=NULL,locked_at=NULL,lease_expires_at=NULL,error=NULL WHERE id=? AND status='running'")
       .run(now, now, jobId)
   }
 
   retrySync(jobId: string, error: string, runAfter: string, terminal: boolean): void {
     const now = new Date().toISOString()
-    this.db.sqlite.prepare(`UPDATE cyber_sync_jobs SET status=?,run_after=?,completed_at=?,updated_at=?,error=?,
+    this.db.sqlite.prepare(`UPDATE agent_sync_jobs SET status=?,run_after=?,completed_at=?,updated_at=?,error=?,
       locked_by=NULL,locked_at=NULL,lease_expires_at=NULL WHERE id=? AND status='running'`).run(
         terminal ? 'failed' : 'queued', runAfter, terminal ? now : null, now, error.slice(0, 2048), jobId,
       )
   }
 
   checkpoint(integrationId: string): SyncCheckpoint | undefined {
-    const row = this.db.sqlite.prepare('SELECT * FROM cyber_sync_checkpoints WHERE integration_id=?').get(integrationId) as Row | undefined
+    const row = this.db.sqlite.prepare('SELECT * FROM agent_sync_checkpoints WHERE integration_id=?').get(integrationId) as Row | undefined
     return row ? {
       integrationId: String(row.integration_id), ...(row.cursor ? { cursor: String(row.cursor) } : {}), updatedAt: String(row.updated_at),
     } : undefined
   }
 
   saveCheckpoint(integrationId: string, cursor: string | undefined): void {
-    this.db.sqlite.prepare(`INSERT INTO cyber_sync_checkpoints(integration_id,cursor,updated_at) VALUES(?,?,?)
+    this.db.sqlite.prepare(`INSERT INTO agent_sync_checkpoints(integration_id,cursor,updated_at) VALUES(?,?,?)
       ON CONFLICT(integration_id) DO UPDATE SET cursor=excluded.cursor,updated_at=excluded.updated_at`)
       .run(integrationId, cursor ?? null, new Date().toISOString())
   }
 
   listJobs(integrationId: string): SyncJob[] {
-    return (this.db.sqlite.prepare('SELECT * FROM cyber_sync_jobs WHERE integration_id=? ORDER BY created_at DESC').all(integrationId) as Row[])
+    return (this.db.sqlite.prepare('SELECT * FROM agent_sync_jobs WHERE integration_id=? ORDER BY created_at DESC').all(integrationId) as Row[])
       .map((row) => this.job(row))
   }
 
@@ -207,7 +207,7 @@ export class TerrainStore {
   private entityId(externalId: string): string { return digest(`entity:${externalId}`) }
   private hasEntity(id: string): boolean { return Boolean(this.db.sqlite.prepare('SELECT 1 FROM terrain_entities WHERE id=?').get(id)) }
 
-  private observation(row: Row): CyberObservation {
+  private observation(row: Row): AgentObservation {
     return {
       id: String(row.id), sourceIntegrationId: String(row.integration_id), sourceRecordId: String(row.source_record_id),
       observedAt: String(row.observed_at), receivedAt: String(row.received_at), ...(row.schema ? { schema: String(row.schema) } : {}),
@@ -251,9 +251,9 @@ export class TerrainStore {
 
   private migrate(): void {
     this.db.sqlite.exec(`
-      CREATE TABLE IF NOT EXISTS cyber_observations (
+      CREATE TABLE IF NOT EXISTS agent_observations (
         id TEXT PRIMARY KEY,
-        integration_id TEXT NOT NULL REFERENCES cyber_integrations(id),
+        integration_id TEXT NOT NULL REFERENCES agent_integrations(id),
         source_record_id TEXT NOT NULL,
         observed_at TEXT NOT NULL,
         received_at TEXT NOT NULL,
@@ -267,11 +267,11 @@ export class TerrainStore {
         processed_at TEXT,
         UNIQUE(integration_id,source_record_id)
       );
-      CREATE INDEX IF NOT EXISTS cyber_observations_received ON cyber_observations(received_at DESC);
-      CREATE TRIGGER IF NOT EXISTS cyber_observations_no_update BEFORE UPDATE ON cyber_observations
-      BEGIN SELECT RAISE(ABORT, 'cyber observations are append-only'); END;
-      CREATE TRIGGER IF NOT EXISTS cyber_observations_no_delete BEFORE DELETE ON cyber_observations
-      BEGIN SELECT RAISE(ABORT, 'cyber observations are append-only'); END;
+      CREATE INDEX IF NOT EXISTS agent_observations_received ON agent_observations(received_at DESC);
+      CREATE TRIGGER IF NOT EXISTS agent_observations_no_update BEFORE UPDATE ON agent_observations
+      BEGIN SELECT RAISE(ABORT, 'agent observations are append-only'); END;
+      CREATE TRIGGER IF NOT EXISTS agent_observations_no_delete BEFORE DELETE ON agent_observations
+      BEGIN SELECT RAISE(ABORT, 'agent observations are append-only'); END;
       CREATE TABLE IF NOT EXISTS terrain_entities (
         id TEXT PRIMARY KEY,
         external_id TEXT NOT NULL UNIQUE,
@@ -297,24 +297,24 @@ export class TerrainStore {
       CREATE INDEX IF NOT EXISTS terrain_relationships_target ON terrain_relationships(target_entity_id);
       CREATE TABLE IF NOT EXISTS terrain_entity_evidence (
         entity_id TEXT NOT NULL REFERENCES terrain_entities(id),
-        observation_id TEXT NOT NULL REFERENCES cyber_observations(id),
-        integration_id TEXT NOT NULL REFERENCES cyber_integrations(id),
+        observation_id TEXT NOT NULL REFERENCES agent_observations(id),
+        integration_id TEXT NOT NULL REFERENCES agent_integrations(id),
         PRIMARY KEY(entity_id,observation_id)
       );
       CREATE TABLE IF NOT EXISTS terrain_relationship_evidence (
         relationship_id TEXT NOT NULL REFERENCES terrain_relationships(id),
-        observation_id TEXT NOT NULL REFERENCES cyber_observations(id),
-        integration_id TEXT NOT NULL REFERENCES cyber_integrations(id),
+        observation_id TEXT NOT NULL REFERENCES agent_observations(id),
+        integration_id TEXT NOT NULL REFERENCES agent_integrations(id),
         PRIMARY KEY(relationship_id,observation_id)
       );
-      CREATE TABLE IF NOT EXISTS cyber_sync_checkpoints (
-        integration_id TEXT PRIMARY KEY REFERENCES cyber_integrations(id),
+      CREATE TABLE IF NOT EXISTS agent_sync_checkpoints (
+        integration_id TEXT PRIMARY KEY REFERENCES agent_integrations(id),
         cursor TEXT,
         updated_at TEXT NOT NULL
       );
-      CREATE TABLE IF NOT EXISTS cyber_sync_jobs (
+      CREATE TABLE IF NOT EXISTS agent_sync_jobs (
         id TEXT PRIMARY KEY,
-        integration_id TEXT NOT NULL REFERENCES cyber_integrations(id),
+        integration_id TEXT NOT NULL REFERENCES agent_integrations(id),
         status TEXT NOT NULL CHECK(status IN ('queued','running','completed','failed','cancelled')),
         attempt INTEGER NOT NULL,
         run_after TEXT NOT NULL,
@@ -327,10 +327,10 @@ export class TerrainStore {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
-      CREATE INDEX IF NOT EXISTS cyber_sync_jobs_ready ON cyber_sync_jobs(status,run_after,created_at);
-      CREATE UNIQUE INDEX IF NOT EXISTS cyber_sync_jobs_one_active ON cyber_sync_jobs(integration_id) WHERE status IN ('queued','running');
+      CREATE INDEX IF NOT EXISTS agent_sync_jobs_ready ON agent_sync_jobs(status,run_after,created_at);
+      CREATE UNIQUE INDEX IF NOT EXISTS agent_sync_jobs_one_active ON agent_sync_jobs(integration_id) WHERE status IN ('queued','running');
     `)
-    this.ensureColumn('cyber_observations', 'schema', 'TEXT')
+    this.ensureColumn('agent_observations', 'schema', 'TEXT')
   }
 
   private ensureColumn(table: string, column: string, definition: string): void {

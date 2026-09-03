@@ -3,11 +3,11 @@ import type { IntegrationConfiguration } from '@papyrus/contracts'
 import { ExchangeEmailDriver } from '../src/agent/drivers/exchange-email-driver.js'
 import { EmailExecutor } from '../src/agent/executors/email-executor.js'
 import type { MicrosoftGraphClient } from '../src/agent/graph-client.js'
-import { CyberDatabase } from '../src/agent/database.js'
+import { AgentDatabase } from '../src/agent/database.js'
 import type { ActionExecutorContext } from '../src/agent/action-worker.js'
 import { ActionExecutorRegistry, ActionWorker } from '../src/agent/action-worker.js'
 import { ActionStore } from '../src/agent/action-store.js'
-import { CyberService } from '../src/agent/service.js'
+import { AgentService } from '../src/agent/service.js'
 import { SyncWorker, ConnectorRegistry } from '../src/agent/sync-worker.js'
 import { TerrainStore } from '../src/agent/terrain-store.js'
 
@@ -80,8 +80,8 @@ describe('Exchange Graph connector boundary', () => {
   })
 
   it('sends only the specifically approved email action with its ledger key as client request id', async () => {
-    const db = new CyberDatabase(':memory:')
-    db.sqlite.prepare(`INSERT INTO cyber_integrations(
+    const db = new AgentDatabase(':memory:')
+    db.sqlite.prepare(`INSERT INTO agent_integrations(
       id,catalog_id,name,integration_class,authority,risk,state,endpoint,scope,credential_ref,settings_json,health,created_by_oid,created_at,updated_at,version
     ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       exchangeIntegration.id, exchangeIntegration.catalogId, exchangeIntegration.name, exchangeIntegration.integrationClass,
@@ -103,8 +103,8 @@ describe('Exchange Graph connector boundary', () => {
   })
 
   it('permits an approved email proposal through an active Exchange integration', () => {
-    const db = new CyberDatabase(':memory:')
-    db.sqlite.prepare(`INSERT INTO cyber_integrations(
+    const db = new AgentDatabase(':memory:')
+    db.sqlite.prepare(`INSERT INTO agent_integrations(
       id,catalog_id,name,integration_class,authority,risk,state,endpoint,scope,credential_ref,settings_json,health,created_by_oid,created_at,updated_at,version
     ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       exchangeIntegration.id, exchangeIntegration.catalogId, exchangeIntegration.name, exchangeIntegration.integrationClass,
@@ -117,7 +117,7 @@ describe('Exchange Graph connector boundary', () => {
     const actions = new ActionStore(db)
     const executors = new ActionExecutorRegistry().register('exchange-email', new EmailExecutor(db, graph()))
     const worker = new ActionWorker(db, actions, executors, config)
-    const service = new CyberService(db, config, terrain, new SyncWorker(db, terrain, new ConnectorRegistry()), actions, executors, worker)
+    const service = new AgentService(db, config, terrain, new SyncWorker(db, terrain, new ConnectorRegistry()), actions, executors, worker)
     const principal = { oid: 'owner', tenantId: 'tenant', displayName: 'Owner', roles: ['Papyrus.System.Owner'], groups: [], source: 'development' } as const
     const investigation = service.createInvestigation(principal, 'Email action', 'manual')
 
@@ -128,8 +128,8 @@ describe('Exchange Graph connector boundary', () => {
   })
 
   it('rejects a malformed recipient before contacting Graph', async () => {
-    const db = new CyberDatabase(':memory:')
-    db.sqlite.prepare(`INSERT INTO cyber_integrations(
+    const db = new AgentDatabase(':memory:')
+    db.sqlite.prepare(`INSERT INTO agent_integrations(
       id,catalog_id,name,integration_class,authority,risk,state,endpoint,scope,credential_ref,settings_json,health,created_by_oid,created_at,updated_at,version
     ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       exchangeIntegration.id, exchangeIntegration.catalogId, exchangeIntegration.name, exchangeIntegration.integrationClass,

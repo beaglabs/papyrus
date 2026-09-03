@@ -2,9 +2,9 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { CyberConfig } from '../src/agent/config.js'
-import { CyberDatabase } from '../src/agent/database.js'
-import { CyberService } from '../src/agent/service.js'
+import type { AgentConfig } from '../src/agent/config.js'
+import { AgentDatabase } from '../src/agent/database.js'
+import { AgentService } from '../src/agent/service.js'
 
 describe('durable terrain observations', () => {
   const disposers: Array<() => void> = []
@@ -12,13 +12,13 @@ describe('durable terrain observations', () => {
 
   function setup(catalogId = 'observation-api') {
     const dataDir = mkdtempSync(join(tmpdir(), 'papyrus-terrain-test-'))
-    const db = new CyberDatabase(':memory:')
-    const config: CyberConfig = {
+    const db = new AgentDatabase(':memory:')
+    const config: AgentConfig = {
       mode: 'local', profile: 'gcc', host: '127.0.0.1', port: 3210, publicOrigin: 'http://127.0.0.1:3210',
       dataDir, databasePath: ':memory:', portalSecret: 'portal-secret-at-least-thirty-two-characters',
       organizationName: 'Example Agency', cloud: 'Public', licenseRequired: false, licenseAuthorities: {},
     }
-    const service = new CyberService(db, config)
+    const service = new AgentService(db, config)
     const owner = { oid: 'owner', tenantId: 'tenant', displayName: 'Owner', roles: ['Papyrus.System.Owner' as const], groups: [], source: 'development' as const }
     const integration = service.createIntegration(owner, catalogId, { name: 'Terrain ingest', scope: 'test', settings: {} })
     expect(integration.state).toBe('active')
@@ -46,7 +46,7 @@ describe('durable terrain observations', () => {
     expect(snapshot.entities.map((entity) => entity.label)).toEqual(['Workstation 1', '10.0.0.8'])
     expect(snapshot.entities[0]).toMatchObject({ sourceIntegrationIds: [integration.id], evidenceIds: [result.observation.id] })
     expect(snapshot.relationships[0]).toMatchObject({ kind: 'connected_to', sourceIntegrationIds: [integration.id], evidenceIds: [result.observation.id] })
-    expect(() => db.sqlite.prepare('UPDATE cyber_observations SET subject=? WHERE id=?').run('changed', result.observation.id)).toThrow(/append-only/)
+    expect(() => db.sqlite.prepare('UPDATE agent_observations SET subject=? WHERE id=?').run('changed', result.observation.id)).toThrow(/append-only/)
   })
 
   it('is idempotent for identical source records and rejects divergent reuse', async () => {

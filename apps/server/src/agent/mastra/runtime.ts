@@ -1,8 +1,8 @@
 import { join } from 'node:path'
-import type { CyberSignal } from '@papyrus/contracts'
+import type { AgentSignal } from '@papyrus/contracts'
 import type { ActionStore } from '../action-store.js'
-import type { CyberConfig } from '../config.js'
-import type { CyberService } from '../service.js'
+import type { AgentConfig } from '../config.js'
+import type { AgentService } from '../service.js'
 import type { TerrainStore } from '../terrain-store.js'
 import { SignalOutbox, type SignalRecord } from './signal-outbox.js'
 import {
@@ -32,7 +32,7 @@ import type { ModelProfile } from '@papyrus/contracts'
  * (see tools.ts) — the only way to reach an executor is a proposal that a
  * human approves through the action ledger.
  *
- * Signals are durable first: they land in cyber_signal_outbox before any
+ * Signals are durable first: they land in agent_signal_outbox before any
  * delivery attempt, so a restart, a crashed harness, or a missing agent thread
  * cannot lose them. If @mastra/core is not installed the daemon still runs and
  * still records signals; they drain once the harness is available.
@@ -47,7 +47,7 @@ import type { ModelProfile } from '@papyrus/contracts'
 export type InvestigationRuntimeMode = 'starlings' | 'centralized'
 
 export interface SignalPayload {
-  type: CyberSignal['type']
+  type: AgentSignal['type']
   investigationId?: string
   proposalId?: string
   claimId?: string
@@ -96,10 +96,10 @@ export class MastraRuntime {
   private timer: ReturnType<typeof setInterval> | undefined
 
   constructor(
-    readonly config: CyberConfig,
+    readonly config: AgentConfig,
     readonly actionStore: ActionStore,
     readonly terrain: TerrainStore,
-    readonly service: CyberService,
+    readonly service: AgentService,
   ) {
     this.mode = (process.env.PAPYRUS_INVESTIGATION_RUNTIME as InvestigationRuntimeMode | undefined) ?? 'starlings'
     this.signals = new SignalOutbox(actionStore.db)
@@ -128,7 +128,7 @@ export class MastraRuntime {
     const memoryModule = await tryImport('@mastra/memory')
     if (!core?.Mastra) {
       console.warn(
-        '[mastra] @mastra/core is not installed; signals are retained in cyber_signal_outbox and will drain once it is. ' +
+        '[mastra] @mastra/core is not installed; signals are retained in agent_signal_outbox and will drain once it is. ' +
         'Install with: pnpm add @mastra/core @mastra/libsql',
       )
       return
@@ -577,9 +577,8 @@ export class MastraRuntime {
     const model = this.agentModel()
     if (!model) {
       console.warn(
-        '[mastra] no active model profile is configured; the agent was not registered. ' +
-        'Configure one in /portal/models or use PAPYRUS_AGENT_MODEL as a one-time bootstrap fallback. ' +
-        'Signals are retained in cyber_signal_outbox and will drain once a model is configured.',
+        '[mastra] PAPYRUS_AGENT_MODEL is not set; the agent was not registered. ' +
+        'Signals are retained in agent_signal_outbox and will drain once a model is configured.',
       )
       return undefined
     }

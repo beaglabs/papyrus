@@ -297,7 +297,7 @@ export interface ApiError {
 }
 
 /**
- * Cyber-twin contracts intentionally live beside the legacy ACP contracts
+ * Agent-twin contracts intentionally live beside the legacy ACP contracts
  * while the experiment branch proves the replacement runtime. The daemon
  * entrypoint and portal consume only these contracts; they do not create
  * Papyrus users, invitations, workspaces, or sessions.
@@ -464,7 +464,7 @@ export interface PortalOverview {
   }
 }
 
-export interface CyberObservation {
+export interface AgentObservation {
   id: string
   sourceIntegrationId: string
   sourceRecordId: string
@@ -566,7 +566,7 @@ export interface SyncCheckpoint {
   updatedAt: string
 }
 
-export interface CyberClaim {
+export interface AgentClaim {
   id: string
   operatorId: string
   subject: string
@@ -578,7 +578,7 @@ export interface CyberClaim {
   publishedAt: string
 }
 
-export interface CyberInvestigation {
+export interface AgentInvestigation {
   id: string
   title: string
   trigger: 'email' | 'teams' | 'manual' | 'signal' | 'schedule'
@@ -593,7 +593,7 @@ export interface CyberInvestigation {
   updatedAt: string
 }
 
-export interface CyberActionProposal {
+export interface AgentActionProposal {
   id: string
   investigationId: string
   proposedByOperatorId: string
@@ -616,7 +616,7 @@ export interface CyberActionProposal {
   decidedAt?: string
 }
 
-export interface CyberActionJob {
+export interface AgentActionJob {
   id: string
   proposalId: string
   investigationId: string
@@ -640,7 +640,7 @@ export interface CyberActionJob {
   updatedAt: string
 }
 
-export interface CyberActionAttempt {
+export interface AgentActionAttempt {
   id: string
   jobId: string
   attempt: number
@@ -652,7 +652,7 @@ export interface CyberActionAttempt {
   resultJson?: string
 }
 
-export interface CyberActionReceipt {
+export interface AgentActionReceipt {
   id: string
   jobId: string
   proposalId: string
@@ -666,7 +666,7 @@ export interface CyberActionReceipt {
   executedAt: string
 }
 
-export interface CyberSignal {
+export interface AgentSignal {
   id: string
   type: 'new_claim' | 'contradiction' | 'evidence_threshold' | 'approval_decision' | 'execution_receipt' | 'investigation_created' | 'action_proposed' | 'stale_investigation' | 'posture_review' | 'external_signal'
   investigationId?: string

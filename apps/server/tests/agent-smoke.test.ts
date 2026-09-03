@@ -2,11 +2,11 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { CyberConfig } from '../src/agent/config.js'
-import { CyberDatabase } from '../src/agent/database.js'
+import type { AgentConfig } from '../src/agent/config.js'
+import { AgentDatabase } from '../src/agent/database.js'
 import { ActionExecutorRegistry, ActionWorker, type ActionExecutor, type ActionExecutorContext, type ActionResult } from '../src/agent/action-worker.js'
 import { ActionStore } from '../src/agent/action-store.js'
-import { CyberService } from '../src/agent/service.js'
+import { AgentService } from '../src/agent/service.js'
 import { ConnectorRegistry, SyncWorker, type ConnectorDriver } from '../src/agent/sync-worker.js'
 import { TerrainStore } from '../src/agent/terrain-store.js'
 
@@ -15,14 +15,14 @@ describe('end-to-end smoke test: email → investigation → action → receipt'
   afterEach(() => { while (disposers.length) disposers.pop()?.() })
 
   interface SmokeTestSetup {
-    db: CyberDatabase
+    db: AgentDatabase
     terrain: TerrainStore
     actionStore: ActionStore
-    service: CyberService
+    service: AgentService
     actionWorker: ActionWorker
     executorRegistry: ActionExecutorRegistry
     syncWorker: SyncWorker
-    config: CyberConfig
+    config: AgentConfig
     owner: { oid: string; tenantId: string; displayName: string; roles: string[]; groups: string[]; source: string }
     emailIntegrationId: string
     firewallIntegrationId: string
@@ -35,22 +35,22 @@ describe('end-to-end smoke test: email → investigation → action → receipt'
     syncDriver?: ConnectorDriver
   } = {}): Promise<SmokeTestSetup> {
     const dataDir = mkdtempSync(join(tmpdir(), 'papyrus-smoke-'))
-    const db = new CyberDatabase(':memory:')
+    const db = new AgentDatabase(':memory:')
     const terrain = new TerrainStore(db)
     const actionStore = new ActionStore(db)
     const connectors = new ConnectorRegistry()
     const executorRegistry = new ActionExecutorRegistry()
     const syncWorker = new SyncWorker(db, terrain, connectors)
     const actionWorkerOptions = { pollMs: 10, leaseMs: 5_000, maxAttempts: 3, retryBaseMs: 50 }
-    const config: CyberConfig = {
+    const config: AgentConfig = {
       mode: 'local', profile: 'gcc', host: '127.0.0.1', port: 3210, publicOrigin: 'http://127.0.0.1:3210',
       dataDir, databasePath: ':memory:', portalSecret: 'portal-secret-at-least-thirty-two-characters',
       organizationName: 'Example Agency', cloud: 'Public', licenseRequired: false, licenseAuthorities: {},
     }
     const actionWorker = new ActionWorker(db, actionStore, executorRegistry, config, actionWorkerOptions)
-    const service = new CyberService(db, config, terrain, syncWorker, actionStore, executorRegistry, actionWorker)
+    const service = new AgentService(db, config, terrain, syncWorker, actionStore, executorRegistry, actionWorker)
     const owner = {
-      oid: 'owner', tenantId: 'tenant', displayName: 'Cyber Ops Owner',
+      oid: 'owner', tenantId: 'tenant', displayName: 'Agent Ops Owner',
       roles: ['Papyrus.System.Owner', 'Papyrus.Action.Approve'] as string[],
       groups: [] as string[], source: 'development',
     }
@@ -222,7 +222,7 @@ describe('end-to-end smoke test: email → investigation → action → receipt'
     // began executing, then died without releasing it, leaving a running job
     // with a stale lease.
     const now = new Date('2100-09-02T09:00:00.000Z')
-    actionStore.db.sqlite.prepare("UPDATE cyber_action_jobs SET status='running',attempt=1,locked_by=?,locked_at=?,started_at=?,lease_expires_at=? WHERE id=?")
+    actionStore.db.sqlite.prepare("UPDATE agent_action_jobs SET status='running',attempt=1,locked_by=?,locked_at=?,started_at=?,lease_expires_at=? WHERE id=?")
       .run('papyrus-action-dead-worker', now.toISOString(), now.toISOString(), new Date(now.getTime() - 1000).toISOString(), job!.id)
 
     // The worker reclaims the expired job on next poll. A lease expiry is a
@@ -332,7 +332,7 @@ describe('end-to-end smoke test: email → investigation → action → receipt'
   it('refuses to propose or approve an action when no executor is installed', async () => {
     const { db, config, terrain, syncWorker, actionStore, service, owner, firewallIntegrationId } = await setupSmokeTest()
     // Same ledger, but nothing in the process can carry the action out.
-    const unequipped = new CyberService(db, config, terrain, syncWorker, actionStore, new ActionExecutorRegistry())
+    const unequipped = new AgentService(db, config, terrain, syncWorker, actionStore, new ActionExecutorRegistry())
     const investigation = service.createInvestigation(owner as never, 'No executor', 'manual')
 
     expect(() => unequipped.createProposal(
@@ -350,7 +350,7 @@ describe('end-to-end smoke test: email → investigation → action → receipt'
   it('refuses to approve an action when no worker can execute it', async () => {
     const { db, config, terrain, syncWorker, actionStore, service, executorRegistry, owner, firewallIntegrationId } = await setupSmokeTest()
     // The executor is installed, but no worker is running to pick the job up.
-    const unstaffed = new CyberService(db, config, terrain, syncWorker, actionStore, executorRegistry)
+    const unstaffed = new AgentService(db, config, terrain, syncWorker, actionStore, executorRegistry)
     const investigation = service.createInvestigation(owner as never, 'No worker', 'manual')
     const proposal = service.createProposal(
       owner as never, investigation.id, firewallIntegrationId, 'isolate', 'host-idle', ['claim-1'],

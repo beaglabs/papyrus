@@ -18,7 +18,7 @@ export interface CreateModelProfileInput {
   baseUrl: string
   authScheme: ModelAuthScheme
   credentialRef?: string
-  scope: string
+  scope?: string
   capabilities?: string[]
 }
 
@@ -42,7 +42,7 @@ export class ModelStore {
   }
 
   getDefault(): ModelProfile | undefined {
-    const row = this.db.sqlite.prepare("SELECT * FROM papyrus_model_profiles WHERE deleted_at IS NULL AND state='active' ORDER BY is_default DESC, updated_at DESC LIMIT 1").get() as Row | undefined
+    const row = this.db.sqlite.prepare("SELECT * FROM papyrus_model_profiles WHERE deleted_at IS NULL AND state='active' AND (last_tested_at IS NOT NULL OR is_default=1) ORDER BY is_default DESC, updated_at DESC LIMIT 1").get() as Row | undefined
     return row ? this.profile(row) : undefined
   }
 
@@ -178,11 +178,11 @@ export class ModelStore {
   }
 }
 
-function normalizeInput(input: CreateModelProfileInput): CreateModelProfileInput & { capabilities: string[] } {
+function normalizeInput(input: CreateModelProfileInput): CreateModelProfileInput & { scope: string; capabilities: string[] } {
   const name = clean(input.name, 'name', 120)
   const provider = clean(input.provider, 'provider', 120).toLowerCase()
   const model = clean(input.model, 'model', 256)
-  const scope = clean(input.scope, 'scope', 256)
+  const scope = clean(input.scope ?? 'daemon', 'scope', 256)
   if (!MODEL_GATEWAY_KINDS.includes(input.gatewayKind)) throw new ModelProfileError('INVALID_MODEL_PROFILE', 'Unsupported gateway kind')
   if (!MODEL_AUTH_SCHEMES.includes(input.authScheme)) throw new ModelProfileError('INVALID_MODEL_PROFILE', 'Unsupported authentication scheme')
   let base: URL

@@ -214,17 +214,23 @@ export class MastraRuntime {
   listModelProfiles(): ModelProfile[] { return this.models.list() }
 
   createModelProfile(input: CreateModelProfileInput, actorOid: string): ModelProfile {
+    // A profile is not usable until its endpoint has passed a test. The first
+    // profile that passes becomes the default in testModelProfile below.
     return this.models.create(input, actorOid, false)
   }
 
   async testModelProfile(id: string, actorOid: string): Promise<ModelProfile> {
     const profile = this.models.get(id)
     if (!profile) throw new MastraRuntimeError(404, 'MODEL_PROFILE_NOT_FOUND', 'Model profile not found')
+    const hadUsableDefault = Boolean(this.models.getDefault())
     try {
       const credential = resolveModelCredential(profile)
       const response = await fetch(`${profile.baseUrl}/models`, { method: 'GET', headers: credential ? { authorization: `Bearer ${credential}` } : {}, signal: AbortSignal.timeout(8_000) })
       if (response.status >= 400) throw new Error(`Model endpoint returned ${response.status}`)
-      return this.models.markTested(id, undefined, actorOid)
+      const tested = this.models.markTested(id, undefined, actorOid)
+      const selected = !hadUsableDefault && !tested.isDefault ? this.models.setDefault(id) : tested
+      if (!hadUsableDefault) await this.reloadAgent()
+      return selected
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : 'Model gateway test failed'
       return this.models.markTested(id, message, actorOid)
@@ -571,6 +577,14 @@ export class MastraRuntime {
     if (typeof instance['removeAgent'] === 'function') (instance['removeAgent'] as (id: string) => boolean)(AGENT_ID)
     if (agent && typeof instance['addAgent'] === 'function') (instance['addAgent'] as (agent: unknown, id: string) => void)(agent, AGENT_ID)
     this.mastra.agent = agent
+    if (agent && !this.timer) {
+      this.timer = setInterval(() => {
+        void this.drainSignals().catch((cause: unknown) => {
+          console.error('[mastra] signal drain failed:', cause instanceof Error ? cause.message : cause)
+        })
+      }, DRAIN_INTERVAL_MS)
+      this.timer.unref?.()
+    }
   }
 
   private async buildAgent(core: Record<string, unknown>, memory?: unknown, webhooks?: unknown): Promise<Record<string, unknown> | undefined> {
@@ -641,7 +655,7 @@ export class MastraRuntime {
     }
     registered['configureModelGateway'] = createTool({
       id: 'configureModelGateway',
-      description: 'Open a secure typed form for configuring a Papyrus model gateway. Never request a raw secret in chat; request a credential reference instead.',
+      description: 'Open a secure typed form for configuring a Papyrus model gateway. Ask only for the model ID, endpoint, authentication mode, and (if needed) the daemon environment variable containing the API key. Never request a raw secret in chat.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       execute: async () => modelGatewayRequest(),
     })

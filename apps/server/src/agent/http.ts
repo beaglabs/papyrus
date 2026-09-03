@@ -204,7 +204,7 @@ export function createAgentServer(config: AgentConfig, service: AgentService, au
           provider: requiredString(input.provider, 'provider', 120), model: requiredString(input.model, 'model', 256),
           baseUrl: requiredString(input.baseUrl, 'baseUrl', 2048), authScheme,
           ...(typeof input.credentialRef === 'string' && input.credentialRef.trim() ? { credentialRef: input.credentialRef } : {}),
-          scope: requiredString(input.scope, 'scope', 256),
+          ...(typeof input.scope === 'string' && input.scope.trim() ? { scope: input.scope.trim() } : {}),
           ...(Array.isArray(input.capabilities) ? { capabilities: input.capabilities.filter((value): value is string => typeof value === 'string').slice(0, 32) } : {}),
         }, actor.oid)
         return json(response, 201, { profile })

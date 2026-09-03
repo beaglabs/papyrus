@@ -36,11 +36,14 @@ Optional: `tools`, `workspace`, `memory`, `description`, `durable`.
 
 Two traps:
 
-- **`model` is required.** Omitting it throws at construction. Papyrus reads
-  `PAPYRUS_AGENT_MODEL` (with the old investigation name accepted temporarily) and, when it is unset, does not build an agent at
-  all — signals accumulate in the outbox instead. Choosing a model is the
-  customer's decision; `disconnected` and `restricted` profiles cannot reach a
-  hosted provider, so there is no sensible default.
+- **`model` is required.** Omitting it throws at construction. Papyrus resolves
+  the active durable profile from its customer model gateway. Existing
+  deployments can bootstrap that profile from `PAPYRUS_AGENT_MODEL` plus
+  `PAPYRUS_MODEL_BASE_URL` and `PAPYRUS_MODEL_CREDENTIAL_REF`; the Models tab
+  and the `configureModelGateway` tool are the normal configuration paths.
+  Profiles use Mastra's registered custom-gateway model shape
+  `papyrus/<profile-id>/<model>`, so agent code does not change when a customer
+  moves between OpenAI-compatible, Azure, Ollama, or another approved endpoint.
 - **`memory` expects a `MastraMemory`, not a store.** Papyrus constructs
   `Memory({ storage })`, passes that to the agent, and also attaches the same
   `LibSQLStore` to `new Mastra({ storage })`.
@@ -57,6 +60,13 @@ Tool output is UI data. Plugin tools return `plugin_connection_request` objects,
 which the browser renders as a secure form, while `fetchUrlPreview` returns a
 `url_preview` card. Credential references submit directly to the daemon and are
 never copied into the follow-up model message.
+
+The Papyrus gateway implements Mastra's custom gateway interface and resolves
+credentials only at inference time. The current built-in resolver supports
+`env://` references; vault, key-vault, certificate, and managed-identity URIs
+fail closed until the deployment supplies its customer-specific resolver. See
+[Mastra custom gateways](https://mastra.ai/models/gateways/custom-gateways#creating-a-custom-gateway)
+for the underlying gateway contract and provider/model ID format.
 
 ## Webhook signals
 

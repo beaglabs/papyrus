@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { LicensePayload } from '@papyrus/contracts'
-import { CyberDatabase } from '../src/cyber/database.js'
+import { CyberDatabase } from '../src/agent/database.js'
 import { LicenseService, signLicense } from '../src/license.js'
 
 describe('cyber daemon licensing', () => {

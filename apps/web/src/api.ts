@@ -7,6 +7,7 @@ import type {
   PortalOverview,
   PortalPrincipal,
   SyncJob,
+  ModelProfile,
 } from '@papyrus/contracts'
 import type { UIMessage } from 'ai'
 
@@ -29,6 +30,7 @@ export interface PortalData {
   sessions: AgentSession[]
   schedules: AgentSchedule[]
   workflows: WorkflowSummary[]
+  models: ModelProfile[]
 }
 
 export interface AgentStatus {
@@ -94,7 +96,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 export async function loadPortal(): Promise<PortalData> {
   const config = await api<PublicConfig>('/api/config/public')
-  const [me, overview, plugins, agent, sessions, schedules, workflows] = await Promise.all([
+  const [me, overview, plugins, agent, sessions, schedules, workflows, models] = await Promise.all([
     api<PortalPrincipal>('/api/me'),
     api<PortalOverview>('/api/portal/overview'),
     api<{ catalog: IntegrationCatalogEntry[]; configured: IntegrationConfiguration[] }>('/api/plugins'),
@@ -102,8 +104,9 @@ export async function loadPortal(): Promise<PortalData> {
     api<{ sessions: AgentSession[] }>('/api/sessions'),
     api<{ schedules: AgentSchedule[] }>('/api/schedules'),
     api<{ workflows: WorkflowSummary[] }>('/api/workflows'),
+    api<{ profiles: ModelProfile[] }>('/api/model-profiles'),
   ])
-  return { config, me, overview, catalog: plugins.catalog, integrations: plugins.configured, agent, sessions: sessions.sessions, schedules: schedules.schedules, workflows: workflows.workflows }
+  return { config, me, overview, catalog: plugins.catalog, integrations: plugins.configured, agent, sessions: sessions.sessions, schedules: schedules.schedules, workflows: workflows.workflows, models: models.profiles }
 }
 
 export async function publicConfig(): Promise<PublicConfig> { return api('/api/config/public') }
@@ -159,6 +162,26 @@ export async function deleteSchedule(id: string): Promise<void> {
 
 export async function runWorkflow(id: string, input: Record<string, unknown>): Promise<unknown> {
   return api(`/api/workflows/${encodeURIComponent(id)}/runs`, { method: 'POST', body: JSON.stringify(input) })
+}
+
+export async function createModelProfile(input: Record<string, unknown>): Promise<ModelProfile> {
+  return (await api<{ profile: ModelProfile }>('/api/model-profiles', { method: 'POST', body: JSON.stringify(input) })).profile
+}
+
+export async function testModelProfile(id: string): Promise<ModelProfile> {
+  return (await api<{ profile: ModelProfile }>(`/api/model-profiles/${encodeURIComponent(id)}?action=test`, { method: 'POST', body: '{}' })).profile
+}
+
+export async function setDefaultModelProfile(id: string): Promise<ModelProfile> {
+  return (await api<{ profile: ModelProfile }>(`/api/model-profiles/${encodeURIComponent(id)}?action=default`, { method: 'POST', body: '{}' })).profile
+}
+
+export async function disableModelProfile(id: string): Promise<ModelProfile> {
+  return (await api<{ profile: ModelProfile }>(`/api/model-profiles/${encodeURIComponent(id)}?action=disable`, { method: 'POST', body: '{}' })).profile
+}
+
+export async function deleteModelProfile(id: string): Promise<void> {
+  await api(`/api/model-profiles/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }
 
 export async function transitionIntegration(id: string, action: 'test' | 'submit' | 'activate' | 'disable', reason?: string): Promise<IntegrationConfiguration> {

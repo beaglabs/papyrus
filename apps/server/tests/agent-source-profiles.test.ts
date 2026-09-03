@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeSourceRecord, SOURCE_SCHEMAS } from '../src/cyber/source-profiles.js'
+import { normalizeSourceRecord, SOURCE_SCHEMAS } from '../src/agent/source-profiles.js'
 
 describe('Observation API source profiles', () => {
   for (const [catalogId, schemas] of Object.entries(SOURCE_SCHEMAS)) {

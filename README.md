@@ -42,6 +42,7 @@ Teams / Email / ACP / A2A / Customer plugins
 The web product is rooted at `/portal`:
 
 - `/portal` — durable agent sessions and AI SDK UI tool cards
+- `/portal/models` — customer model gateways and the agent-guided model configuration form
 - `/portal/plugins` — installed plugins and the agent-visible tool catalog
 - `/portal/scheduled` — persistent Mastra agent schedules
 - `/portal/workflows` — durable, inspectable Mastra workflows
@@ -86,7 +87,10 @@ export PAPYRUS_PUBLIC_ORIGIN=http://127.0.0.1:3210
 export PAPYRUS_PORTAL_SECRET="$(openssl rand -hex 32)"
 export PAPYRUS_LICENSE_REQUIRED=false
 export PAPYRUS_DATABASE_PATH=:memory:
-export PAPYRUS_AGENT_MODEL='openai/gpt-5' # any Mastra model id the deployment can reach
+# Optional one-time bootstrap; durable profiles can be configured at /portal/models.
+export PAPYRUS_AGENT_MODEL='openai/gpt-5'
+export PAPYRUS_MODEL_BASE_URL='https://api.openai.com/v1'
+export PAPYRUS_MODEL_CREDENTIAL_REF='env://OPENAI_API_KEY'
 export PAPYRUS_DEV_ENTRA_PRINCIPAL='{
   "oid":"local-owner",
   "tenantId":"local-tenant",
@@ -127,6 +131,8 @@ Authenticated portal clients use:
 - `GET|POST /api/sessions`
 - `GET /api/sessions/:id/messages`
 - `POST /api/agent/chat` — AI SDK UI v7 stream
+- `GET|POST /api/model-profiles`
+- `POST|DELETE /api/model-profiles/:id` — test, select, disable, or remove a durable model profile
 - `GET /api/plugins`
 - `POST /api/plugins/connect`
 - `GET|POST /api/schedules`
@@ -153,7 +159,7 @@ Teams SSO tokens can be exchanged at `POST /api/auth/teams`; standard portal log
 
 This branch implements the Entra-native daemon, offline licensing, governed plugin lifecycle, action ledger and leased executor worker, Mastra LibSQL memory, durable evented agent registration, session history, native schedules, a signal-intake workflow, WebhookSignalProvider delivery backed by a database-leased outbox, agent-rendered plugin configuration cards, and guarded URL previews.
 
-Mastra is now a server dependency. Its storage starts even when no model is configured, so session and workflow state remain available. When `PAPYRUS_AGENT_MODEL` is absent, the daemon refuses chat and keeps incoming signals in `cyber_signal_outbox`; it does not invent a default provider or discard events.
+Mastra is now a server dependency. Its storage starts even when no model is configured, so session and workflow state remain available. Configure durable model profiles from the **Models** tab or ask the agent to open its secure model-gateway form. `PAPYRUS_AGENT_MODEL` remains a one-time bootstrap fallback for existing deployments; the daemon stores endpoint/model metadata and a credential reference, never a raw API key. When no profile is active, the daemon refuses chat and keeps incoming signals in `cyber_signal_outbox`; it does not invent a default provider or discard events.
 
 `fetchUrlPreview` permits HTTPS by default, follows redirects only after re-validation, limits response size, and rejects credentials, loopback, link-local, metadata, private, and reserved destinations. Reviewed internal hosts can be enumerated with `PAPYRUS_FETCH_ALLOWED_HOSTS`.
 

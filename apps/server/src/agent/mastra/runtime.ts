@@ -17,9 +17,12 @@ import {
   type InvestigationToolName,
 } from './tools.js'
 import { INTEGRATION_CATALOG } from '../catalog.js'
-import { connectionRequest, pluginToolId } from './plugin-tools.js'
+import { connectionRequest, modelGatewayRequest, pluginToolId } from './plugin-tools.js'
 import { fetchUrlPreview } from './fetch-preview.js'
 import { signalIntakeWorkflow, WORKFLOW_CATALOG } from './workflows.js'
+import { ModelStore, type CreateModelProfileInput } from '../model-store.js'
+import { PapyrusModelGateway, resolveModelCredential } from '../model-gateway.js'
+import type { ModelProfile } from '@papyrus/contracts'
 
 /**
  * MastraRuntime wraps the Mastra durable agent harness.
@@ -36,9 +39,9 @@ import { signalIntakeWorkflow, WORKFLOW_CATALOG } from './workflows.js'
  *
  * The Mastra surface below was verified against @mastra/core 1.63.2 by reading
  * the published type declarations. It is still imported dynamically and
- * feature-detected, because the package is not yet a dependency and the export
- * surface has moved between versions. Anything that cannot be verified without
- * the package installed is probed at runtime and degrades loudly.
+ * feature-detected so a minimal daemon build can retain signals if an optional
+ * Mastra package is unavailable. Anything that cannot be verified without the
+ * package installed is probed at runtime and degrades loudly.
  */
 
 export type InvestigationRuntimeMode = 'starlings' | 'centralized'
@@ -86,6 +89,7 @@ export class MastraRuntime {
   readonly mode: InvestigationRuntimeMode
   readonly signals: SignalOutbox
   readonly tools: InvestigationToolContext
+  readonly models: ModelStore
   private mastra: MastraHandle | undefined
   private started = false
   private sandbox: SandboxPolicy | undefined
@@ -99,6 +103,7 @@ export class MastraRuntime {
   ) {
     this.mode = (process.env.PAPYRUS_INVESTIGATION_RUNTIME as InvestigationRuntimeMode | undefined) ?? 'starlings'
     this.signals = new SignalOutbox(actionStore.db)
+    this.models = new ModelStore(actionStore.db)
     this.tools = { actionStore, terrain }
   }
 
@@ -129,6 +134,8 @@ export class MastraRuntime {
       return
     }
 
+    this.models.bootstrapLegacy()
+
     const storage = libsql?.LibSQLStore
       ? new libsql.LibSQLStore({ id: 'papyrus-mastra', url: `file:${join(this.config.dataDir, 'mastra.db')}` })
       : undefined
@@ -140,9 +147,11 @@ export class MastraRuntime {
 
     const webhooks = await this.buildWebhookProvider()
     const agent = await this.buildAgent(core, memory, webhooks)
+    const gateway = new PapyrusModelGateway(this.models)
     const instance = new core.Mastra({
         ...(storage ? { storage } : {}),
         ...(agent ? { agents: { [AGENT_ID]: agent } } : {}),
+        gateways: { papyrus: gateway },
         workflows: { signalIntake: signalIntakeWorkflow },
         backgroundTasks: { enabled: true, mode: 'full', globalConcurrency: 8, perAgentConcurrency: 4, backpressure: 'queue' },
       })
@@ -202,6 +211,46 @@ export class MastraRuntime {
     }
   }
 
+  listModelProfiles(): ModelProfile[] { return this.models.list() }
+
+  createModelProfile(input: CreateModelProfileInput, actorOid: string): ModelProfile {
+    return this.models.create(input, actorOid, false)
+  }
+
+  async testModelProfile(id: string, actorOid: string): Promise<ModelProfile> {
+    const profile = this.models.get(id)
+    if (!profile) throw new MastraRuntimeError(404, 'MODEL_PROFILE_NOT_FOUND', 'Model profile not found')
+    try {
+      const credential = resolveModelCredential(profile)
+      const response = await fetch(`${profile.baseUrl}/models`, { method: 'GET', headers: credential ? { authorization: `Bearer ${credential}` } : {}, signal: AbortSignal.timeout(8_000) })
+      if (response.status >= 400) throw new Error(`Model endpoint returned ${response.status}`)
+      return this.models.markTested(id, undefined, actorOid)
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : 'Model gateway test failed'
+      return this.models.markTested(id, message, actorOid)
+    }
+  }
+
+  async setDefaultModelProfile(id: string): Promise<ModelProfile> {
+    const profile = this.models.setDefault(id)
+    await this.reloadAgent()
+    return profile
+  }
+
+  async disableModelProfile(id: string): Promise<ModelProfile> {
+    const wasDefault = Boolean(this.models.get(id)?.isDefault)
+    const profile = this.models.disable(id)
+    if (wasDefault) await this.reloadAgent()
+    return profile
+  }
+
+  async deleteModelProfile(id: string, actorOid: string): Promise<void> {
+    const profile = this.models.get(id)
+    const wasDefault = Boolean(profile?.isDefault)
+    this.models.delete(id, actorOid)
+    if (wasDefault) await this.reloadAgent()
+  }
+
   async createSession(title = 'New session') {
     const memory = this.requireMemory()
     const thread = await (memory['createThread'] as (input: Record<string, unknown>) => Promise<Record<string, unknown>>)({
@@ -253,7 +302,7 @@ export class MastraRuntime {
   }
 
   async chat(threadId: string, params: Record<string, unknown>): Promise<Response> {
-    if (!this.mastra?.agent) throw new MastraRuntimeError(503, 'AGENT_MODEL_NOT_CONFIGURED', 'Configure PAPYRUS_AGENT_MODEL before starting a session')
+    if (!this.mastra?.agent) throw new MastraRuntimeError(503, 'AGENT_MODEL_NOT_CONFIGURED', 'Configure a model gateway in /portal/models before starting a session')
     await this.assertOwnedThread(threadId)
     const messages = Array.isArray(params['messages']) ? params['messages'] : []
     const lastMessage = [...messages].reverse().find((message) => message && typeof message === 'object' && (message as Record<string, unknown>)['role'] === 'user')
@@ -509,15 +558,27 @@ export class MastraRuntime {
    * in the outbox rather than failing against a model nobody chose.
    */
   private agentModel(): string | undefined {
-    const model = process.env.PAPYRUS_AGENT_MODEL?.trim() ?? process.env.PAPYRUS_INVESTIGATION_MODEL?.trim()
-    return model ? model : undefined
+    const profile = this.models.getDefault()
+    return profile ? `papyrus/${profile.id}/${profile.model}` : undefined
+  }
+
+  private async reloadAgent(): Promise<void> {
+    if (!this.mastra) return
+    const core = await tryImport('@mastra/core')
+    if (!core?.Mastra) return
+    const agent = await this.buildAgent(core, this.mastra.memory, this.mastra.webhooks)
+    const instance = this.mastra.instance as Record<string, unknown>
+    if (typeof instance['removeAgent'] === 'function') (instance['removeAgent'] as (id: string) => boolean)(AGENT_ID)
+    if (agent && typeof instance['addAgent'] === 'function') (instance['addAgent'] as (agent: unknown, id: string) => void)(agent, AGENT_ID)
+    this.mastra.agent = agent
   }
 
   private async buildAgent(core: Record<string, unknown>, memory?: unknown, webhooks?: unknown): Promise<Record<string, unknown> | undefined> {
     const model = this.agentModel()
     if (!model) {
       console.warn(
-        '[mastra] PAPYRUS_AGENT_MODEL is not set; the agent was not registered. ' +
+        '[mastra] no active model profile is configured; the agent was not registered. ' +
+        'Configure one in /portal/models or use PAPYRUS_AGENT_MODEL as a one-time bootstrap fallback. ' +
         'Signals are retained in cyber_signal_outbox and will drain once a model is configured.',
       )
       return undefined
@@ -579,6 +640,12 @@ export class MastraRuntime {
         execute: async () => connectionRequest(entry),
       })
     }
+    registered['configureModelGateway'] = createTool({
+      id: 'configureModelGateway',
+      description: 'Open a secure typed form for configuring a Papyrus model gateway. Never request a raw secret in chat; request a credential reference instead.',
+      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      execute: async () => modelGatewayRequest(),
+    })
     registered['fetchUrlPreview'] = createTool({
       id: 'fetchUrlPreview',
       description: 'Fetch an approved HTTP(S) URL and return a safe title, description, and excerpt preview for the UI.',

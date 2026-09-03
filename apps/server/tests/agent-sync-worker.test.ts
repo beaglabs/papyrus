@@ -2,11 +2,11 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { CyberConfig } from '../src/cyber/config.js'
-import { CyberDatabase } from '../src/cyber/database.js'
-import { CyberService } from '../src/cyber/service.js'
-import { ConnectorRegistry, SyncWorker, type ConnectorDriver } from '../src/cyber/sync-worker.js'
-import { TerrainStore } from '../src/cyber/terrain-store.js'
+import type { CyberConfig } from '../src/agent/config.js'
+import { CyberDatabase } from '../src/agent/database.js'
+import { CyberService } from '../src/agent/service.js'
+import { ConnectorRegistry, SyncWorker, type ConnectorDriver } from '../src/agent/sync-worker.js'
+import { TerrainStore } from '../src/agent/terrain-store.js'
 
 describe('connector synchronization worker', () => {
   const disposers: Array<() => void> = []

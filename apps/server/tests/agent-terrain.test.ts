@@ -2,9 +2,9 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { CyberConfig } from '../src/cyber/config.js'
-import { CyberDatabase } from '../src/cyber/database.js'
-import { CyberService } from '../src/cyber/service.js'
+import type { CyberConfig } from '../src/agent/config.js'
+import { CyberDatabase } from '../src/agent/database.js'
+import { CyberService } from '../src/agent/service.js'
 
 describe('durable terrain observations', () => {
   const disposers: Array<() => void> = []

@@ -6,7 +6,7 @@ describe('primary navigation', () => {
   it('exposes the Mastra-native runtime surfaces', () => {
     const html = renderToStaticMarkup(<PrimaryNavigation view="agent" onNavigate={() => undefined} />)
     const buttons = [...html.matchAll(/<button\b[^>]*>([\s\S]*?)<\/button>/g)].map((match) => match[1]!.replace(/<[^>]*>/g, '').trim())
-    expect(buttons).toEqual(['✦Agent', '⌘Plugins', '◷Scheduled', '⌬Workflows', '◇Governance'])
+    expect(buttons).toEqual(['✦Agent', '◎Models', '⌘Plugins', '◷Scheduled', '⌬Workflows', '◇Governance'])
     expect(html).not.toMatch(/terrain|investigation/i)
   })
 })

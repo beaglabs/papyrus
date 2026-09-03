@@ -49,10 +49,13 @@ Papyrus resolves execution policy at startup from `process.platform` and a PATH 
 The agent needs a model, and choosing one is the customer's decision — `disconnected` and `restricted` profiles cannot reach a hosted provider at all. Papyrus will not guess a default.
 
 ```bash
-export PAPYRUS_AGENT_MODEL='openai/gpt-5'   # or any Mastra model id your deployment can reach
+# Optional one-time bootstrap; durable profiles can be configured at /portal/models.
+export PAPYRUS_AGENT_MODEL='openai/gpt-5'
+export PAPYRUS_MODEL_BASE_URL='https://api.openai.com/v1'
+export PAPYRUS_MODEL_CREDENTIAL_REF='env://OPENAI_API_KEY'
 ```
 
-Without it the agent is not registered. Mastra storage, session history, workflows, and plugin configuration still start normally, while signals accumulate durably in `cyber_signal_outbox`. Nothing is dropped while unconfigured.
+Without it the agent is not registered. Mastra storage, session history, workflows, and plugin configuration still start normally, while signals accumulate durably in `cyber_signal_outbox`. Nothing is dropped while unconfigured. The Models tab stores only gateway metadata and a customer-owned credential reference; it never stores raw key material.
 
 Storage for durable threads is LibSQL at `<data-dir>/mastra.db`, created alongside the main database.
 

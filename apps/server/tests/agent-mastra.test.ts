@@ -2,18 +2,18 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { CyberConfig } from '../src/cyber/config.js'
-import { ActionStore, ThreadConflictError } from '../src/cyber/action-store.js'
-import { CyberDatabase } from '../src/cyber/database.js'
-import { MastraRuntime } from '../src/cyber/mastra/runtime.js'
+import type { CyberConfig } from '../src/agent/config.js'
+import { ActionStore, ThreadConflictError } from '../src/agent/action-store.js'
+import { CyberDatabase } from '../src/agent/database.js'
+import { MastraRuntime } from '../src/agent/mastra/runtime.js'
 import {
   assertUsableSandbox,
   localSandboxOptions,
   probeIsolation,
   resolveSandboxPolicy,
   SandboxUnavailableError,
-} from '../src/cyber/mastra/sandbox-policy.js'
-import { SignalOutbox } from '../src/cyber/mastra/signal-outbox.js'
+} from '../src/agent/mastra/sandbox-policy.js'
+import { SignalOutbox } from '../src/agent/mastra/signal-outbox.js'
 import {
   AgentToolAuthorizationError,
   assertAgentSafeTool,
@@ -22,10 +22,10 @@ import {
   listProposals,
   runInvestigationTool,
   terrainQuery,
-} from '../src/cyber/mastra/tools.js'
-import { CyberService } from '../src/cyber/service.js'
-import { ConnectorRegistry, SyncWorker } from '../src/cyber/sync-worker.js'
-import { TerrainStore } from '../src/cyber/terrain-store.js'
+} from '../src/agent/mastra/tools.js'
+import { CyberService } from '../src/agent/service.js'
+import { ConnectorRegistry, SyncWorker } from '../src/agent/sync-worker.js'
+import { TerrainStore } from '../src/agent/terrain-store.js'
 
 const CAN_RUN_ALL = () => true
 const CAN_RUN_NONE = () => false

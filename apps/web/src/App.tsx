@@ -4,13 +4,14 @@ import { AuthenticationRequired, createSession, deleteSession, loadPortal, logou
 import { AgentView } from './Agent.js'
 import { PluginsView } from './Plugins.js'
 import { ScheduledView, WorkflowsView } from './Automation.js'
+import { ModelsView } from './Models.js'
 import { Alert, Avatar, Badge, Button, Card, DropdownMenu, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from './components/ui/index.js'
 
-export type PortalView = 'agent' | 'plugins' | 'scheduled' | 'workflows' | 'governance'
+export type PortalView = 'agent' | 'models' | 'plugins' | 'scheduled' | 'workflows' | 'governance'
 type AppState = { phase: 'loading' } | { phase: 'signed-out'; config: PublicConfig } | { phase: 'ready'; data: PortalData } | { phase: 'error'; message: string }
 
 const ROUTES: Record<PortalView, string> = {
-  agent: '/portal', plugins: '/portal/plugins', scheduled: '/portal/scheduled', workflows: '/portal/workflows', governance: '/portal/governance',
+  agent: '/portal', models: '/portal/models', plugins: '/portal/plugins', scheduled: '/portal/scheduled', workflows: '/portal/workflows', governance: '/portal/governance',
 }
 
 function viewFromPath(): PortalView {
@@ -83,6 +84,7 @@ export function App() {
         {view === 'agent' && (selectedSession
           ? <AgentView key={selectedSession.id} session={selectedSession} status={data.agent} initialPrompt={initialPrompt} canApprove={data.me.roles.includes('Papyrus.System.Owner') || data.me.roles.includes('Papyrus.Action.Approve')} onChanged={refresh} />
           : <EmptyAgent onCreate={() => void newSession()} />)}
+        {view === 'models' && <ModelsView profiles={data.models} onAskAgent={(prompt) => navigate('agent', { prompt, session: selectedSession?.id })} onChanged={refresh} canManage={data.me.roles.includes('Papyrus.System.Owner') || data.me.roles.includes('Papyrus.Integration.Manage')} />}
         {view === 'plugins' && <PluginsView catalog={data.catalog} configured={data.integrations} onAskAgent={(prompt) => navigate('agent', { prompt, session: selectedSession?.id })} onChanged={refresh} canManage={data.me.roles.includes('Papyrus.System.Owner') || data.me.roles.includes('Papyrus.Integration.Manage')} />}
         {view === 'scheduled' && <ScheduledView schedules={data.schedules} sessions={data.sessions} onChanged={refresh} />}
         {view === 'workflows' && <WorkflowsView workflows={data.workflows} />}
@@ -106,7 +108,7 @@ function SignedOut({ config }: { config: PublicConfig }) {
 
 export function PrimaryNavigation({ view, onNavigate }: { view: PortalView; onNavigate: (view: PortalView) => void }) {
   const items: Array<{ view: PortalView; icon: string; label: string }> = [
-    { view: 'agent', icon: '✦', label: 'Agent' }, { view: 'plugins', icon: '⌘', label: 'Plugins' },
+    { view: 'agent', icon: '✦', label: 'Agent' }, { view: 'models', icon: '◎', label: 'Models' }, { view: 'plugins', icon: '⌘', label: 'Plugins' },
     { view: 'scheduled', icon: '◷', label: 'Scheduled' }, { view: 'workflows', icon: '⌬', label: 'Workflows' },
     { view: 'governance', icon: '◇', label: 'Governance' },
   ]
@@ -115,7 +117,7 @@ export function PrimaryNavigation({ view, onNavigate }: { view: PortalView; onNa
 
 function PortalHeader({ view, data }: { view: PortalView; data: PortalData }) {
   const copy: Record<PortalView, [string, string]> = {
-    agent: ['MASTRA + STARLINGS', 'Agent'], plugins: ['TOOLS AND SIGNALS', 'Plugins'], scheduled: ['PERSISTENT TRIGGERS', 'Scheduled'],
+    agent: ['MASTRA + STARLINGS', 'Agent'], models: ['MODEL GATEWAYS', 'Models'], plugins: ['TOOLS AND SIGNALS', 'Plugins'], scheduled: ['PERSISTENT TRIGGERS', 'Scheduled'],
     workflows: ['DURABLE EXECUTION', 'Workflows'], governance: ['IDENTITY, LICENSING AND AUDIT', 'Governance'],
   }
   return <header className="portal-header"><div><p className="eyebrow">{copy[view][0]}</p><h1>{copy[view][1]}</h1></div><div className="header-status"><span><i className="dot good" />DAEMON HEALTHY</span><small>{data.config.organizationName}</small></div></header>

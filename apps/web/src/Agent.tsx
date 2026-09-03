@@ -3,6 +3,7 @@ import { DefaultChatTransport, type UIMessage } from 'ai'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { AgentSession, AgentStatus } from './api.js'
 import { approveProposal, connectPlugin, createSessionProposal, denyProposal, issueIngestionToken, sessionMessages, setSessionAttention } from './api.js'
+import { ModelGatewayCard } from './Models.js'
 import { Alert, Badge, Button, Card, Input, Label, NativeSelect, Textarea } from './components/ui/index.js'
 
 interface PluginField {
@@ -24,6 +25,12 @@ interface PluginRequest {
   risk: string
   syncMode: string
   acceptsSignals: boolean
+  fields: PluginField[]
+  note: string
+}
+
+interface ModelGatewayRequest {
+  kind: 'model_gateway_request'
   fields: PluginField[]
   note: string
 }
@@ -89,7 +96,7 @@ function Chat({ session, status, initial, input, setInput, historyError, canAppr
 
   return <div className="agent-surface">
     <div className="agent-session-head"><div><p className="eyebrow">DURABLE SESSION</p><h2>{session.title}</h2></div><div className="agent-badges"><Badge>{status.mode.toUpperCase()}</Badge><Badge className={status.durable ? 'status-good' : ''}>{status.durable ? 'DURABLE' : 'OFFLINE'}</Badge></div></div>
-    {!status.agentReady && <Alert className="agent-config-alert"><strong>Agent model not configured</strong><span>Set <code>PAPYRUS_AGENT_MODEL</code> on the daemon. Sessions, plugins, signals, schedules, and workflow history remain available.</span></Alert>}
+    {!status.agentReady && <Alert className="agent-config-alert"><strong>Agent model not configured</strong><span>Open <a href="/portal/models">Models</a> to configure an approved gateway. Legacy <code>PAPYRUS_AGENT_MODEL</code> values are imported once as a bootstrap fallback.</span></Alert>}
     {historyError && <Alert className="error">{historyError}</Alert>}
     <div className="message-list" aria-live="polite">
       {messages.length === 0 && <Welcome />}
@@ -121,6 +128,7 @@ function MessagePart({ part, sessionId, canApprove, onChanged }: { part: Record<
   if (type === 'dynamic-tool' || type.startsWith('tool-')) {
     const output = part['output'] as Record<string, unknown> | undefined
     if (output?.['kind'] === 'plugin_connection_request') return <PluginConnectionCard request={output as unknown as PluginRequest} onChanged={onChanged} />
+    if (output?.['kind'] === 'model_gateway_request') return <ModelGatewayCard request={output as unknown as ModelGatewayRequest} onChanged={onChanged} />
     if (output?.['kind'] === 'url_preview') return <UrlPreviewCard preview={output as unknown as UrlPreview} />
     if (output?.['kind'] === 'action_suggestion') return <ActionSuggestionCard suggestion={output} sessionId={sessionId} canApprove={canApprove} onChanged={onChanged} />
     const name = type === 'dynamic-tool' ? String(part['toolName'] ?? 'tool') : type.slice(5)

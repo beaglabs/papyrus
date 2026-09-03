@@ -2,15 +2,17 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { CyberConfig } from '../src/cyber/config.js'
-import { ActionStore } from '../src/cyber/action-store.js'
-import { CyberDatabase } from '../src/cyber/database.js'
-import { INTEGRATION_CATALOG } from '../src/cyber/catalog.js'
-import { fetchUrlPreview, UnsafeFetchTargetError } from '../src/cyber/mastra/fetch-preview.js'
-import { connectionRequest, pluginToolId } from '../src/cyber/mastra/plugin-tools.js'
-import { MastraRuntime } from '../src/cyber/mastra/runtime.js'
-import { CyberService } from '../src/cyber/service.js'
-import { TerrainStore } from '../src/cyber/terrain-store.js'
+import type { CyberConfig } from '../src/agent/config.js'
+import { ActionStore } from '../src/agent/action-store.js'
+import { CyberDatabase } from '../src/agent/database.js'
+import { INTEGRATION_CATALOG } from '../src/agent/catalog.js'
+import { fetchUrlPreview, UnsafeFetchTargetError } from '../src/agent/mastra/fetch-preview.js'
+import { connectionRequest, modelGatewayRequest, pluginToolId } from '../src/agent/mastra/plugin-tools.js'
+import { MastraRuntime } from '../src/agent/mastra/runtime.js'
+import { PapyrusModelGateway } from '../src/agent/model-gateway.js'
+import { ModelStore } from '../src/agent/model-store.js'
+import { CyberService } from '../src/agent/service.js'
+import { TerrainStore } from '../src/agent/terrain-store.js'
 
 describe('Mastra-native product surface', () => {
   const disposers: Array<() => Promise<void> | void> = []
@@ -51,6 +53,37 @@ describe('Mastra-native product surface', () => {
     await expect(fetchUrlPreview('http://169.254.169.254/latest/meta-data')).rejects.toBeInstanceOf(UnsafeFetchTargetError)
     await expect(fetchUrlPreview('https://localhost/admin')).rejects.toBeInstanceOf(UnsafeFetchTargetError)
     await expect(fetchUrlPreview('file:///etc/passwd')).rejects.toBeInstanceOf(UnsafeFetchTargetError)
+  })
+
+  it('persists model profiles without storing secret material', () => {
+    const db = new CyberDatabase(':memory:')
+    disposers.push(() => db.close())
+    const store = new ModelStore(db)
+    const profile = store.create({ name: 'Test gateway', gatewayKind: 'openai-compatible', provider: 'openai', model: 'gpt-test', baseUrl: 'https://inference.example.gov/v1', authScheme: 'credential_ref', credentialRef: 'env://PAPYRUS_TEST_MODEL_KEY', scope: 'test', capabilities: ['chat'] }, 'owner', true)
+    expect(profile.isDefault).toBe(true)
+    expect(profile).not.toHaveProperty('apiKey')
+    expect(store.getDefault()?.id).toBe(profile.id)
+    expect(() => store.create({ name: 'Bad gateway', gatewayKind: 'openai-compatible', provider: 'openai', model: 'gpt-test', baseUrl: 'http://inference.example.gov/v1', authScheme: 'none', scope: 'test' }, 'owner')).toThrow('loopback')
+  })
+
+  it('resolves an env credential only through the Papyrus gateway', async () => {
+    const db = new CyberDatabase(':memory:')
+    disposers.push(() => db.close())
+    const store = new ModelStore(db)
+    const profile = store.create({ name: 'Gateway auth test', gatewayKind: 'openai-compatible', provider: 'openai', model: 'gpt-test', baseUrl: 'https://inference.example.gov/v1', authScheme: 'credential_ref', credentialRef: 'env://PAPYRUS_TEST_MODEL_KEY', scope: 'test' }, 'owner', true)
+    process.env.PAPYRUS_TEST_MODEL_KEY = 'not-persisted-secret'
+    try {
+      const gateway = new PapyrusModelGateway(store)
+      expect((await gateway.fetchProviders())[profile.id]).toMatchObject({ url: profile.baseUrl, models: [profile.model] })
+      await expect(gateway.resolveAuth({ providerId: profile.id, modelId: profile.model } as never)).resolves.toMatchObject({ apiKey: 'not-persisted-secret', source: 'gateway' })
+    } finally { delete process.env.PAPYRUS_TEST_MODEL_KEY }
+  })
+
+  it('describes model setup as a secret-free agent form', () => {
+    const request = modelGatewayRequest()
+    expect(request.kind).toBe('model_gateway_request')
+    expect(request.fields.some((field) => field.name === 'baseUrl')).toBe(true)
+    expect(JSON.stringify(request)).not.toMatch(/apiKey|clientSecret|password/i)
   })
 
   it('bounds URL preview redirects and response text', async () => {

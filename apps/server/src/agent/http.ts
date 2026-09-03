@@ -2,11 +2,12 @@ import { readFileSync } from 'node:fs'
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { createServer as createHttpsServer } from 'node:https'
 import { extname, join, normalize } from 'node:path'
-import type { EntraAppRole, PortalPrincipal, SignedLicense } from '@papyrus/contracts'
+import { MODEL_AUTH_SCHEMES, MODEL_GATEWAY_KINDS, type EntraAppRole, type ModelAuthScheme, type ModelGatewayKind, type PortalPrincipal, type SignedLicense } from '@papyrus/contracts'
 import type { CyberConfig } from './config.js'
 import { EntraAuthError, EntraAuthService, hasAppRole } from './entra-auth.js'
 import { CyberService, CyberServiceError } from './service.js'
 import { MastraRuntime, MastraRuntimeError } from './mastra/runtime.js'
+import { ModelProfileError } from './model-store.js'
 
 class HttpError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message) }
@@ -187,6 +188,43 @@ export function createCyberServer(config: CyberConfig, service: CyberService, au
         }
         return json(response, 201, { plugin })
       }
+      if (url.pathname === '/api/model-profiles' && request.method === 'GET') {
+        await principal(request, auth, service)
+        return json(response, 200, { profiles: mastra.listModelProfiles() })
+      }
+      if (url.pathname === '/api/model-profiles' && request.method === 'POST') {
+        const actor = await principal(request, auth, service)
+        requireRole(actor, 'Papyrus.Integration.Manage')
+        const input = await body(request)
+        const gatewayKind = requiredString(input.gatewayKind, 'gatewayKind', 64) as ModelGatewayKind
+        const authScheme = requiredString(input.authScheme, 'authScheme', 64) as ModelAuthScheme
+        if (!MODEL_GATEWAY_KINDS.includes(gatewayKind) || !MODEL_AUTH_SCHEMES.includes(authScheme)) throw new HttpError(400, 'INVALID_MODEL_PROFILE', 'Unsupported gateway or authentication type')
+        const profile = mastra.createModelProfile({
+          name: requiredString(input.name, 'name', 120), gatewayKind,
+          provider: requiredString(input.provider, 'provider', 120), model: requiredString(input.model, 'model', 256),
+          baseUrl: requiredString(input.baseUrl, 'baseUrl', 2048), authScheme,
+          ...(typeof input.credentialRef === 'string' && input.credentialRef.trim() ? { credentialRef: input.credentialRef } : {}),
+          scope: requiredString(input.scope, 'scope', 256),
+          ...(Array.isArray(input.capabilities) ? { capabilities: input.capabilities.filter((value): value is string => typeof value === 'string').slice(0, 32) } : {}),
+        }, actor.oid)
+        return json(response, 201, { profile })
+      }
+      const modelResource = url.pathname.match(/^\/api\/model-profiles\/([^/]+)$/)
+      if (modelResource && request.method === 'POST') {
+        const actor = await principal(request, auth, service)
+        requireRole(actor, 'Papyrus.Integration.Manage')
+        const id = decodeURIComponent(modelResource[1] as string)
+        if (url.searchParams.get('action') === 'test') return json(response, 200, { profile: await mastra.testModelProfile(id, actor.oid) })
+        if (url.searchParams.get('action') === 'default') return json(response, 200, { profile: await mastra.setDefaultModelProfile(id) })
+        if (url.searchParams.get('action') === 'disable') return json(response, 200, { profile: await mastra.disableModelProfile(id) })
+        throw new HttpError(400, 'INVALID_MODEL_ACTION', 'Model profile action must be test, default, or disable')
+      }
+      if (modelResource && request.method === 'DELETE') {
+        const actor = await principal(request, auth, service)
+        requireRole(actor, 'Papyrus.Integration.Manage')
+        await mastra.deleteModelProfile(decodeURIComponent(modelResource[1] as string), actor.oid)
+        securityHeaders(response); response.writeHead(204); return response.end()
+      }
       if (url.pathname === '/api/schedules' && request.method === 'GET') {
         await principal(request, auth, service)
         return json(response, 200, { schedules: await mastra.listSchedules() })
@@ -343,6 +381,8 @@ export function createCyberServer(config: CyberConfig, service: CyberService, au
     } catch (cause) {
       const failure = cause instanceof HttpError || cause instanceof CyberServiceError || cause instanceof MastraRuntimeError
         ? cause
+        : cause instanceof ModelProfileError
+          ? new HttpError(400, cause.code, cause.message)
         : cause instanceof EntraAuthError
           ? new HttpError(401, cause.code, cause.message)
           : new HttpError(500, 'INTERNAL_ERROR', cause instanceof Error ? cause.message : 'Unexpected server failure')

@@ -1,7 +1,7 @@
 import type { IncomingMessage } from 'node:http'
 import { describe, expect, it } from 'vitest'
-import type { CyberConfig } from '../src/cyber/config.js'
-import { EntraAuthService, hasAppRole, principalFromClaims } from '../src/cyber/entra-auth.js'
+import type { CyberConfig } from '../src/agent/config.js'
+import { EntraAuthService, hasAppRole, principalFromClaims } from '../src/agent/entra-auth.js'
 
 describe('Entra-native portal identity', () => {
   it('maps only declared Entra application roles and never provisions local roles', () => {

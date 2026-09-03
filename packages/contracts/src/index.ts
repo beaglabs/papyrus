@@ -407,6 +407,34 @@ export interface IntegrationConfiguration {
   version: number
 }
 
+export const MODEL_GATEWAY_KINDS = ['openai-compatible', 'azure-openai', 'ollama', 'custom'] as const
+export type ModelGatewayKind = (typeof MODEL_GATEWAY_KINDS)[number]
+export const MODEL_AUTH_SCHEMES = ['none', 'api_key', 'entra', 'credential_ref'] as const
+export type ModelAuthScheme = (typeof MODEL_AUTH_SCHEMES)[number]
+export type ModelProfileState = 'active' | 'disabled' | 'error'
+
+/** Public model configuration metadata. Secret material is never represented here. */
+export interface ModelProfile {
+  id: string
+  name: string
+  gatewayKind: ModelGatewayKind
+  provider: string
+  model: string
+  baseUrl: string
+  authScheme: ModelAuthScheme
+  credentialRef?: string
+  scope: string
+  capabilities: string[]
+  state: ModelProfileState
+  isDefault: boolean
+  lastTestedAt?: string
+  lastTestError?: string
+  createdByOid: string
+  createdAt: string
+  updatedAt: string
+  version: number
+}
+
 export interface IntegrationEvent {
   sequence: number
   integrationId: string

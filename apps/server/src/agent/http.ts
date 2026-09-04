@@ -173,6 +173,24 @@ export function createAgentServer(config: AgentConfig, service: AgentService, au
         response.end(bytes)
         return
       }
+      if (url.pathname === '/api/links' && request.method === 'GET') {
+        await principal(request, auth, service)
+        return json(response, 200, { links: mastra.links.list() })
+      }
+      const linkInbounds = url.pathname.match(/^\/api\/links\/([^/]+)\/inbounds$/)
+      if (linkInbounds && request.method === 'GET') {
+        await principal(request, auth, service)
+        const id = decodeURIComponent(linkInbounds[1] as string)
+        if (!mastra.links.get(id)) throw new HttpError(404, 'LINK_NOT_FOUND', 'Link not found')
+        return json(response, 200, { inbounds: mastra.links.listInbounds(id) })
+      }
+      const linkResource = url.pathname.match(/^\/api\/links\/([^/]+)$/)
+      if (linkResource && request.method === 'GET') {
+        await principal(request, auth, service)
+        const link = mastra.links.get(decodeURIComponent(linkResource[1] as string))
+        if (!link) throw new HttpError(404, 'LINK_NOT_FOUND', 'Link not found')
+        return json(response, 200, { link })
+      }
       if (url.pathname === '/api/workspace/files' && request.method === 'GET') {
         await principal(request, auth, service)
         const query = (url.searchParams.get('q') ?? '').slice(0, 256)

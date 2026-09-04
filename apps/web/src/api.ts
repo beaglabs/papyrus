@@ -41,7 +41,6 @@ export interface AgentStatus {
   mode: 'starlings' | 'centralized'
   workspace?: {
     filesystem: 'agentfs'
-    database: string
     mountBackend: 'fuse' | 'nfs'
     sandbox: 'nono'
     isolation: 'landlock' | 'seatbelt' | 'unsupported'

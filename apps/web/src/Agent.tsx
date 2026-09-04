@@ -269,7 +269,7 @@ function Composer({ input, setInput, attachments, setAttachments, disabled, work
           </div>}
         </div>
         <input ref={fileInput} className="composer-file-input" type="file" multiple onChange={(event) => void upload(event.currentTarget.files)} />
-        <span className="composer-workspace-state"><span className="status-dot" />{workspace ? `AgentFS SDK · nono-ts ${workspace.isolation}` : 'Local workspace'}</span>
+        <span className="composer-workspace-state"><span className="status-dot" />{workspace ? `AgentFS · Enclave STRICT · nono-ts ${workspace.isolation}` : 'Local workspace'}</span>
       </div>
       {working ? <Button type="button" onClick={onStop}>Stop</Button> : <Button className="primary" disabled={disabled || (!input.trim() && attachments.length === 0)}>Send ↑</Button>}
     </div>

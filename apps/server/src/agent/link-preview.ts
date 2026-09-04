@@ -27,7 +27,7 @@ export class KitesurfLinkValidator {
     const token = process.env[settings.apiTokenEnv]?.trim()
     if (!token) throw new Error(`Kitesurf API token environment variable ${settings.apiTokenEnv} is not set`)
 
-    const endpoint = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(settings.accountId)}/browser-run/content?browser=kitesurf`
+    const endpoint = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(settings.accountId)}/browser-rendering/content?browser=kitesurf`
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: {

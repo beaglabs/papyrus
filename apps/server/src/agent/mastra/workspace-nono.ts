@@ -23,7 +23,6 @@ export interface NonoWorkspaceSandboxOptions {
 export interface NonoLaunchPlan {
   binary: string
   args: string[]
-  cwd: string
   backend: 'fuse' | 'nfs'
 }
 
@@ -46,7 +45,6 @@ export function buildNonoLaunchPlan(
   const shellCommand = `cd -- ${shellQuote(normalizedCwd)} && exec /bin/sh -lc ${shellQuote(command)}`
   return {
     binary: filesystem.binary,
-    cwd: filesystem.databasePath,
     backend: filesystem.mountBackend,
     args: [
       'exec',

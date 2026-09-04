@@ -152,6 +152,10 @@ export async function createSessionProposal(id: string, input: {
   return api(`/api/sessions/${encodeURIComponent(id)}/proposals`, { method: 'POST', body: JSON.stringify(input) })
 }
 
+export async function approveSkill(id: string): Promise<unknown> {
+  return api(`/api/skills/${encodeURIComponent(id)}/approve`, { method: 'POST', body: '{}' })
+}
+
 export async function createSchedule(input: { name: string; cron: string; prompt: string; timezone?: string; threadId?: string }): Promise<AgentSchedule> {
   return api('/api/schedules', { method: 'POST', body: JSON.stringify(input) })
 }

@@ -38,44 +38,6 @@ apps/server/.papyrus/
 *.db-journal
 *.db-wal
 *.db-shm
-*.sqlite
-*.sqlite3
 
-# Cryptographic keys and certificates
-*.pem
-*.key
-*.p12
-*.pfx
-*.cert
-*.crt
-*.srl
-*.csr
-
-# Large binary / model files
-*.gguf
-*.bin
-*.model
-*.onnx
-*.pt
-*.pth
-*.caffemodel
-*.h5
-*.pb
-
-# Archives
-*.zip
-*.tar
-*.tar.gz
-*.tgz
-*.rar
-*.7z
-
-# Cache
-.cache/
-
-# Compliance artifacts (large, generated)
-compliance/*.json
-compliance/*.spdx.json
-
-# OSCAL output (large, generated)
-oscal-output/
+# Generated compliance artifacts
+compliance/sbom.spdx.json

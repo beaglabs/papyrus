@@ -4,7 +4,10 @@ export interface ArtifactSheetInput { name?: string; rows: Array<Array<string | 
 function xml(value: string): string { return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;').replace(/'/g, '&apos;') }
 
 export function createXlsx(inputSheets: ArtifactSheetInput[]): Buffer {
-  const sheets = inputSheets.slice(0, 32).map((sheet, index) => ({
+  const selected = inputSheets.slice(0, 32)
+  const totalCells = selected.reduce((sum, sheet) => sum + sheet.rows.slice(0, 10_000).reduce((rowSum, row) => rowSum + Math.min(row.length, 100), 0), 0)
+  if (totalCells > 100_000) throw new Error('XLSX artifact exceeds the 100,000-cell direct-generation limit; use a sandboxed workbook tool and publishArtifact instead')
+  const sheets = selected.map((sheet, index) => ({
     name: safeSheetName(sheet.name ?? `Sheet${index + 1}`),
     rows: sheet.rows.slice(0, 10_000).map((row) => row.slice(0, 100)),
   }))
@@ -33,7 +36,8 @@ function cellXml(value: string | number | boolean | null, row: number, column: n
   const style = header ? ' s="1"' : ''
   if (typeof value === 'number' && Number.isFinite(value)) return `<c r="${reference}"${style}><v>${value}</v></c>`
   if (typeof value === 'boolean') return `<c r="${reference}" t="b"${style}><v>${value ? 1 : 0}</v></c>`
-  return `<c r="${reference}" t="inlineStr"${style}><is><t xml:space="preserve">${xml(value == null ? '' : String(value))}</t></is></c>`
+  const text = value == null ? '' : String(value).slice(0, 32_767)
+  return `<c r="${reference}" t="inlineStr"${style}><is><t xml:space="preserve">${xml(text)}</t></is></c>`
 }
 
 function columnName(value: number): string {

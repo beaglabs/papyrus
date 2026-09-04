@@ -5,7 +5,8 @@ import { AgentView } from './Agent.js'
 import { PluginsView } from './Plugins.js'
 import { ScheduledView, WorkflowsView } from './Automation.js'
 import { ModelsView } from './Models.js'
-import { Alert, Avatar, Badge, Button, Card, DropdownMenu, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from './components/ui/index.js'
+import { Alert, Avatar, Badge, Button, Card, DropdownMenu, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, Skeleton } from './components/ui/index.js'
+import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarRail, SidebarTrigger } from './components/ui/sidebar.js'
 
 export type PortalView = 'agent' | 'models' | 'plugins' | 'scheduled' | 'workflows' | 'governance'
 type AppState = { phase: 'loading' } | { phase: 'signed-out'; config: PublicConfig } | { phase: 'ready'; data: PortalData } | { phase: 'error'; message: string }
@@ -53,7 +54,7 @@ export function App() {
     setView(next); setInitialPrompt(options?.prompt); setSelectedSessionId(options?.session)
   }
 
-  if (state.phase === 'loading') return <main className="center portal-loading"><Logo /><div className="signal-loader"><span /><span /><span /></div><p className="eyebrow">OPENING RUNTIME…</p></main>
+  if (state.phase === 'loading') return <PortalSkeleton />
   if (state.phase === 'error') return <main className="center login"><Logo /><p className="eyebrow">DAEMON UNAVAILABLE</p><h1>Unable to open<br />Papyrus.</h1><Alert className="error">{state.message}</Alert><Button className="primary" onClick={() => { setState({ phase: 'loading' }); void refresh() }}>Try again →</Button></main>
   if (state.phase === 'signed-out') return <SignedOut config={state.config} />
 
@@ -70,17 +71,40 @@ export function App() {
 
   return <>
     <div className="handling-banner government"><strong>{profileLabel(data.config.profile)}</strong><span>AUTHORIZED USE ONLY · CUSTOMER-HOSTED AGENT RUNTIME</span></div>
-    <div className="portal-shell with-handling-banner agent-layout">
-      <aside className="portal-sidebar"><Logo /><div className="classification">{profileLabel(data.config.profile)} · {data.config.cloud}</div>
-        <Button className="new-session" onClick={() => void newSession()}><span>＋</span> New session</Button>
-        <SessionHistory sessions={data.sessions} selectedId={selectedSession?.id} onSelect={(id) => navigate('agent', { session: id })} onDelete={(id) => void removeSession(id)} />
-        <PrimaryNavigation view={view} onNavigate={navigate} />
-        <div className="runtime-panel"><span className="runtime-label">COLLECTIVE RUNTIME</span><strong><span className={`dot ${data.agent.agentReady ? 'good' : 'warning'}`} />{data.agent.agentReady ? 'Starlings + Mastra online' : 'Mastra storage online'}</strong><small>{data.agent.model ?? 'Model configuration required'}</small></div>
-        <DropdownMenu className="account-menu" trigger={<div className="account-trigger-content"><Avatar className="avatar">{initials(data.me.displayName)}</Avatar><span className="account-copy"><strong>{data.me.displayName}</strong><small>ENTRA · {data.me.roles.length} ROLES</small></span><span>•••</span></div>}>
-          <DropdownMenuLabel><strong>{data.me.displayName}</strong><span>{data.me.preferredUsername ?? data.me.oid}</span></DropdownMenuLabel><DropdownMenuSeparator /><DropdownMenuItem disabled>Roles managed in Microsoft Entra</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem className="danger-item" onClick={() => void signOut()}>Sign out</DropdownMenuItem>
-        </DropdownMenu>
-      </aside>
-      <main className={`portal-main ${view === 'agent' ? 'agent-main' : ''}`}><PortalHeader view={view} data={data} />
+    <SidebarProvider className="portal-shell with-handling-banner">
+      <Sidebar collapsible="icon" className="portal-sidebar">
+        <SidebarHeader>
+          <div className="sidebar-brand-row"><Logo /></div>
+          <div className="classification">{profileLabel(data.config.profile)} · {data.config.cloud}</div>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton className="new-session" tooltip="New session" onClick={() => void newSession()}><span className="sidebar-icon">＋</span><span className="sidebar-copy">New session</span></SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarHeader>
+        <SidebarContent>
+          <SidebarGroup className="sidebar-history-group">
+            <SidebarGroupLabel>History</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SessionHistory sessions={data.sessions} selectedId={selectedSession?.id} onSelect={(id) => navigate('agent', { session: id })} onDelete={(id) => void removeSession(id)} />
+            </SidebarGroupContent>
+          </SidebarGroup>
+          <SidebarGroup>
+            <SidebarGroupLabel>Platform</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <PrimaryNavigation view={view} onNavigate={navigate} />
+            </SidebarGroupContent>
+          </SidebarGroup>
+        </SidebarContent>
+        <SidebarFooter>
+          <div className="runtime-panel"><span className="runtime-label">COLLECTIVE RUNTIME</span><strong><span className={`dot ${data.agent.agentReady ? 'good' : 'warning'}`} /><span className="sidebar-copy">{data.agent.agentReady ? 'Starlings + Mastra online' : 'Mastra storage online'}</span></strong><small className="sidebar-copy">{data.agent.model ?? 'Model configuration required'}</small></div>
+          <DropdownMenu className="account-menu" trigger={<div className="account-trigger-content"><Avatar className="avatar">{initials(data.me.displayName)}</Avatar><span className="account-copy sidebar-copy"><strong>{data.me.displayName}</strong><small>ENTRA · {data.me.roles.length} ROLES</small></span><span className="sidebar-copy">•••</span></div>}>
+            <DropdownMenuLabel><strong>{data.me.displayName}</strong><span>{data.me.preferredUsername ?? data.me.oid}</span></DropdownMenuLabel><DropdownMenuSeparator /><DropdownMenuItem disabled>Roles managed in Microsoft Entra</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem className="danger-item" onClick={() => void signOut()}>Sign out</DropdownMenuItem>
+          </DropdownMenu>
+        </SidebarFooter>
+        <SidebarRail />
+      </Sidebar>
+      <SidebarInset className={`portal-main ${view === 'agent' ? 'agent-main' : ''}`}><PortalHeader view={view} data={data} />
         {view === 'agent' && (selectedSession
           ? <AgentView key={selectedSession.id} session={selectedSession} status={data.agent} initialPrompt={initialPrompt} canApprove={data.me.roles.includes('Papyrus.System.Owner') || data.me.roles.includes('Papyrus.Action.Approve')} canManageSkills={data.me.roles.includes('Papyrus.System.Owner')} onChanged={refresh} />
           : <EmptyAgent onCreate={() => void newSession()} />)}
@@ -89,16 +113,33 @@ export function App() {
         {view === 'scheduled' && <ScheduledView schedules={data.schedules} sessions={data.sessions} onChanged={refresh} />}
         {view === 'workflows' && <WorkflowsView workflows={data.workflows} />}
         {view === 'governance' && <GovernanceView data={data} />}
-      </main>
-    </div>
+      </SidebarInset>
+    </SidebarProvider>
   </>
+
 }
 
 function SessionHistory({ sessions, selectedId, onSelect, onDelete }: { sessions: PortalData['sessions']; selectedId?: string | undefined; onSelect: (id: string) => void; onDelete: (id: string) => void }) {
-  return <section className="session-history"><p className="sidebar-label">HISTORY</p><div>{sessions.map((session) => <div className={`session-row ${selectedId === session.id ? 'active' : ''}`} key={session.id}><Button variant="ghost" onClick={() => onSelect(session.id)}>{session.attention && <span className="attention-icon" title="Requires attention">!</span>}<span>{session.title}</span></Button><Button variant="ghost" className="session-delete" aria-label={`Delete ${session.title}`} onClick={() => onDelete(session.id)}>×</Button></div>)}</div>{sessions.length === 0 && <small>No sessions yet</small>}</section>
+  if (!sessions.length) return <small className="sidebar-empty">No sessions yet</small>
+  return <SidebarMenu className="session-history">{sessions.map((session) => <SidebarMenuItem className="session-row" key={session.id}><SidebarMenuButton active={selectedId === session.id} tooltip={session.title} onClick={() => onSelect(session.id)}>{session.attention ? <span className="attention-icon" title="Requires attention">!</span> : <span className="sidebar-session-mark">•</span>}<span className="sidebar-copy session-title">{session.title}</span></SidebarMenuButton><Button variant="ghost" className="session-delete sidebar-copy" aria-label={`Delete ${session.title}`} onClick={() => onDelete(session.id)}>×</Button></SidebarMenuItem>)}</SidebarMenu>
 }
 
 function EmptyAgent({ onCreate }: { onCreate: () => void }) { return <Card className="empty-agent"><span>✦</span><h2>Start a durable session</h2><p>Your conversation, tool activity, and signal history stay in this customer-hosted daemon.</p><Button className="primary" onClick={onCreate}>New session →</Button></Card> }
+
+function PortalSkeleton() {
+  return <div className="portal-skeleton">
+    <aside>
+      <div className="portal-skeleton-brand"><Skeleton className="skeleton-square" /><Skeleton className="skeleton-brand-line" /></div>
+      <Skeleton className="skeleton-sidebar-wide" />
+      <Skeleton className="skeleton-sidebar-wide" />
+      <div className="portal-skeleton-nav">{Array.from({ length: 6 }, (_, index) => <Skeleton className="skeleton-nav-line" key={index} />)}</div>
+    </aside>
+    <main>
+      <div className="portal-skeleton-header"><div><Skeleton className="skeleton-eyebrow" /><Skeleton className="skeleton-title" /></div><Skeleton className="skeleton-status" /></div>
+      <div className="portal-skeleton-body"><Skeleton className="skeleton-content-wide" /><Skeleton className="skeleton-content-line" /><Skeleton className="skeleton-content-line short" /><Skeleton className="skeleton-card" /></div>
+    </main>
+  </div>
+}
 
 function SignedOut({ config }: { config: PublicConfig }) {
   return <><div className="handling-banner government"><strong>{profileLabel(config.profile)}</strong><span>MICROSOFT ENTRA AUTHORITY</span></div><main className="center login agent-login"><Logo /><p className="eyebrow">CUSTOMER-HOSTED AGENT RUNTIME</p><h1>Your tools.<br />Your authority.</h1><p>Papyrus accepts identity and application roles from your Microsoft Entra tenant. It does not maintain a parallel user directory.</p>{config.entraConfigured
@@ -112,7 +153,7 @@ export function PrimaryNavigation({ view, onNavigate }: { view: PortalView; onNa
     { view: 'scheduled', icon: '◷', label: 'Scheduled' }, { view: 'workflows', icon: '⌬', label: 'Workflows' },
     { view: 'governance', icon: '◇', label: 'Governance' },
   ]
-  return <nav aria-label="Primary navigation">{items.map((item) => <Button variant="ghost" key={item.view} className={view === item.view ? 'active' : ''} onClick={() => onNavigate(item.view)}><span aria-hidden="true">{item.icon}</span>{item.label}</Button>)}</nav>
+  return <SidebarMenu aria-label="Primary navigation">{items.map((item) => <SidebarMenuItem key={item.view}><SidebarMenuButton active={view === item.view} tooltip={item.label} onClick={() => onNavigate(item.view)}><span className="sidebar-icon" aria-hidden="true">{item.icon}</span><span className="sidebar-copy">{item.label}</span></SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu>
 }
 
 function PortalHeader({ view, data }: { view: PortalView; data: PortalData }) {
@@ -120,7 +161,7 @@ function PortalHeader({ view, data }: { view: PortalView; data: PortalData }) {
     agent: ['MASTRA + STARLINGS', 'Agent'], models: ['MODEL GATEWAYS', 'Models'], plugins: ['TOOLS AND SIGNALS', 'Plugins'], scheduled: ['PERSISTENT TRIGGERS', 'Scheduled'],
     workflows: ['DURABLE EXECUTION', 'Workflows'], governance: ['IDENTITY, LICENSING AND AUDIT', 'Governance'],
   }
-  return <header className="portal-header"><div><p className="eyebrow">{copy[view][0]}</p><h1>{copy[view][1]}</h1></div><div className="header-status"><span><i className="dot good" />DAEMON HEALTHY</span><small>{data.config.organizationName}</small></div></header>
+  return <header className="portal-header"><div className="portal-header-title"><SidebarTrigger /><div><p className="eyebrow">{copy[view][0]}</p><h1>{copy[view][1]}</h1></div></div><div className="header-status"><span><i className="dot good" />DAEMON HEALTHY</span><small>{data.config.organizationName}</small></div></header>
 }
 
 function GovernanceView({ data }: { data: PortalData }) {

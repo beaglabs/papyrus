@@ -829,7 +829,7 @@ export class MastraRuntime {
     })
     registered['createArtifact'] = createTool({
       id: 'createArtifact',
-      description: 'Create a durable local artifact and return typed inline UI. Use this for PDF, DOCX, XLSX, text, Markdown, JSON, CSV, or HTML deliverables. This is not an external action and requires no action executor.',
+      description: 'Create a durable local artifact, mirror the exact bytes into AgentFS /Library/Generated, and return typed inline UI including workspacePath. Use this for PDF, DOCX, XLSX, text, Markdown, JSON, CSV, or HTML deliverables. This is not an external action and requires no action executor.',
       inputSchema: {
         type: 'object', required: ['format', 'name'],
         properties: {
@@ -865,7 +865,7 @@ export class MastraRuntime {
     })
     registered['publishArtifact'] = createTool({
       id: 'publishArtifact',
-      description: 'Publish an existing file from the sandbox workspace into the durable artifact store so it can be previewed and downloaded in Agent Chat. Paths outside the sandbox are rejected.',
+      description: 'Publish an existing AgentFS file into the durable artifact store, preserve a canonical /Library/Generated mirror, and return workspacePath for later Link publication. Paths outside the sandbox are rejected.',
       inputSchema: {
         type: 'object', required: ['path'],
         properties: { path: { type: 'string' }, name: { type: 'string' }, skill: { type: 'string' }, skillVersion: { type: 'string' } },

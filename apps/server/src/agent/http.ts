@@ -187,13 +187,22 @@ export function createAgentServer(config: AgentConfig, service: AgentService, au
         const file = await mastra.workspaceFilesystem.describeLibraryFile(path)
         const value = await mastra.workspaceFilesystem.readFile(file.path)
         const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value)
-        const activeContent = file.mediaType.startsWith('text/html') || file.mediaType === 'image/svg+xml'
+        const inlineSafe = [
+          'application/pdf',
+          'text/plain',
+          'text/markdown',
+          'image/png',
+          'image/jpeg',
+          'image/gif',
+          'image/webp',
+          'video/mp4',
+          'video/webm',
+        ].includes(file.mediaType)
         securityHeaders(response)
-        if (activeContent) response.setHeader('content-security-policy', "sandbox; default-src 'none'")
-        const download = url.searchParams.get('download') === '1' || activeContent
+        const download = url.searchParams.get('download') === '1' || !inlineSafe
         const name = file.name.replace(/[\r\n"]/g, '_')
         response.writeHead(200, {
-          'content-type': activeContent ? 'application/octet-stream' : file.mediaType,
+          'content-type': inlineSafe ? file.mediaType : 'application/octet-stream',
           'content-length': String(bytes.byteLength),
           'content-disposition': `${download ? 'attachment' : 'inline'}; filename="${name}"`,
         })

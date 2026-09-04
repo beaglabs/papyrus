@@ -9,7 +9,7 @@ import type { AgentService } from '../src/agent/service.js'
 import type { TerrainStore } from '../src/agent/terrain-store.js'
 import type { ArtifactRecord } from '../src/agent/artifact-store.js'
 import { MastraRuntime } from '../src/agent/mastra/runtime.js'
-import { LINK_EXECUTOR_INTEGRATION_ID, LinkStore } from '../src/agent/link-store.js'
+import { LINK_EXECUTOR_INTEGRATION_ID, LinkStore, validateSource } from '../src/agent/link-store.js'
 import { PapyrusAgentFSFilesystem } from '../src/agent/mastra/workspace-agentfs.js'
 
 async function fixture() {
@@ -45,6 +45,51 @@ describe('AgentFS Links boundary', () => {
       expect(integration.state).toBe('active')
       expect(integration.authority).toBe('controlled_actions')
       expect(subject.links.list()).toEqual([])
+    } finally {
+      await subject.close()
+    }
+  })
+
+  it('accepts MIME parameters on otherwise valid Link source types', () => {
+    expect(() => validateSource('webpage', 'text/html; charset=utf-8')).not.toThrow()
+    expect(() => validateSource('api', 'application/json; charset=UTF-8')).not.toThrow()
+    expect(() => validateSource('webhook', 'text/plain; charset=utf-8')).not.toThrow()
+    expect(() => validateSource('webpage', 'video/mp4')).toThrow(/HTML source/)
+  })
+
+  it('rewrites private artifact references to immutable Link asset snapshots', async () => {
+    const subject = await fixture()
+    try {
+      const privateReference = '/api/artifacts/31b4a400-a60a-4c99-98da-a1afeb953b2d/content'
+      await subject.filesystem.writeFile('/Library/Generated/video-preview.html', `<!doctype html><video controls><source src="${privateReference}" type="video/mp4"></video>`)
+      await subject.filesystem.writeFile('/Library/Generated/video.mp4', Buffer.from('fake-video-bytes'))
+
+      const draft = await subject.links.prepareDraft({
+        name: 'Video preview webpage',
+        type: 'webpage',
+        sourcePath: '/Library/Generated/video-preview.html',
+        assets: [{
+          sourcePath: '/Library/Generated/video.mp4',
+          sourceReferences: [privateReference],
+          publicName: '31b4a400-video.mp4',
+        }],
+      })
+
+      expect(draft.assets).toHaveLength(1)
+      expect(draft.assets?.[0]).toMatchObject({
+        name: '31b4a400-video.mp4',
+        mediaType: 'video/mp4',
+      })
+      const html = String(await subject.filesystem.readFile(draft.sourcePath, { encoding: 'utf8' }))
+      expect(html).toContain('/l/video-preview-webpage/assets/31b4a400-video.mp4')
+      expect(html).not.toContain('/api/artifacts/')
+
+      const live = await subject.links.publishFromManifest(
+        `/Library/Links/Drafts/${draft.draftId}/link.json`,
+        'operator-1',
+      )
+      const publishedAsset = `/Library/Links/Published/${live.id}/assets/31b4a400-video.mp4`
+      expect(await subject.filesystem.readFile(publishedAsset, { encoding: 'utf8' })).toBe('fake-video-bytes')
     } finally {
       await subject.close()
     }

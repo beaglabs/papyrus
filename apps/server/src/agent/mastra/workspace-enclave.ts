@@ -176,12 +176,14 @@ export class PapyrusEnclaveRuntime {
         return this.readText(args)
       case 'workspace:writeText':
         return this.writeText(args)
-      case 'process:python':
+      case 'process:python': {
+        const pythonArgs = stringArray(args['args'])
         return this.executors.runPython({
           scriptPath: requiredString(args['scriptPath'], 'scriptPath'),
-          ...(stringArray(args['args']) ? { args: stringArray(args['args']) } : {}),
+          ...(pythonArgs ? { args: pythonArgs } : {}),
           ...(typeof args['cwd'] === 'string' ? { cwd: args['cwd'] } : {}),
         })
+      }
       case 'process:pandoc':
         return this.executors.runPandoc({
           inputPath: requiredString(args['inputPath'], 'inputPath'),
@@ -258,8 +260,9 @@ function workerSourcePath(): string {
 }
 
 function writePacket(child: ReturnType<typeof spawn>, value: unknown): void {
-  if (child.stdin.destroyed) return
-  child.stdin.write(JSON.stringify(value) + '\n')
+  const stdin = child.stdin
+  if (!stdin || stdin.destroyed) return
+  stdin.write(JSON.stringify(value) + '\n')
 }
 
 function readPath(args: Record<string, unknown>): string {

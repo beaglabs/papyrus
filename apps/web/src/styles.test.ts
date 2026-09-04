@@ -32,4 +32,12 @@ describe('Agent chat style contract', () => {
     expect(styles).not.toContain('.message-list { overflow: visible; }')
   })
 
+  it('keeps Links previews inside the Papyrus design system without imposing a borrowed theme', () => {
+    expect(styles).toMatch(/\.links-view\s*\{[^}]*background:\s*transparent;[^}]*color:\s*var\(--foreground\);/s)
+    expect(styles).toMatch(/\.link-preview\s*\{[^}]*border:\s*2px solid var\(--border\);[^}]*box-shadow:\s*var\(--shadow\);/s)
+    expect(styles).toMatch(/\.link-preview iframe[^}]*background:\s*var\(--surface\);/s)
+    expect(styles).not.toContain('#15111d')
+    expect(styles).not.toContain('#003f2e')
+    expect(styles).not.toContain('#c6a7ff')
+  })
 })

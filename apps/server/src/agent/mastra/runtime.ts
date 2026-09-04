@@ -690,7 +690,18 @@ export class MastraRuntime {
       id: 'loadSkill',
       description: 'Load the instructions for an enabled skill. Skills provide procedural guidance only and cannot grant new tools or authority.',
       inputSchema: { type: 'object', required: ['name'], properties: { name: { type: 'string' } }, additionalProperties: false },
-      execute: async (inputData: { name: string }) => this.skills.load(inputData.name),
+      execute: async (inputData: { name: string }) => {
+        const skill = this.skills.load(inputData.name)
+        return {
+          kind: skill.kind,
+          name: skill.name,
+          version: skill.version,
+          description: skill.description,
+          instructions: skill.instructions,
+          requestedCapabilities: skill.requestedCapabilities,
+          trust: skill.trust,
+        }
+      },
     })
     registered['createArtifact'] = createTool({
       id: 'createArtifact',
@@ -759,17 +770,28 @@ export class MastraRuntime {
         },
         additionalProperties: false,
       },
-      execute: async (inputData: Record<string, unknown>) => ({
-        kind: 'skill_draft',
-        skill: this.skills.draft({
+      execute: async (inputData: Record<string, unknown>) => {
+        const draft = this.skills.draft({
           name: String(inputData['name'] ?? ''),
           description: String(inputData['description'] ?? ''),
           instructions: String(inputData['instructions'] ?? ''),
           requestedCapabilities: Array.isArray(inputData['requestedCapabilities'])
             ? inputData['requestedCapabilities'].filter((value): value is string => typeof value === 'string')
             : [],
-        }),
-      }),
+        })
+        return {
+          kind: 'skill_draft',
+          skill: {
+            id: draft.id,
+            name: draft.name,
+            version: draft.version,
+            description: draft.description,
+            requestedCapabilities: draft.requestedCapabilities,
+            trust: draft.trust,
+            state: draft.state,
+          },
+        }
+      },
     })
     registered['listActionExecutors'] = createTool({
       id: 'listActionExecutors',

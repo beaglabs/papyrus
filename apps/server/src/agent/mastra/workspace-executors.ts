@@ -69,7 +69,7 @@ export class WorkspaceExecutorRegistry {
     if (input.startSeconds !== undefined) args.push('-ss', boundedNumber(input.startSeconds, 0, 86_400, 'startSeconds'))
     for (const path of input.inputPaths) args.push('-i', processPath(path))
     if (input.durationSeconds !== undefined) args.push('-t', boundedNumber(input.durationSeconds, 0.01, 86_400, 'durationSeconds'))
-    if (input.videoCodec) args.push('-c:v', input.videoCodec)
+    if (input.videoCodec) args.push('-c:v', input.videoCodec === 'vp9' ? 'libvpx-vp9' : input.videoCodec)
     if (input.audioCodec) args.push('-c:a', input.audioCodec)
     args.push(processPath(assertWritableOutput(input.outputPath)))
     return this.execute('ffmpeg', 'ffmpeg', args, '/', 300_000)

@@ -3,6 +3,7 @@ import type { DeploymentProfile, EntraAppRole, PortalPrincipal, ServerMode } fro
 import { ENTRA_APP_ROLES, PROFILES } from '@papyrus/contracts'
 
 export type EntraCloud = 'Public' | 'USGov' | 'USGovDoD'
+export type SandboxRuntime = 'bwrap' | 'seatbelt'
 
 export interface AgentConfig {
   mode: ServerMode
@@ -15,6 +16,7 @@ export interface AgentConfig {
   portalSecret: string
   organizationName: string
   cloud: EntraCloud
+  sandboxRuntime?: SandboxRuntime
   entra?: {
     tenantId: string
     clientId: string
@@ -98,6 +100,11 @@ export function loadAgentConfig(env: NodeJS.ProcessEnv = process.env): AgentConf
   if (mode === 'persistent' && !publicOrigin.startsWith('https://')) throw new Error('Persistent deployments require an HTTPS PAPYRUS_PUBLIC_ORIGIN')
 
   const cloud = cloudForProfile(selectedProfile, env.PAPYRUS_ENTRA_CLOUD)
+  const sandboxRuntimeValue = env.PAPYRUS_SANDBOX_RUNTIME?.trim()
+  if (sandboxRuntimeValue && sandboxRuntimeValue !== 'bwrap' && sandboxRuntimeValue !== 'seatbelt') {
+    throw new Error('PAPYRUS_SANDBOX_RUNTIME must be bwrap or seatbelt')
+  }
+  const sandboxRuntime = sandboxRuntimeValue as SandboxRuntime | undefined
   const tenantId = env.PAPYRUS_ENTRA_TENANT_ID?.trim()
   const clientId = env.PAPYRUS_ENTRA_CLIENT_ID?.trim()
   const development = mode === 'local' ? developmentPrincipal(env.PAPYRUS_DEV_ENTRA_PRINCIPAL) : undefined
@@ -123,6 +130,7 @@ export function loadAgentConfig(env: NodeJS.ProcessEnv = process.env): AgentConf
     portalSecret: required('PAPYRUS_PORTAL_SECRET', env.PAPYRUS_PORTAL_SECRET),
     organizationName: env.PAPYRUS_ORGANIZATION_NAME?.trim() || 'Customer Agent Operations',
     cloud,
+    ...(sandboxRuntime ? { sandboxRuntime } : {}),
     ...(tenantId && clientId && authority ? { entra: {
       tenantId,
       clientId,

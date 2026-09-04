@@ -43,11 +43,14 @@ const runtimePaths = new Set([
   dirname(process.execPath),
   '/usr',
   '/bin',
+  '/sbin',
   '/lib',
   '/lib64',
-  '/opt',
+  '/usr/local',
   '/System',
-  '/Library',
+  '/opt/homebrew',
+  '/Applications/LibreOffice.app',
+  '/Library/Fonts',
 ])
 for (const path of runtimePaths) {
   if (!existsSync(path)) continue

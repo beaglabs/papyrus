@@ -42,7 +42,8 @@ export function buildNonoLaunchPlan(
   cwd = '/',
 ): NonoLaunchPlan {
   const normalizedCwd = normalizeWorkspaceCwd(cwd)
-  const shellCommand = `cd -- ${shellQuote(normalizedCwd)} && exec /bin/sh -lc ${shellQuote(command)}`
+  const mountedCwd = normalizedCwd === '/' ? '.' : `.${normalizedCwd}`
+  const shellCommand = `cd -- ${shellQuote(mountedCwd)} && exec /bin/sh -lc ${shellQuote(command)}`
   return {
     binary: filesystem.binary,
     backend: filesystem.mountBackend,

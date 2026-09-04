@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { Composer } from './Agent.js'
+import { Composer, isNearScrollBottom } from './Agent.js'
 
 describe('Agent composer', () => {
   it('keeps upload, Library, attachment affordances, and send visible in the base render', () => {
@@ -31,5 +31,18 @@ describe('Agent composer', () => {
     expect(html).toContain('multiple=""')
     expect(html).toContain('aria-label="Send message"')
     expect(html).toContain('AgentFS · Enclave STRICT · nono-ts seatbelt')
+  })
+})
+
+
+describe('Agent chat auto-scroll', () => {
+  it('follows output while the reader remains near the bottom', () => {
+    expect(isNearScrollBottom({ scrollHeight: 1000, scrollTop: 620, clientHeight: 300 })).toBe(true)
+    expect(isNearScrollBottom({ scrollHeight: 1000, scrollTop: 500, clientHeight: 300 })).toBe(false)
+  })
+
+  it('allows a custom follow threshold', () => {
+    expect(isNearScrollBottom({ scrollHeight: 1000, scrollTop: 650, clientHeight: 300 }, 40)).toBe(false)
+    expect(isNearScrollBottom({ scrollHeight: 1000, scrollTop: 665, clientHeight: 300 }, 40)).toBe(true)
   })
 })

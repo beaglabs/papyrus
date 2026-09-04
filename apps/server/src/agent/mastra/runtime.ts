@@ -23,6 +23,8 @@ import { signalIntakeWorkflow, WORKFLOW_CATALOG } from './workflows.js'
 import { ModelStore, type CreateModelProfileInput } from '../model-store.js'
 import { PapyrusModelGateway, resolveModelCredential } from '../model-gateway.js'
 import type { ModelProfile } from '@papyrus/contracts'
+import { ArtifactStore, type ArtifactFormat, type ArtifactSheetInput } from '../artifact-store.js'
+import { SkillRegistry } from '../skills.js'
 
 /**
  * MastraRuntime wraps the Mastra durable agent harness.
@@ -90,6 +92,8 @@ export class MastraRuntime {
   readonly signals: SignalOutbox
   readonly tools: InvestigationToolContext
   readonly models: ModelStore
+  readonly artifacts: ArtifactStore
+  readonly skills: SkillRegistry
   private mastra: MastraHandle | undefined
   private started = false
   private sandbox: SandboxPolicy | undefined
@@ -104,6 +108,8 @@ export class MastraRuntime {
     this.mode = (process.env.PAPYRUS_INVESTIGATION_RUNTIME as InvestigationRuntimeMode | undefined) ?? 'starlings'
     this.signals = new SignalOutbox(actionStore.db)
     this.models = new ModelStore(actionStore.db)
+    this.artifacts = new ArtifactStore(config.dataDir)
+    this.skills = new SkillRegistry(config.dataDir)
     this.tools = { actionStore, terrain }
   }
 
@@ -620,7 +626,10 @@ export class MastraRuntime {
         'You are the customer-hosted Papyrus operations agent.',
         'Use plugins, durable workflows, schedules, external signals, and the Starlings collective runtime to help operators complete work.',
         'When a plugin is needed, call its connect tool so the UI can collect configuration safely. Never ask a user to paste a secret into chat.',
-        'Before suggesting an operational action, list the active executors, then call suggestAction. A suggestion is only a UI artifact until the operator submits it to the ledger.',
+        'Creating, editing, or returning a local file is a workspace capability, not an operational action. For PDF, DOCX, XLSX, text, JSON, CSV, or HTML deliverables, call listSkills/loadSkill as needed and then createArtifact. Never call listActionExecutors merely to create a file.',
+        'For richer files created by sandbox commands, call publishArtifact after the file exists. Artifact publication only copies a file from the sandbox into the durable artifact store; it does not send it to an external system.',
+        'Only external side effects use action executors. Before suggesting an operational action such as sending mail, changing a firewall, or publishing to an external system, list the active executors, then call suggestAction. A suggestion is only a UI artifact until the operator submits it to the ledger.',
+        'Skills teach procedures but never grant authority. Dynamically created skills remain inert drafts until a Papyrus.System.Owner approves them.',
         'You may inspect action proposals, but you cannot approve or execute them. Human Entra authority and the Papyrus action ledger are mandatory.',
       ].join(' '),
       ...(tools ? { tools } : {}),
@@ -665,6 +674,97 @@ export class MastraRuntime {
       inputSchema: { type: 'object', required: ['url'], properties: { url: { type: 'string', format: 'uri' } }, additionalProperties: false },
       background: { enabled: true, timeoutMs: 15_000, maxRetries: 1, waitTimeoutMs: 15_000 },
       execute: async (inputData: { url: string }) => fetchUrlPreview(inputData.url),
+    })
+    registered['listSkills'] = createTool({
+      id: 'listSkills',
+      description: 'List built-in and organization skills. Use this to discover procedural guidance for artifact generation and reusable workflows.',
+      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      execute: async () => this.skills.list(),
+    })
+    registered['loadSkill'] = createTool({
+      id: 'loadSkill',
+      description: 'Load the instructions for an enabled skill. Skills provide procedural guidance only and cannot grant new tools or authority.',
+      inputSchema: { type: 'object', required: ['name'], properties: { name: { type: 'string' } }, additionalProperties: false },
+      execute: async (inputData: { name: string }) => this.skills.load(inputData.name),
+    })
+    registered['createArtifact'] = createTool({
+      id: 'createArtifact',
+      description: 'Create a durable local artifact and return typed inline UI. Use this for PDF, DOCX, XLSX, text, Markdown, JSON, CSV, or HTML deliverables. This is not an external action and requires no action executor.',
+      inputSchema: {
+        type: 'object', required: ['format', 'name'],
+        properties: {
+          format: { type: 'string', enum: ['pdf', 'docx', 'xlsx', 'txt', 'md', 'json', 'csv', 'html'] },
+          name: { type: 'string' }, title: { type: 'string' }, content: { type: 'string' },
+          skill: { type: 'string' }, skillVersion: { type: 'string' },
+          sheets: {
+            type: 'array',
+            items: {
+              type: 'object', required: ['rows'],
+              properties: {
+                name: { type: 'string' },
+                rows: { type: 'array', items: { type: 'array', items: { type: ['string', 'number', 'boolean', 'null'] } } },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+        additionalProperties: false,
+      },
+      execute: async (inputData: Record<string, unknown>) => this.artifacts.create({
+        format: inputData['format'] as ArtifactFormat,
+        name: String(inputData['name'] ?? 'artifact'),
+        ...(typeof inputData['title'] === 'string' ? { title: inputData['title'] } : {}),
+        ...(typeof inputData['content'] === 'string' ? { content: inputData['content'] } : {}),
+        ...(Array.isArray(inputData['sheets']) ? { sheets: inputData['sheets'] as ArtifactSheetInput[] } : {}),
+        ...(typeof inputData['skill'] === 'string' ? { skill: inputData['skill'] } : {}),
+        ...(typeof inputData['skillVersion'] === 'string' ? { skillVersion: inputData['skillVersion'] } : {}),
+      }),
+    })
+    registered['publishArtifact'] = createTool({
+      id: 'publishArtifact',
+      description: 'Publish an existing file from the sandbox workspace into the durable artifact store so it can be previewed and downloaded in Agent Chat. Paths outside the sandbox are rejected.',
+      inputSchema: {
+        type: 'object', required: ['path'],
+        properties: { path: { type: 'string' }, name: { type: 'string' }, skill: { type: 'string' }, skillVersion: { type: 'string' } },
+        additionalProperties: false,
+      },
+      execute: async (inputData: Record<string, unknown>) => {
+        if (!this.sandbox?.enabled) throw new Error('Sandbox workspace is unavailable; use createArtifact for built-in document formats')
+        return this.artifacts.importWorkspaceFile(String(inputData['path'] ?? ''), this.sandbox.workingDirectory, {
+          ...(typeof inputData['name'] === 'string' ? { name: inputData['name'] } : {}),
+          ...(typeof inputData['skill'] === 'string' ? { skill: inputData['skill'] } : {}),
+          ...(typeof inputData['skillVersion'] === 'string' ? { skillVersion: inputData['skillVersion'] } : {}),
+        })
+      },
+    })
+    registered['listArtifacts'] = createTool({
+      id: 'listArtifacts',
+      description: 'List durable artifacts already created in this customer-hosted runtime.',
+      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      execute: async () => this.artifacts.list(),
+    })
+    registered['draftSkill'] = createTool({
+      id: 'draftSkill',
+      description: 'Create an inert draft skill for a reusable organization procedure. Drafting never grants tools, network access, or external authority; a System Owner must approve and enable it.',
+      inputSchema: {
+        type: 'object', required: ['name', 'description', 'instructions'],
+        properties: {
+          name: { type: 'string' }, description: { type: 'string' }, instructions: { type: 'string' },
+          requestedCapabilities: { type: 'array', items: { type: 'string' } },
+        },
+        additionalProperties: false,
+      },
+      execute: async (inputData: Record<string, unknown>) => ({
+        kind: 'skill_draft',
+        skill: this.skills.draft({
+          name: String(inputData['name'] ?? ''),
+          description: String(inputData['description'] ?? ''),
+          instructions: String(inputData['instructions'] ?? ''),
+          requestedCapabilities: Array.isArray(inputData['requestedCapabilities'])
+            ? inputData['requestedCapabilities'].filter((value): value is string => typeof value === 'string')
+            : [],
+        }),
+      }),
     })
     registered['listActionExecutors'] = createTool({
       id: 'listActionExecutors',

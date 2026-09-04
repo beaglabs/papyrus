@@ -359,12 +359,17 @@ function normalizeDraftManifestPath(value: string): string {
   return normalized
 }
 
-function validateSource(type: LinkType, mediaType: string): void {
-  if (type === 'webpage' && mediaType !== 'text/html') throw new Error('Webpage Links require an HTML source file')
-  if (type === 'api' && !['application/json', 'text/json'].includes(mediaType)) throw new Error('API Links require a JSON source file')
-  if (type === 'webhook' && !['application/json', 'text/json', 'text/plain', 'text/markdown'].includes(mediaType)) {
+export function validateSource(type: LinkType, mediaType: string): void {
+  const baseType = normalizedMediaType(mediaType)
+  if (type === 'webpage' && baseType !== 'text/html') throw new Error('Webpage Links require an HTML source file')
+  if (type === 'api' && !['application/json', 'text/json'].includes(baseType)) throw new Error('API Links require a JSON source file')
+  if (type === 'webhook' && !['application/json', 'text/json', 'text/plain', 'text/markdown'].includes(baseType)) {
     throw new Error('Webhook Links require a JSON, text, or Markdown contract file')
   }
+}
+
+function normalizedMediaType(value: string): string {
+  return value.split(';', 1)[0]?.trim().toLowerCase() ?? ''
 }
 
 function validateManifest(value: unknown): LinkDraftManifest {

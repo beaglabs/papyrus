@@ -183,6 +183,15 @@ export class LinkStore {
     return this.get(manifest.draftId) as AgentLink
   }
 
+  recordValidation(id: string, provider: 'local-static' | 'kitesurf'): AgentLink {
+    this.require(id)
+    const now = new Date().toISOString()
+    this.db.sqlite.prepare('UPDATE agent_links SET validation_provider=?,validated_at=?,updated_at=? WHERE id=?')
+      .run(provider, now, now, id)
+    this.appendEvent(id, 'LinkValidated', { provider })
+    return this.get(id) as AgentLink
+  }
+
   recordPing(id: string, metadata: Record<string, unknown> = {}): AgentLink {
     const link = this.require(id)
     const now = new Date().toISOString()
@@ -270,6 +279,8 @@ export class LinkStore {
       ...(row.last_ping_at ? { lastPingAt: String(row.last_ping_at) } : {}),
       pingCount: Number(row.ping_count),
       inboundCount: Number(row.inbound_count),
+      ...(row.validation_provider ? { validationProvider: String(row.validation_provider) as 'local-static' | 'kitesurf' } : {}),
+      ...(row.validated_at ? { validatedAt: String(row.validated_at) } : {}),
     }
   }
 
@@ -293,6 +304,8 @@ export class LinkStore {
         last_ping_at TEXT,
         ping_count INTEGER NOT NULL DEFAULT 0,
         inbound_count INTEGER NOT NULL DEFAULT 0,
+        validation_provider TEXT,
+        validated_at TEXT,
         deleted_at TEXT
       );
       CREATE INDEX IF NOT EXISTS agent_links_type_state ON agent_links(type,state,updated_at DESC);
@@ -321,6 +334,13 @@ export class LinkStore {
       CREATE TRIGGER IF NOT EXISTS agent_link_events_no_delete BEFORE DELETE ON agent_link_events
       BEGIN SELECT RAISE(ABORT, 'agent link events are append-only'); END;
     `)
+    this.ensureColumn('agent_links', 'validation_provider', 'TEXT')
+    this.ensureColumn('agent_links', 'validated_at', 'TEXT')
+  }
+
+  private ensureColumn(table: string, column: string, definition: string): void {
+    const columns = this.db.sqlite.pragma(`table_info(${table})`) as Array<{ name: string }>
+    if (!columns.some((candidate) => candidate.name === column)) this.db.sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
   }
 }
 

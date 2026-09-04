@@ -490,29 +490,6 @@ export class MastraRuntime {
     return { accepted: true, sessionId: link.threadId }
   }
 
-  async acceptWebhook(sourceId: string, body: Record<string, unknown>, headers: Record<string, string>): Promise<{ accepted: true; sessionId: string; signalId: string }> {
-    const integration = this.actionStore.db.getIntegration(sourceId)
-    if (!integration || integration.state !== 'active') throw new MastraRuntimeError(404, 'SIGNAL_SOURCE_NOT_FOUND', 'Active signal source not found')
-    const threadId = `papyrus-signal-${sourceId}`
-    const memory = this.requireMemory()
-    const existing = await (memory['getThreadById'] as (input: Record<string, unknown>) => Promise<unknown>)({ threadId, resourceId: this.resourceId() })
-    if (!existing) {
-      await (memory['createThread'] as (input: Record<string, unknown>) => Promise<unknown>)({
-        threadId, resourceId: this.resourceId(), title: `Signals · ${integration.name}`, saveThread: true,
-        metadata: { kind: 'signal_session', signalSourceId: sourceId, attention: true },
-      })
-      this.actionStore.createInvestigation({ title: `Signals · ${integration.name}`, trigger: 'signal', triggerIntegrationId: sourceId, mastraThreadId: threadId })
-    } else {
-      await this.updateThreadMetadata(threadId, { kind: 'signal_session', signalSourceId: sourceId, attention: true })
-    }
-    this.subscribeWebhookThread(threadId, sourceId)
-    const record = this.emitSignal({
-      type: 'external_signal',
-      payload: { threadId, sourceId, body, headers: safeWebhookHeaders(headers), sourceName: integration.name },
-    })
-    return { accepted: true, sessionId: threadId, signalId: record.id }
-  }
-
   /**
    * Deliver leased signals to their investigation thread. Returns the number
    * acknowledged. Signals stay pending when the harness is unavailable rather
@@ -1125,7 +1102,7 @@ export class MastraRuntime {
     })
     registered['listActionExecutors'] = createTool({
       id: 'listActionExecutors',
-      description: 'List active controlled-action plugins that can receive a human-approved action.',
+      description: 'List active controlled-action executors that can receive a human-approved action.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       execute: async () => this.actionStore.db.listIntegrations().filter((integration) => integration.state === 'active' && (integration.catalogId === 'exchange-email' || integration.authority === 'controlled_actions' || integration.integrationClass === 'action_executor')).map((integration) => ({ id: integration.id, name: integration.name, catalogId: integration.catalogId })),
     })

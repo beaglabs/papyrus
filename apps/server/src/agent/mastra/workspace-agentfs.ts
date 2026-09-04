@@ -128,7 +128,7 @@ export class PapyrusAgentFSFilesystem extends MastraFilesystem {
 
   async readFile(path: string, options?: ReadOptions): Promise<string | Buffer> {
     const normalized = normalizeFsPath(path)
-    const result = await this.execMounted('cat -- "$1"', [normalized], undefined, true)
+    const result = await this.execMounted('cat -- "$1"', [normalized])
     return options?.encoding ? result.stdout.toString(options.encoding) : result.stdout
   }
 
@@ -138,7 +138,7 @@ export class PapyrusAgentFSFilesystem extends MastraFilesystem {
     const data = typeof content === 'string' ? Buffer.from(content) : Buffer.from(content)
     const overwriteGuard = options?.overwrite === false ? 'if [ -e "$1" ]; then exit 73; fi; ' : ''
     const script = `parent=$(dirname -- "$1"); mkdir -p -- "$parent"; ${overwriteGuard}cat > "$1"`
-    const result = await this.execMounted(script, [normalized], data, false, new Set([73]))
+    const result = await this.execMounted(script, [normalized], data, new Set([73]))
     if (result.exitCode === 73) throw new FileExistsError(normalized)
   }
 
@@ -180,7 +180,7 @@ export class PapyrusAgentFSFilesystem extends MastraFilesystem {
     const target = normalizeFsPath(dest)
     const overwriteGuard = options?.overwrite === false ? 'if [ -e "$2" ]; then exit 73; fi; ' : ''
     const script = `if [ ! -e "$1" ]; then exit 44; fi; ${overwriteGuard}mkdir -p -- "$(dirname -- "$2")"; mv -- "$1" "$2"`
-    const result = await this.execMounted(script, [source, target], undefined, false, new Set([44, 73]))
+    const result = await this.execMounted(script, [source, target], undefined, new Set([44, 73]))
     if (result.exitCode === 44) throw new FileNotFoundError(source)
     if (result.exitCode === 73) throw new FileExistsError(target)
   }

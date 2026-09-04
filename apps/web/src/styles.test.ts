@@ -40,4 +40,10 @@ describe('Agent chat style contract', () => {
     expect(styles).not.toContain('#003f2e')
     expect(styles).not.toContain('#c6a7ff')
   })
+  it('keeps History as a neutral cascade instead of a highlighted navigation block', () => {
+    expect(styles).toMatch(/\.session-row\s*\{[^}]*margin-left:\s*calc\(var\(--history-depth\) \* 3px\);/s)
+    expect(styles).toMatch(/\.session-row \.nb-sidebar-menu-button\[data-active="true"\]\s*\{[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/s)
+    expect(styles).toContain('.session-row[data-history-depth="6"] { --history-depth: 6; }')
+    expect(styles).not.toMatch(/\.session-row \.nb-sidebar-menu-button\[data-active="true"\][^{]*\{[^}]*background:\s*var\(--main\)/s)
+  })
 })

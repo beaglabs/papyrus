@@ -666,6 +666,46 @@ export interface AgentActionReceipt {
   executedAt: string
 }
 
+export const LINK_TYPES = ['webpage', 'api', 'webhook'] as const
+export type LinkType = (typeof LINK_TYPES)[number]
+export type LinkState = 'live' | 'disabled' | 'failed'
+
+/**
+ * Public-link metadata lives in the Papyrus database, while the content
+ * authority remains AgentFS. blobPath always identifies the immutable source
+ * snapshot that was approved for publication.
+ */
+export interface AgentLink {
+  id: string
+  name: string
+  slug: string
+  type: LinkType
+  state: LinkState
+  blobPath: string
+  mediaType: string
+  sourceSha256: string
+  publicPath: string
+  workflowId?: string
+  scheduleId?: string
+  createdByOid: string
+  createdAt: string
+  updatedAt: string
+  lastPingAt?: string
+  pingCount: number
+  inboundCount: number
+}
+
+export interface LinkInbound {
+  id: string
+  linkId: string
+  blobPath: string
+  method: string
+  contentType?: string
+  receivedAt: string
+  size: number
+  sha256: string
+}
+
 export interface AgentSignal {
   id: string
   type: 'new_claim' | 'contradiction' | 'evidence_threshold' | 'approval_decision' | 'execution_receipt' | 'investigation_created' | 'action_proposed' | 'stale_investigation' | 'posture_review' | 'external_signal'

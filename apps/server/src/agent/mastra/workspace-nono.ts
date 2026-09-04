@@ -1,6 +1,9 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { mkdirSync } from 'node:fs'
-import { join, posix } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { join, posix, resolve, sep } from 'node:path'
+import { isSupported, supportInfo } from 'nono-ts'
 import {
   MastraSandbox,
   ProcessHandle,
@@ -11,92 +14,52 @@ import {
   type SandboxInfo,
   type SpawnProcessOptions,
 } from '@mastra/core/workspace'
-import { minimalEnvironment, runBinary, type PapyrusAgentFSFilesystem } from './workspace-agentfs.js'
+import { type MaterializedWorkspace, type PapyrusAgentFSFilesystem } from './workspace-agentfs.js'
 
 export interface NonoWorkspaceSandboxOptions {
   filesystem: PapyrusAgentFSFilesystem
-  binary?: string
   dataDir: string
   platform?: NodeJS.Platform
 }
 
-export interface NonoLaunchPlan {
-  binary: string
-  args: string[]
-  backend: 'fuse' | 'nfs'
-}
-
-/**
- * Build the exact local execution chain:
- *
- * AgentFS transient mount -> nono least-privilege sandbox -> command.
- *
- * AgentFS chooses FUSE on Linux and NFS on macOS. nono independently selects
- * Landlock on Linux and Seatbelt on macOS, so Papyrus does not reimplement
- * either OS sandbox profile.
- */
-export function buildNonoLaunchPlan(
-  filesystem: PapyrusAgentFSFilesystem,
-  nonoBinary: string,
-  command: string,
-  cwd = '/',
-): NonoLaunchPlan {
-  const normalizedCwd = normalizeWorkspaceCwd(cwd)
-  const mountedCwd = normalizedCwd === '/' ? '.' : `.${normalizedCwd}`
-  const shellCommand = `cd -- ${shellQuote(mountedCwd)} && exec /bin/sh -lc ${shellQuote(command)}`
-  return {
-    binary: filesystem.binary,
-    backend: filesystem.mountBackend,
-    args: [
-      'exec',
-      '--backend', filesystem.mountBackend,
-      filesystem.databasePath,
-      nonoBinary,
-      'run',
-      '--allow-cwd',
-      '--block-net',
-      '--',
-      '/bin/sh',
-      '-lc',
-      shellCommand,
-    ],
-  }
-}
+const MAX_COMMAND_BYTES = 64 * 1024
+const WORKER_PATH = fileURLToPath(new URL('./workspace-nono-worker.js', import.meta.url))
 
 export class NonoWorkspaceSandbox extends MastraSandbox {
   readonly id = 'papyrus-nono'
   readonly name = 'Papyrus Nono Sandbox'
-  readonly provider = 'nono'
+  readonly provider = 'nono-ts'
   readonly supportsCheckpoints = false
   readonly workingDirectory = '/'
   status: ProviderStatus = 'pending'
 
   readonly filesystem: PapyrusAgentFSFilesystem
-  readonly nonoBinary: string
   readonly dataDir: string
   readonly platform: NodeJS.Platform
 
   constructor(options: NonoWorkspaceSandboxOptions) {
     const manager = new NonoProcessManager({
       filesystem: options.filesystem,
-      nonoBinary: options.binary ?? 'nono',
       dataDir: options.dataDir,
     })
     super({ name: 'Papyrus Nono Sandbox', processes: manager })
     this.filesystem = options.filesystem
-    this.nonoBinary = options.binary ?? 'nono'
-    this.dataDir = options.dataDir
+    this.dataDir = resolve(options.dataDir)
     this.platform = options.platform ?? process.platform
   }
 
   async start(): Promise<void> {
     if (!['linux', 'darwin'].includes(this.platform)) {
-      throw new Error(`nono workspace sandbox requires Linux or macOS; ${this.platform} is unsupported`)
+      throw new Error(`nono-ts workspace sandbox requires Linux or macOS; ${this.platform} is unsupported`)
     }
-    mkdirSync(join(this.dataDir, '.workspace-home'), { recursive: true, mode: 0o700 })
-    const nono = await runBinary(this.nonoBinary, ['--version'], { cwd: this.dataDir })
-    if (nono.exitCode !== 0) throw new Error(`nono preflight failed: ${nono.stderr.toString('utf8').slice(0, 1000)}`)
-    await this.filesystem._init()
+    if (!isSupported()) {
+      const info = supportInfo()
+      throw new Error(`nono-ts sandbox is unavailable on ${info.platform}: ${info.details}`)
+    }
+    mkdirSync(join(this.dataDir, '.workspace-control'), { recursive: true, mode: 0o700 })
+    mkdirSync(join(this.dataDir, '.workspace-exec'), { recursive: true, mode: 0o700 })
+    mkdirSync(join(this.dataDir, '.workspace-worker-home'), { recursive: true, mode: 0o700 })
+    mkdirSync(join(this.dataDir, '.workspace-worker-tmp'), { recursive: true, mode: 0o700 })
   }
 
   async stop(): Promise<void> {
@@ -111,11 +74,12 @@ export class NonoWorkspaceSandbox extends MastraSandbox {
 
   getInstructions(): string {
     return [
-      'Commands execute locally inside the AgentFS workspace through nono.',
-      `AgentFS uses ${this.filesystem.mountBackend.toUpperCase()} for the transient local mount on this host.`,
-      'nono grants the mounted workspace read/write access and blocks outbound network by default.',
-      'Host credentials, SSH keys, cloud config, and the rest of the host filesystem are not exposed to commands.',
-      'Use workspace-relative paths. External side effects still require Papyrus action executors.',
+      'Workspace files persist directly in the local AgentFS SDK SQLite database.',
+      'When a real OS command is required, Papyrus materializes a bounded snapshot into a private execution directory.',
+      'A dedicated nono-ts worker applies kernel isolation before spawning the command.',
+      'Outbound network is blocked; the user home directory and Papyrus data directory are not granted.',
+      'Command changes are reconciled back into AgentFS only after the process exits.',
+      'External side effects still require Papyrus action executors.',
     ].join(' ')
   }
 
@@ -127,9 +91,10 @@ export class NonoWorkspaceSandbox extends MastraSandbox {
       status: this.status,
       createdAt: new Date(),
       metadata: {
-        isolation: this.platform === 'darwin' ? 'seatbelt-via-nono' : 'landlock-via-nono',
-        filesystem: 'agentfs',
-        agentfsMountBackend: this.filesystem.mountBackend,
+        isolation: this.platform === 'darwin' ? 'seatbelt-via-nono-ts' : 'landlock-via-nono-ts',
+        filesystem: 'agentfs-sdk',
+        storage: 'local-sqlite',
+        execution: 'materialize-sandbox-reconcile',
         network: 'blocked',
       },
     }

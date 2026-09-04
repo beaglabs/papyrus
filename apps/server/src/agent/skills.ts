@@ -16,6 +16,8 @@ export interface SkillRecord {
   trust: SkillTrust
   state: SkillState
   createdByOid: string
+  approvedByOid?: string
+  approvedAt?: string
   createdAt: string
   updatedAt: string
 }
@@ -103,6 +105,7 @@ export class SkillRegistry {
       updatedAt: now,
     }
     this.write(record)
+    this.writePackage(record)
     return record
   }
 
@@ -110,15 +113,50 @@ export class SkillRegistry {
     const record = this.custom().find((skill) => skill.id === id)
     if (!record) throw new Error('Skill draft not found')
     if (record.state !== 'draft') throw new Error('Only draft skills can be approved')
+    const approvedAt = new Date().toISOString()
     const approved: SkillRecord = {
       ...record,
       trust: 'organization_approved',
       state: 'enabled',
-      updatedAt: new Date().toISOString(),
-      createdByOid: record.createdByOid || actorOid,
+      approvedByOid: actorOid,
+      approvedAt,
+      updatedAt: approvedAt,
     }
     this.write(approved)
+    this.writePackage(approved)
     return approved
+  }
+
+  private writePackage(record: SkillRecord): void {
+    const directory = join(this.root, record.id)
+    mkdirSync(directory, { recursive: true, mode: 0o700 })
+    const capabilities = record.requestedCapabilities.length
+      ? `[${record.requestedCapabilities.map((value) => JSON.stringify(value)).join(', ')}]`
+      : '[]'
+    const frontmatter = [
+      '---',
+      `name: ${record.name}`,
+      `version: ${record.version}`,
+      `description: ${JSON.stringify(record.description)}`,
+      `trust: ${record.trust}`,
+      `state: ${record.state}`,
+      `requested_capabilities: ${capabilities}`,
+      '---',
+      '',
+    ].join('\n')
+    writeFileSync(join(directory, 'SKILL.md'), frontmatter + record.instructions.trim() + '\n', { mode: 0o600 })
+    writeFileSync(join(directory, 'manifest.json'), JSON.stringify({
+      id: record.id,
+      name: record.name,
+      version: record.version,
+      trust: record.trust,
+      state: record.state,
+      requestedCapabilities: record.requestedCapabilities,
+      createdByOid: record.createdByOid,
+      ...(record.approvedByOid ? { approvedByOid: record.approvedByOid } : {}),
+      ...(record.approvedAt ? { approvedAt: record.approvedAt } : {}),
+      updatedAt: record.updatedAt,
+    }, null, 2), { mode: 0o600 })
   }
 
   private custom(): SkillRecord[] {

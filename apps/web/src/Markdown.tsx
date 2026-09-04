@@ -78,7 +78,7 @@ function renderNode(node: MarkdownNode, key: string): ReactNode {
         : <span>{children}</span>
     }
     case 'table':
-      return <div className="message-table-wrap"><table>{children}</table></div>
+      return <MarkdownTable node={node} keyPrefix={key} />
     case 'tableRow':
       return <tr>{children}</tr>
     case 'tableCell':
@@ -88,6 +88,17 @@ function renderNode(node: MarkdownNode, key: string): ReactNode {
     default:
       return children.length ? children : (node.value ?? null)
   }
+}
+
+function MarkdownTable({ node, keyPrefix }: { node: MarkdownNode; keyPrefix: string }) {
+  const rows = node.children ?? []
+  const [head, ...body] = rows
+  return <div className="message-table-wrap">
+    <table>
+      {head && <thead><tr>{(head.children ?? []).map((cell, index) => <th key={`${keyPrefix}-head-${index}`}>{renderChildren(cell.children ?? [], `${keyPrefix}-head-${index}`)}</th>)}</tr></thead>}
+      {body.length > 0 && <tbody>{body.map((row, rowIndex) => <tr key={`${keyPrefix}-row-${rowIndex}`}>{(row.children ?? []).map((cell, cellIndex) => <td key={`${keyPrefix}-cell-${rowIndex}-${cellIndex}`}>{renderChildren(cell.children ?? [], `${keyPrefix}-cell-${rowIndex}-${cellIndex}`)}</td>)}</tr>)}</tbody>}
+    </table>
+  </div>
 }
 
 function safeHref(value: string | undefined): string | undefined {

@@ -21,6 +21,7 @@ import { signalIntakeWorkflow, WORKFLOW_CATALOG } from './workflows.js'
 import { ModelStore, type CreateModelProfileInput } from '../model-store.js'
 import { PapyrusModelGateway, resolveModelCredential } from '../model-gateway.js'
 import type { ModelProfile } from '@papyrus/contracts'
+import { RequestContext } from '@mastra/core/request-context'
 import { ArtifactStore, type ArtifactFormat, type ArtifactRecord, type ArtifactSheetInput } from '../artifact-store.js'
 import { SkillRegistry } from '../skills.js'
 import { PapyrusAgentFSFilesystem, type WorkspaceLibraryFile } from './workspace-agentfs.js'
@@ -365,6 +366,12 @@ export class MastraRuntime {
 
     const adapter = await import('@mastra/ai-sdk')
     const ai = await import('ai')
+    const requestContext = new RequestContext<{
+      papyrusThreadId: string
+      papyrusResourceId: string
+    }>()
+    requestContext.set('papyrusThreadId', threadId)
+    requestContext.set('papyrusResourceId', this.resourceId())
     const stream = await adapter.handleChatStream({
       mastra: this.mastra.instance as never,
       agentId: AGENT_ID,
@@ -373,10 +380,7 @@ export class MastraRuntime {
         ...params,
         messages: [enriched] as never,
         memory: { thread: threadId, resource: this.resourceId() },
-        requestContext: {
-          papyrusThreadId: threadId,
-          papyrusResourceId: this.resourceId(),
-        },
+        requestContext,
       },
       onError: (cause) => cause instanceof Error ? cause.message : 'Agent execution failed',
     })

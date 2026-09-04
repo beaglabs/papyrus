@@ -45,7 +45,7 @@ describe('Papyrus SDK workspace', () => {
       databasePath: join(root, '.agentfs', 'workspace.db'),
     })
     const sandbox = new NonoWorkspaceSandbox({ filesystem, dataDir: root, platform: 'linux' })
-    const enclave = new PapyrusEnclaveRuntime(filesystem, new WorkspaceExecutorRegistry(sandbox))
+    const enclave = new PapyrusEnclaveRuntime(filesystem, new WorkspaceExecutorRegistry(sandbox), root)
 
     try {
       await filesystem.init()

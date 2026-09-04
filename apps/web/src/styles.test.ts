@@ -26,6 +26,7 @@ describe('Agent chat style contract', () => {
   it('pins the composer and keeps chat scrolling isolated to the message pane', () => {
     expect(styles).toMatch(/\.composer\s*\{[^}]*position:\s*sticky;[^}]*bottom:\s*0;/s)
     expect(styles).toMatch(/\.message-list\s*\{[^}]*overflow-y:\s*auto;[^}]*overscroll-behavior:\s*contain;/s)
+    expect(styles).not.toContain('.message-list { overflow: visible; }')
   })
 
 })

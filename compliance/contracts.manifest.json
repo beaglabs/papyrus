@@ -2,7 +2,12 @@
   "formatVersion": 1,
   "sources": [
     {
-      "path": "packages/contracts/src/index.ts",
+      "path": "contracts/index.ts",
+      "gitBlob": "b0f7c4eb52e376dfebf447ef7f68e368ad87e9a3",
+      "exports": []
+    },
+    {
+      "path": "contracts/src/index.ts",
       "gitBlob": "c15a10504a55d1f387e2e00a1bd11f2598242d53",
       "exports": [
         "APPROVED_SOURCE_KINDS",
@@ -48,7 +53,151 @@
       ]
     },
     {
-      "path": "packages/acp-runtime/src/index.ts",
+      "path": "contracts/plugins/types.ts",
+      "gitBlob": "d36a43bb1ac1e82006a3ce545aef664b14123636",
+      "exports": [
+        "ALL_PROFILES",
+        "BIDIRECTIONAL_SECURITY",
+        "CONNECTED_PROFILES",
+        "CONTROLLED_ACTION_SECURITY",
+        "MICROSOFT_CLOUD_PROFILES",
+        "PLUGIN_AUTHORITIES",
+        "PLUGIN_AUTH_SCHEMES",
+        "PLUGIN_INTEGRATION_CLASSES",
+        "PLUGIN_PROFILES",
+        "PLUGIN_RISKS",
+        "PLUGIN_SYNC_MODES",
+        "PluginAuthScheme",
+        "PluginAuthority",
+        "PluginConformanceContract",
+        "PluginContract",
+        "PluginIntegrationClass",
+        "PluginObservationSchemaContract",
+        "PluginProfile",
+        "PluginRisk",
+        "PluginSecurityContract",
+        "PluginSyncMode",
+        "READ_ONLY_PULL_SECURITY",
+        "READ_ONLY_PUSH_SECURITY",
+        "definePluginContract",
+        "validatePluginContract"
+      ]
+    },
+    {
+      "path": "contracts/plugins/index.ts",
+      "gitBlob": "baf684326416ac87f97516f40d309137714fcf77",
+      "exports": [
+        "PLUGIN_CONTRACTS",
+        "pluginContractById"
+      ]
+    },
+    {
+      "path": "contracts/plugins/a2a-peer.ts",
+      "gitBlob": "382831c769ef2dde5e4a54b41cf264135cb5504f",
+      "exports": [
+        "A2A_PEER_CONTRACT"
+      ]
+    },
+    {
+      "path": "contracts/plugins/acp-client.ts",
+      "gitBlob": "2425ec4c6f16e79c2e8b74677f30f96428d4e1a1",
+      "exports": [
+        "ACP_CLIENT_CONTRACT"
+      ]
+    },
+    {
+      "path": "contracts/plugins/asset-inventory.ts",
+      "gitBlob": "ab15c1cc21b940840ca5dc46e2d1b7bee142dec1",
+      "exports": [
+        "ASSET_INVENTORY_CONTRACT"
+      ]
+    },
+    {
+      "path": "contracts/plugins/customer-vault.ts",
+      "gitBlob": "cae2b70b08d4afabbf38fa1d0c49d108e5e23f9d",
+      "exports": [
+        "CUSTOMER_VAULT_CONTRACT"
+      ]
+    },
+    {
+      "path": "contracts/plugins/defender-xdr.ts",
+      "gitBlob": "717502089a2e8c437996843bbf7e841125f1583c",
+      "exports": [
+        "DEFENDER_XDR_CONTRACT"
+      ]
+    },
+    {
+      "path": "contracts/plugins/dns-observation.ts",
+      "gitBlob": "a3644af7162dc5920f8884d532d38fb47a0e88f6",
+      "exports": [
+        "DNS_OBSERVATION_CONTRACT"
+      ]
+    },
+    {
+      "path": "contracts/plugins/exchange-email.ts",
+      "gitBlob": "7b57281c0bd8a1ffe01870abbc08106d25f8312c",
+      "exports": [
+        "EXCHANGE_EMAIL_CONTRACT"
+      ]
+    },
+    {
+      "path": "contracts/plugins/firewall-executor.ts",
+      "gitBlob": "31982c98884aabd15140e4405a71c3cfd9ab10f5",
+      "exports": [
+        "FIREWALL_EXECUTOR_CONTRACT"
+      ]
+    },
+    {
+      "path": "contracts/plugins/microsoft-entra.ts",
+      "gitBlob": "f9cd8a5f8e986161a666ed2b44b458e332fb5aae",
+      "exports": [
+        "MICROSOFT_ENTRA_CONTRACT"
+      ]
+    },
+    {
+      "path": "contracts/plugins/microsoft-sentinel.ts",
+      "gitBlob": "5102eaf9f9a51a6211e94417495832e673e8bebe",
+      "exports": [
+        "MICROSOFT_SENTINEL_CONTRACT"
+      ]
+    },
+    {
+      "path": "contracts/plugins/microsoft-teams.ts",
+      "gitBlob": "340acf65056235d2104282c5dd37dea6dc7cf70c",
+      "exports": [
+        "MICROSOFT_TEAMS_CONTRACT"
+      ]
+    },
+    {
+      "path": "contracts/plugins/observation-api.ts",
+      "gitBlob": "a71f9c03fa2357cbd632e43a31251c2bda7cba73",
+      "exports": [
+        "OBSERVATION_API_CONTRACT"
+      ]
+    },
+    {
+      "path": "contracts/plugins/suricata.ts",
+      "gitBlob": "13afa9c816a11b59d6cabeb80396d736bad2df3d",
+      "exports": [
+        "SURICATA_CONTRACT"
+      ]
+    },
+    {
+      "path": "contracts/plugins/sysmon.ts",
+      "gitBlob": "8fc5ac321be3ec44ec12e6bccc3a910d2759fd9b",
+      "exports": [
+        "SYSMON_CONTRACT"
+      ]
+    },
+    {
+      "path": "contracts/plugins/zeek.ts",
+      "gitBlob": "b9f003129d41ab87e02a09f52558e4c87cbc5bc1",
+      "exports": [
+        "ZEEK_CONTRACT"
+      ]
+    },
+    {
+      "path": "acp-runtime/src/index.ts",
       "gitBlob": "343d6e56bf7bb19a80f5ae8dc9052360593193dc",
       "exports": [
         "ACP_PROTOCOL_VERSION",

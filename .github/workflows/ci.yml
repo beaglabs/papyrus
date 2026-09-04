@@ -35,6 +35,8 @@ jobs:
         run: pnpm compliance:check
       - name: Verify contract/schema manifest
         run: pnpm contracts:check
+      - name: Run contract conformance harness
+        run: pnpm contracts:test
       - name: Install Linux command isolation
         if: runner.os == 'Linux'
         run: |

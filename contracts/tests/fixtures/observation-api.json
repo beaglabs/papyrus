@@ -1,0 +1,30 @@
+{
+  "sourceRecordId": "sensor-record-1042",
+  "observedAt": "2026-09-02T07:00:00Z",
+  "evidenceType": "NetworkConnection",
+  "subject": "device:workstation-1",
+  "payload": {
+    "source": "contract-fixture"
+  },
+  "terrain": {
+    "entities": [
+      {
+        "externalId": "device:workstation-1",
+        "kind": "Device",
+        "label": "Workstation 1"
+      },
+      {
+        "externalId": "ip:10.0.0.8",
+        "kind": "IPAddress",
+        "label": "10.0.0.8"
+      }
+    ],
+    "relationships": [
+      {
+        "kind": "connected_to",
+        "sourceExternalId": "device:workstation-1",
+        "targetExternalId": "ip:10.0.0.8"
+      }
+    ]
+  }
+}

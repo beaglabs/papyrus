@@ -1,8 +1,14 @@
 import { indexBlob, indexText, stagedPaths, trackedPaths } from './git.mjs'
 
+const tracked = trackedPaths()
+const pluginContractSources = tracked.filter((path) => /^contracts\/plugins\/(?!index\.ts$|types\.ts$)[^/]+\.ts$/.test(path)).sort()
 const contractSources = [
-  'packages/contracts/src/index.ts',
-  'packages/acp-runtime/src/index.ts',
+  'contracts/index.ts',
+  'contracts/src/index.ts',
+  'contracts/plugins/types.ts',
+  'contracts/plugins/index.ts',
+  ...pluginContractSources,
+  'acp-runtime/src/index.ts',
   'apps/server/src/mastra/tools.ts',
 ]
 
@@ -22,21 +28,20 @@ const expected = contractSources.map((path) => {
 
 const manifestText = indexText('compliance/contracts.manifest.json')
 const errors = []
+if (tracked.some((path) => path.startsWith('packages/'))) errors.push('legacy /packages workspace level is not allowed; use /contracts and /acp-runtime')
 if (manifestText === undefined) {
   errors.push('compliance/contracts.manifest.json is missing; run pnpm compliance:generate and stage it')
 } else {
   try {
     const manifest = JSON.parse(manifestText)
     if (manifest.formatVersion !== 1) errors.push('compliance/contracts.manifest.json has an unsupported formatVersion')
-    if (JSON.stringify(manifest.sources) !== JSON.stringify(expected)) {
-      errors.push('contract/schema manifest is stale; run pnpm compliance:generate and stage compliance/contracts.manifest.json')
-    }
+    if (JSON.stringify(manifest.sources) !== JSON.stringify(expected)) errors.push('contract/schema manifest is stale; run pnpm compliance:generate and stage compliance/contracts.manifest.json')
   } catch (error) {
     errors.push(`compliance/contracts.manifest.json is invalid JSON: ${error instanceof Error ? error.message : String(error)}`)
   }
 }
 
-for (const path of trackedPaths().filter((path) => path.endsWith('/package.json') || path === 'package.json')) {
+for (const path of tracked.filter((path) => path.endsWith('/package.json') || path === 'package.json')) {
   const text = indexText(path)
   if (text === undefined) continue
   try {
@@ -47,16 +52,15 @@ for (const path of trackedPaths().filter((path) => path.endsWith('/package.json'
       const runtimeVersion = manifest[section]?.['@papyrus/acp-runtime']
       if (runtimeVersion !== undefined && runtimeVersion !== 'workspace:*') errors.push(`${path}: @papyrus/acp-runtime must use workspace:* (${section})`)
     }
-  } catch {
-    // Package JSON validity is covered by install/typecheck; avoid duplicate noise.
-  }
+  } catch {}
 }
 
 for (const path of stagedPaths().filter((path) => /\.[cm]?[jt]sx?$/.test(path))) {
-  const text = indexText(path) ?? ''
-  if (/['"](?:@papyrus\/contracts\/|@papyrus\/acp-runtime\/|\.\.\/.*packages\/(?:contracts|acp-runtime)\/src)/.test(text)) {
-    errors.push(`${path}: import contract packages only through their public package exports`)
-  }
+  const source = indexText(path) ?? ''
+  const forbiddenRuntimeDeepImport = /['"]@papyrus\/acp-runtime\//.test(source)
+  const forbiddenContractsDeepImport = /['"]@papyrus\/contracts\/(?!plugins['"])/.test(source)
+  const forbiddenRelativeContractImport = /['"](?:\.\.\/)+(?:contracts\/(?:src|plugins)\/|acp-runtime\/src\/)/.test(source)
+  if (forbiddenRuntimeDeepImport || forbiddenContractsDeepImport || forbiddenRelativeContractImport) errors.push(`${path}: import contract packages only through their public package exports`)
 }
 
 if (errors.length) {

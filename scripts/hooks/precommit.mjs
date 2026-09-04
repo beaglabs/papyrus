@@ -21,8 +21,8 @@ const serverSecurityChanged = staged.some((path) =>
   path === 'apps/server/src/audit.ts' ||
   path === 'apps/server/src/catalog.ts' ||
   path.startsWith('apps/server/src/mastra/') ||
-  path.startsWith('packages/contracts/') ||
-  path.startsWith('packages/acp-runtime/'))
+  path.startsWith('contracts/') ||
+  path.startsWith('acp-runtime/'))
 const webChanged = changed('apps/web/src/') || changed('apps/web/scripts/')
 const workspaceChanged = changed('apps/server/src/mastra/')
 
@@ -30,6 +30,7 @@ run('filename / case / path sanity', 'node', ['scripts/hooks/filename-sanity.mjs
 run('secret / key / material scan', 'node', ['scripts/hooks/secret-scan.mjs'])
 run('junk / debugging scan', 'node', ['scripts/hooks/junk-scan.mjs'])
 run('contract / schema drift', 'node', ['scripts/hooks/contracts-drift.mjs'])
+run('contract conformance harness', 'pnpm', ['contracts:test'])
 
 if (workspaceChanged) run('workspace implementation boundaries', 'node', ['scripts/hooks/workspace-boundaries.mjs'])
 

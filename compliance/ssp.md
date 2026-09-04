@@ -56,8 +56,9 @@ The values below are Git blob IDs from the candidate Git index. A change to a se
 | `apps/server/src/mastra/sandbox.ts` | `d578bd973d09e3f75c70443e413c8f7c9e2f903e` |
 | `apps/server/src/mastra/workspace.ts` | `1b187f977169d265fc13abcef2000bc565718cb8` |
 | `apps/server/src/mastra/tools.ts` | `5bc1bc3e9b360cbf3668c26459c4ebc17b5326c8` |
-| `packages/contracts/src/index.ts` | `c15a10504a55d1f387e2e00a1bd11f2598242d53` |
-| `packages/acp-runtime/src/index.ts` | `343d6e56bf7bb19a80f5ae8dc9052360593193dc` |
+| `contracts/src/index.ts` | `c15a10504a55d1f387e2e00a1bd11f2598242d53` |
+| `contracts/plugins/index.ts` | `baf684326416ac87f97516f40d309137714fcf77` |
+| `acp-runtime/src/index.ts` | `343d6e56bf7bb19a80f5ae8dc9052360593193dc` |
 
 ## Regeneration
 

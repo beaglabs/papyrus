@@ -1,0 +1,11 @@
+{
+  "schema": "sentinel.incident@1",
+  "sourceRecordId": "sentinel-incident-1",
+  "payload": {
+    "id": "incident-1042",
+    "title": "Multiple correlated alerts",
+    "severity": "High",
+    "status": "New",
+    "incidentNumber": 1042
+  }
+}

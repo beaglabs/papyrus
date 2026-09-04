@@ -1,0 +1,12 @@
+{
+  "schema": "defender.alert@1",
+  "sourceRecordId": "defender-alert-1",
+  "payload": {
+    "id": "da637312284012345678",
+    "title": "Suspicious process behavior",
+    "severity": "medium",
+    "status": "new",
+    "deviceId": "device-1042",
+    "deviceName": "WS-1042"
+  }
+}

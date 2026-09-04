@@ -1,0 +1,13 @@
+{
+  "schema": "dns.response@1",
+  "sourceRecordId": "dns-response-1",
+  "payload": {
+    "query": "service.example.mil",
+    "queryType": "A",
+    "answers": [
+      "10.0.0.8"
+    ],
+    "responseCode": "NOERROR",
+    "resolver": "resolver-1"
+  }
+}

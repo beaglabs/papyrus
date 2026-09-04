@@ -4,13 +4,13 @@ FROM reg.mini.dev/node-fips:v24.19.0-dev@sha256:c92b0186c8c2b1e6f10e0b7b401348a4
 WORKDIR /src
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY apps/server/package.json apps/server/package.json
-COPY packages/acp-runtime/package.json packages/acp-runtime/package.json
-COPY packages/contracts/package.json packages/contracts/package.json
+COPY acp-runtime/package.json acp-runtime/package.json
+COPY contracts/package.json contracts/package.json
 RUN corepack pnpm install --frozen-lockfile
 
 COPY apps/server apps/server
-COPY packages/acp-runtime packages/acp-runtime
-COPY packages/contracts packages/contracts
+COPY acp-runtime acp-runtime
+COPY contracts contracts
 RUN corepack pnpm --filter @papyrus/server... run build \
  && corepack pnpm --filter @papyrus/server --prod deploy --legacy /out \
  && rm -rf /out/src /out/tests /out/scripts /out/tsconfig.json \

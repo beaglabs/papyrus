@@ -1,0 +1,21 @@
+{
+  "id": "graph-message-1",
+  "internetMessageId": "<message-1@example.mil>",
+  "receivedDateTime": "2026-09-02T10:00:00.000Z",
+  "subject": "Potential phishing report",
+  "importance": "high",
+  "bodyPreview": "This message may be suspicious.",
+  "from": {
+    "emailAddress": {
+      "address": "reporter@example.mil",
+      "name": "Reporter"
+    }
+  },
+  "toRecipients": [
+    {
+      "emailAddress": {
+        "address": "soc@example.mil"
+      }
+    }
+  ]
+}

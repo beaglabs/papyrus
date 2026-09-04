@@ -1,0 +1,22 @@
+[
+  {
+    "schema": "entra.user@1",
+    "sourceRecordId": "entra-user-1",
+    "payload": {
+      "id": "2f2a7f93-35bd-4f73-b42b-50f98658f033",
+      "displayName": "Alex Morgan",
+      "userPrincipalName": "alex@example.mil",
+      "accountEnabled": true
+    }
+  },
+  {
+    "schema": "entra.group-membership@1",
+    "sourceRecordId": "entra-membership-1",
+    "payload": {
+      "groupId": "group-security-operations",
+      "groupDisplayName": "Security Operations",
+      "memberId": "2f2a7f93-35bd-4f73-b42b-50f98658f033",
+      "memberDisplayName": "Alex Morgan"
+    }
+  }
+]

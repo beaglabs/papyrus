@@ -1,0 +1,13 @@
+{
+  "schema": "asset.device@1",
+  "sourceRecordId": "asset-device-1",
+  "payload": {
+    "id": "asset-1042",
+    "hostname": "WS-1042",
+    "operatingSystem": "Windows 11",
+    "ipAddresses": [
+      "10.0.0.12"
+    ],
+    "owner": "Security Operations"
+  }
+}

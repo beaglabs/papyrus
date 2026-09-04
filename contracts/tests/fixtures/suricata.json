@@ -1,0 +1,33 @@
+[
+  {
+    "schema": "suricata.eve.alert@1",
+    "sourceRecordId": "suricata-alert-1",
+    "payload": {
+      "event_type": "alert",
+      "flow_id": 204851144702544,
+      "src_ip": "10.0.0.12",
+      "src_port": 51822,
+      "dest_ip": "10.0.0.8",
+      "dest_port": 443,
+      "proto": "TCP",
+      "alert": {
+        "signature_id": 2100498,
+        "signature": "Potentially Bad Traffic",
+        "severity": 2
+      }
+    }
+  },
+  {
+    "schema": "suricata.eve.flow@1",
+    "sourceRecordId": "suricata-flow-1",
+    "payload": {
+      "event_type": "flow",
+      "flow_id": 204851144702544,
+      "src_ip": "10.0.0.12",
+      "src_port": 51822,
+      "dest_ip": "10.0.0.8",
+      "dest_port": 443,
+      "proto": "TCP"
+    }
+  }
+]

@@ -1,0 +1,26 @@
+[
+  {
+    "schema": "sysmon.network-connect@1",
+    "sourceRecordId": "sysmon-net-1",
+    "payload": {
+      "EventID": 3,
+      "Computer": "WS-1042.example.mil",
+      "ProcessGuid": "{47ab-1042}",
+      "Image": "C:\\Windows\\System32\\curl.exe",
+      "SourceIp": "10.0.0.12",
+      "DestinationIp": "10.0.0.8",
+      "DestinationPort": 443
+    }
+  },
+  {
+    "schema": "sysmon.process-create@1",
+    "sourceRecordId": "sysmon-process-1",
+    "payload": {
+      "EventID": 1,
+      "Computer": "WS-1042.example.mil",
+      "ProcessGuid": "{47ab-1042}",
+      "Image": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      "User": "EXAMPLE\\analyst"
+    }
+  }
+]

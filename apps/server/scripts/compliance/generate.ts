@@ -41,9 +41,16 @@ function exportedNames(text: string): string[] {
   return [...names].sort()
 }
 
+const pluginContractSources = indexPaths()
+  .filter((path) => /^contracts\/plugins\/(?!index\.ts$|types\.ts$)[^/]+\.ts$/.test(path))
+  .sort()
 const contractSources = [
-  'packages/contracts/src/index.ts',
-  'packages/acp-runtime/src/index.ts',
+  'contracts/index.ts',
+  'contracts/src/index.ts',
+  'contracts/plugins/types.ts',
+  'contracts/plugins/index.ts',
+  ...pluginContractSources,
+  'acp-runtime/src/index.ts',
   'apps/server/src/mastra/tools.ts',
 ]
 const contractManifest = {
@@ -65,8 +72,9 @@ const evidencePaths = [
   'apps/server/src/mastra/sandbox.ts',
   'apps/server/src/mastra/workspace.ts',
   'apps/server/src/mastra/tools.ts',
-  'packages/contracts/src/index.ts',
-  'packages/acp-runtime/src/index.ts',
+  'contracts/src/index.ts',
+  'contracts/plugins/index.ts',
+  'acp-runtime/src/index.ts',
 ]
 const evidenceRows = evidencePaths.map((path) => `| \`${path}\` | \`${indexBlob(path)}\` |`).join('\n')
 
@@ -90,7 +98,10 @@ function spdxId(seed: string): string {
 
 const lockText = indexText('pnpm-lock.yaml')
 const lock = parse(lockText) as { packages?: Record<string, unknown> }
-const packageManifestPaths = indexPaths().filter((path) => path === 'package.json' || /^(?:apps|packages)\/[^/]+\/package\.json$/.test(path))
+const packageManifestPaths = indexPaths().filter((path) =>
+  path === 'package.json' ||
+  /^apps\/[^/]+\/package\.json$/.test(path) ||
+  /^(?:contracts|acp-runtime)\/package\.json$/.test(path))
 const workspacePackages = packageManifestPaths.map((path) => {
   const manifest = JSON.parse(indexText(path)) as { name?: string; version?: string }
   return {

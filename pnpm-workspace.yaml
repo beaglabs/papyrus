@@ -1,6 +1,7 @@
 packages:
   - "apps/*"
-  - "packages/*"
+  - "acp-runtime"
+  - "contracts"
 allowBuilds:
   '@mongodb-js/zstd': true
   esbuild: true

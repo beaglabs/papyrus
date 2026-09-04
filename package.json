@@ -21,6 +21,7 @@
     "precommit:check": "node scripts/hooks/precommit.mjs",
     "contracts:check": "node scripts/hooks/contracts-drift.mjs",
     "compliance:generate": "pnpm --filter @papyrus/server exec tsx scripts/compliance/generate.ts",
-    "compliance:check": "pnpm --filter @papyrus/server exec tsx scripts/compliance/generate.ts --check"
+    "compliance:check": "pnpm --filter @papyrus/server exec tsx scripts/compliance/generate.ts --check",
+    "contracts:test": "pnpm --filter @papyrus/acp-runtime build && pnpm --filter @papyrus/contracts build && node --test contracts/tests/*.test.mjs"
   }
 }

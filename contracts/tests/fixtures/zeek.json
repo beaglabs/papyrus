@@ -1,0 +1,13 @@
+{
+  "schema": "zeek.conn@1",
+  "sourceRecordId": "zeek-conn-918281",
+  "payload": {
+    "uid": "CTo78A11gLkU",
+    "id.orig_h": "10.0.0.12",
+    "id.orig_p": 51822,
+    "id.resp_h": "10.0.0.8",
+    "id.resp_p": 443,
+    "proto": "tcp",
+    "service": "ssl"
+  }
+}

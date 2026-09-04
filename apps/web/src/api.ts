@@ -29,7 +29,6 @@ export interface PortalData {
   agent: AgentStatus
   sessions: AgentSession[]
   schedules: AgentSchedule[]
-  workflows: WorkflowSummary[]
   models: ModelProfile[]
 }
 
@@ -115,17 +114,16 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 export async function loadPortal(): Promise<PortalData> {
   const config = await api<PublicConfig>('/api/config/public')
-  const [me, overview, plugins, agent, sessions, schedules, workflows, models] = await Promise.all([
+  const [me, overview, plugins, agent, sessions, schedules, models] = await Promise.all([
     api<PortalPrincipal>('/api/me'),
     api<PortalOverview>('/api/portal/overview'),
     api<{ catalog: IntegrationCatalogEntry[]; configured: IntegrationConfiguration[] }>('/api/plugins'),
     api<AgentStatus>('/api/agent/status'),
     api<{ sessions: AgentSession[] }>('/api/sessions'),
     api<{ schedules: AgentSchedule[] }>('/api/schedules'),
-    api<{ workflows: WorkflowSummary[] }>('/api/workflows'),
     api<{ profiles: ModelProfile[] }>('/api/model-profiles'),
   ])
-  return { config, me, overview, catalog: plugins.catalog, integrations: plugins.configured, agent, sessions: sessions.sessions, schedules: schedules.schedules, workflows: workflows.workflows, models: models.profiles }
+  return { config, me, overview, catalog: plugins.catalog, integrations: plugins.configured, agent, sessions: sessions.sessions, schedules: schedules.schedules, models: models.profiles }
 }
 
 export async function publicConfig(): Promise<PublicConfig> { return api('/api/config/public') }
@@ -175,9 +173,22 @@ export async function approveSkill(id: string): Promise<unknown> {
   return api(`/api/skills/${encodeURIComponent(id)}/approve`, { method: 'POST', body: '{}' })
 }
 
+export interface WorkspaceLibraryPage {
+  files: WorkspaceLibraryFile[]
+  total: number
+  offset: number
+  limit: number
+  nextOffset?: number
+}
+
+export async function workspaceFilesPage(query = '', offset = 0, limit = 100): Promise<WorkspaceLibraryPage> {
+  const params = new URLSearchParams({ offset: String(offset), limit: String(limit) })
+  if (query.trim()) params.set('q', query.trim())
+  return api<WorkspaceLibraryPage>(`/api/workspace/files?${params}`)
+}
+
 export async function workspaceFiles(query = ''): Promise<WorkspaceLibraryFile[]> {
-  const suffix = query.trim() ? `?q=${encodeURIComponent(query.trim())}` : ''
-  return (await api<{ files: WorkspaceLibraryFile[] }>(`/api/workspace/files${suffix}`)).files
+  return (await workspaceFilesPage(query)).files
 }
 
 export async function uploadWorkspaceAttachment(input: {

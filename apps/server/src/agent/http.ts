@@ -14,6 +14,13 @@ class HttpError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message) }
 }
 
+function boundedInteger(value: string | null, minimum: number, maximum: number, fallback: number): number {
+  if (value === null || value.trim() === '') return fallback
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < minimum || parsed > maximum) throw new HttpError(400, 'INVALID_INTEGER', `Expected an integer between ${minimum} and ${maximum}`)
+  return parsed
+}
+
 function securityHeaders(response: ServerResponse): void {
   response.setHeader('cache-control', 'no-store')
   response.setHeader('content-security-policy', "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self'; worker-src 'self' blob:; frame-ancestors 'self' https://*.teams.microsoft.com https://*.cloud.microsoft")
@@ -169,7 +176,9 @@ export function createAgentServer(config: AgentConfig, service: AgentService, au
       if (url.pathname === '/api/workspace/files' && request.method === 'GET') {
         await principal(request, auth, service)
         const query = (url.searchParams.get('q') ?? '').slice(0, 256)
-        return json(response, 200, { files: await mastra.workspaceFilesystem.listLibrary(query) })
+        const offset = boundedInteger(url.searchParams.get('offset'), 0, 4_000, 0)
+        const limit = boundedInteger(url.searchParams.get('limit'), 1, 500, 100)
+        return json(response, 200, await mastra.workspaceFilesystem.listLibraryPage(query, { offset, limit }))
       }
       if (url.pathname === '/api/workspace/attachments' && request.method === 'POST') {
         await principal(request, auth, service)

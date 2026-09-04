@@ -6,3 +6,6 @@ allowBuilds:
   esbuild: true
   node-liblzma: true
   onnxruntime-node: true
+
+overrides:
+  'nono-ts@0.3.0>mintlify': '-'

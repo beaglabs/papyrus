@@ -1,18 +1,44 @@
-import { loadCyberConfig } from './cyber/config.js'
-import { CyberDatabase } from './cyber/database.js'
-import { EntraAuthService } from './cyber/entra-auth.js'
-import { createCyberServer } from './cyber/http.js'
-import { CyberService } from './cyber/service.js'
+import { loadAgentConfig } from './agent/config.js'
+import { AgentDatabase } from './agent/database.js'
+import { EntraAuthService } from './agent/entra-auth.js'
+import { createAgentServer } from './agent/http.js'
+import { AgentService } from './agent/service.js'
+import { ActionExecutorRegistry, ActionWorker } from './agent/action-worker.js'
+import { ActionStore } from './agent/action-store.js'
+import { ConnectorRegistry, SyncWorker } from './agent/sync-worker.js'
+import { TerrainStore } from './agent/terrain-store.js'
+import { EmailExecutor } from './agent/executors/email-executor.js'
+import { ExchangeEmailDriver } from './agent/drivers/exchange-email-driver.js'
+import { HttpMicrosoftGraphClient } from './agent/graph-client.js'
+import { MastraRuntime } from './agent/mastra/runtime.js'
 
-const config = loadCyberConfig()
-const database = new CyberDatabase(config.databasePath)
+const config = loadAgentConfig()
+const database = new AgentDatabase(config.databasePath)
 const auth = new EntraAuthService(config)
-const service = new CyberService(database, config)
-const server = createCyberServer(config, service, auth)
+const terrain = new TerrainStore(database)
+const connectors = new ConnectorRegistry()
+const graph = new HttpMicrosoftGraphClient(config)
+const actionStore = new ActionStore(database)
+const executorRegistry = new ActionExecutorRegistry()
+const worker = new SyncWorker(database, terrain, connectors)
+const actionWorker = new ActionWorker(database, actionStore, executorRegistry, config)
+const service = new AgentService(database, config, terrain, worker, actionStore, executorRegistry, actionWorker)
+const mastraRuntime = new MastraRuntime(config, actionStore, terrain, service)
+await mastraRuntime.start()
+const server = createAgentServer(config, service, auth, mastraRuntime)
+
+// Exchange shares one Graph client boundary for inbound mailbox delta sync and
+// approved outbound mail. The default client deliberately refuses to resolve
+// credentials until the customer supplies its vault/workload-identity adapter.
+connectors.register('exchange-email', new ExchangeEmailDriver(graph))
+executorRegistry.register('exchange-email', new EmailExecutor(database, graph, mastraRuntime.artifacts))
 
 server.listen(config.port, config.host, () => {
-  console.log(`Papyrus Cyber Twin listening at ${config.publicOrigin}`)
+  worker.start()
+  actionWorker.start()
+  console.log(`Papyrus daemon listening at ${config.publicOrigin}`)
   console.log(`Profile: ${config.profile}; Entra cloud: ${config.cloud}; deployment: ${service.license.deploymentId}`)
+  console.log(`Agent runtime: ${mastraRuntime.mode}`)
 })
 
 let stopping = false
@@ -24,6 +50,9 @@ async function shutdown(): Promise<void> {
   if (stopping) return
   stopping = true
   server.closeAllConnections()
+  await worker.stop()
+  await actionWorker.stop()
+  await mastraRuntime.stop()
   await closeServer(server)
   database.close()
   process.exit(0)

@@ -1,0 +1,88 @@
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
+import { INTEGRATION_CATALOG } from '../src/agent/catalog.js'
+import type { AgentConfig } from '../src/agent/config.js'
+import { AgentDatabase } from '../src/agent/database.js'
+import { AgentService } from '../src/agent/service.js'
+
+describe('agent integration lifecycle', () => {
+  const disposers: Array<() => void> = []
+  afterEach(() => { while (disposers.length) disposers.pop()?.() })
+
+  function setup() {
+    const dataDir = mkdtempSync(join(tmpdir(), 'papyrus-agent-test-'))
+    const db = new AgentDatabase(':memory:')
+    const config: AgentConfig = {
+      mode: 'local', profile: 'gcc', host: '127.0.0.1', port: 3210, publicOrigin: 'http://127.0.0.1:3210',
+      dataDir, databasePath: ':memory:', portalSecret: 'portal-secret-at-least-thirty-two-characters',
+      organizationName: 'Example Agency', cloud: 'Public', licenseRequired: false, licenseAuthorities: {},
+    }
+    const service = new AgentService(db, config)
+    const owner = { oid: 'owner-oid', tenantId: 'tenant', displayName: 'Owner', roles: ['Papyrus.System.Owner' as const], groups: [], source: 'development' as const }
+    const viewer = { oid: 'viewer-oid', tenantId: 'tenant', displayName: 'Viewer', roles: ['Papyrus.Integration.View' as const], groups: [], source: 'development' as const }
+    disposers.push(() => { db.close(); rmSync(dataDir, { recursive: true, force: true }) })
+    return { db, service, owner, viewer }
+  }
+
+  it('requires Entra application roles and immediately registers observation sources', () => {
+    const { db, service, owner, viewer } = setup()
+    expect(() => service.createIntegration(viewer, 'zeek', { name: 'Zeek East', scope: 'east enclave', settings: {} }))
+      .toThrow(/Papyrus\.Integration\.Manage/)
+    const integration = service.createIntegration(owner, 'zeek', { name: 'Zeek East', scope: 'east enclave', settings: {} })
+    expect(integration).toMatchObject({ state: 'active', health: 'unknown' })
+    expect(db.listEvents(integration.id)[0]?.action).toBe('ObservationSourceRegistered')
+    expect(db.verifyEventChain()).toEqual({ valid: true, count: 1 })
+  })
+
+  it('rejects inline connector secrets and stores only credential references', () => {
+    const { service, owner } = setup()
+    expect(() => service.createIntegration(owner, 'defender-xdr', {
+      name: 'Defender', scope: 'enterprise', settings: { clientSecret: 'do-not-store' },
+    })).toThrow(/vault reference/i)
+    const integration = service.createIntegration(owner, 'defender-xdr', {
+      name: 'Defender', scope: 'enterprise', credentialRef: 'keyvault://papyrus/connectors/defender', settings: { dataHandling: 'metadata_only' },
+    })
+    expect(integration.credentialRef).toBe('keyvault://papyrus/connectors/defender')
+    expect(JSON.stringify(integration)).not.toContain('do-not-store')
+  })
+
+  it('does not put read-only high-risk observation sources through action approval', () => {
+    const { service } = setup()
+    const integrationManager = {
+      oid: 'manager', tenantId: 'tenant', displayName: 'Manager', roles: ['Papyrus.Integration.Manage' as const], groups: [], source: 'development' as const,
+    }
+    expect(service.createIntegration(integrationManager, 'microsoft-entra', { name: 'Entra terrain', settings: {} })).toMatchObject({ state: 'active', scope: 'daemon' })
+  })
+
+  it('deletes an integration from active configuration while retaining its audit tombstone', () => {
+    const { db, service, owner } = setup()
+    const integration = service.createIntegration(owner, 'zeek', { name: 'Temporary Zeek', settings: {} })
+    service.deleteIntegration(owner, integration.id)
+    expect(service.integrations(owner)).toEqual([])
+    expect(db.sqlite.prepare('SELECT state,deleted_at FROM agent_integrations WHERE id=?').get(integration.id)).toMatchObject({ state: 'disabled' })
+    expect(db.sqlite.prepare('SELECT action FROM agent_integration_events WHERE integration_id=? ORDER BY sequence DESC LIMIT 1').get(integration.id)).toMatchObject({ action: 'IntegrationDeleted' })
+    expect(db.verifyEventChain()).toEqual({ valid: true, count: 2 })
+  })
+
+  it('keeps configuration-only tests unknown and refuses to activate a pull connector without a driver', async () => {
+    const { service, owner } = setup()
+    const integration = service.createIntegration(owner, 'exchange-email', { name: 'Mailbox', scope: 'operations', settings: {} })
+    expect(await service.testIntegration(owner, integration.id)).toMatchObject({ state: 'tested', health: 'unknown' })
+    service.submitIntegration(owner, integration.id)
+    expect(() => service.activateIntegration(owner, integration.id)).toThrow(/driver must be installed/i)
+  })
+
+  it('exposes evidence and terrain connectors as Observation API source profiles', () => {
+    const sources = INTEGRATION_CATALOG.filter((entry) => ['evidence_source', 'terrain_source'].includes(entry.integrationClass))
+    expect(sources.every((entry) => entry.syncMode === 'push' && entry.observationProtocol)).toBe(true)
+    for (const entry of sources) for (const schema of entry.observationProtocol?.schemas ?? []) {
+      expect(entry.evidenceTypes.length === 0 || entry.evidenceTypes.includes(schema.evidenceType)).toBe(true)
+      expect(schema.canonicalExample?.evidenceType).toBe(schema.evidenceType)
+    }
+    expect(INTEGRATION_CATALOG.find((entry) => entry.id === 'observation-api')).toMatchObject({ name: 'Custom Source' })
+    expect(INTEGRATION_CATALOG.find((entry) => entry.id === 'zeek')?.observationProtocol?.schemas.map((schema) => schema.id)).toContain('zeek.conn@1')
+    expect(INTEGRATION_CATALOG.find((entry) => entry.id === 'asset-inventory')?.observationProtocol?.schemas.map((schema) => schema.id)).toContain('asset.device@1')
+  })
+})

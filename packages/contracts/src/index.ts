@@ -297,7 +297,7 @@ export interface ApiError {
 }
 
 /**
- * Cyber-twin contracts intentionally live beside the legacy ACP contracts
+ * Agent-twin contracts intentionally live beside the legacy ACP contracts
  * while the experiment branch proves the replacement runtime. The daemon
  * entrypoint and portal consume only these contracts; they do not create
  * Papyrus users, invitations, workspaces, or sessions.
@@ -344,6 +344,27 @@ export type IntegrationState = (typeof INTEGRATION_STATES)[number]
 export type IntegrationAuthority = 'read_only' | 'bidirectional' | 'controlled_actions'
 export type IntegrationRisk = 'low' | 'moderate' | 'high' | 'critical'
 
+export interface ObservationSchemaProfile {
+  id: string
+  label: string
+  description: string
+  evidenceType: string
+  example: Record<string, unknown>
+  canonicalExample?: {
+    evidenceType: string
+    subject: string
+    terrain: {
+      entities: TerrainEntityInput[]
+      relationships?: TerrainRelationshipInput[]
+    }
+  }
+}
+
+export interface ObservationProtocolProfile {
+  acceptsCanonicalTerrain: boolean
+  schemas: ObservationSchemaProfile[]
+}
+
 export interface IntegrationCatalogEntry {
   id: string
   name: string
@@ -354,6 +375,8 @@ export interface IntegrationCatalogEntry {
   risk: IntegrationRisk
   capabilities: string[]
   evidenceTypes: string[]
+  syncMode: 'none' | 'pull' | 'push' | 'hybrid'
+  observationProtocol?: ObservationProtocolProfile
   authSchemes: Array<'entra' | 'certificate' | 'managed_identity' | 'oauth' | 'mTLS' | 'vault_reference' | 'none'>
   supportedProfiles: DeploymentProfile[]
   licenseFeature: string
@@ -375,7 +398,37 @@ export interface IntegrationConfiguration {
   settings: Record<string, string | number | boolean>
   health: 'unknown' | 'healthy' | 'degraded' | 'unreachable'
   lastEvidenceAt?: string
+  lastSyncAt?: string
+  lastSyncError?: string
   lastTestedAt?: string
+  createdByOid: string
+  createdAt: string
+  updatedAt: string
+  version: number
+}
+
+export const MODEL_GATEWAY_KINDS = ['openai-compatible', 'azure-openai', 'ollama', 'custom'] as const
+export type ModelGatewayKind = (typeof MODEL_GATEWAY_KINDS)[number]
+export const MODEL_AUTH_SCHEMES = ['none', 'api_key', 'entra', 'credential_ref'] as const
+export type ModelAuthScheme = (typeof MODEL_AUTH_SCHEMES)[number]
+export type ModelProfileState = 'active' | 'disabled' | 'error'
+
+/** Public model configuration metadata. Secret material is never represented here. */
+export interface ModelProfile {
+  id: string
+  name: string
+  gatewayKind: ModelGatewayKind
+  provider: string
+  model: string
+  baseUrl: string
+  authScheme: ModelAuthScheme
+  credentialRef?: string
+  scope: string
+  capabilities: string[]
+  state: ModelProfileState
+  isDefault: boolean
+  lastTestedAt?: string
+  lastTestError?: string
   createdByOid: string
   createdAt: string
   updatedAt: string
@@ -411,19 +464,109 @@ export interface PortalOverview {
   }
 }
 
-export interface CyberObservation {
+export interface AgentObservation {
   id: string
   sourceIntegrationId: string
+  sourceRecordId: string
   observedAt: string
   receivedAt: string
+  schema?: string
   evidenceType: string
   subject: string
   classification?: string
   payload: Record<string, unknown>
   provenance: { sourceRecordId?: string; sha256: string }
+  processedAt?: string
 }
 
-export interface CyberClaim {
+export interface TerrainEntityInput {
+  externalId: string
+  kind: string
+  label: string
+  attributes?: Record<string, unknown>
+  confidence?: number
+}
+
+export interface TerrainRelationshipInput {
+  externalId?: string
+  kind: string
+  sourceExternalId: string
+  targetExternalId: string
+  attributes?: Record<string, unknown>
+  confidence?: number
+}
+
+export interface ObservationInput {
+  sourceRecordId: string
+  observedAt: string
+  schema?: string
+  evidenceType: string
+  subject: string
+  classification?: string
+  payload: Record<string, unknown>
+  terrain?: {
+    entities: TerrainEntityInput[]
+    relationships?: TerrainRelationshipInput[]
+  }
+}
+
+export interface TerrainEntity {
+  id: string
+  externalId: string
+  kind: string
+  label: string
+  attributes: Record<string, unknown>
+  confidence: number
+  firstSeen: string
+  lastSeen: string
+  sourceIntegrationIds: string[]
+  evidenceIds: string[]
+}
+
+export interface TerrainRelationship {
+  id: string
+  externalId: string
+  kind: string
+  sourceId: string
+  targetId: string
+  attributes: Record<string, unknown>
+  confidence: number
+  firstSeen: string
+  lastSeen: string
+  sourceIntegrationIds: string[]
+  evidenceIds: string[]
+}
+
+export interface TerrainSnapshot {
+  generatedAt: string
+  entities: TerrainEntity[]
+  relationships: TerrainRelationship[]
+  observationCount: number
+  unresolvedClaims: number
+}
+
+export interface SyncJob {
+  id: string
+  integrationId: string
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+  attempt: number
+  runAfter: string
+  lockedBy?: string
+  lockedAt?: string
+  startedAt?: string
+  completedAt?: string
+  error?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SyncCheckpoint {
+  integrationId: string
+  cursor?: string
+  updatedAt: string
+}
+
+export interface AgentClaim {
   id: string
   operatorId: string
   subject: string
@@ -435,15 +578,100 @@ export interface CyberClaim {
   publishedAt: string
 }
 
-export interface CyberActionProposal {
+export interface AgentInvestigation {
   id: string
+  title: string
+  trigger: 'email' | 'teams' | 'manual' | 'signal' | 'schedule'
+  triggerIntegrationId?: string
+  triggerMessageId?: string
+  mastraThreadId?: string
+  status: 'open' | 'analyzing' | 'action_proposed' | 'awaiting_approval' | 'executing' | 'resolved' | 'abandoned'
+  summary?: string
+  claimIds: string[]
+  proposalIds: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AgentActionProposal {
+  id: string
+  investigationId: string
   proposedByOperatorId: string
   executorIntegrationId: string
   action: string
   target: string
+  parameters?: Record<string, unknown>
   rationaleClaimIds: string[]
   simulationId?: string
-  status: 'proposed' | 'approved' | 'denied' | 'executed' | 'failed'
+  status: 'proposed' | 'approved' | 'denied' | 'expired' | 'executing' | 'executed' | 'failed'
   requiredRole: 'Papyrus.Action.Approve'
+  approvedByOid?: string
+  approvedAt?: string
+  deniedByOid?: string
+  deniedAt?: string
+  denialReason?: string
+  expiresAt?: string
+  idempotencyKey: string
   proposedAt: string
+  decidedAt?: string
+}
+
+export interface AgentActionJob {
+  id: string
+  proposalId: string
+  investigationId: string
+  executorIntegrationId: string
+  action: string
+  target: string
+  parameters?: Record<string, unknown>
+  idempotencyKey: string
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+  attempt: number
+  maxAttempts: number
+  lockedBy?: string
+  lockedAt?: string
+  leaseExpiresAt?: string
+  startedAt?: string
+  completedAt?: string
+  error?: string
+  /** When set, the job must not be claimed until this instant (retry backoff). */
+  runAfter?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AgentActionAttempt {
+  id: string
+  jobId: string
+  attempt: number
+  workerId: string
+  startedAt: string
+  completedAt?: string
+  success: boolean
+  error?: string
+  resultJson?: string
+}
+
+export interface AgentActionReceipt {
+  id: string
+  jobId: string
+  proposalId: string
+  investigationId: string
+  executorIntegrationId: string
+  action: string
+  target: string
+  result: 'success' | 'partial' | 'failure'
+  message: string
+  evidenceObservationId?: string
+  executedAt: string
+}
+
+export interface AgentSignal {
+  id: string
+  type: 'new_claim' | 'contradiction' | 'evidence_threshold' | 'approval_decision' | 'execution_receipt' | 'investigation_created' | 'action_proposed' | 'stale_investigation' | 'posture_review' | 'external_signal'
+  investigationId?: string
+  proposalId?: string
+  claimId?: string
+  payload: Record<string, unknown>
+  emittedAt: string
 }

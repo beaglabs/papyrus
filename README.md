@@ -2,57 +2,59 @@
 
 <img src="assets/papyrus-logo-transparent-v3.png" alt="Papyrus" width="400">
 
-# Papyrus Cyber Twin
+# Papyrus
 
-**Customer-hosted cyber resilience daemon powered by Starlings.**
+**Customer-hosted durable agent runtime powered by Mastra and Starlings.**
 
 </div>
 
-> This is the `experiment/cyber-twin` product-reset branch. The legacy general-agent session harness and Papyrus user directory have been removed.
+> This is the `experiment/agent-twin-terrain-runtime` product-reset branch. Entra remains the identity authority; the product surface is now a Mastra-native agent runtime rather than a agent-twin dashboard.
 
-Papyrus is a licensed daemon for building and operating an evidence-backed cyber terrain twin. Microsoft Teams and Exchange email are human connection adapters. ACP and A2A are machine boundaries. Security data connectors publish typed observations. Starlings is the internal distributed computation substrate.
+Papyrus is a licensed daemon for durable, event-driven agent work. Mastra owns sessions, memory, schedules, workflows, and signal delivery. Starlings remains the heterogeneous collective-computation substrate. Teams, Exchange email, ACP, A2A, and customer systems are plugins around that core.
 
 ## Product boundary
 
 ```text
-Teams / Email / ACP / A2A / Security Connectors
+Teams / Email / ACP / A2A / Customer plugins
                          │
                          ▼
                   Papyrus daemon
             Entra identity · licensing
-           integration policy · audit
+           plugin policy · action ledger · audit
                          │
                          ▼
                  Starlings runtime
-          observations · claims · conflicts
+        local operators · claims · conflicts
                          │
                          ▼
-                    Cyber twin
+        Mastra sessions · signals · workflows
 ```
 
 - **Identity and portal roles:** Microsoft Entra ID application roles. Papyrus has no invitation, password, provisioning, or local role database.
 - **Operational safety:** Starlings proposes actions; deterministic workflow policy and an Entra-authorized approver release them.
 - **Secrets:** Connector configuration accepts customer-vault, certificate, or managed-identity references. Inline tokens, passwords, client secrets, and private keys are rejected.
 - **Licensing:** The existing deployment-bound, signed, offline license format remains. No Beag cloud callback is required.
-- **Runtime independence:** Teams and email are adapters. Disabling them does not disable the cyber twin.
+- **Runtime independence:** Teams and email are adapters. Disabling them does not disable sessions, workflows, or the Starlings runtime.
+- **Sandboxed execution:** Agent code runs only on Linux under Bubblewrap, with network denied. On any other host execution is off, and the daemon reports why rather than falling back to unisolated execution.
 
 ## Portal
 
-The web product is now rooted at `/portal` and has no chat/session surface:
+The web product is rooted at `/portal`:
 
-- `/portal` — operational posture
-- `/portal/terrain` — cyber terrain
-- `/portal/investigations` — Starlings claims and investigations
-- `/portal/integrations` — operator, evidence, terrain, executor, peer, and infrastructure connectors
+- `/portal` — durable agent sessions and AI SDK UI tool cards
+- `/portal/models` — customer model gateways and the agent-guided model configuration form
+- `/portal/plugins` — installed plugins and the agent-visible tool catalog
+- `/portal/scheduled` — persistent Mastra agent schedules
+- `/portal/workflows` — durable, inspectable Mastra workflows
 - `/portal/governance` — Entra roles, licensing, and action boundary
 
-`/portal/integrations` implements a governed connector lifecycle:
+Plugin configuration happens inside agent messages. A generated tool exists for every catalog entry and returns a typed secure-configuration card. Credential values are never placed in model context; the card sends credential references directly to the daemon. The governed lifecycle remains:
 
 ```text
 Draft → Tested → Awaiting Approval → Active → Degraded / Disabled
 ```
 
-Connector activation and configuration events form an append-only SHA-256 hash chain.
+Integration registration, activation, configuration, and disable events form an append-only SHA-256 hash chain.
 
 ## Entra application roles
 
@@ -71,7 +73,7 @@ Entra is authoritative. Roles are read from validated token claims and are not c
 
 ## Local development
 
-Node.js 24 and pnpm 11 are required.
+Node.js 24 and pnpm 11 are required. macOS and Windows are fine for development — the daemon, portal, connectors, and action ledger all run there. Agent code execution does not: it is Linux-only and enforced with Bubblewrap, and it turns itself off with an explicit log line anywhere else. See [docs/deployment.md](docs/deployment.md#platform-requirements).
 
 ```bash
 pnpm install --frozen-lockfile
@@ -85,10 +87,14 @@ export PAPYRUS_PUBLIC_ORIGIN=http://127.0.0.1:3210
 export PAPYRUS_PORTAL_SECRET="$(openssl rand -hex 32)"
 export PAPYRUS_LICENSE_REQUIRED=false
 export PAPYRUS_DATABASE_PATH=:memory:
+# Optional one-time bootstrap; durable profiles can be configured at /portal/models.
+export PAPYRUS_AGENT_MODEL='openai/gpt-5'
+export PAPYRUS_MODEL_BASE_URL='https://api.openai.com/v1'
+export PAPYRUS_MODEL_CREDENTIAL_REF='env://OPENAI_API_KEY'
 export PAPYRUS_DEV_ENTRA_PRINCIPAL='{
   "oid":"local-owner",
   "tenantId":"local-tenant",
-  "displayName":"Cyber Operations Owner",
+  "displayName":"Operations Owner",
   "preferredUsername":"owner@example.mil",
   "roles":["Papyrus.System.Owner"],
   "groups":[]
@@ -118,9 +124,21 @@ export PAPYRUS_LICENSE_AUTHORITIES='{ "beag-root": "-----BEGIN PUBLIC KEY-----..
 
 Cloud defaults are inferred from the deployment profile, but an explicit value is recommended in production.
 
-## Integration API
+## Runtime API
 
 Authenticated portal clients use:
+
+- `GET|POST /api/sessions`
+- `GET /api/sessions/:id/messages`
+- `POST /api/agent/chat` — AI SDK UI v7 stream
+- `GET|POST /api/model-profiles`
+- `POST|DELETE /api/model-profiles/:id` — test, select, disable, or remove a durable model profile
+- `GET /api/plugins`
+- `POST /api/plugins/connect`
+- `GET|POST /api/schedules`
+- `GET /api/workflows`
+- `POST /api/workflows/:id/runs`
+- `POST /api/signals/:sourceId/webhook` — source-scoped token required
 
 - `GET /api/integrations/catalog`
 - `GET /api/integrations`
@@ -130,14 +148,22 @@ Authenticated portal clients use:
 - `POST /api/integrations/:id/activate`
 - `POST /api/integrations/:id/disable`
 - `GET /api/integrations/:id/events`
+- `POST /api/integrations/:id/observations`
+- `POST /api/integrations/:id/sync`
+- `GET /api/integrations/:id/sync-jobs`
+- `GET /api/terrain`
 
 Teams SSO tokens can be exchanged at `POST /api/auth/teams`; standard portal login uses Entra authorization code + PKCE through `/api/auth/entra/login`.
 
 ## Current experiment boundary
 
-This branch implements the Entra-native daemon, new portal shell, connector catalog, governed integration lifecycle, offline licensing, audit chain, and canonical `Observation`, `Claim`, and `ActionProposal` contracts.
+This branch implements the Entra-native daemon, offline licensing, governed plugin lifecycle, action ledger and leased executor worker, Mastra LibSQL memory, durable evented agent registration, session history, native schedules, a signal-intake workflow, WebhookSignalProvider delivery backed by a database-leased outbox, agent-rendered plugin configuration cards, and guarded URL previews.
 
-Live Teams command handling, Exchange mailbox polling, vendor telemetry drivers, and the Starlings process adapter are the next implementation slices. Their configuration and authority boundaries are represented now; the daemon does not pretend that saving a connector performs live network validation.
+Mastra is now a server dependency. Its storage starts even when no model is configured, so session and workflow state remain available. When `PAPYRUS_AGENT_MODEL` is absent, the daemon refuses chat and keeps incoming signals in `agent_signal_outbox`; it does not invent a default provider or discard events.
+
+`fetchUrlPreview` permits HTTPS by default, follows redirects only after re-validation, limits response size, and rejects credentials, loopback, link-local, metadata, private, and reserved destinations. Reviewed internal hosts can be enumerated with `PAPYRUS_FETCH_ALLOWED_HOSTS`.
+
+The Observation API is an advanced custom-ingestion contract, not the primary production collection workflow. Selecting **Connect** registers a source identity and opens a one-record validation/developer bridge that mints a one-hour source-scoped token. Production telemetry should use native SIEM, EDR, OTEL, email, or OT connectors; unattended custom producers require customer-approved workload identity or mTLS plus durable spooling and batching. Waiting custom sources remain in the catalog rather than appearing as operational. Exchange now has a Microsoft Graph delta-polling and send-mail boundary, but customer deployments must supply the approved vault/workload-identity credential resolver before it performs external calls. Live Teams command handling, additional native security connectors, the customer-vault resolver, and the Starlings process adapter remain implementation slices. Pull integrations cannot activate until their driver is registered, and configuration-only tests leave health unknown rather than pretending that saving a connector performed live network validation.
 
 ## Verification
 
@@ -147,7 +173,7 @@ pnpm test
 pnpm build
 ```
 
-The server test target is the cyber-twin surface. The separate ACP package remains as a machine-interface primitive; it does not provide human chat sessions or a local identity system.
+The separate ACP package remains a machine-interface primitive; it does not provide a local identity system.
 
 ---
 

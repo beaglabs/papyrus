@@ -4,6 +4,7 @@ import { ENTRA_APP_ROLES, PROFILES } from '@papyrus/contracts'
 
 export type EntraCloud = 'Public' | 'USGov' | 'USGovDoD'
 export type SandboxRuntime = 'bwrap' | 'seatbelt'
+export type WorkspaceBackend = 'local' | 'archil'
 
 export interface AgentConfig {
   mode: ServerMode
@@ -17,6 +18,9 @@ export interface AgentConfig {
   organizationName: string
   cloud: EntraCloud
   sandboxRuntime?: SandboxRuntime
+  workspaceBackend?: WorkspaceBackend
+  archilMountPath?: string
+  workspaceLibrarySubdir?: string
   entra?: {
     tenantId: string
     clientId: string
@@ -105,6 +109,12 @@ export function loadAgentConfig(env: NodeJS.ProcessEnv = process.env): AgentConf
     throw new Error('PAPYRUS_SANDBOX_RUNTIME must be bwrap or seatbelt')
   }
   const sandboxRuntime = sandboxRuntimeValue as SandboxRuntime | undefined
+  const workspaceBackendValue = env.PAPYRUS_WORKSPACE_BACKEND?.trim() || 'local'
+  if (workspaceBackendValue !== 'local' && workspaceBackendValue !== 'archil') throw new Error('PAPYRUS_WORKSPACE_BACKEND must be local or archil')
+  const workspaceBackend = workspaceBackendValue as WorkspaceBackend
+  const archilMountPath = env.PAPYRUS_ARCHIL_MOUNT_PATH?.trim()
+  const workspaceLibrarySubdir = env.PAPYRUS_WORKSPACE_LIBRARY_SUBDIR?.trim() || 'Library'
+  if (workspaceLibrarySubdir.startsWith('/') || workspaceLibrarySubdir.includes('..')) throw new Error('PAPYRUS_WORKSPACE_LIBRARY_SUBDIR must be a contained relative path')
   const tenantId = env.PAPYRUS_ENTRA_TENANT_ID?.trim()
   const clientId = env.PAPYRUS_ENTRA_CLIENT_ID?.trim()
   const development = mode === 'local' ? developmentPrincipal(env.PAPYRUS_DEV_ENTRA_PRINCIPAL) : undefined
@@ -131,6 +141,9 @@ export function loadAgentConfig(env: NodeJS.ProcessEnv = process.env): AgentConf
     organizationName: env.PAPYRUS_ORGANIZATION_NAME?.trim() || 'Customer Agent Operations',
     cloud,
     ...(sandboxRuntime ? { sandboxRuntime } : {}),
+    workspaceBackend,
+    ...(archilMountPath ? { archilMountPath: resolve(archilMountPath) } : {}),
+    workspaceLibrarySubdir,
     ...(tenantId && clientId && authority ? { entra: {
       tenantId,
       clientId,

@@ -15,6 +15,8 @@ Papyrus is a customer-hosted durable agent runtime. The repository boundary incl
 - Webpage Links are served as static documents with a restrictive CSP and without Papyrus-injected presentation styles or scripts.
 - API Links serve approved JSON snapshots or explicitly bound durable workflows.
 - Webhook Links are scoped to the creating Mastra {resourceId, threadId}; WebhookSignalProvider routes each inbound event back into that exact session.
+- Webhook Links are the public dynamic-ingestion primitive; legacy Plugin connection and integration-scoped signal webhook routes are not exposed by the portal API.
+- Recurring work is managed through session-scoped Agent tools; the public scheduler CRUD/page surface is not exposed.
 - Webhook logo identity is snapshotted with the approved Link rather than loaded from an untrusted mutable URL.
 - Kitesurf is optional validation only; it is not the hosting authority and is not configurable for government, restricted, or disconnected profiles.
 - nono applies kernel-backed filesystem authority and blocks network access for workspace command execution.
@@ -27,14 +29,14 @@ Papyrus is a customer-hosted durable agent runtime. The repository boundary incl
 | Evidence source | Git blob |
 | --- | --- |
 | `apps/server/src/agent/config.ts` | `288d607bac86deda4f53f8f795900b960d4f59cf` |
-| `apps/server/src/agent/http.ts` | `15aebf08aa0ff019933ebdbd3a972ab31cdde35e` |
+| `apps/server/src/agent/http.ts` | `a339307f7c87cf4c690cfd25cb83001b7f3d6d13` |
 | `apps/server/src/agent/action-worker.ts` | `edee5c81e503ea46f5596c806c73b39884e0383f` |
 | `apps/server/src/agent/catalog.ts` | `e31ac4a9b8f39775708149ba4a3a5e883c577dcd` |
 | `apps/server/src/agent/link-store.ts` | `38dcacf1bc660c0b872efecb52c962610f804795` |
 | `apps/server/src/agent/link-http.ts` | `528c4307baf755403d62219869318dc3935922ec` |
 | `apps/server/src/agent/link-preview.ts` | `fc30c91eea30af9999019d6bc0c565240e13ace7` |
 | `apps/server/src/agent/executors/link-publisher-executor.ts` | `7f31a74af751f8d7009d1667f835b35890663cbd` |
-| `apps/server/src/agent/mastra/runtime.ts` | `025ed910a95af778598801fe69fb766ca3784343` |
+| `apps/server/src/agent/mastra/runtime.ts` | `a73f65da76ce021441e03c715b8cf7230888099e` |
 | `apps/server/src/agent/mastra/workspace-agentfs.ts` | `c2b86023b6a6e33270fc07c745afc63c2fff55b3` |
 | `apps/server/src/agent/mastra/workspace-nono.ts` | `f3ad0004c050eff5658ddc5af62015cea2b40c01` |
 | `apps/server/src/agent/mastra/workspace-nono-worker.ts` | `0dcadce525f5f77664a580ceb444382ace17c0d1` |

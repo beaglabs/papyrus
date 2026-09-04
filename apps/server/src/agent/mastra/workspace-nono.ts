@@ -1,6 +1,9 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { mkdirSync } from 'node:fs'
-import { join, posix } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { join, posix, resolve, sep } from 'node:path'
+import { isSupported, supportInfo } from 'nono-ts'
 import {
   MastraSandbox,
   ProcessHandle,
@@ -11,92 +14,53 @@ import {
   type SandboxInfo,
   type SpawnProcessOptions,
 } from '@mastra/core/workspace'
-import { minimalEnvironment, runBinary, type PapyrusAgentFSFilesystem } from './workspace-agentfs.js'
+import { type MaterializedWorkspace, type PapyrusAgentFSFilesystem } from './workspace-agentfs.js'
 
 export interface NonoWorkspaceSandboxOptions {
   filesystem: PapyrusAgentFSFilesystem
-  binary?: string
   dataDir: string
   platform?: NodeJS.Platform
 }
 
-export interface NonoLaunchPlan {
-  binary: string
-  args: string[]
-  backend: 'fuse' | 'nfs'
-}
-
-/**
- * Build the exact local execution chain:
- *
- * AgentFS transient mount -> nono least-privilege sandbox -> command.
- *
- * AgentFS chooses FUSE on Linux and NFS on macOS. nono independently selects
- * Landlock on Linux and Seatbelt on macOS, so Papyrus does not reimplement
- * either OS sandbox profile.
- */
-export function buildNonoLaunchPlan(
-  filesystem: PapyrusAgentFSFilesystem,
-  nonoBinary: string,
-  command: string,
-  cwd = '/',
-): NonoLaunchPlan {
-  const normalizedCwd = normalizeWorkspaceCwd(cwd)
-  const mountedCwd = normalizedCwd === '/' ? '.' : `.${normalizedCwd}`
-  const shellCommand = `cd -- ${shellQuote(mountedCwd)} && exec /bin/sh -lc ${shellQuote(command)}`
-  return {
-    binary: filesystem.binary,
-    backend: filesystem.mountBackend,
-    args: [
-      'exec',
-      '--backend', filesystem.mountBackend,
-      filesystem.databasePath,
-      nonoBinary,
-      'run',
-      '--allow-cwd',
-      '--block-net',
-      '--',
-      '/bin/sh',
-      '-lc',
-      shellCommand,
-    ],
-  }
-}
+const MAX_COMMAND_BYTES = 64 * 1024
+const WORKER_JS_PATH = fileURLToPath(new URL('./workspace-nono-worker.js', import.meta.url))
+const WORKER_TS_PATH = fileURLToPath(new URL('./workspace-nono-worker.ts', import.meta.url))
 
 export class NonoWorkspaceSandbox extends MastraSandbox {
   readonly id = 'papyrus-nono'
   readonly name = 'Papyrus Nono Sandbox'
-  readonly provider = 'nono'
+  readonly provider = 'nono-ts'
   readonly supportsCheckpoints = false
   readonly workingDirectory = '/'
   status: ProviderStatus = 'pending'
 
   readonly filesystem: PapyrusAgentFSFilesystem
-  readonly nonoBinary: string
   readonly dataDir: string
   readonly platform: NodeJS.Platform
 
   constructor(options: NonoWorkspaceSandboxOptions) {
     const manager = new NonoProcessManager({
       filesystem: options.filesystem,
-      nonoBinary: options.binary ?? 'nono',
       dataDir: options.dataDir,
     })
     super({ name: 'Papyrus Nono Sandbox', processes: manager })
     this.filesystem = options.filesystem
-    this.nonoBinary = options.binary ?? 'nono'
-    this.dataDir = options.dataDir
+    this.dataDir = resolve(options.dataDir)
     this.platform = options.platform ?? process.platform
   }
 
   async start(): Promise<void> {
     if (!['linux', 'darwin'].includes(this.platform)) {
-      throw new Error(`nono workspace sandbox requires Linux or macOS; ${this.platform} is unsupported`)
+      throw new Error(`nono-ts workspace sandbox requires Linux or macOS; ${this.platform} is unsupported`)
     }
-    mkdirSync(join(this.dataDir, '.workspace-home'), { recursive: true, mode: 0o700 })
-    const nono = await runBinary(this.nonoBinary, ['--version'], { cwd: this.dataDir })
-    if (nono.exitCode !== 0) throw new Error(`nono preflight failed: ${nono.stderr.toString('utf8').slice(0, 1000)}`)
-    await this.filesystem._init()
+    if (!isSupported()) {
+      const info = supportInfo()
+      throw new Error(`nono-ts sandbox is unavailable on ${info.platform}: ${info.details}`)
+    }
+    mkdirSync(join(this.dataDir, '.workspace-control'), { recursive: true, mode: 0o700 })
+    mkdirSync(join(this.dataDir, '.workspace-exec'), { recursive: true, mode: 0o700 })
+    mkdirSync(join(this.dataDir, '.workspace-worker-home'), { recursive: true, mode: 0o700 })
+    mkdirSync(join(this.dataDir, '.workspace-worker-tmp'), { recursive: true, mode: 0o700 })
   }
 
   async stop(): Promise<void> {
@@ -111,11 +75,12 @@ export class NonoWorkspaceSandbox extends MastraSandbox {
 
   getInstructions(): string {
     return [
-      'Commands execute locally inside the AgentFS workspace through nono.',
-      `AgentFS uses ${this.filesystem.mountBackend.toUpperCase()} for the transient local mount on this host.`,
-      'nono grants the mounted workspace read/write access and blocks outbound network by default.',
-      'Host credentials, SSH keys, cloud config, and the rest of the host filesystem are not exposed to commands.',
-      'Use workspace-relative paths. External side effects still require Papyrus action executors.',
+      'Workspace files persist directly in the local AgentFS SDK SQLite database.',
+      'When a real OS command is required, Papyrus materializes a bounded snapshot into a private execution directory.',
+      'A dedicated nono-ts worker applies kernel isolation before spawning the command.',
+      'Outbound network is blocked; the user home directory and Papyrus data directory are not granted.',
+      'Command changes are reconciled back into AgentFS only after the process exits.',
+      'External side effects still require Papyrus action executors.',
     ].join(' ')
   }
 
@@ -127,9 +92,10 @@ export class NonoWorkspaceSandbox extends MastraSandbox {
       status: this.status,
       createdAt: new Date(),
       metadata: {
-        isolation: this.platform === 'darwin' ? 'seatbelt-via-nono' : 'landlock-via-nono',
-        filesystem: 'agentfs',
-        agentfsMountBackend: this.filesystem.mountBackend,
+        isolation: this.platform === 'darwin' ? 'seatbelt-via-nono-ts' : 'landlock-via-nono-ts',
+        filesystem: 'agentfs-sdk',
+        storage: 'local-sqlite',
+        execution: 'materialize-sandbox-reconcile',
         network: 'blocked',
       },
     }
@@ -138,30 +104,75 @@ export class NonoWorkspaceSandbox extends MastraSandbox {
 
 class NonoProcessManager extends SandboxProcessManager<NonoWorkspaceSandbox> {
   private readonly filesystem: PapyrusAgentFSFilesystem
-  private readonly nonoBinary: string
   private readonly dataDir: string
+  private executionTail: Promise<void> = Promise.resolve()
 
-  constructor(options: { filesystem: PapyrusAgentFSFilesystem; nonoBinary: string; dataDir: string }) {
+  constructor(options: { filesystem: PapyrusAgentFSFilesystem; dataDir: string }) {
     super()
     this.filesystem = options.filesystem
-    this.nonoBinary = options.nonoBinary
-    this.dataDir = options.dataDir
+    this.dataDir = resolve(options.dataDir)
   }
 
   async spawn(command: string, options: SpawnProcessOptions = {}): Promise<ProcessHandle> {
-    const plan = buildNonoLaunchPlan(this.filesystem, this.nonoBinary, command, options.cwd ?? '/')
-    const environment = minimalEnvironment(this.dataDir, options.env)
-    const startedAt = Date.now()
-    const child = spawn(plan.binary, plan.args, {
-      cwd: this.dataDir,
-      env: environment,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      detached: process.platform !== 'win32',
-      windowsHide: true,
-    })
-    const handle = new NonoProcessHandle(child, startedAt, options)
-    this._tracked.set(handle.pid, handle)
-    return handle
+    if (!command.trim()) throw new Error('Workspace command is required')
+    if (Buffer.byteLength(command) > MAX_COMMAND_BYTES) throw new Error('Workspace command exceeds 64 KiB')
+
+    const releaseLease = await this.acquireExecutionLease()
+    let materialized: MaterializedWorkspace | undefined
+    let controlPath: string | undefined
+
+    try {
+      materialized = await this.filesystem.materializeForExecution()
+      const cwd = normalizeWorkspaceCwd(options.cwd ?? '/')
+      const hostCwd = materializedPath(materialized.root, cwd)
+      if (!existsSync(hostCwd)) throw new Error(`Workspace cwd does not exist: ${cwd}`)
+
+      const home = join(materialized.root, '.papyrus-home')
+      const temp = join(materialized.root, '.papyrus-tmp')
+      mkdirSync(home, { recursive: true, mode: 0o700 })
+      mkdirSync(temp, { recursive: true, mode: 0o700 })
+
+      const controlDirectory = join(this.dataDir, '.workspace-control')
+      mkdirSync(controlDirectory, { recursive: true, mode: 0o700 })
+      controlPath = join(controlDirectory, `${randomUUID()}.json`)
+      writeFileSync(controlPath, JSON.stringify({
+        workspaceRoot: materialized.root,
+        cwd,
+        command,
+        env: workspaceEnvironment(materialized.root, options.env),
+      }), { mode: 0o600, flag: 'wx' })
+
+      const startedAt = Date.now()
+      const child = spawn(process.execPath, workerArguments(controlPath), {
+        cwd: this.dataDir,
+        env: workerBootstrapEnvironment(this.dataDir),
+        stdio: ['pipe', 'pipe', 'pipe'],
+        detached: process.platform !== 'win32',
+        windowsHide: true,
+      })
+      let handle!: NonoProcessHandle
+      handle = new NonoProcessHandle(child, startedAt, options, async (exitCode) => {
+        let finalCode = exitCode
+        try {
+          await this.filesystem.reconcileExecution(materialized!)
+        } catch (error) {
+          handle.emitStderr(`\n[papyrus-workspace] Unable to reconcile command output into AgentFS: ${message(error)}\n`)
+          finalCode = finalCode === 0 ? 70 : finalCode
+        } finally {
+          this.filesystem.cleanupExecution(materialized!)
+          if (controlPath) rmSync(controlPath, { force: true })
+          releaseLease()
+        }
+        return finalCode
+      })
+      this._tracked.set(handle.pid, handle)
+      return handle
+    } catch (error) {
+      if (materialized) this.filesystem.cleanupExecution(materialized)
+      if (controlPath) rmSync(controlPath, { force: true })
+      releaseLease()
+      throw error
+    }
   }
 
   async list(): Promise<ProcessInfo[]> {
@@ -176,10 +187,23 @@ class NonoProcessManager extends SandboxProcessManager<NonoWorkspaceSandbox> {
   async killTracked(): Promise<void> {
     const handles = [...this._tracked.values()]
     await Promise.all(handles.filter((handle) => handle.exitCode === undefined).map((handle) => handle.kill().catch(() => false)))
+    await Promise.all(handles.map((handle) => handle.wait().catch(() => undefined)))
     for (const handle of handles) this.release(handle.pid)
   }
-}
 
+  private async acquireExecutionLease(): Promise<() => void> {
+    const previous = this.executionTail
+    let release!: () => void
+    this.executionTail = new Promise<void>((resolvePromise) => { release = resolvePromise })
+    await previous
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      release()
+    }
+  }
+}
 class NonoProcessHandle extends ProcessHandle {
   readonly pid: string
   private readonly child: ChildProcessWithoutNullStreams
@@ -190,11 +214,11 @@ class NonoProcessHandle extends ProcessHandle {
   private readonly completion: Promise<CommandResult>
   private timeout: ReturnType<typeof setTimeout> | undefined
 
-  constructor(child: ChildProcessWithoutNullStreams, startedAt: number, options: SpawnProcessOptions) {
+  constructor(child: ChildProcessWithoutNullStreams, startedAt: number, options: SpawnProcessOptions, finalize: (exitCode: number) => Promise<number>) {
     super(options)
     this.child = child
     this.startedAt = startedAt
-    this.pid = String(child.pid ?? crypto.randomUUID())
+    this.pid = String(child.pid ?? randomUUID())
 
     child.stdout.setEncoding('utf8')
     child.stderr.setEncoding('utf8')
@@ -202,19 +226,40 @@ class NonoProcessHandle extends ProcessHandle {
     child.stderr.on('data', (value: string) => this.emitStderr(value))
 
     this.completion = new Promise((resolvePromise, reject) => {
-      child.once('error', reject)
-      child.once('close', (code, signal) => {
+      let settled = false
+      child.once('error', (error) => {
+        if (settled) return
+        settled = true
         if (this.timeout) clearTimeout(this.timeout)
-        this._exitCode = code ?? (signal ? 128 : 1)
-        resolvePromise({
-          success: this._exitCode === 0,
-          exitCode: this._exitCode,
-          stdout: this.stdout,
-          stderr: this.stderr,
-          executionTimeMs: Date.now() - this.startedAt,
-          ...(this._timedOut ? { timedOut: true } : {}),
-          ...(this._killed ? { killed: true } : {}),
-        })
+        this.emitStderr(`[papyrus-workspace] Worker failed to start: ${error.message}\n`)
+        void finalize(70).then((finalCode) => {
+          this._exitCode = finalCode
+          resolvePromise({
+            success: false,
+            exitCode: finalCode,
+            stdout: this.stdout,
+            stderr: this.stderr,
+            executionTimeMs: Date.now() - this.startedAt,
+          })
+        }, reject)
+      })
+      child.once('close', (code, signal) => {
+        if (settled) return
+        settled = true
+        if (this.timeout) clearTimeout(this.timeout)
+        const processCode = code ?? (signal ? 128 : 1)
+        void finalize(processCode).then((finalCode) => {
+          this._exitCode = finalCode
+          resolvePromise({
+            success: finalCode === 0,
+            exitCode: finalCode,
+            stdout: this.stdout,
+            stderr: this.stderr,
+            executionTimeMs: Date.now() - this.startedAt,
+            ...(this._timedOut ? { timedOut: true } : {}),
+            ...(this._killed ? { killed: true } : {}),
+          })
+        }, reject)
       })
     })
 
@@ -259,13 +304,56 @@ class NonoProcessHandle extends ProcessHandle {
   }
 }
 
-function normalizeWorkspaceCwd(value: string): string {
+export function normalizeWorkspaceCwd(value: string): string {
   const raw = value.trim() || '/'
   const normalized = posix.normalize(raw.startsWith('/') ? raw : `/${raw}`)
   if (normalized === '/..' || normalized.startsWith('/../')) throw new Error('Sandbox cwd escapes AgentFS workspace')
   return normalized
 }
 
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`
+function workerArguments(controlPath: string): string[] {
+  if (existsSync(WORKER_JS_PATH)) return [WORKER_JS_PATH, controlPath]
+  if (existsSync(WORKER_TS_PATH)) {
+    // pnpm dev executes the source tree through tsx. Resolve the exact loader
+    // from this trusted module rather than relying on PATH.
+    return ['--import', import.meta.resolve('tsx'), WORKER_TS_PATH, controlPath]
+  }
+  throw new Error('Papyrus workspace executor worker is missing from this build')
+}
+function materializedPath(root: string, virtualPath: string): string {
+  const normalized = normalizeWorkspaceCwd(virtualPath)
+  const target = resolve(root, normalized.replace(/^\/+/, ''))
+  if (target !== root && !target.startsWith(root + sep)) throw new Error('Sandbox path escapes materialized workspace')
+  return target
+}
+
+export function workspaceEnvironment(root: string, overlay: Record<string, string | undefined> = {}): Record<string, string> {
+  const environment: Record<string, string> = {
+    PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin',
+    LANG: process.env.LANG ?? 'C.UTF-8',
+    HOME: join(root, '.papyrus-home'),
+    TMPDIR: join(root, '.papyrus-tmp'),
+  }
+  for (const [key, value] of Object.entries(overlay)) {
+    if (value === undefined || sensitiveEnvironmentKey(key)) continue
+    environment[key] = value
+  }
+  return environment
+}
+
+function workerBootstrapEnvironment(dataDir: string): NodeJS.ProcessEnv {
+  return {
+    PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin',
+    LANG: process.env.LANG ?? 'C.UTF-8',
+    HOME: join(dataDir, '.workspace-worker-home'),
+    TMPDIR: join(dataDir, '.workspace-worker-tmp'),
+  }
+}
+
+function sensitiveEnvironmentKey(key: string): boolean {
+  return /(SECRET|TOKEN|PASSWORD|PASSWD|API[_-]?KEY|PRIVATE[_-]?KEY|CREDENTIAL)/i.test(key)
+}
+
+function message(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }

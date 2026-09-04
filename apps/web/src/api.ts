@@ -40,11 +40,13 @@ export interface AgentStatus {
   model: string | null
   mode: 'starlings' | 'centralized'
   workspace?: {
-    filesystem: 'agentfs'
-    mountBackend: 'fuse' | 'nfs'
-    sandbox: 'nono'
+    filesystem: 'agentfs-sdk'
+    storage: 'local-sqlite'
+    programmableRuntime: 'enclave-strict'
+    processSandbox: 'nono-ts'
     isolation: 'landlock' | 'seatbelt' | 'unsupported'
     network: 'blocked'
+    rawShell: false
   }
   signalBacklog: Record<'pending' | 'delivering' | 'delivered' | 'failed', number>
 }
@@ -193,7 +195,7 @@ export function workspaceFileContentUrl(path: string, download = false): string 
   return `/api/workspace/files/content?path=${encodeURIComponent(path)}${download ? '&download=1' : ''}`
 }
 
-export async function createSchedule(input: { name: string; cron: string; prompt: string; timezone?: string; threadId?: string }): Promise<AgentSchedule> {
+export async function createSchedule(input: { name: string; cron: string; prompt: string; timezone?: string; threadId: string }): Promise<AgentSchedule> {
   return api('/api/schedules', { method: 'POST', body: JSON.stringify(input) })
 }
 

@@ -21,7 +21,10 @@
     "ai": "7.0.89",
     "jose": "6.2.9",
     "libsql": "^0.5.29",
-    "zod": "4.5.4"
+    "zod": "4.5.4",
+    "agentfs-sdk": "0.6.4",
+    "nono-ts": "0.3.0",
+    "@enclave-vm/core": "2.15.2"
   },
   "devDependencies": {
     "@types/node": "24.10.1",

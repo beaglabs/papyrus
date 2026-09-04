@@ -95,7 +95,7 @@ export class ArtifactStore {
 
   importBytes(name: string, bytes: Buffer, options: { skill?: string; skillVersion?: string; sessionId?: string } = {}): ArtifactRecord {
     if (bytes.byteLength > 100 * 1024 * 1024) throw new Error('Artifact exceeds the 100 MiB publication limit')
-    const safe = normalizedName(name, extname(name) || '.bin')
+    const safe = normalizedImportedName(name, name)
     return this.persist(safe, bytes, {
       producer: 'workspace',
       ...(options.skill ? { skill: options.skill } : {}),

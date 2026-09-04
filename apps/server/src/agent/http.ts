@@ -329,8 +329,8 @@ export function createAgentServer(config: AgentConfig, service: AgentService, au
         return json(response, 201, await mastra.createSchedule({
           name: requiredString(input.name, 'name', 120), cron: requiredString(input.cron, 'cron', 120),
           prompt: requiredString(input.prompt, 'prompt', 10_000),
+          threadId: requiredString(input.threadId, 'threadId', 256),
           ...(typeof input.timezone === 'string' && input.timezone ? { timezone: input.timezone } : {}),
-          ...(typeof input.threadId === 'string' && input.threadId ? { threadId: input.threadId } : {}),
         }))
       }
       const scheduleResource = url.pathname.match(/^\/api\/schedules\/([^/]+)$/)

@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { Badge, Button, Card, Checkbox, Input, NativeSelect, TabsList, TabsTrigger, Textarea } from './index.js'
+import { Badge, Button, Card, Checkbox, Combobox, Input, NativeSelect, Skeleton, TabsList, TabsTrigger, Textarea } from './index.js'
+import { Sidebar, SidebarContent, SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider } from './sidebar.js'
 
 describe('neobrutalism UI primitives',()=>{
   it('exposes stable data slots for application styling',()=>{
@@ -17,5 +18,20 @@ describe('neobrutalism UI primitives',()=>{
       expect(html).toContain(`data-slot="${slot}"`)
     }
     expect(html).toContain('data-state="active"')
+  })
+  it('renders combobox, skeleton, and composable sidebar primitives',()=>{
+    const html=renderToStaticMarkup(<>
+      <Combobox value="daily" placeholder="Choose schedule" options={[{value:'daily',label:'Daily'}]} />
+      <Skeleton />
+      <SidebarProvider>
+        <Sidebar><SidebarContent><SidebarMenu><SidebarMenuItem><SidebarMenuButton isActive>Agent</SidebarMenuButton></SidebarMenuItem></SidebarMenu></SidebarContent></Sidebar>
+        <SidebarInset>Workspace</SidebarInset>
+      </SidebarProvider>
+    </>)
+    expect(html).toContain('data-slot="combobox"')
+    expect(html).toContain('data-slot="skeleton"')
+    expect(html).toContain('data-slot="sidebar-wrapper"')
+    expect(html).toContain('data-slot="sidebar"')
+    expect(html).toContain('data-active="true"')
   })
 })

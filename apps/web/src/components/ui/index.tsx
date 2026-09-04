@@ -52,6 +52,10 @@ export function Badge({className,...props}:HTMLAttributes<HTMLSpanElement>){
 export function Alert({className,...props}:HTMLAttributes<HTMLDivElement>){
   return <div role="alert" data-slot="alert" className={classes('nb-alert',className)} {...props}/>
 }
+export function Skeleton({className,...props}:HTMLAttributes<HTMLDivElement>){
+  return <div aria-hidden="true" data-slot="skeleton" className={classes('nb-skeleton',className)} {...props}/>
+}
+
 export function EmptyState({title,description,action,className}:{title:string;description?:string;action?:ReactNode;className?:string}){
   return <Card className={classes('nb-empty-state',className)}><CardContent><span className="nb-empty-mark" aria-hidden="true">＋</span><h2>{title}</h2>{description&&<p>{description}</p>}{action}</CardContent></Card>
 }

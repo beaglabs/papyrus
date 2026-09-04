@@ -127,6 +127,8 @@ function Chat({ session, status, initial, input, setInput, historyError, history
 }) {
   const [attachments, setAttachments] = useState<WorkspaceLibraryFile[]>([])
   const attachmentRef = useRef<WorkspaceLibraryFile[]>([])
+  const messageListRef = useRef<HTMLDivElement>(null)
+  const followLatestRef = useRef(true)
   const transport = useMemo(() => new DefaultChatTransport<UIMessage>({
     api: '/api/agent/chat',
     credentials: 'same-origin',
@@ -142,10 +144,20 @@ function Chat({ session, status, initial, input, setInput, historyError, history
   const { messages, sendMessage, status: chatStatus, error, stop } = useChat({ id: session.id, messages: initial, transport })
   const working = chatStatus === 'submitted' || chatStatus === 'streaming'
 
+  useEffect(() => {
+    if (!followLatestRef.current) return
+    const frame = window.requestAnimationFrame(() => {
+      const list = messageListRef.current
+      if (list) list.scrollTop = list.scrollHeight
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [messages, working, error, historyLoading])
+
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     const text = input.trim()
     if ((!text && attachments.length === 0) || working || !status.agentReady) return
+    followLatestRef.current = true
     attachmentRef.current = attachments
     const messageText = text || `Review the attached ${attachments.length === 1 ? 'file' : 'files'}.`
     setInput('')
@@ -159,7 +171,12 @@ function Chat({ session, status, initial, input, setInput, historyError, history
     <div className="agent-session-head"><div><p className="eyebrow">DURABLE SESSION</p><h2>{session.title}</h2></div><div className="agent-badges"><Badge>{status.mode.toUpperCase()}</Badge><Badge className={status.durable ? 'status-good' : ''}>{status.durable ? 'DURABLE' : 'OFFLINE'}</Badge></div></div>
     {!status.agentReady && <Alert className="agent-config-alert"><strong>Agent model not configured</strong><span>Open <a href="/portal/models">Models</a> to configure an approved gateway using the first-run form. Chat unlocks after the daemon has a tested model profile.</span></Alert>}
     {historyError && <Alert className="error">{historyError}</Alert>}
-    <div className="message-list" aria-live="polite">
+    <div
+      ref={messageListRef}
+      className="message-list"
+      aria-live="polite"
+      onScroll={(event) => { followLatestRef.current = isNearScrollBottom(event.currentTarget) }}
+    >
       {historyLoading && messages.length === 0 && <MessageSkeleton />}
       {!historyLoading && messages.length === 0 && <Welcome />}
       {messages.map((message) => <Message key={message.id} message={message} sessionId={session.id} canApprove={canApprove} canManageSkills={canManageSkills} onChanged={onChanged} />)}
@@ -474,6 +491,10 @@ function SkillDraftCard({ output, canManage, onChanged }: { output: SkillDraftOu
     {error && <Alert className="error">{error}</Alert>}
     <div className="proposal-controls">{state === 'enabled' ? <Badge className="status-good">ENABLED</Badge> : canManage ? <Button className="primary" disabled={state === 'approving'} onClick={() => void approve()}>{state === 'approving' ? 'Approving…' : 'Approve & enable'}</Button> : <small>A Papyrus.System.Owner must approve this skill.</small>}</div>
   </Card>
+}
+
+export function isNearScrollBottom(element: Pick<HTMLElement, 'scrollHeight' | 'scrollTop' | 'clientHeight'>, threshold = 96): boolean {
+  return element.scrollHeight - element.scrollTop - element.clientHeight <= threshold
 }
 
 function formatBytes(value: number): string {

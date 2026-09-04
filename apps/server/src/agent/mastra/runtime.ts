@@ -6,10 +6,6 @@ import type { AgentService } from '../service.js'
 import type { TerrainStore } from '../terrain-store.js'
 import { SignalOutbox, type SignalRecord } from './signal-outbox.js'
 import {
-  resolveSandboxPolicy,
-  type SandboxPolicy,
-} from './sandbox-policy.js'
-import {
   INVESTIGATION_TOOLS,
   runInvestigationTool,
   type InvestigationToolContext,
@@ -100,7 +96,6 @@ export class MastraRuntime {
   readonly workspaceSandbox: NonoWorkspaceSandbox
   private mastra: MastraHandle | undefined
   private started = false
-  private sandbox: SandboxPolicy | undefined
   private timer: ReturnType<typeof setInterval> | undefined
 
   constructor(
@@ -127,11 +122,6 @@ export class MastraRuntime {
       dataDir: config.dataDir,
     })
     this.tools = { actionStore, terrain }
-  }
-
-  /** Resolved during start(); undefined until then. */
-  get sandboxPolicy(): SandboxPolicy | undefined {
-    return this.sandbox
   }
 
   get harnessReady(): boolean {

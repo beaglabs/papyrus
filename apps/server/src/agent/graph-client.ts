@@ -56,12 +56,19 @@ export interface GraphMessagePage {
   hasMore: boolean
 }
 
+export interface SendGraphMailAttachment {
+  name: string
+  contentType: string
+  contentBytes: string
+}
+
 export interface SendGraphMailInput {
   mailbox: string
   to: string[]
   subject: string
   body: string
   bodyContentType?: 'Text' | 'HTML'
+  attachments?: SendGraphMailAttachment[]
   /** Passed to Graph as a client request id for supportability and tracing. */
   clientRequestId: string
 }
@@ -144,6 +151,12 @@ export class HttpMicrosoftGraphClient implements MicrosoftGraphClient {
           subject: input.subject,
           body: { contentType: input.bodyContentType ?? 'Text', content: input.body },
           toRecipients: input.to.map((address) => ({ emailAddress: { address } })),
+          ...(input.attachments?.length ? { attachments: input.attachments.map((attachment) => ({
+            '@odata.type': '#microsoft.graph.fileAttachment',
+            name: attachment.name,
+            contentType: attachment.contentType,
+            contentBytes: attachment.contentBytes,
+          })) } : {}),
         },
         saveToSentItems: true,
       }),

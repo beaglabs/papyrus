@@ -31,7 +31,7 @@ const server = createAgentServer(config, service, auth, mastraRuntime)
 // approved outbound mail. The default client deliberately refuses to resolve
 // credentials until the customer supplies its vault/workload-identity adapter.
 connectors.register('exchange-email', new ExchangeEmailDriver(graph))
-executorRegistry.register('exchange-email', new EmailExecutor(database, graph))
+executorRegistry.register('exchange-email', new EmailExecutor(database, graph, mastraRuntime.artifacts))
 
 server.listen(config.port, config.host, () => {
   worker.start()

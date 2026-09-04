@@ -82,7 +82,7 @@ export function App() {
       </aside>
       <main className={`portal-main ${view === 'agent' ? 'agent-main' : ''}`}><PortalHeader view={view} data={data} />
         {view === 'agent' && (selectedSession
-          ? <AgentView key={selectedSession.id} session={selectedSession} status={data.agent} initialPrompt={initialPrompt} canApprove={data.me.roles.includes('Papyrus.System.Owner') || data.me.roles.includes('Papyrus.Action.Approve')} onChanged={refresh} />
+          ? <AgentView key={selectedSession.id} session={selectedSession} status={data.agent} initialPrompt={initialPrompt} canApprove={data.me.roles.includes('Papyrus.System.Owner') || data.me.roles.includes('Papyrus.Action.Approve')} canManageSkills={data.me.roles.includes('Papyrus.System.Owner')} onChanged={refresh} />
           : <EmptyAgent onCreate={() => void newSession()} />)}
         {view === 'models' && <ModelsView profiles={data.models} onAskAgent={(prompt) => navigate('agent', { prompt, session: selectedSession?.id })} onChanged={refresh} canManage={data.me.roles.includes('Papyrus.System.Owner') || data.me.roles.includes('Papyrus.Integration.Manage')} />}
         {view === 'plugins' && <PluginsView catalog={data.catalog} configured={data.integrations} onAskAgent={(prompt) => navigate('agent', { prompt, session: selectedSession?.id })} onChanged={refresh} canManage={data.me.roles.includes('Papyrus.System.Owner') || data.me.roles.includes('Papyrus.Integration.Manage')} />}

@@ -2,7 +2,7 @@ import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport, type UIMessage } from 'ai'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { AgentSession, AgentStatus } from './api.js'
-import { approveProposal, connectPlugin, createSessionProposal, denyProposal, issueIngestionToken, sessionMessages, setSessionAttention } from './api.js'
+import { approveProposal, approveSkill, connectPlugin, createSessionProposal, denyProposal, issueIngestionToken, sessionMessages, setSessionAttention } from './api.js'
 import { ModelGatewayCard } from './Models.js'
 import { Alert, Badge, Button, Card, Input, Label, NativeSelect, Textarea } from './components/ui/index.js'
 import { MarkdownMessage } from './Markdown.js'
@@ -47,11 +47,43 @@ interface UrlPreview {
   excerpt?: string
 }
 
-export function AgentView({ session, status, initialPrompt, canApprove, onChanged }: {
+interface ArtifactOutput {
+  kind: 'artifact'
+  id: string
+  name: string
+  mediaType: string
+  size: number
+  sha256: string
+  createdAt: string
+  contentUrl: string
+  downloadUrl: string
+  preview: {
+    kind: 'pdf' | 'document' | 'spreadsheet' | 'video' | 'image' | 'text' | 'generic'
+    text?: string
+    sheets?: Array<{ name: string; rows: Array<Array<string | number | boolean | null>> }>
+  }
+  provenance: { producer: string; skill?: string; skillVersion?: string }
+}
+
+interface SkillDraftOutput {
+  kind: 'skill_draft'
+  skill: {
+    id: string
+    name: string
+    version: string
+    description: string
+    requestedCapabilities: string[]
+    trust: string
+    state: string
+  }
+}
+
+export function AgentView({ session, status, initialPrompt, canApprove, canManageSkills, onChanged }: {
   session: AgentSession
   status: AgentStatus
   initialPrompt?: string | undefined
   canApprove: boolean
+  canManageSkills: boolean
   onChanged: () => Promise<void>
 }) {
   const [initial, setInitial] = useState<UIMessage[]>([])
@@ -66,10 +98,10 @@ export function AgentView({ session, status, initialPrompt, canApprove, onChange
     return () => { active = false }
   }, [session.id])
 
-  return <Chat key={`${session.id}:${initial.length}`} session={session} status={status} initial={initial} input={input} setInput={setInput} historyError={historyError} canApprove={canApprove} onChanged={onChanged} />
+  return <Chat key={`${session.id}:${initial.length}`} session={session} status={status} initial={initial} input={input} setInput={setInput} historyError={historyError} canApprove={canApprove} canManageSkills={canManageSkills} onChanged={onChanged} />
 }
 
-function Chat({ session, status, initial, input, setInput, historyError, canApprove, onChanged }: {
+function Chat({ session, status, initial, input, setInput, historyError, canApprove, canManageSkills, onChanged }: {
   session: AgentSession
   status: AgentStatus
   initial: UIMessage[]
@@ -77,6 +109,7 @@ function Chat({ session, status, initial, input, setInput, historyError, canAppr
   setInput: (value: string) => void
   historyError: string | undefined
   canApprove: boolean
+  canManageSkills: boolean
   onChanged: () => Promise<void>
 }) {
   const transport = useMemo(() => new DefaultChatTransport<UIMessage>({
@@ -101,12 +134,12 @@ function Chat({ session, status, initial, input, setInput, historyError, canAppr
     {historyError && <Alert className="error">{historyError}</Alert>}
     <div className="message-list" aria-live="polite">
       {messages.length === 0 && <Welcome />}
-      {messages.map((message) => <Message key={message.id} message={message} sessionId={session.id} canApprove={canApprove} onChanged={onChanged} />)}
+      {messages.map((message) => <Message key={message.id} message={message} sessionId={session.id} canApprove={canApprove} canManageSkills={canManageSkills} onChanged={onChanged} />)}
       {working && <div className="agent-thinking"><span /><span /><span /> Papyrus is working</div>}
       {error && <Alert className="error">{error.message}</Alert>}
     </div>
     <form className="composer" onSubmit={(event) => void submit(event)}>
-      <Textarea value={input} onChange={(event) => setInput(event.target.value)} disabled={!status.agentReady} placeholder="Ask Papyrus to investigate, connect a plugin, run a workflow, or preview a URL…" onKeyDown={(event) => {
+      <Textarea value={input} onChange={(event) => setInput(event.target.value)} disabled={!status.agentReady} placeholder="Ask Papyrus to investigate, create a document, build a spreadsheet, connect a plugin, or run a workflow…" onKeyDown={(event) => {
         if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() }
       }} />
       <div><small>Secrets never enter the conversation.</small>{working ? <Button type="button" onClick={() => void stop()}>Stop</Button> : <Button className="primary" disabled={!input.trim() || !status.agentReady}>Send ↑</Button>}</div>
@@ -115,15 +148,15 @@ function Chat({ session, status, initial, input, setInput, historyError, canAppr
 }
 
 function Welcome() {
-  return <div className="agent-welcome"><span className="agent-orbit">✦</span><p className="eyebrow">PAPYRUS RUNTIME</p><h2>What should the population work on?</h2><p>Start a task, connect an operational plugin, inspect a URL, or schedule recurring work. Starlings handles collective reasoning; Mastra makes the session durable and event-driven.</p><div className="prompt-chips"><span>Connect Exchange Email</span><span>Preview a URL</span><span>Create a daily briefing</span></div></div>
+  return <div className="agent-welcome"><span className="agent-orbit">✦</span><p className="eyebrow">PAPYRUS RUNTIME</p><h2>What should the population work on?</h2><p>Start a task, create a durable artifact, connect an operational plugin, or schedule recurring work. Starlings handles collective reasoning; Mastra makes the session durable and event-driven.</p><div className="prompt-chips"><span>Create a PDF briefing</span><span>Build an XLSX risk register</span><span>Create a reusable skill</span></div></div>
 }
 
-function Message({ message, sessionId, canApprove, onChanged }: { message: UIMessage; sessionId: string; canApprove: boolean; onChanged: () => Promise<void> }) {
-  return <article className={`chat-message ${message.role}`}><div className="message-author">{message.role === 'user' ? 'YOU' : 'PAPYRUS'}</div><div className="message-body">{message.parts.map((part, index) => <MessagePart key={`${part.type}:${index}`} part={part as unknown as Record<string, unknown>} sessionId={sessionId} canApprove={canApprove} onChanged={onChanged} />)}</div></article>
+function Message({ message, sessionId, canApprove, canManageSkills, onChanged }: { message: UIMessage; sessionId: string; canApprove: boolean; canManageSkills: boolean; onChanged: () => Promise<void> }) {
+  return <article className={`chat-message ${message.role}`}><div className="message-author">{message.role === 'user' ? 'YOU' : 'PAPYRUS'}</div><div className="message-body">{message.parts.map((part, index) => <MessagePart key={`${part.type}:${index}`} part={part as unknown as Record<string, unknown>} sessionId={sessionId} canApprove={canApprove} canManageSkills={canManageSkills} onChanged={onChanged} />)}</div></article>
 }
 
-function MessagePart({ part, sessionId, canApprove, onChanged }: { part: Record<string, unknown>; sessionId: string; canApprove: boolean; onChanged: () => Promise<void> }) {
-  if (part['type'] === 'text') return <MarkdownMessage>{String(part['text'] ?? '')}</MarkdownMessage>
+function MessagePart({ part, sessionId, canApprove, canManageSkills, onChanged }: { part: Record<string, unknown>; sessionId: string; canApprove: boolean; canManageSkills: boolean; onChanged: () => Promise<void> }) {
+  if (part['type'] === 'text') return <p className="message-text">{String(part['text'] ?? '')}</p>
   if (part['type'] === 'source-url') return <a className="source-link" href={String(part['url'])} target="_blank" rel="noreferrer">{String(part['title'] ?? part['url'])} ↗</a>
   const type = String(part['type'] ?? '')
   if (type === 'dynamic-tool' || type.startsWith('tool-')) {
@@ -132,6 +165,8 @@ function MessagePart({ part, sessionId, canApprove, onChanged }: { part: Record<
     if (output?.['kind'] === 'model_gateway_request') return <ModelGatewayCard request={output as unknown as ModelGatewayRequest} onChanged={onChanged} />
     if (output?.['kind'] === 'url_preview') return <UrlPreviewCard preview={output as unknown as UrlPreview} />
     if (output?.['kind'] === 'action_suggestion') return <ActionSuggestionCard suggestion={output} sessionId={sessionId} canApprove={canApprove} onChanged={onChanged} />
+    if (output?.['kind'] === 'artifact') return <ArtifactCard artifact={output as unknown as ArtifactOutput} />
+    if (output?.['kind'] === 'skill_draft') return <SkillDraftCard output={output as unknown as SkillDraftOutput} canManage={canManageSkills} onChanged={onChanged} />
     const name = type === 'dynamic-tool' ? String(part['toolName'] ?? 'tool') : type.slice(5)
     const state = String(part['state'] ?? 'running')
     return <Card className="tool-card"><div><span className="tool-icon">⌁</span><strong>{humanize(name)}</strong></div><Badge>{humanize(state)}</Badge>{state === 'output-error' && <p>{String(part['errorText'] ?? 'Tool failed')}</p>}</Card>
@@ -198,6 +233,57 @@ function UrlPreviewCard({ preview }: { preview: UrlPreview }) {
   let host = preview.finalUrl
   try { host = new URL(preview.finalUrl).hostname } catch { /* keep URL */ }
   return <a className="url-preview" href={preview.finalUrl} target="_blank" rel="noreferrer"><div className="url-preview-status"><span>{host}</span><Badge>{preview.status}</Badge></div><h3>{preview.title ?? preview.finalUrl}</h3>{preview.description && <p>{preview.description}</p>}{preview.excerpt && <small>{preview.excerpt}</small>}<span className="url-preview-open">Open URL ↗</span></a>
+}
+
+
+function ArtifactCard({ artifact }: { artifact: ArtifactOutput }) {
+  const [sheetIndex, setSheetIndex] = useState(0)
+  const sheets = artifact.preview.sheets ?? []
+  const selectedSheet = sheets[Math.min(sheetIndex, Math.max(0, sheets.length - 1))]
+  return <Card className="artifact-card">
+    <div className="artifact-head">
+      <span className="artifact-icon">{artifact.preview.kind === 'spreadsheet' ? '▦' : artifact.preview.kind === 'video' ? '▶' : artifact.preview.kind === 'image' ? '▧' : '▤'}</span>
+      <div><p className="eyebrow">DURABLE ARTIFACT</p><h3>{artifact.name}</h3><small>{artifact.mediaType} · {formatBytes(artifact.size)}</small></div>
+      <Badge>{artifact.preview.kind}</Badge>
+    </div>
+    {artifact.preview.kind === 'pdf' && <iframe className="artifact-pdf-preview" src={artifact.contentUrl} title={`Preview ${artifact.name}`} />}
+    {artifact.preview.kind === 'video' && <video className="artifact-video-preview" controls src={artifact.contentUrl} />}
+    {artifact.preview.kind === 'image' && <img className="artifact-image-preview" src={artifact.contentUrl} alt={artifact.name} />}
+    {artifact.preview.kind === 'document' && artifact.preview.text && <div className="artifact-document-preview">{artifact.preview.text.slice(0, 1800)}</div>}
+    {artifact.preview.kind === 'text' && artifact.preview.text && <pre className="artifact-text-preview">{artifact.preview.text}</pre>}
+    {artifact.preview.kind === 'spreadsheet' && sheets.length > 0 && <div className="artifact-sheet-preview">
+      {sheets.length > 1 && <div className="artifact-sheet-tabs">{sheets.map((sheet, index) => <button key={sheet.name} type="button" className={index === sheetIndex ? 'active' : ''} onClick={() => setSheetIndex(index)}>{sheet.name}</button>)}</div>}
+      {selectedSheet && <div className="artifact-sheet-table"><table><tbody>{selectedSheet.rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => rowIndex === 0 ? <th key={cellIndex}>{String(cell ?? '')}</th> : <td key={cellIndex}>{String(cell ?? '')}</td>)}</tr>)}</tbody></table></div>}
+    </div>}
+    <div className="artifact-actions">
+      <span className="artifact-hash">SHA-256 {artifact.sha256.slice(0, 12)}…{artifact.provenance.skill ? ` · ${artifact.provenance.skill}@${artifact.provenance.skillVersion ?? 'current'}` : ''}</span>
+      <div><a className="nb-button" href={artifact.contentUrl} target="_blank" rel="noreferrer">Open ↗</a><a className="nb-button primary" href={artifact.downloadUrl}>Download</a></div>
+    </div>
+  </Card>
+}
+
+function SkillDraftCard({ output, canManage, onChanged }: { output: SkillDraftOutput; canManage: boolean; onChanged: () => Promise<void> }) {
+  const [state, setState] = useState<'draft' | 'approving' | 'enabled'>(output.skill.state === 'enabled' ? 'enabled' : 'draft')
+  const [error, setError] = useState<string>()
+  const approve = async () => {
+    setState('approving'); setError(undefined)
+    try { await approveSkill(output.skill.id); setState('enabled'); await onChanged() }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to approve skill'); setState('draft') }
+  }
+  return <Card className="skill-draft-card">
+    <div className="skill-draft-head"><span className="artifact-icon">◇</span><div><p className="eyebrow">SKILL DRAFT</p><h3>{output.skill.name} <small>v{output.skill.version}</small></h3></div><Badge>{state}</Badge></div>
+    <p>{output.skill.description}</p>
+    <div className="skill-capabilities">{output.skill.requestedCapabilities.length ? output.skill.requestedCapabilities.map((capability) => <Badge key={capability}>{capability}</Badge>) : <small>No additional capabilities requested.</small>}</div>
+    <p className="skill-trust-note">This draft is inert. Requested capabilities do not grant authority; Papyrus only exposes tools already allowed by deployment policy.</p>
+    {error && <Alert className="error">{error}</Alert>}
+    <div className="proposal-controls">{state === 'enabled' ? <Badge className="status-good">ENABLED</Badge> : canManage ? <Button className="primary" disabled={state === 'approving'} onClick={() => void approve()}>{state === 'approving' ? 'Approving…' : 'Approve & enable'}</Button> : <small>A Papyrus.System.Owner must approve this skill.</small>}</div>
+  </Card>
+}
+
+function formatBytes(value: number): string {
+  if (value < 1024) return `${value} B`
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`
 }
 
 function humanize(value: string): string { return value.replaceAll('_', ' ').replace(/([a-z])([A-Z])/g, '$1 $2') }

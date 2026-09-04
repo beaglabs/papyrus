@@ -47,7 +47,12 @@ export function SidebarProvider({
   className?: string
   style?: CSSProperties
 }) {
-  const [open, setOpenState] = useState(defaultOpen)
+  const [open, setOpenState] = useState(() => {
+    if (typeof document === 'undefined') return defaultOpen
+    const match = document.cookie.split('; ').find((entry) => entry.startsWith(`${SIDEBAR_COOKIE_NAME}=`))
+    if (!match) return defaultOpen
+    return match.slice(SIDEBAR_COOKIE_NAME.length + 1) === 'true'
+  })
   const [openMobile, setOpenMobile] = useState(false)
   const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches)
 

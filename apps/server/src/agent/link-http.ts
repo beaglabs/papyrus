@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http'
+import { posix } from 'node:path'
 import type { AgentLink, LinkInbound } from '@papyrus/contracts'
 import type { MastraRuntime } from './mastra/runtime.js'
 
 const MAX_LINK_BODY = 512 * 1024
 const MAX_LINK_RESPONSE = 2 * 1024 * 1024
+const MAX_LINK_ASSET = 100 * 1024 * 1024
 
 export async function handlePublicLink(
   request: IncomingMessage,
@@ -12,15 +14,22 @@ export async function handlePublicLink(
   url: URL,
   mastra: MastraRuntime,
 ): Promise<boolean> {
+  const assetMatch = url.pathname.match(/^\/l\/([^/]+)\/assets\/([^/]+)$/)
   const match = url.pathname.match(/^\/l\/([^/]+)$/)
-  if (!match) return false
+  if (!assetMatch && !match) return false
+
   let slug: string
-  try { slug = decodeURIComponent(match[1] as string) } catch { return publicError(response, 400, 'INVALID_LINK', 'Invalid Link path') }
+  try { slug = decodeURIComponent((assetMatch?.[1] ?? match?.[1]) as string) } catch { return publicError(response, 400, 'INVALID_LINK', 'Invalid Link path') }
 
   const link = mastra.links.getBySlug(slug)
   if (!link || link.state !== 'live') return publicError(response, 404, 'LINK_NOT_FOUND', 'Link not found')
 
   try {
+    if (assetMatch) {
+      let assetName: string
+      try { assetName = decodeURIComponent(assetMatch[2] as string) } catch { return publicError(response, 400, 'INVALID_LINK_ASSET', 'Invalid Link asset path') }
+      return await serveLinkAsset(request, response, mastra, link, assetName)
+    }
     if (link.type === 'webpage') return await serveWebpage(request, response, mastra, link)
     if (link.type === 'api') return await serveApi(request, response, url, mastra, link)
     return await acceptWebhook(request, response, url, mastra, link)
@@ -28,6 +37,55 @@ export async function handlePublicLink(
     const message = cause instanceof Error ? cause.message : 'Link request failed'
     return publicError(response, 500, 'LINK_REQUEST_FAILED', message)
   }
+}
+
+async function serveLinkAsset(
+  request: IncomingMessage,
+  response: ServerResponse,
+  mastra: MastraRuntime,
+  link: AgentLink,
+  assetName: string,
+): Promise<true> {
+  if (!['GET', 'HEAD'].includes(request.method ?? '')) return methodNotAllowed(response, ['GET', 'HEAD'])
+  if (!assetName || posix.basename(assetName) !== assetName || assetName === '.' || assetName === '..') {
+    return publicError(response, 400, 'INVALID_LINK_ASSET', 'Invalid Link asset path')
+  }
+
+  const assetPath = `${posix.dirname(link.blobPath)}/assets/${assetName}`
+  if (!(await mastra.workspaceFilesystem.exists(assetPath))) return publicError(response, 404, 'LINK_ASSET_NOT_FOUND', 'Link asset not found')
+  const file = await mastra.workspaceFilesystem.describeLibraryFile(assetPath)
+  if (file.size > MAX_LINK_ASSET) return publicError(response, 413, 'LINK_ASSET_TOO_LARGE', 'Published Link asset exceeds the serving limit')
+  const value = await mastra.workspaceFilesystem.readFile(assetPath)
+  const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value)
+  mastra.links.recordPing(link.id, { method: request.method ?? 'GET', surface: 'asset', asset: assetName })
+
+  publicHeaders(response)
+  response.setHeader('content-type', file.mediaType)
+  response.setHeader('content-disposition', `inline; filename="${assetName.replace(/["\\]/g, '_')}"`)
+  response.setHeader('accept-ranges', 'bytes')
+
+  const range = typeof request.headers.range === 'string' ? request.headers.range : undefined
+  const parsed = range ? parseByteRange(range, bytes.length) : undefined
+  if (range && !parsed) {
+    response.setHeader('content-range', `bytes */${bytes.length}`)
+    response.writeHead(416)
+    response.end()
+    return true
+  }
+
+  if (parsed) {
+    const chunk = bytes.subarray(parsed.start, parsed.end + 1)
+    response.setHeader('content-range', `bytes ${parsed.start}-${parsed.end}/${bytes.length}`)
+    response.setHeader('content-length', String(chunk.length))
+    response.writeHead(206)
+    response.end(request.method === 'HEAD' ? undefined : chunk)
+    return true
+  }
+
+  response.setHeader('content-length', String(bytes.length))
+  response.writeHead(200)
+  response.end(request.method === 'HEAD' ? undefined : bytes)
+  return true
 }
 
 async function serveWebpage(
@@ -44,7 +102,7 @@ async function serveWebpage(
 
   publicHeaders(response)
   response.setHeader('content-type', 'text/html; charset=utf-8')
-  response.setHeader('content-security-policy', "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'")
+  response.setHeader('content-security-policy', "sandbox; default-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; font-src 'self' data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'")
   response.writeHead(200)
   response.end(request.method === 'HEAD' ? undefined : html)
   return true
@@ -203,6 +261,24 @@ function safeInboundHeaders(headers: IncomingHttpHeaders): Record<string, string
     else if (Array.isArray(value)) values[name] = value.join(', ').slice(0, 2048)
   }
   return values
+}
+
+function parseByteRange(value: string, size: number): { start: number; end: number } | undefined {
+  const match = /^bytes=(\d*)-(\d*)$/.exec(value.trim())
+  if (!match || size <= 0) return undefined
+  const startText = match[1] ?? ''
+  const endText = match[2] ?? ''
+
+  if (!startText) {
+    const suffix = Number(endText)
+    if (!Number.isInteger(suffix) || suffix <= 0) return undefined
+    return { start: Math.max(0, size - suffix), end: size - 1 }
+  }
+
+  const start = Number(startText)
+  const requestedEnd = endText ? Number(endText) : size - 1
+  if (!Number.isInteger(start) || !Number.isInteger(requestedEnd) || start < 0 || start >= size || requestedEnd < start) return undefined
+  return { start, end: Math.min(requestedEnd, size - 1) }
 }
 
 function publicHeaders(response: ServerResponse, cors = false): void {

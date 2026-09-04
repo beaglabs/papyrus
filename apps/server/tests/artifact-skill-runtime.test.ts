@@ -30,6 +30,7 @@ describe('artifact runtime', () => {
       skillVersion: '1.0.0',
     })
     expect(pdf.name).toBe('incident-brief.pdf')
+    expect(store.create({ format: 'pdf', name: 'misleading.html', content: 'safe' }).name).toBe('misleading.pdf')
     expect(pdf.kind).toBe('artifact')
     expect(pdf.preview.kind).toBe('pdf')
     expect(pdf.sha256).toHaveLength(64)

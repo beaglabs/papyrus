@@ -13,6 +13,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lockfile-refresh:
+    if: ${{ github.event_name == 'pull_request' && github.head_ref == 'feat/rich-context-workspace' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.22.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Regenerate lockfile
+        run: pnpm install --lockfile-only --no-frozen-lockfile
+      - name: Emit regenerated lockfile
+        run: |
+          echo 'PAPYRUS_LOCKFILE_GZIP_BASE64_BEGIN'
+          gzip -c pnpm-lock.yaml | base64 -w0
+          echo
+          echo 'PAPYRUS_LOCKFILE_GZIP_BASE64_END'
+
   verify:
     strategy:
       fail-fast: false

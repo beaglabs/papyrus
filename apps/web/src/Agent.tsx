@@ -138,7 +138,7 @@ function Chat({ session, status, initial, input, setInput, historyError, canAppr
       {error && <Alert className="error">{error.message}</Alert>}
     </div>
     <form className="composer" onSubmit={(event) => void submit(event)}>
-      <Textarea value={input} onChange={(event) => setInput(event.target.value)} disabled={!status.agentReady} placeholder="Ask Papyrus to investigate, connect a plugin, run a workflow, or preview a URL…" onKeyDown={(event) => {
+      <Textarea value={input} onChange={(event) => setInput(event.target.value)} disabled={!status.agentReady} placeholder="Ask Papyrus to investigate, create a document, build a spreadsheet, connect a plugin, or run a workflow…" onKeyDown={(event) => {
         if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() }
       }} />
       <div><small>Secrets never enter the conversation.</small>{working ? <Button type="button" onClick={() => void stop()}>Stop</Button> : <Button className="primary" disabled={!input.trim() || !status.agentReady}>Send ↑</Button>}</div>
@@ -147,7 +147,7 @@ function Chat({ session, status, initial, input, setInput, historyError, canAppr
 }
 
 function Welcome() {
-  return <div className="agent-welcome"><span className="agent-orbit">✦</span><p className="eyebrow">PAPYRUS RUNTIME</p><h2>What should the population work on?</h2><p>Start a task, connect an operational plugin, inspect a URL, or schedule recurring work. Starlings handles collective reasoning; Mastra makes the session durable and event-driven.</p><div className="prompt-chips"><span>Connect Exchange Email</span><span>Preview a URL</span><span>Create a daily briefing</span></div></div>
+  return <div className="agent-welcome"><span className="agent-orbit">✦</span><p className="eyebrow">PAPYRUS RUNTIME</p><h2>What should the population work on?</h2><p>Start a task, create a durable artifact, connect an operational plugin, or schedule recurring work. Starlings handles collective reasoning; Mastra makes the session durable and event-driven.</p><div className="prompt-chips"><span>Create a PDF briefing</span><span>Build an XLSX risk register</span><span>Create a reusable skill</span></div></div>
 }
 
 function Message({ message, sessionId, canApprove, canManageSkills, onChanged }: { message: UIMessage; sessionId: string; canApprove: boolean; canManageSkills: boolean; onChanged: () => Promise<void> }) {

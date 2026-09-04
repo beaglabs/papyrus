@@ -277,7 +277,7 @@ function Composer({ input, setInput, attachments, setAttachments, disabled, work
         placeholder="Ask Papyrus… Type @ to attach from Library."
         onKeyDown={(event) => {
           if (event.key === 'Escape') setLibraryOpen(false)
-          if (event.key === 'Enter' && !showMention) event.currentTarget.form?.requestSubmit()
+          if (event.key === 'Enter' && showMention) event.preventDefault()
         }}
       />
       {working

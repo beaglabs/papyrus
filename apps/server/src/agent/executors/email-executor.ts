@@ -80,8 +80,9 @@ export class EmailExecutor implements ActionExecutor {
     if (!Array.isArray(ids) || ids.some((value) => typeof value !== 'string')) {
       throw new Error('Email action parameters.artifactIds must be an array of artifact ids')
     }
+    if (ids.length > 10) throw new Error('Email actions support at most 10 direct artifact attachments')
     if (!this.artifacts && ids.length) throw new Error('Artifact attachments are unavailable in this runtime')
-    const attachments = ids.slice(0, 10).map((id) => {
+    const attachments = ids.map((id) => {
       const artifact = this.artifacts?.get(id as string)
       if (!artifact || !this.artifacts) throw new Error(`Artifact ${String(id)} was not found`)
       const bytes = readFileSync(this.artifacts.contentPath(artifact.id))

@@ -302,10 +302,10 @@ export class PapyrusAgentFSFilesystem extends MastraFilesystem {
     const date = new Date().toISOString().slice(0, 10)
     const path = `/Library/Uploads/${date}/${randomUUID().slice(0, 8)}-${safeName(input.name)}`
     await this.writeFile(path, data, { recursive: true, overwrite: false })
-    return this.describeLibraryFile(path, undefined, 'upload')
+    return this.describeLibraryFile(path, 'upload')
   }
 
-  async describeLibraryFile(path: string, mediaTypeOverride?: string, source?: WorkspaceLibraryFile['source']): Promise<WorkspaceLibraryFile> {
+  async describeLibraryFile(path: string, source?: WorkspaceLibraryFile['source']): Promise<WorkspaceLibraryFile> {
     const normalized = normalizeFsPath(path)
     if (normalized !== '/Library' && !normalized.startsWith('/Library/')) throw new Error('Library reference must remain under /Library')
     const [stat, bytes] = await Promise.all([this.stat(normalized), this.readFile(normalized)])

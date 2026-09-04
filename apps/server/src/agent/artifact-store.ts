@@ -120,6 +120,14 @@ export class ArtifactStore {
   }
 
   get(id: string): ArtifactRecord | undefined {
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return undefined
+    const recordPath = join(this.root, id, 'record.json')
+    if (existsSync(recordPath)) {
+      try {
+        const parsed = JSON.parse(readFileSync(recordPath, 'utf8')) as ArtifactRecord
+        if (parsed?.id === id && parsed.kind === 'artifact') return parsed
+      } catch { /* fall through to the bounded index */ }
+    }
     return this.list().find((artifact) => artifact.id === id)
   }
 
@@ -227,5 +235,5 @@ function safeSheetName(value: string): string {
 }
 
 function previewCell(value: string | number | boolean | null): string | number | boolean | null {
-  return typeof value === 'string' && value.length > 500 ? value.slice(0, 497) + '…' : value
+  return typeof value === 'string' && value.length > 160 ? value.slice(0, 157) + '…' : value
 }

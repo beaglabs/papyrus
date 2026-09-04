@@ -475,9 +475,9 @@ p { color: var(--muted); line-height: 1.55; }
   .artifact-actions { align-items: flex-start; flex-direction: column; }
   .artifact-actions > div { width: 100%; }
   .artifact-actions a { flex: 1; text-align: center; }
-  .agent-main { overflow: visible; }
-  .agent-surface { min-height: 70vh; }
-  .message-list { overflow: visible; }
+  .agent-main { overflow: hidden; }
+  .agent-surface { min-height: 0; }
+  .message-list { overflow-y: auto; }
   .chat-message { grid-template-columns: 1fr; gap: 7px; }
   .agent-thinking { padding-left: 0; }
   .agent-form-grid, .plugin-grid, .model-catalog-grid, .workflow-grid { grid-template-columns: 1fr; }

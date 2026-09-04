@@ -280,7 +280,7 @@ p { color: var(--muted); line-height: 1.55; }
 .agent-session-head h2 { margin: 0; }
 .agent-badges { display: flex; gap: 7px; }
 .agent-config-alert { margin-top: 14px; display: grid; grid-template-columns: auto 1fr; gap: 12px; background: var(--yellow); }
-.message-list { min-height: 0; overflow-y: auto; padding: 28px 4px 28px; scrollbar-gutter: stable; }
+.message-list { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 28px 4px 34px; scrollbar-gutter: stable; scroll-behavior: auto; }
 .agent-welcome { max-width: 650px; margin: 7vh auto 0; text-align: center; }
 .agent-orbit { display: grid; place-items: center; width: 64px; height: 64px; margin: 0 auto 22px; border: 2px solid #111; border-radius: 50%; background: var(--main); box-shadow: var(--shadow); font-size: 28px; }
 .agent-welcome h2 { font-size: clamp(30px, 4vw, 48px); letter-spacing: -.05em; }
@@ -330,7 +330,7 @@ p { color: var(--muted); line-height: 1.55; }
 .agent-thinking { display: flex; align-items: center; gap: 5px; padding: 18px 0 18px 98px; color: var(--muted); font: 11px ui-monospace, monospace; }
 .agent-thinking span { width: 6px; height: 6px; border-radius: 50%; background: var(--main); animation: pulse 1s infinite alternate; }
 
-.composer { position: relative; margin: 0 4px 18px; padding: 0; overflow: visible; background: transparent; }
+.composer { position: sticky; z-index: 45; bottom: 0; margin: 0 4px; padding: 10px 0 14px; overflow: visible; background: var(--background); }
 .composer.drag-active .composer-prompt-input { border-color: var(--main); box-shadow: 4px 4px 0 var(--main); }
 .composer-input-row { position: relative; display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 10px; }
 .composer-prompt-input { height: 48px; min-width: 0; border-radius: 8px; padding: 0 15px; background: var(--surface); font-size: 15px; box-shadow: 3px 3px 0 #111; }

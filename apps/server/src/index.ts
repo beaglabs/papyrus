@@ -8,6 +8,8 @@ import { ActionStore } from './agent/action-store.js'
 import { ConnectorRegistry, SyncWorker } from './agent/sync-worker.js'
 import { TerrainStore } from './agent/terrain-store.js'
 import { EmailExecutor } from './agent/executors/email-executor.js'
+import { LinkPublisherExecutor } from './agent/executors/link-publisher-executor.js'
+import { LINK_PUBLISHER_CATALOG_ID } from './agent/catalog.js'
 import { ExchangeEmailDriver } from './agent/drivers/exchange-email-driver.js'
 import { HttpMicrosoftGraphClient } from './agent/graph-client.js'
 import { MastraRuntime } from './agent/mastra/runtime.js'
@@ -32,6 +34,7 @@ const server = createAgentServer(config, service, auth, mastraRuntime)
 // credentials until the customer supplies its vault/workload-identity adapter.
 connectors.register('exchange-email', new ExchangeEmailDriver(graph))
 executorRegistry.register('exchange-email', new EmailExecutor(database, graph, mastraRuntime.artifacts))
+executorRegistry.register(LINK_PUBLISHER_CATALOG_ID, new LinkPublisherExecutor(mastraRuntime.links))
 
 server.listen(config.port, config.host, () => {
   worker.start()

@@ -120,6 +120,7 @@ export class PapyrusAgentFSFilesystem extends MastraFilesystem {
     return [
       'The workspace is a persistent customer-hosted AgentFS SQLite filesystem.',
       'Use POSIX paths relative to the workspace root; user-visible files live under /Library.',
+      'Link drafts, approved snapshots, and inbound payloads live under /Library/Links so the same Workspace filesystem remains the data authority.',
       'AgentFS SDK operations do not require external internet or a Turso account.',
     ].join(' ')
   }
@@ -131,6 +132,10 @@ export class PapyrusAgentFSFilesystem extends MastraFilesystem {
     await this.mkdir('/Library', { recursive: true })
     await this.mkdir('/Library/Uploads', { recursive: true })
     await this.mkdir('/Library/Generated', { recursive: true })
+    await this.mkdir('/Library/Links', { recursive: true })
+    await this.mkdir('/Library/Links/Drafts', { recursive: true })
+    await this.mkdir('/Library/Links/Published', { recursive: true })
+    await this.mkdir('/Library/Links/Inbound', { recursive: true })
     await this.mkdir('/Workspace', { recursive: true })
   }
 

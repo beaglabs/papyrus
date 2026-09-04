@@ -14,7 +14,7 @@ import type {
   TerrainSnapshot,
 } from '@papyrus/contracts'
 import { LicenseService } from '../license.js'
-import { catalogEntry, INTEGRATION_CATALOG } from './catalog.js'
+import { catalogEntry, INTEGRATION_CATALOG, LINK_PUBLISHER_CATALOG_ID } from './catalog.js'
 import type { AgentConfig } from './config.js'
 import { AgentDatabase, type CreateIntegrationInput } from './database.js'
 import { hasAppRole } from './entra-auth.js'
@@ -149,7 +149,7 @@ export class AgentService {
 
   catalog(principal: PortalPrincipal) {
     this.requirePortalAccess(principal)
-    return INTEGRATION_CATALOG.filter((entry) => entry.supportedProfiles.includes(this.config.profile))
+    return INTEGRATION_CATALOG.filter((entry) => entry.id !== LINK_PUBLISHER_CATALOG_ID && entry.supportedProfiles.includes(this.config.profile))
   }
 
   integrations(principal: PortalPrincipal): IntegrationConfiguration[] {
@@ -160,7 +160,7 @@ export class AgentService {
   createIntegration(principal: PortalPrincipal, catalogId: unknown, input: Record<string, unknown>): IntegrationConfiguration {
     requireRole(principal, 'Papyrus.Integration.Manage')
     const entry = catalogEntry(cleanText(catalogId, 'catalogId', 128))
-    if (!entry || !entry.supportedProfiles.includes(this.config.profile)) throw new AgentServiceError(400, 'CONNECTOR_UNAVAILABLE', 'Connector is not available for this deployment profile')
+    if (!entry || entry.id === LINK_PUBLISHER_CATALOG_ID || !entry.supportedProfiles.includes(this.config.profile)) throw new AgentServiceError(400, 'CONNECTOR_UNAVAILABLE', 'Connector is not available for this deployment profile')
     this.license.require(entry.licenseFeature)
     const settings = input.settings === undefined ? {} : input.settings
     if (!settings || typeof settings !== 'object' || Array.isArray(settings)) throw new AgentServiceError(400, 'INVALID_INPUT', 'settings must be an object')

@@ -1,5 +1,7 @@
-import { join } from 'node:path'
-import type { AgentSignal } from '@papyrus/contracts'
+import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { basename, join } from 'node:path'
+import type { AgentSignal, LinkType } from '@papyrus/contracts'
 import type { ActionStore } from '../action-store.js'
 import type { AgentConfig } from '../config.js'
 import type { AgentService } from '../service.js'
@@ -11,14 +13,15 @@ import {
   type InvestigationToolContext,
   type InvestigationToolName,
 } from './tools.js'
-import { INTEGRATION_CATALOG } from '../catalog.js'
+import { INTEGRATION_CATALOG, LINK_PUBLISHER_CATALOG_ID } from '../catalog.js'
+import { LinkStore } from '../link-store.js'
 import { connectionRequest, modelGatewayRequest, pluginToolId } from './plugin-tools.js'
 import { fetchUrlPreview } from './fetch-preview.js'
 import { signalIntakeWorkflow, WORKFLOW_CATALOG } from './workflows.js'
 import { ModelStore, type CreateModelProfileInput } from '../model-store.js'
 import { PapyrusModelGateway, resolveModelCredential } from '../model-gateway.js'
 import type { ModelProfile } from '@papyrus/contracts'
-import { ArtifactStore, type ArtifactFormat, type ArtifactSheetInput } from '../artifact-store.js'
+import { ArtifactStore, type ArtifactFormat, type ArtifactRecord, type ArtifactSheetInput } from '../artifact-store.js'
 import { SkillRegistry } from '../skills.js'
 import { PapyrusAgentFSFilesystem, type WorkspaceLibraryFile } from './workspace-agentfs.js'
 import { NonoWorkspaceSandbox } from './workspace-nono.js'
@@ -98,6 +101,7 @@ export class MastraRuntime {
   readonly workspaceSandbox: NonoWorkspaceSandbox
   readonly workspaceExecutors: WorkspaceExecutorRegistry
   readonly enclave: PapyrusEnclaveRuntime
+  readonly links: LinkStore
   private mastra: MastraHandle | undefined
   private started = false
   private timer: ReturnType<typeof setInterval> | undefined
@@ -125,6 +129,7 @@ export class MastraRuntime {
     })
     this.workspaceExecutors = new WorkspaceExecutorRegistry(this.workspaceSandbox)
     this.enclave = new PapyrusEnclaveRuntime(this.workspaceFilesystem, this.workspaceExecutors, config.dataDir)
+    this.links = new LinkStore(actionStore.db, this.workspaceFilesystem)
     this.tools = { actionStore, terrain }
   }
 
@@ -136,6 +141,7 @@ export class MastraRuntime {
     if (this.started) return
     this.started = true
     await this.workspaceFilesystem.init()
+    this.links.ensureExecutorIntegration()
 
     const core = await tryImport('@mastra/core')
     const libsql = await tryImport('@mastra/libsql')
@@ -669,6 +675,7 @@ export class MastraRuntime {
         'Creating, editing, or returning a local file is a workspace capability, not an operational action. For PDF, DOCX, XLSX, text, JSON, CSV, or HTML deliverables, call listSkills/loadSkill as needed and then createArtifact. Never call listActionExecutors merely to create a file.',
         'The workspace filesystem is local AgentFS SDK storage backed by SQLite. Do not use or invent raw shell commands. For multi-step programmable local logic, use runAgentScript: it executes STRICT Enclave AgentScript with AST validation, resource limits, no Node built-ins, no direct filesystem or network, and only the explicitly brokered workspace/process tools. Real OS programs are available only through constrained tools such as runPythonScript, convertWithPandoc, convertWithLibreOffice, renderWithFfmpeg, and renderRemotion; those commands run in dedicated nono-ts workers with outbound network blocked and changes reconciled back into AgentFS. For richer files created by workspace commands, call publishArtifact after the file exists.',
         'Only external side effects use action executors. Before suggesting an operational action such as sending mail, changing a firewall, or publishing to an external system, list the active executors, then call suggestAction. A suggestion is only a UI artifact until the operator submits it to the ledger. When an approved Exchange action should send generated files, put their durable artifact ids in parameters.artifactIds; never inline binary data into chat.',
+        'Links expose AgentFS content outside the private workspace. When a Webpage, API, or Webhook would materially help the operator, ask whether they want to expose it as that specific Link type. Do not create a Link without that confirmation. createArtifact and publishArtifact return a canonical AgentFS workspacePath under /Library/Generated; pass that workspacePath, or the durable artifactId, to prepareLink. Do not invent a /Library path from an artifact filename. prepareLink snapshots the exact AgentFS bytes and returns the normal human-approval action suggestion; it never publishes directly.',
         'Skills teach procedures but never grant authority. Dynamically created skills remain inert drafts until a Papyrus.System.Owner approves them.',
         'You may inspect action proposals, but you cannot approve or execute them. Human Entra authority and the Papyrus action ledger are mandatory.',
       ].join(' '),
@@ -693,7 +700,7 @@ export class MastraRuntime {
         execute: async (inputData: Record<string, unknown>) => runInvestigationTool(name, this.tools, inputData),
       })
     }
-    for (const entry of INTEGRATION_CATALOG.filter((item) => item.supportedProfiles.includes(this.config.profile))) {
+    for (const entry of INTEGRATION_CATALOG.filter((item) => item.id !== LINK_PUBLISHER_CATALOG_ID && item.supportedProfiles.includes(this.config.profile))) {
       const id = pluginToolId(entry)
       registered[id] = createTool({
         id,
@@ -822,7 +829,7 @@ export class MastraRuntime {
     })
     registered['createArtifact'] = createTool({
       id: 'createArtifact',
-      description: 'Create a durable local artifact and return typed inline UI. Use this for PDF, DOCX, XLSX, text, Markdown, JSON, CSV, or HTML deliverables. This is not an external action and requires no action executor.',
+      description: 'Create a durable local artifact, mirror the exact bytes into AgentFS /Library/Generated, and return typed inline UI including workspacePath. Use this for PDF, DOCX, XLSX, text, Markdown, JSON, CSV, or HTML deliverables. This is not an external action and requires no action executor.',
       inputSchema: {
         type: 'object', required: ['format', 'name'],
         properties: {
@@ -843,19 +850,22 @@ export class MastraRuntime {
         },
         additionalProperties: false,
       },
-      execute: async (inputData: Record<string, unknown>) => this.artifacts.create({
-        format: inputData['format'] as ArtifactFormat,
-        name: String(inputData['name'] ?? 'artifact'),
-        ...(typeof inputData['title'] === 'string' ? { title: inputData['title'] } : {}),
-        ...(typeof inputData['content'] === 'string' ? { content: inputData['content'] } : {}),
-        ...(Array.isArray(inputData['sheets']) ? { sheets: inputData['sheets'] as ArtifactSheetInput[] } : {}),
-        ...(typeof inputData['skill'] === 'string' ? { skill: inputData['skill'] } : {}),
-        ...(typeof inputData['skillVersion'] === 'string' ? { skillVersion: inputData['skillVersion'] } : {}),
-      }),
+      execute: async (inputData: Record<string, unknown>) => {
+        const artifact = this.artifacts.create({
+          format: inputData['format'] as ArtifactFormat,
+          name: String(inputData['name'] ?? 'artifact'),
+          ...(typeof inputData['title'] === 'string' ? { title: inputData['title'] } : {}),
+          ...(typeof inputData['content'] === 'string' ? { content: inputData['content'] } : {}),
+          ...(Array.isArray(inputData['sheets']) ? { sheets: inputData['sheets'] as ArtifactSheetInput[] } : {}),
+          ...(typeof inputData['skill'] === 'string' ? { skill: inputData['skill'] } : {}),
+          ...(typeof inputData['skillVersion'] === 'string' ? { skillVersion: inputData['skillVersion'] } : {}),
+        })
+        return this.artifactWithWorkspacePath(artifact)
+      },
     })
     registered['publishArtifact'] = createTool({
       id: 'publishArtifact',
-      description: 'Publish an existing file from the sandbox workspace into the durable artifact store so it can be previewed and downloaded in Agent Chat. Paths outside the sandbox are rejected.',
+      description: 'Publish an existing AgentFS file into the durable artifact store, preserve a canonical /Library/Generated mirror, and return workspacePath for later Link publication. Paths outside the sandbox are rejected.',
       inputSchema: {
         type: 'object', required: ['path'],
         properties: { path: { type: 'string' }, name: { type: 'string' }, skill: { type: 'string' }, skillVersion: { type: 'string' } },
@@ -868,10 +878,11 @@ export class MastraRuntime {
         const name = typeof inputData['name'] === 'string' && inputData['name'].trim()
           ? inputData['name'].trim()
           : path.split('/').filter(Boolean).at(-1) ?? 'artifact.bin'
-        return this.artifacts.importBytes(name, bytes, {
+        const artifact = this.artifacts.importBytes(name, bytes, {
           ...(typeof inputData['skill'] === 'string' ? { skill: inputData['skill'] } : {}),
           ...(typeof inputData['skillVersion'] === 'string' ? { skillVersion: inputData['skillVersion'] } : {}),
         })
+        return this.artifactWithWorkspacePath(artifact)
       },
     })
     registered['listArtifacts'] = createTool({
@@ -914,6 +925,55 @@ export class MastraRuntime {
         }
       },
     })
+    registered['prepareLink'] = createTool({
+      id: 'prepareLink',
+      description: 'After the operator explicitly agrees to expose content, snapshot a canonical AgentFS file as a Webpage, API, or Webhook Link draft and return the standard human-approval action suggestion. Pass workspacePath returned by createArtifact/publishArtifact, or artifactId for an existing durable artifact. This tool does not publish directly.',
+      inputSchema: {
+        type: 'object',
+        required: ['name', 'type'],
+        properties: {
+          name: { type: 'string', maxLength: 160 },
+          type: { type: 'string', enum: ['webpage', 'api', 'webhook'] },
+          sourcePath: { type: 'string', description: 'Canonical AgentFS file under /Library; use workspacePath returned by artifact tools' },
+          artifactId: { type: 'string', description: 'Durable artifact id; Papyrus will materialize the exact hashed bytes into /Library/Generated before preparing the Link' },
+          slug: { type: 'string', maxLength: 96 },
+          workflowId: { type: 'string', maxLength: 256 },
+          scheduleId: { type: 'string', maxLength: 256 },
+        },
+        additionalProperties: false,
+      },
+      execute: async (inputData: Record<string, unknown>) => {
+        const integration = this.links.ensureExecutorIntegration()
+        const sourcePath = await this.resolveLinkSource(
+          typeof inputData['sourcePath'] === 'string' ? inputData['sourcePath'] : undefined,
+          typeof inputData['artifactId'] === 'string' ? inputData['artifactId'] : undefined,
+        )
+        const draft = await this.links.prepareDraft({
+          name: String(inputData['name'] ?? ''),
+          type: String(inputData['type'] ?? '') as LinkType,
+          sourcePath,
+          ...(typeof inputData['slug'] === 'string' && inputData['slug'].trim() ? { slug: inputData['slug'] } : {}),
+          ...(typeof inputData['workflowId'] === 'string' && inputData['workflowId'].trim() ? { workflowId: inputData['workflowId'] } : {}),
+          ...(typeof inputData['scheduleId'] === 'string' && inputData['scheduleId'].trim() ? { scheduleId: inputData['scheduleId'] } : {}),
+        })
+        return {
+          kind: 'action_suggestion',
+          executorIntegrationId: integration.id,
+          action: 'publish_link',
+          target: draft.slug,
+          rationale: `Expose the approved AgentFS snapshot as a ${draft.type} Link.`,
+          rationaleClaimIds: [],
+          parameters: {
+            manifestPath: `/Library/Links/Drafts/${draft.draftId}/link.json`,
+            linkType: draft.type,
+            sourcePath: draft.sourcePath,
+            sourceSha256: draft.sourceSha256,
+            ...(draft.workflowId ? { workflowId: draft.workflowId } : {}),
+            ...(draft.scheduleId ? { scheduleId: draft.scheduleId } : {}),
+          },
+        }
+      },
+    })
     registered['listActionExecutors'] = createTool({
       id: 'listActionExecutors',
       description: 'List active controlled-action plugins that can receive a human-approved action.',
@@ -935,6 +995,59 @@ export class MastraRuntime {
       execute: async (inputData: Record<string, unknown>) => ({ kind: 'action_suggestion', ...inputData }),
     })
     return registered
+  }
+
+  private async artifactWithWorkspacePath(artifact: ArtifactRecord): Promise<ArtifactRecord & { workspacePath: string }> {
+    const workspaceFile = await this.materializeArtifactInLibrary(artifact)
+    return { ...artifact, workspacePath: workspaceFile.path }
+  }
+
+  private async materializeArtifactInLibrary(artifact: ArtifactRecord): Promise<WorkspaceLibraryFile> {
+    const bytes = readFileSync(this.artifacts.contentPath(artifact.id))
+    if (artifact.sha256 !== sha256Hex(bytes)) throw new Error('Durable artifact bytes do not match their recorded SHA-256')
+
+    const preferred = `/Library/Generated/${artifact.name}`
+    if (await this.workspaceFilesystem.exists(preferred)) {
+      const existing = await this.workspaceFilesystem.describeLibraryFile(preferred)
+      if (existing.sha256 === artifact.sha256) return existing
+      const versioned = `/Library/Generated/${artifact.id.slice(0, 8)}-${artifact.name}`
+      if (await this.workspaceFilesystem.exists(versioned)) {
+        const current = await this.workspaceFilesystem.describeLibraryFile(versioned)
+        if (current.sha256 === artifact.sha256) return current
+        throw new Error('AgentFS artifact mirror path already exists with different content')
+      }
+      await this.workspaceFilesystem.writeFile(versioned, bytes, { recursive: true, overwrite: false })
+      const mirrored = await this.workspaceFilesystem.describeLibraryFile(versioned)
+      if (mirrored.sha256 !== artifact.sha256) throw new Error('AgentFS artifact mirror failed SHA-256 verification')
+      return mirrored
+    }
+
+    await this.workspaceFilesystem.writeFile(preferred, bytes, { recursive: true, overwrite: false })
+    const mirrored = await this.workspaceFilesystem.describeLibraryFile(preferred)
+    if (mirrored.sha256 !== artifact.sha256) throw new Error('AgentFS artifact mirror failed SHA-256 verification')
+    return mirrored
+  }
+
+  private async resolveLinkSource(sourcePath?: string, artifactId?: string): Promise<string> {
+    const requested = sourcePath?.trim()
+    const id = artifactId?.trim()
+
+    if (id) {
+      const artifact = this.artifacts.get(id)
+      if (!artifact) throw new Error('Durable artifact not found')
+      return (await this.materializeArtifactInLibrary(artifact)).path
+    }
+
+    if (!requested) throw new Error('prepareLink requires sourcePath or artifactId')
+    if (await this.workspaceFilesystem.exists(requested)) return requested
+
+    if (requested.startsWith('/Library/Generated/')) {
+      const name = basename(requested)
+      const artifact = this.artifacts.list().find((candidate) => candidate.name === name)
+      if (artifact) return (await this.materializeArtifactInLibrary(artifact)).path
+    }
+
+    return requested
   }
 
   private requireMemory(): Record<string, unknown> {
@@ -1009,6 +1122,9 @@ export class MastraRuntime {
       id: 'papyrus-workspace',
       name: 'Papyrus Workspace',
       filesystem: this.workspaceFilesystem,
+      // Link drafts, published snapshots, and inbound payloads intentionally
+      // share this filesystem so Workspace reads observe the same AgentFS
+      // authority used by the approval-backed Links executor.
       // Deliberately do not expose the WorkspaceSandbox through Mastra's
       // generic shell tool surface. Papyrus invokes it only behind constrained
       // process tools and the Enclave capability broker.
@@ -1041,6 +1157,10 @@ function addWorkspaceAttachmentContext(message: Record<string, unknown>, context
 
 function stripWorkspaceAttachmentContext(value: string): string {
   return value.replace(/\n?<papyrus-workspace-attachments>[\s\S]*?<\/papyrus-workspace-attachments>\s*$/g, '').trimEnd()
+}
+
+function sha256Hex(bytes: Buffer): string {
+  return createHash('sha256').update(bytes).digest('hex')
 }
 
 function dateString(value: unknown): string {

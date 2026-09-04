@@ -9,6 +9,7 @@ import { AgentService, AgentServiceError } from './service.js'
 import { MastraRuntime, MastraRuntimeError } from './mastra/runtime.js'
 import { fetchUrlPreviewImage, UnsafeFetchTargetError } from './mastra/fetch-preview.js'
 import { ModelProfileError } from './model-store.js'
+import { handlePublicLink } from './link-http.js'
 
 class HttpError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message) }
@@ -75,6 +76,7 @@ export function createAgentServer(config: AgentConfig, service: AgentService, au
     response.setHeader('x-request-id', requestId)
     const url = new URL(request.url ?? '/', config.publicOrigin)
     try {
+      if (await handlePublicLink(request, response, url, mastra)) return
       if (url.pathname === '/api/health' && request.method === 'GET') {
         return json(response, 200, {
           status: 'ok', product: 'Papyrus Agent Twin', topology: 'customer-hosted', profile: config.profile,

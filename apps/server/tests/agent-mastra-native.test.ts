@@ -6,7 +6,7 @@ import type { AgentConfig } from '../src/agent/config.js'
 import { ActionStore } from '../src/agent/action-store.js'
 import { AgentDatabase } from '../src/agent/database.js'
 import { INTEGRATION_CATALOG } from '../src/agent/catalog.js'
-import { fetchUrlPreview, UnsafeFetchTargetError } from '../src/agent/mastra/fetch-preview.js'
+import { fetchUrlPreview, htmlMetadata, UnsafeFetchTargetError } from '../src/agent/mastra/fetch-preview.js'
 import { connectionRequest, modelGatewayRequest, pluginToolId } from '../src/agent/mastra/plugin-tools.js'
 import { MastraRuntime } from '../src/agent/mastra/runtime.js'
 import { PapyrusModelGateway } from '../src/agent/model-gateway.js'
@@ -84,6 +84,31 @@ describe('Mastra-native product surface', () => {
     expect(request.kind).toBe('model_gateway_request')
     expect(request.fields.some((field) => field.name === 'baseUrl')).toBe(true)
     expect(JSON.stringify(request)).not.toMatch(/apiKey|clientSecret|password/i)
+  })
+
+  it('extracts rich Open Graph preview metadata and resolves relative assets', () => {
+    const metadata = htmlMetadata(`
+      <html><head>
+        <title>Fallback title</title>
+        <meta property="og:title" content="Papyrus Runtime">
+        <meta content="Customer-hosted agent operations" property="og:description">
+        <meta property="og:site_name" content="Beag Labs">
+        <meta property="og:type" content="website">
+        <meta property="og:image" content="/social/papyrus.png">
+        <meta property="og:image:alt" content="Papyrus control plane">
+        <link rel="icon" href="/favicon.png">
+      </head></html>
+    `, new URL('https://www.example.com/products/papyrus'))
+
+    expect(metadata).toEqual({
+      title: 'Papyrus Runtime',
+      description: 'Customer-hosted agent operations',
+      siteName: 'Beag Labs',
+      type: 'website',
+      image: 'https://www.example.com/social/papyrus.png',
+      imageAlt: 'Papyrus control plane',
+      favicon: 'https://www.example.com/favicon.png',
+    })
   })
 
   it('bounds URL preview redirects and response text', async () => {

@@ -231,7 +231,17 @@ class NonoProcessHandle extends ProcessHandle {
         if (settled) return
         settled = true
         if (this.timeout) clearTimeout(this.timeout)
-        reject(error)
+        this.emitStderr(`[papyrus-workspace] Worker failed to start: ${error.message}\n`)
+        void finalize(70).then((finalCode) => {
+          this._exitCode = finalCode
+          resolvePromise({
+            success: false,
+            exitCode: finalCode,
+            stdout: this.stdout,
+            stderr: this.stderr,
+            executionTimeMs: Date.now() - this.startedAt,
+          })
+        }, reject)
       })
       child.once('close', (code, signal) => {
         if (settled) return

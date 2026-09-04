@@ -114,15 +114,16 @@ export class MastraRuntime {
     this.models = new ModelStore(actionStore.db)
     this.artifacts = new ArtifactStore(config.dataDir)
     this.skills = new SkillRegistry(config.dataDir)
+    const agentfsId = config.agentfsId ?? 'papyrus-workspace'
     this.workspaceFilesystem = new PapyrusAgentFSFilesystem({
       dataDir: config.dataDir,
-      agentId: config.agentfsId,
-      databasePath: config.agentfsDatabasePath,
-      binary: config.agentfsBinary,
+      agentId: agentfsId,
+      databasePath: config.agentfsDatabasePath ?? join(config.dataDir, '.agentfs', `${agentfsId}.db`),
+      binary: config.agentfsBinary ?? 'agentfs',
     })
     this.workspaceSandbox = new NonoWorkspaceSandbox({
       filesystem: this.workspaceFilesystem,
-      binary: config.nonoBinary,
+      binary: config.nonoBinary ?? 'nono',
       dataDir: config.dataDir,
     })
     this.tools = { actionStore, terrain }
@@ -235,7 +236,7 @@ export class MastraRuntime {
       mode: this.mode,
       workspace: {
         filesystem: 'agentfs',
-        database: this.config.agentfsDatabasePath,
+        database: this.workspaceFilesystem.databasePath,
         mountBackend: this.workspaceFilesystem.mountBackend,
         sandbox: 'nono',
         isolation: process.platform === 'darwin' ? 'seatbelt' : process.platform === 'linux' ? 'landlock' : 'unsupported',

@@ -8,7 +8,7 @@ import type { AgentConfig } from '../src/agent/config.js'
 import type { AgentService } from '../src/agent/service.js'
 import type { TerrainStore } from '../src/agent/terrain-store.js'
 import type { ArtifactRecord } from '../src/agent/artifact-store.js'
-import { LINK_EXECUTOR_INTEGRATION_ID, LinkStore } from '../src/agent/link-store.js'
+import { LINK_EXECUTOR_INTEGRATION_ID, LinkStore, validateSource } from '../src/agent/link-store.js'
 import { MastraRuntime } from '../src/agent/mastra/runtime.js'
 import { PapyrusAgentFSFilesystem } from '../src/agent/mastra/workspace-agentfs.js'
 
@@ -48,6 +48,13 @@ describe('AgentFS Links boundary', () => {
     } finally {
       await subject.close()
     }
+  })
+
+  it('accepts MIME parameters on otherwise valid Link source types', () => {
+    expect(() => validateSource('webpage', 'text/html; charset=utf-8')).not.toThrow()
+    expect(() => validateSource('api', 'application/json; charset=UTF-8')).not.toThrow()
+    expect(() => validateSource('webhook', 'text/plain; charset=utf-8')).not.toThrow()
+    expect(() => validateSource('webpage', 'video/mp4')).toThrow(/HTML source/)
   })
 
   it('snapshots approved AgentFS bytes before publication', async () => {

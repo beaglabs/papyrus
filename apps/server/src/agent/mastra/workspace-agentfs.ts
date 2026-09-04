@@ -21,7 +21,6 @@ import {
   type WriteOptions,
   type FileStat,
 } from '@mastra/core/workspace'
-import { mediaTypeFor } from '../artifact-store.js'
 
 const MAX_COMMAND_OUTPUT = 16 * 1024 * 1024
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024
@@ -266,7 +265,7 @@ export class PapyrusAgentFSFilesystem extends MastraFilesystem {
       size: Number(size) || 0,
       createdAt: now,
       modifiedAt: now,
-      ...(type === 'f' ? { mimeType: mediaTypeFor(normalized) } : {}),
+      ...(type === 'f' ? { mimeType: workspaceMediaType(normalized) } : {}),
     }
   }
 
@@ -315,7 +314,7 @@ export class PapyrusAgentFSFilesystem extends MastraFilesystem {
     return {
       path: normalized,
       name: basename(normalized),
-      mediaType: mediaTypeOverride?.trim() || mediaTypeFor(normalized),
+      mediaType: mediaTypeOverride?.trim() || workspaceMediaType(normalized),
       size: stat.size,
       sha256: createHash('sha256').update(buffer).digest('hex'),
       updatedAt: stat.modifiedAt.toISOString(),
@@ -361,6 +360,29 @@ function normalizeFsPath(input: string): string {
   const normalized = posix.normalize(raw.startsWith('/') ? raw : `/${raw}`)
   if (normalized === '/..' || normalized.startsWith('/../')) throw new Error('Workspace path escapes root')
   return normalized
+}
+
+function workspaceMediaType(path: string): string {
+  switch (extname(path).toLowerCase()) {
+    case '.pdf': return 'application/pdf'
+    case '.docx': return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    case '.xlsx': return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    case '.pptx': return 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+    case '.md': return 'text/markdown'
+    case '.txt': return 'text/plain'
+    case '.csv': return 'text/csv'
+    case '.json': return 'application/json'
+    case '.html': return 'text/html'
+    case '.svg': return 'image/svg+xml'
+    case '.png': return 'image/png'
+    case '.jpg':
+    case '.jpeg': return 'image/jpeg'
+    case '.webp': return 'image/webp'
+    case '.gif': return 'image/gif'
+    case '.mp4': return 'video/mp4'
+    case '.webm': return 'video/webm'
+    default: return 'application/octet-stream'
+  }
 }
 
 function safeName(value: string): string {

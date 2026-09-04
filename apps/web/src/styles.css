@@ -458,10 +458,13 @@ p { color: var(--muted); line-height: 1.55; }
 .link-preview iframe { display: block; }
 .link-type-badge { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 2; border: 1px solid var(--border); background: var(--surface); color: var(--foreground); box-shadow: 2px 2px 0 var(--border); white-space: nowrap; }
 .api-link-preview { margin: 0; overflow: hidden; padding: 24px 16px; color: var(--foreground); font: 10px/1.55 ui-monospace, monospace; white-space: pre-wrap; }
-.webhook-preview { display: grid; place-items: center; align-content: center; gap: 10px; color: var(--muted); }
-.webhook-preview > span { font-size: 34px; color: var(--foreground); }
-.webhook-preview strong { color: var(--foreground); font: 800 11px ui-monospace, monospace; letter-spacing: .08em; }
-.webhook-preview small { max-width: 85%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.webhook-preview { display: grid; place-items: center; align-content: center; gap: 8px; padding: 18px; color: var(--muted); text-align: center; }
+.webhook-logo { width: 54px; height: 54px; display: grid; place-items: center; overflow: hidden; border: 1px solid var(--border); border-radius: 12px; background: var(--background); }
+.webhook-logo img { width: 100%; height: 100%; object-fit: contain; }
+.webhook-logo span { font-size: 26px; color: var(--foreground); }
+.webhook-preview strong { max-width: 90%; overflow: hidden; color: var(--foreground); font: 800 11px ui-monospace, monospace; letter-spacing: .04em; text-overflow: ellipsis; white-space: nowrap; }
+.webhook-preview small { max-width: 90%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.webhook-preview code { max-width: 90%; overflow: hidden; padding: 4px 6px; border: 1px solid var(--border); background: var(--background); color: var(--foreground); font: 8px ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .link-card-body { padding: 12px 4px 0; }
 .link-card-title { min-width: 0; display: flex; align-items: center; gap: 8px; }
 .link-card-title a { min-width: 0; flex: 1; overflow: hidden; color: var(--foreground); font-weight: 800; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }

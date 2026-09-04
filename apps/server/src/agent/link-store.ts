@@ -35,6 +35,10 @@ export interface LinkDraftManifest {
   createdAt: string
   workflowId?: string
   scheduleId?: string
+  threadId?: string
+  resourceId?: string
+  logo?: LinkDraftAsset
+  logoText?: string
   assets?: LinkDraftAsset[]
 }
 
@@ -45,6 +49,10 @@ export interface PrepareLinkInput {
   slug?: string
   workflowId?: string
   scheduleId?: string
+  threadId?: string
+  resourceId?: string
+  logoPath?: string
+  logoText?: string
   assets?: LinkDraftAssetInput[]
 }
 
@@ -156,6 +164,25 @@ export class LinkStore {
 
     const workflowId = cleanOptional(input.workflowId)
     const scheduleId = cleanOptional(input.scheduleId)
+    const threadId = cleanOptional(input.threadId)
+    const resourceId = cleanOptional(input.resourceId)
+    if (input.type === 'webhook' && (!threadId || !resourceId)) {
+      throw new Error('Webhook Links must be scoped to the Agent session that created them')
+    }
+
+    const logoText = cleanLogoText(input.logoText)
+    let logo: LinkDraftAsset | undefined
+    if (input.logoPath?.trim()) {
+      const logoSource = normalizeLibrarySource(input.logoPath)
+      const describedLogo = await this.filesystem.describeLibraryFile(logoSource)
+      if (!normalizedMediaType(describedLogo.mediaType).startsWith('image/')) throw new Error('Webhook Link logo must be an image file')
+      const logoName = safeAssetName(describedLogo.name)
+      const draftLogoPath = `${draftRoot}/logo/${logoName}`
+      await this.filesystem.copyFile(logoSource, draftLogoPath, { overwrite: false })
+      const draftLogo = await this.filesystem.describeLibraryFile(draftLogoPath)
+      logo = { name: logoName, path: draftLogo.path, sha256: draftLogo.sha256, mediaType: draftLogo.mediaType }
+    }
+
     const manifest: LinkDraftManifest = {
       formatVersion: 1,
       draftId,
@@ -168,6 +195,10 @@ export class LinkStore {
       createdAt: new Date().toISOString(),
       ...(workflowId ? { workflowId } : {}),
       ...(scheduleId ? { scheduleId } : {}),
+      ...(threadId ? { threadId } : {}),
+      ...(resourceId ? { resourceId } : {}),
+      ...(logo ? { logo } : {}),
+      ...(logoText ? { logoText } : {}),
       ...(assets.length ? { assets } : {}),
     }
     await this.filesystem.writeFile(`${draftRoot}/link.json`, JSON.stringify(manifest, null, 2) + '\n', { overwrite: false, recursive: true })
@@ -195,6 +226,18 @@ export class LinkStore {
     validateSource(manifest.type, current.mediaType)
 
     const finalRoot = `/Library/Links/Published/${manifest.draftId}`
+    let finalLogoPath: string | undefined
+    if (manifest.logo) {
+      const currentLogo = await this.filesystem.describeLibraryFile(manifest.logo.path)
+      if (currentLogo.sha256 !== manifest.logo.sha256) throw new Error('Link logo changed after the operator reviewed the publication request')
+      finalLogoPath = `${finalRoot}/logo/${manifest.logo.name}`
+      if (!(await this.filesystem.exists(finalLogoPath))) {
+        await this.filesystem.copyFile(manifest.logo.path, finalLogoPath, { overwrite: false })
+      }
+      const finalLogo = await this.filesystem.describeLibraryFile(finalLogoPath)
+      if (finalLogo.sha256 !== manifest.logo.sha256) throw new Error('Published Link logo does not match the approved snapshot')
+    }
+
     for (const asset of manifest.assets ?? []) {
       const currentAsset = await this.filesystem.describeLibraryFile(asset.path)
       if (currentAsset.sha256 !== asset.sha256) throw new Error(`Link asset ${asset.name} changed after the operator reviewed the publication request`)
@@ -216,8 +259,9 @@ export class LinkStore {
     const now = new Date().toISOString()
     this.db.sqlite.prepare(`INSERT INTO agent_links(
       id,name,slug,type,state,blob_path,media_type,source_sha256,public_path,workflow_id,schedule_id,
+      thread_id,resource_id,logo_path,logo_media_type,logo_text,
       created_by_oid,created_at,updated_at,ping_count,inbound_count
-    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0)`).run(
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0)`).run(
       manifest.draftId,
       manifest.name,
       manifest.slug,
@@ -229,6 +273,11 @@ export class LinkStore {
       `/l/${manifest.slug}`,
       manifest.workflowId ?? null,
       manifest.scheduleId ?? null,
+      manifest.threadId ?? null,
+      manifest.resourceId ?? null,
+      finalLogoPath ?? null,
+      manifest.logo?.mediaType ?? null,
+      manifest.logoText ?? null,
       actorOid,
       now,
       now,
@@ -239,6 +288,9 @@ export class LinkStore {
       blobPath: final.path,
       sourceSha256: final.sha256,
       assetCount: manifest.assets?.length ?? 0,
+      threadId: manifest.threadId,
+      resourceId: manifest.resourceId,
+      hasLogo: Boolean(finalLogoPath || manifest.logoText),
       actorOid,
     })
     return this.get(manifest.draftId) as AgentLink
@@ -334,6 +386,11 @@ export class LinkStore {
       publicPath: String(row.public_path),
       ...(row.workflow_id ? { workflowId: String(row.workflow_id) } : {}),
       ...(row.schedule_id ? { scheduleId: String(row.schedule_id) } : {}),
+      ...(row.thread_id ? { threadId: String(row.thread_id) } : {}),
+      ...(row.resource_id ? { resourceId: String(row.resource_id) } : {}),
+      ...(row.logo_path ? { logoPath: String(row.logo_path) } : {}),
+      ...(row.logo_media_type ? { logoMediaType: String(row.logo_media_type) } : {}),
+      ...(row.logo_text ? { logoText: String(row.logo_text) } : {}),
       createdByOid: String(row.created_by_oid),
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at),
@@ -359,6 +416,11 @@ export class LinkStore {
         public_path TEXT NOT NULL,
         workflow_id TEXT,
         schedule_id TEXT,
+        thread_id TEXT,
+        resource_id TEXT,
+        logo_path TEXT,
+        logo_media_type TEXT,
+        logo_text TEXT,
         created_by_oid TEXT NOT NULL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
@@ -397,6 +459,11 @@ export class LinkStore {
     `)
     this.ensureColumn('agent_links', 'validation_provider', 'TEXT')
     this.ensureColumn('agent_links', 'validated_at', 'TEXT')
+    this.ensureColumn('agent_links', 'thread_id', 'TEXT')
+    this.ensureColumn('agent_links', 'resource_id', 'TEXT')
+    this.ensureColumn('agent_links', 'logo_path', 'TEXT')
+    this.ensureColumn('agent_links', 'logo_media_type', 'TEXT')
+    this.ensureColumn('agent_links', 'logo_text', 'TEXT')
   }
 
   private ensureColumn(table: string, column: string, definition: string): void {
@@ -409,6 +476,13 @@ function cleanName(value: string): string {
   const name = value.trim()
   if (!name || name.length > 160) throw new Error('Link name is required and must not exceed 160 characters')
   return name
+}
+
+function cleanLogoText(value: string | undefined): string | undefined {
+  const cleaned = value?.trim()
+  if (!cleaned) return undefined
+  if (cleaned.length > 32) throw new Error('Link logo text must not exceed 32 characters')
+  return cleaned
 }
 
 function cleanOptional(value: string | undefined): string | undefined {
@@ -473,10 +547,29 @@ function validateManifest(value: unknown): LinkDraftManifest {
   validateSource(type, mediaType)
   const workflowId = typeof item['workflowId'] === 'string' ? cleanOptional(item['workflowId']) : undefined
   const scheduleId = typeof item['scheduleId'] === 'string' ? cleanOptional(item['scheduleId']) : undefined
+  const threadId = typeof item['threadId'] === 'string' ? cleanOptional(item['threadId']) : undefined
+  const resourceId = typeof item['resourceId'] === 'string' ? cleanOptional(item['resourceId']) : undefined
+  if (type === 'webhook' && (!threadId || !resourceId)) throw new Error('Webhook Link manifest is missing its session scope')
+  const logoText = typeof item['logoText'] === 'string' ? cleanLogoText(item['logoText']) : undefined
   const draftId = String(item['draftId'] ?? '').trim()
   if (!draftId || draftId.length > 128) throw new Error('Link draft id is invalid')
   const createdAt = String(item['createdAt'] ?? '')
   if (Number.isNaN(new Date(createdAt).getTime())) throw new Error('Link draft creation time is invalid')
+  let logo: LinkDraftAsset | undefined
+  if (item['logo'] !== undefined) {
+    const value = item['logo']
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Link draft logo must be an object')
+    const candidate = value as Record<string, unknown>
+    const name = safeAssetName(String(candidate['name'] ?? ''))
+    const path = normalizeLibrarySource(String(candidate['path'] ?? ''))
+    if (path !== `/Library/Links/Drafts/${draftId}/logo/${name}`) throw new Error('Link draft logo path is outside the draft logo boundary')
+    const sha256 = String(candidate['sha256'] ?? '')
+    if (!/^[a-f0-9]{64}$/.test(sha256)) throw new Error('Link draft logo hash is invalid')
+    const mediaType = String(candidate['mediaType'] ?? '')
+    if (!normalizedMediaType(mediaType).startsWith('image/')) throw new Error('Link draft logo must be an image')
+    logo = { name, path, sha256, mediaType }
+  }
+
   const rawAssets = Array.isArray(item['assets']) ? item['assets'] : []
   const assets = rawAssets.map((value) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Link draft asset must be an object')
@@ -502,6 +595,10 @@ function validateManifest(value: unknown): LinkDraftManifest {
     createdAt,
     ...(workflowId ? { workflowId } : {}),
     ...(scheduleId ? { scheduleId } : {}),
+    ...(threadId ? { threadId } : {}),
+    ...(resourceId ? { resourceId } : {}),
+    ...(logo ? { logo } : {}),
+    ...(logoText ? { logoText } : {}),
     ...(assets.length ? { assets } : {}),
   }
 }

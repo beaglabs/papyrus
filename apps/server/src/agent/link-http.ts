@@ -174,7 +174,7 @@ async function acceptWebhook(
   if (!allowed.includes(request.method ?? '')) return methodNotAllowed(response, allowed)
   const body = await jsonBody(request)
   const inbound = await persistInbound(request, url, mastra, link, body)
-  const investigation = await mastra.acceptLinkInbound(link, inbound, body)
+  const signal = await mastra.acceptLinkWebhook(link, inbound, body, safeInboundHeaders(request.headers))
 
   let workflowResult: unknown
   if (link.workflowId) {
@@ -198,7 +198,7 @@ async function acceptWebhook(
     accepted: true,
     linkId: link.id,
     inboundId: inbound.id,
-    investigationId: investigation.investigationId,
+    sessionId: signal.sessionId,
     ...(link.workflowId ? { workflowId: link.workflowId, workflowResult } : {}),
   }))
   return true

@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { AgentDatabase } from '../src/agent/database.js'
 import { ActionStore } from '../src/agent/action-store.js'
 import type { AgentConfig } from '../src/agent/config.js'
@@ -251,6 +251,127 @@ describe('AgentFS Links boundary', () => {
       expect(html).toMatch(/\/l\/video-preview-webpage\/assets\/[a-f0-9]{8}-preview\.mp4/)
     } finally {
       await runtime.workspaceFilesystem.destroy()
+      db.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('requires Webhook Links to carry the creating Mastra session scope', async () => {
+    const subject = await fixture()
+    try {
+      await subject.filesystem.writeFile('/Library/Generated/webhook.json', '{"type":"object"}')
+      await expect(subject.links.prepareDraft({
+        name: 'Build intake',
+        type: 'webhook',
+        sourcePath: '/Library/Generated/webhook.json',
+      })).rejects.toThrow(/scoped to the Agent session/)
+    } finally {
+      await subject.close()
+    }
+  })
+
+  it('snapshots Webhook logo identity with the session-scoped Link', async () => {
+    const subject = await fixture()
+    try {
+      await subject.filesystem.writeFile('/Library/Generated/webhook.json', '{"type":"object"}')
+      await subject.filesystem.writeFile('/Library/Uploads/build-logo.png', Buffer.from('png-logo-bytes'))
+      const draft = await subject.links.prepareDraft({
+        name: 'Build intake',
+        type: 'webhook',
+        sourcePath: '/Library/Generated/webhook.json',
+        threadId: 'thread-build',
+        resourceId: 'papyrus:gcc:Example Agency',
+        logoPath: '/Library/Uploads/build-logo.png',
+      })
+      expect(draft).toMatchObject({
+        threadId: 'thread-build',
+        resourceId: 'papyrus:gcc:Example Agency',
+        logo: expect.objectContaining({ name: 'build-logo.png', mediaType: 'image/png' }),
+      })
+
+      const live = await subject.links.publishFromManifest(
+        `/Library/Links/Drafts/${draft.draftId}/link.json`,
+        'owner',
+      )
+      expect(live).toMatchObject({
+        type: 'webhook',
+        threadId: 'thread-build',
+        resourceId: 'papyrus:gcc:Example Agency',
+        logoMediaType: 'image/png',
+      })
+      expect(live.logoPath).toMatch(/^\/Library\/Links\/Published\/[^/]+\/logo\/build-logo\.png$/)
+      expect(await subject.filesystem.readFile(live.logoPath as string, { encoding: 'utf8' })).toBe('png-logo-bytes')
+    } finally {
+      await subject.close()
+    }
+  })
+
+  it('delivers Webhook Link events through WebhookSignalProvider to the bound session', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'papyrus-webhook-signal-'))
+    const db = new AgentDatabase(':memory:')
+    const actionStore = new ActionStore(db)
+    const config: AgentConfig = {
+      mode: 'local', profile: 'gcc', host: '127.0.0.1', port: 3210,
+      publicOrigin: 'http://127.0.0.1:3210', dataDir: root, databasePath: ':memory:',
+      portalSecret: 'test-secret', organizationName: 'Example Agency', cloud: 'Public',
+      agentfsId: 'webhook-signal-test', licenseRequired: false, licenseAuthorities: {},
+    }
+    const runtime = new MastraRuntime(config, actionStore, {} as TerrainStore, {} as AgentService)
+    const subscribeThread = vi.fn()
+    const handleWebhook = vi.fn(async () => ({ matched: 1 }))
+    const updateThread = vi.fn(async () => undefined)
+    ;(runtime as unknown as { mastra: unknown }).mastra = {
+      webhooks: { subscribeThread, handleWebhook },
+      memory: {
+        getThreadById: async () => ({ id: 'thread-1', resourceId: 'papyrus:gcc:Example Agency', metadata: {} }),
+        updateThread,
+      },
+    }
+
+    try {
+      const accepted = await runtime.acceptLinkWebhook({
+        id: 'link-1',
+        name: 'CI intake',
+        slug: 'ci-intake',
+        type: 'webhook',
+        state: 'live',
+        blobPath: '/Library/Links/Published/link-1/webhook.json',
+        mediaType: 'application/json',
+        sourceSha256: 'a'.repeat(64),
+        publicPath: '/l/ci-intake',
+        threadId: 'thread-1',
+        resourceId: 'papyrus:gcc:Example Agency',
+        createdByOid: 'owner',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        pingCount: 0,
+        inboundCount: 1,
+      }, {
+        id: 'inbound-1',
+        linkId: 'link-1',
+        blobPath: '/Library/Links/Inbound/link-1/inbound.json',
+        method: 'POST',
+        receivedAt: new Date().toISOString(),
+        size: 42,
+        sha256: 'b'.repeat(64),
+      }, { summary: 'Build failed', status: 'failed' }, { authorization: 'must-not-forward', 'x-request-id': 'req-1' })
+
+      expect(accepted).toEqual({ accepted: true, sessionId: 'thread-1' })
+      expect(subscribeThread).toHaveBeenCalledWith(
+        { threadId: 'thread-1', resourceId: 'papyrus:gcc:Example Agency' },
+        'link-1',
+      )
+      expect(handleWebhook).toHaveBeenCalledWith(expect.objectContaining({
+        body: expect.objectContaining({
+          summary: 'Build failed',
+          externalResourceId: 'link-1',
+          __papyrus: expect.objectContaining({ linkId: 'link-1', inboundId: 'inbound-1' }),
+        }),
+        headers: { 'x-request-id': 'req-1' },
+      }))
+      expect(updateThread).toHaveBeenCalled()
+    } finally {
+      await runtime.workspaceFilesystem.destroy().catch(() => undefined)
       db.close()
       rmSync(root, { recursive: true, force: true })
     }

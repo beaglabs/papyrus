@@ -178,30 +178,33 @@ export function SidebarMenuButton({
   >{children}</button>
 }
 
-export function SidebarTrigger({ className, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) {
+export function SidebarTrigger({ className, onClick, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) {
   const { toggleSidebar, state } = useSidebar()
   return <button
+    {...props}
     type="button"
     data-slot="sidebar-trigger"
     className={classes('nb-sidebar-trigger', className)}
-    aria-label={state === 'expanded' ? 'Collapse sidebar' : 'Expand sidebar'}
+    aria-label={props['aria-label'] ?? (state === 'expanded' ? 'Collapse sidebar' : 'Expand sidebar')}
     onClick={(event) => {
-      props.onClick?.(event)
+      onClick?.(event)
       if (!event.defaultPrevented) toggleSidebar()
     }}
-    {...props}
   ><span aria-hidden="true">☰</span></button>
 }
 
-export function SidebarRail({ className, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) {
+export function SidebarRail({ className, onClick, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) {
   const { toggleSidebar } = useSidebar()
   return <button
+    {...props}
     type="button"
     data-slot="sidebar-rail"
     tabIndex={-1}
-    aria-label="Toggle sidebar"
+    aria-label={props['aria-label'] ?? 'Toggle sidebar'}
     className={classes('nb-sidebar-rail', className)}
-    onClick={toggleSidebar}
-    {...props}
+    onClick={(event) => {
+      onClick?.(event)
+      if (!event.defaultPrevented) toggleSidebar()
+    }}
   />
 }

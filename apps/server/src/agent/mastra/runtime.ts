@@ -1290,7 +1290,7 @@ export class MastraRuntime {
           summary: typeof body['summary'] === 'string'
             ? body['summary']
             : `Webhook Link ${String(metadata['linkName'] ?? 'ingestion source')} received an event.`,
-          data: body,
+          payload: body,
         }
       },
     })

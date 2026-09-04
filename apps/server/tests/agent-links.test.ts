@@ -306,6 +306,32 @@ describe('AgentFS Links boundary', () => {
     }
   })
 
+  it('disables live Webhook Links when their owning session disappears', async () => {
+    const subject = await fixture()
+    try {
+      await subject.filesystem.writeFile('/Library/Generated/webhook.json', '{"type":"object"}')
+      const draft = await subject.links.prepareDraft({
+        name: 'Build intake',
+        type: 'webhook',
+        sourcePath: '/Library/Generated/webhook.json',
+        threadId: 'thread-build',
+        resourceId: 'papyrus:gcc:Example Agency',
+      })
+      const live = await subject.links.publishFromManifest(
+        `/Library/Links/Drafts/${draft.draftId}/link.json`,
+        'owner',
+      )
+      expect(live.state).toBe('live')
+
+      const disabled = subject.links.disableWebhookLinksForThread('thread-build', 'system:test')
+      expect(disabled).toEqual([expect.objectContaining({ id: live.id, state: 'disabled' })])
+      expect(subject.links.get(live.id)?.state).toBe('disabled')
+      expect(subject.links.disableWebhookLinksForThread('thread-build', 'system:test')).toEqual([])
+    } finally {
+      await subject.close()
+    }
+  })
+
   it('delivers Webhook Link events through WebhookSignalProvider to the bound session', async () => {
     const root = mkdtempSync(join(tmpdir(), 'papyrus-webhook-signal-'))
     const db = new AgentDatabase(':memory:')

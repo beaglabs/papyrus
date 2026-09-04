@@ -296,6 +296,21 @@ export class LinkStore {
     return this.get(manifest.draftId) as AgentLink
   }
 
+  disableWebhookLinksForThread(threadId: string, actorOid: string): AgentLink[] {
+    const scoped = (this.db.sqlite.prepare(
+      "SELECT * FROM agent_links WHERE deleted_at IS NULL AND type='webhook' AND state='live' AND thread_id=? ORDER BY updated_at DESC"
+    ).all(threadId) as Row[]).map((row) => this.link(row))
+    if (!scoped.length) return []
+
+    const now = new Date().toISOString()
+    const update = this.db.sqlite.prepare("UPDATE agent_links SET state='disabled',updated_at=? WHERE id=? AND state='live'")
+    for (const link of scoped) {
+      update.run(now, link.id)
+      this.appendEvent(link.id, 'LinkDisabled', { reason: 'session_unavailable', threadId, actorOid })
+    }
+    return scoped.map((link) => this.get(link.id) as AgentLink)
+  }
+
   recordValidation(id: string, provider: 'local-static' | 'kitesurf'): AgentLink {
     this.require(id)
     const now = new Date().toISOString()

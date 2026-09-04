@@ -2,12 +2,12 @@ import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport, type UIMessage } from 'ai'
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import type { AgentSession, AgentStatus, WorkspaceLibraryFile } from './api.js'
-import { approveProposal, approveSkill, connectPlugin, createSessionProposal, denyProposal, issueIngestionToken, sessionMessages, setSessionAttention, uploadWorkspaceAttachment, workspaceFiles } from './api.js'
+import { approveProposal, approveSkill, createSessionProposal, denyProposal, sessionMessages, setSessionAttention, uploadWorkspaceAttachment, workspaceFiles } from './api.js'
 import { ModelGatewayCard } from './Models.js'
-import { Alert, Badge, Button, Card, Input, Label, NativeSelect, Skeleton } from './components/ui/index.js'
+import { Alert, Badge, Button, Card, Input, Skeleton } from './components/ui/index.js'
 import { MarkdownMessage } from './Markdown.js'
 
-interface PluginField {
+interface AgentFormField {
   name: string
   label: string
   kind: 'text' | 'url' | 'email' | 'credential_reference' | 'select'
@@ -17,22 +17,9 @@ interface PluginField {
   options?: Array<{ label: string; value: string }>
 }
 
-interface PluginRequest {
-  kind: 'plugin_connection_request'
-  catalogId: string
-  name: string
-  description: string
-  authority: string
-  risk: string
-  syncMode: string
-  acceptsSignals: boolean
-  fields: PluginField[]
-  note: string
-}
-
 interface ModelGatewayRequest {
   kind: 'model_gateway_request'
-  fields: PluginField[]
+  fields: AgentFormField[]
   note: string
 }
 
@@ -369,7 +356,7 @@ function MessageSkeleton() {
 }
 
 function Welcome() {
-  return <div className="agent-welcome"><span className="agent-orbit">✦</span><p className="eyebrow">PAPYRUS RUNTIME</p><h2>What should the population work on?</h2><p>Start a task, create a durable artifact, connect an operational plugin, or schedule recurring work. Starlings handles collective reasoning; Mastra makes the session durable and event-driven.</p><div className="prompt-chips"><span>Create a PDF briefing</span><span>Build an XLSX risk register</span><span>Create a reusable skill</span></div></div>
+  return <div className="agent-welcome"><span className="agent-orbit">✦</span><p className="eyebrow">PAPYRUS RUNTIME</p><h2>What should the population work on?</h2><p>Start a task, create a durable artifact, expose a session-scoped ingestion Link, or schedule recurring work through the agent. Starlings handles collective reasoning; Mastra makes the session durable and event-driven.</p><div className="prompt-chips"><span>Create a PDF briefing</span><span>Build an XLSX risk register</span><span>Create a reusable skill</span></div></div>
 }
 
 function Message({ message, sessionId, canApprove, canManageSkills, onChanged }: { message: UIMessage; sessionId: string; canApprove: boolean; canManageSkills: boolean; onChanged: () => Promise<void> }) {
@@ -382,7 +369,6 @@ function MessagePart({ part, sessionId, canApprove, canManageSkills, onChanged }
   const type = String(part['type'] ?? '')
   if (type === 'dynamic-tool' || type.startsWith('tool-')) {
     const output = part['output'] as Record<string, unknown> | undefined
-    if (output?.['kind'] === 'plugin_connection_request') return <PluginConnectionCard request={output as unknown as PluginRequest} onChanged={onChanged} />
     if (output?.['kind'] === 'model_gateway_request') return <ModelGatewayCard request={output as unknown as ModelGatewayRequest} onChanged={onChanged} />
     if (output?.['kind'] === 'url_preview') return <UrlPreviewCard preview={output as unknown as UrlPreview} />
     if (output?.['kind'] === 'action_suggestion') return <ActionSuggestionCard suggestion={output} sessionId={sessionId} canApprove={canApprove} onChanged={onChanged} />
@@ -419,35 +405,6 @@ function ActionSuggestionCard({ suggestion, sessionId, canApprove, onChanged }: 
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to record decision') }
   }
   return <Card className="action-suggestion"><div className="action-suggestion-head"><span className="attention-icon">!</span><div><p className="eyebrow">ACTION SUGGESTION</p><h3>{String(suggestion['action'] ?? 'Proposed action')}</h3></div><Badge>{status}</Badge></div><dl><div><dt>Target</dt><dd>{String(suggestion['target'] ?? '—')}</dd></div><div><dt>Executor</dt><dd>{String(suggestion['executorIntegrationId'] ?? '—')}</dd></div></dl><p>{String(suggestion['rationale'] ?? '')}</p>{error && <Alert className="error">{error}</Alert>}<div className="proposal-controls">{status === 'suggested' && <Button className="primary" onClick={() => void propose()}>Submit for approval</Button>}{status === 'saving' && <Button disabled>Recording…</Button>}{status === 'proposed' && canApprove && <><Button className="primary" onClick={() => void decide(true)}>Approve and queue</Button><Button variant="ghost" onClick={() => void decide(false)}>Deny</Button></>}{status === 'proposed' && !canApprove && <small>Waiting for a Papyrus.Action.Approve operator.</small>}</div></Card>
-}
-
-function PluginConnectionCard({ request, onChanged }: { request: PluginRequest; onChanged: () => Promise<void> }) {
-  const [state, setState] = useState<'ready' | 'saving' | 'connected'>('ready')
-  const [error, setError] = useState<string>()
-  const [webhook, setWebhook] = useState<{ endpoint: string; token: string }>()
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault(); setState('saving'); setError(undefined)
-    const form = new FormData(event.currentTarget)
-    const settings: Record<string, string> = {}
-    for (const field of request.fields) if (!['name', 'scope', 'endpoint', 'credentialRef'].includes(field.name)) settings[field.name] = String(form.get(field.name) ?? '')
-    try {
-      const connected = await connectPlugin({
-        catalogId: request.catalogId, name: String(form.get('name') ?? request.name), scope: String(form.get('scope') ?? 'daemon'), settings,
-        ...(form.get('endpoint') ? { endpoint: String(form.get('endpoint')) } : {}),
-        ...(form.get('credentialRef') ? { credentialRef: String(form.get('credentialRef')) } : {}),
-      })
-      const plugin = connected.plugin
-      if (request.acceptsSignals && plugin.state === 'active') {
-        const issued = await issueIngestionToken(plugin.id)
-        setWebhook({ endpoint: `${window.location.origin}/api/signals/${plugin.id}/webhook`, token: issued.token })
-      }
-      setState('connected'); await onChanged()
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to connect plugin'); setState('ready') }
-  }
-  if (state === 'connected') return <Card className="plugin-tool-card connected"><span className="tool-icon">✓</span><div><strong>{request.name} connected</strong><p>The daemon validated and activated the plugin under your Entra authority.</p>{webhook && <div className="webhook-command"><small>Push any JSON event into this agent’s durable signal session:</small><pre>{`curl --fail-with-body -X POST \\\n  -H 'Authorization: Bearer ${webhook.token}' \\\n  -H 'Content-Type: application/json' \\\n  '${webhook.endpoint}' \\\n  --data '{"kind":"event","summary":"Describe what changed"}'`}</pre><Button type="button" onClick={() => void navigator.clipboard.writeText(`curl --fail-with-body -X POST -H 'Authorization: Bearer ${webhook.token}' -H 'Content-Type: application/json' '${webhook.endpoint}' --data '{"kind":"event","summary":"Describe what changed"}'`)}>Copy command</Button></div>}</div></Card>
-  return <Card className="plugin-tool-card"><div className="plugin-tool-head"><div><p className="eyebrow">SECURE PLUGIN SETUP</p><h3>{request.name}</h3></div><Badge className={`risk-${request.risk}`}>{request.authority.replaceAll('_', ' ')}</Badge></div><p>{request.description}</p><form onSubmit={(event) => void submit(event)}><div className="agent-form-grid">{request.fields.map((field) => <Label key={field.name}>{field.label}{field.kind === 'select'
-      ? <NativeSelect name={field.name} required={field.required}>{field.options?.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</NativeSelect>
-      : <Input name={field.name} type={field.kind === 'credential_reference' ? 'password' : field.kind} required={field.required} defaultValue={field.name === 'name' ? request.name : undefined} placeholder={field.placeholder} autoComplete={field.kind === 'credential_reference' ? 'off' : undefined} />}{field.help && <small>{field.help}</small>}</Label>)}</div>{error && <Alert className="error">{error}</Alert>}<div className="plugin-tool-foot"><small>{request.note}</small><Button className="primary" disabled={state === 'saving'}>{state === 'saving' ? 'Connecting…' : 'Connect plugin'}</Button></div></form></Card>
 }
 
 function UrlPreviewCard({ preview }: { preview: UrlPreview }) {

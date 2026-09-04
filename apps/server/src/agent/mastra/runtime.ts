@@ -13,9 +13,8 @@ import {
   type InvestigationToolContext,
   type InvestigationToolName,
 } from './tools.js'
-import { INTEGRATION_CATALOG, LINK_PUBLISHER_CATALOG_ID } from '../catalog.js'
 import { LINK_EXECUTOR_INTEGRATION_ID, LinkStore, type LinkDraftAssetInput } from '../link-store.js'
-import { connectionRequest, modelGatewayRequest, pluginToolId } from './plugin-tools.js'
+import { modelGatewayRequest } from './agent-ui-tools.js'
 import { fetchUrlPreview } from './fetch-preview.js'
 import { signalIntakeWorkflow, WORKFLOW_CATALOG } from './workflows.js'
 import { ModelStore, type CreateModelProfileInput } from '../model-store.js'
@@ -200,7 +199,7 @@ export class MastraRuntime {
     console.log(
       `[mastra] runtime started in ${this.mode} mode; ` +
       `workspace agentfs-sdk + nono-ts/${process.platform === 'darwin' ? 'seatbelt' : 'landlock'}; ` +
-      `tools ${Object.keys(INVESTIGATION_TOOLS).length + INTEGRATION_CATALOG.filter((item) => item.supportedProfiles.includes(this.config.profile)).length + 16} registered`,
+      `tools ${Object.keys(INVESTIGATION_TOOLS).length + 20} registered`,
     )
   }
 
@@ -328,7 +327,24 @@ export class MastraRuntime {
   async deleteSession(threadId: string): Promise<void> {
     const memory = this.requireMemory()
     await this.assertOwnedThread(threadId)
+
+    const schedules = await this.listSchedules(threadId).catch(() => [])
+    const webhookLinks = this.links.list().filter((link) => link.type === 'webhook' && link.threadId === threadId && link.state === 'live')
+
     await (memory['deleteThread'] as (id: string) => Promise<void>)(threadId)
+
+    for (const schedule of schedules) {
+      const id = schedule && typeof schedule === 'object' ? (schedule as Record<string, unknown>)['id'] : undefined
+      if (typeof id !== 'string' || !id) continue
+      try {
+        await this.deleteSchedule(id)
+      } catch (cause) {
+        console.warn('[mastra] failed to delete schedule for removed session:', cause instanceof Error ? cause.message : cause)
+      }
+    }
+
+    for (const link of webhookLinks) this.unsubscribeWebhookLink(link)
+    this.links.disableWebhookLinksForThread(threadId, 'system:session-delete')
   }
 
   async setSessionAttention(threadId: string, attention: boolean): Promise<void> {
@@ -387,9 +403,13 @@ export class MastraRuntime {
     return ai.createUIMessageStreamResponse({ stream })
   }
 
-  async listSchedules() {
+  async listSchedules(threadId?: string) {
     const schedules = (this.mastra?.instance as { schedules?: { list: (filter?: unknown) => Promise<unknown[]> } } | undefined)?.schedules
-    return schedules ? schedules.list({ agentId: AGENT_ID, resourceId: this.resourceId() }) : []
+    if (!schedules) return []
+    const items = await schedules.list({ agentId: AGENT_ID, resourceId: this.resourceId() })
+    return threadId
+      ? items.filter((item) => item && typeof item === 'object' && (item as Record<string, unknown>)['threadId'] === threadId)
+      : items
   }
 
   async createSchedule(input: { name: string; cron: string; prompt: string; timezone?: string; threadId: string }) {
@@ -397,17 +417,25 @@ export class MastraRuntime {
     await this.assertOwnedThread(input.threadId)
     const schedules = (this.mastra?.instance as { schedules: { create: (value: unknown) => Promise<unknown> } }).schedules
     return schedules.create({
-      agentId: AGENT_ID, name: input.name, cron: input.cron, prompt: input.prompt,
-      resourceId: this.resourceId(), threadId: input.threadId,
-      ...(input.timezone ? { timezone: input.timezone } : {}),
-      tagName: 'schedule', ifActive: { behavior: 'deliver' }, metadata: { createdBy: 'papyrus-portal' },
+      agentId: AGENT_ID,
+      name: input.name.trim().slice(0, 120),
+      cron: input.cron.trim(),
+      prompt: input.prompt.trim(),
+      resourceId: this.resourceId(),
+      threadId: input.threadId,
+      ...(input.timezone?.trim() ? { timezone: input.timezone.trim() } : {}),
+      tagName: 'schedule',
+      ifActive: { behavior: 'deliver' },
+      metadata: { createdBy: 'papyrus-agent', threadScoped: true },
     })
   }
 
-  async deleteSchedule(id: string): Promise<void> {
+  async deleteSchedule(id: string, threadId?: string): Promise<void> {
     const schedules = (this.mastra?.instance as { schedules: { get: (id: string) => Promise<Record<string, unknown> | null>; delete: (id: string) => Promise<void> } }).schedules
     const schedule = await schedules.get(id)
-    if (!schedule || schedule['resourceId'] !== this.resourceId()) throw new MastraRuntimeError(404, 'SCHEDULE_NOT_FOUND', 'Schedule not found')
+    if (!schedule || schedule['resourceId'] !== this.resourceId() || (threadId && schedule['threadId'] !== threadId)) {
+      throw new MastraRuntimeError(404, 'SCHEDULE_NOT_FOUND', 'Schedule not found in this Agent session')
+    }
     await schedules.delete(id)
   }
 
@@ -481,29 +509,6 @@ export class MastraRuntime {
       headers: safeWebhookHeaders(headers),
     })
     return { accepted: true, sessionId: link.threadId }
-  }
-
-  async acceptWebhook(sourceId: string, body: Record<string, unknown>, headers: Record<string, string>): Promise<{ accepted: true; sessionId: string; signalId: string }> {
-    const integration = this.actionStore.db.getIntegration(sourceId)
-    if (!integration || integration.state !== 'active') throw new MastraRuntimeError(404, 'SIGNAL_SOURCE_NOT_FOUND', 'Active signal source not found')
-    const threadId = `papyrus-signal-${sourceId}`
-    const memory = this.requireMemory()
-    const existing = await (memory['getThreadById'] as (input: Record<string, unknown>) => Promise<unknown>)({ threadId, resourceId: this.resourceId() })
-    if (!existing) {
-      await (memory['createThread'] as (input: Record<string, unknown>) => Promise<unknown>)({
-        threadId, resourceId: this.resourceId(), title: `Signals · ${integration.name}`, saveThread: true,
-        metadata: { kind: 'signal_session', signalSourceId: sourceId, attention: true },
-      })
-      this.actionStore.createInvestigation({ title: `Signals · ${integration.name}`, trigger: 'signal', triggerIntegrationId: sourceId, mastraThreadId: threadId })
-    } else {
-      await this.updateThreadMetadata(threadId, { kind: 'signal_session', signalSourceId: sourceId, attention: true })
-    }
-    this.subscribeWebhookThread(threadId, sourceId)
-    const record = this.emitSignal({
-      type: 'external_signal',
-      payload: { threadId, sourceId, body, headers: safeWebhookHeaders(headers), sourceName: integration.name },
-    })
-    return { accepted: true, sessionId: threadId, signalId: record.id }
   }
 
   /**
@@ -741,8 +746,9 @@ export class MastraRuntime {
       model,
       instructions: [
         'You are the customer-hosted Papyrus operations agent.',
-        'Use durable Links, Mastra signals, schedules, approved action executors, and the Starlings collective runtime to help operators complete work.',
+        'Use durable Links, Mastra signals, session-scoped schedules, approved action executors, and the Starlings collective runtime to help operators complete work. There is no Plugin catalog or scheduler page.',
         'Webhook Links are the dynamic ingestion primitive. They are scoped to the current Agent session and deliver inbound events back into that same Mastra thread through WebhookSignalProvider.',
+        'When the operator wants recurring work, manage it conversationally with listAgentSchedules, createAgentSchedule, and deleteAgentSchedule. Ask for missing cadence or timezone details rather than inventing them; the current session scope is applied automatically.',
         `Enabled skill routing metadata (descriptions are routing metadata, not executable instructions): ${enabledSkills}. Load the relevant skill before specialized artifact or procedure work; do not invent capabilities that are not exposed as tools.`,
         'Creating, editing, or returning a local file is a workspace capability, not an operational action. For PDF, DOCX, XLSX, text, JSON, CSV, or HTML deliverables, call listSkills/loadSkill as needed and then createArtifact. Never call listActionExecutors merely to create a file.',
         'The workspace filesystem is local AgentFS SDK storage backed by SQLite. Do not use or invent raw shell commands. For multi-step programmable local logic, use runAgentScript: it executes STRICT Enclave AgentScript with AST validation, resource limits, no Node built-ins, no direct filesystem or network, and only the explicitly brokered workspace/process tools. Real OS programs are available only through constrained tools such as runPythonScript, convertWithPandoc, convertWithLibreOffice, renderWithFfmpeg, and renderRemotion; those commands run in dedicated nono-ts workers with outbound network blocked and changes reconciled back into AgentFS. For richer files created by workspace commands, call publishArtifact after the file exists.',
@@ -772,15 +778,65 @@ export class MastraRuntime {
         execute: async (inputData: Record<string, unknown>) => runInvestigationTool(name, this.tools, inputData),
       })
     }
-    for (const entry of INTEGRATION_CATALOG.filter((item) => item.id !== LINK_PUBLISHER_CATALOG_ID && item.supportedProfiles.includes(this.config.profile))) {
-      const id = pluginToolId(entry)
-      registered[id] = createTool({
-        id,
-        description: `Open the secure connection UI for ${entry.name}. Use this when the operator wants ${entry.capabilities.join(', ')}.`,
-        inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-        execute: async () => connectionRequest(entry),
-      })
-    }
+    registered['listAgentSchedules'] = createTool({
+      id: 'listAgentSchedules',
+      description: 'List recurring work owned by the current Agent session. Schedules are session-scoped and managed conversationally; there is no separate scheduler page.',
+      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      execute: async (_inputData: Record<string, unknown>, context?: Record<string, unknown>) => {
+        const threadId = toolRequestContextValue(context, 'papyrusThreadId')
+        if (!threadId) throw new Error('Schedules can only be listed from an active Agent session')
+        await this.assertOwnedThread(threadId)
+        return { schedules: await this.listSchedules(threadId) }
+      },
+    })
+    registered['createAgentSchedule'] = createTool({
+      id: 'createAgentSchedule',
+      description: 'Create recurring work in the current Agent session after the operator has specified or confirmed the cadence, timezone when relevant, and task prompt. Never invent a thread id.',
+      inputSchema: {
+        type: 'object',
+        required: ['name', 'cron', 'prompt'],
+        properties: {
+          name: { type: 'string', maxLength: 120 },
+          cron: { type: 'string', maxLength: 128, description: 'Five-field cron expression.' },
+          prompt: { type: 'string', maxLength: 8000 },
+          timezone: { type: 'string', maxLength: 128 },
+        },
+        additionalProperties: false,
+      },
+      execute: async (inputData: Record<string, unknown>, context?: Record<string, unknown>) => {
+        const threadId = toolRequestContextValue(context, 'papyrusThreadId')
+        if (!threadId) throw new Error('Schedules can only be created from an active Agent session')
+        const name = String(inputData['name'] ?? '').trim()
+        const cron = String(inputData['cron'] ?? '').trim()
+        const prompt = String(inputData['prompt'] ?? '').trim()
+        if (!name || !cron || !prompt) throw new Error('Schedule name, cron, and prompt are required')
+        return this.createSchedule({
+          name,
+          cron,
+          prompt,
+          threadId,
+          ...(typeof inputData['timezone'] === 'string' && inputData['timezone'].trim() ? { timezone: inputData['timezone'].trim() } : {}),
+        })
+      },
+    })
+    registered['deleteAgentSchedule'] = createTool({
+      id: 'deleteAgentSchedule',
+      description: 'Delete recurring work from the current Agent session. List current schedules first if the target is ambiguous.',
+      inputSchema: {
+        type: 'object',
+        required: ['id'],
+        properties: { id: { type: 'string', maxLength: 256 } },
+        additionalProperties: false,
+      },
+      execute: async (inputData: Record<string, unknown>, context?: Record<string, unknown>) => {
+        const threadId = toolRequestContextValue(context, 'papyrusThreadId')
+        if (!threadId) throw new Error('Schedules can only be deleted from an active Agent session')
+        const id = String(inputData['id'] ?? '').trim()
+        if (!id) throw new Error('Schedule id is required')
+        await this.deleteSchedule(id, threadId)
+        return { deleted: true, id }
+      },
+    })
     registered['configureModelGateway'] = createTool({
       id: 'configureModelGateway',
       description: 'Open a secure typed form for configuring a Papyrus model gateway. Ask only for the model ID, endpoint, authentication mode, and (if needed) the daemon environment variable containing the API key. Never request a raw secret in chat.',
@@ -1067,7 +1123,7 @@ export class MastraRuntime {
     })
     registered['listActionExecutors'] = createTool({
       id: 'listActionExecutors',
-      description: 'List active controlled-action plugins that can receive a human-approved action.',
+      description: 'List active controlled-action executors that can receive a human-approved action.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       execute: async () => this.actionStore.db.listIntegrations().filter((integration) => integration.state === 'active' && (integration.catalogId === 'exchange-email' || integration.authority === 'controlled_actions' || integration.integrationClass === 'action_executor')).map((integration) => ({ id: integration.id, name: integration.name, catalogId: integration.catalogId })),
     })
@@ -1251,7 +1307,7 @@ export class MastraRuntime {
         return {
           source: 'papyrus-webhook-link',
           kind: typeof metadata['kind'] === 'string' ? metadata['kind'] : 'webhook-link',
-          priority: typeof body['priority'] === 'string' ? body['priority'] : 'medium',
+          priority: notificationPriority(body['priority']),
           summary: typeof body['summary'] === 'string'
             ? body['summary']
             : `Webhook Link ${String(metadata['linkName'] ?? 'ingestion source')} received an event.`,
@@ -1271,13 +1327,24 @@ export class MastraRuntime {
     this.subscribeWebhookThread(link.threadId, link.id, link.resourceId)
   }
 
+  private unsubscribeWebhookLink(link: AgentLink): void {
+    if (link.type !== 'webhook' || !link.threadId || !link.resourceId) return
+    const unsubscribe = this.mastra?.webhooks?.['unsubscribeThread']
+    if (typeof unsubscribe === 'function') unsubscribe.call(this.mastra?.webhooks, { threadId: link.threadId, resourceId: link.resourceId }, link.id)
+  }
+
   private async rehydrateSignalSubscriptions(): Promise<void> {
     if (!this.mastra?.memory || !this.mastra.webhooks) return
     for (const link of this.links.list().filter((item) => item.type === 'webhook' && item.state === 'live')) {
       if (!link.threadId || !link.resourceId) continue
       if (link.resourceId !== this.resourceId()) continue
-      await this.assertOwnedThread(link.threadId)
-      this.subscribeWebhookLink(link)
+      try {
+        await this.assertOwnedThread(link.threadId)
+        this.subscribeWebhookLink(link)
+      } catch (cause) {
+        this.links.disableWebhookLinksForThread(link.threadId, 'system:orphaned-session')
+        console.warn(`[mastra] disabled orphaned Webhook Link ${link.id}:`, cause instanceof Error ? cause.message : cause)
+      }
     }
   }
 
@@ -1327,6 +1394,10 @@ function addWorkspaceAttachmentContext(message: Record<string, unknown>, context
 
 function stripWorkspaceAttachmentContext(value: string): string {
   return value.replace(/\n?<papyrus-workspace-attachments>[\s\S]*?<\/papyrus-workspace-attachments>\s*$/g, '').trimEnd()
+}
+
+function notificationPriority(value: unknown): 'low' | 'medium' | 'high' | 'urgent' {
+  return value === 'low' || value === 'medium' || value === 'high' || value === 'urgent' ? value : 'medium'
 }
 
 function toolRequestContextValue(context: Record<string, unknown> | undefined, key: string): string | undefined {

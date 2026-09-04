@@ -13,6 +13,13 @@ import {
 
 type SidebarState = 'expanded' | 'collapsed'
 
+const SIDEBAR_COOKIE_NAME = 'sidebar_state'
+const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
+const SIDEBAR_WIDTH = '16rem'
+const SIDEBAR_WIDTH_MOBILE = '18rem'
+const SIDEBAR_WIDTH_ICON = '3rem'
+const SIDEBAR_KEYBOARD_SHORTCUT = 'b'
+
 interface SidebarContextValue {
   state: SidebarState
   open: boolean
@@ -40,7 +47,7 @@ export function SidebarProvider({
   className?: string
   style?: CSSProperties
 }) {
-  const [open, setOpen] = useState(defaultOpen)
+  const [open, setOpenState] = useState(defaultOpen)
   const [openMobile, setOpenMobile] = useState(false)
   const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches)
 
@@ -52,14 +59,21 @@ export function SidebarProvider({
     return () => media.removeEventListener('change', changed)
   }, [])
 
+  const setOpen = useCallback((next: boolean) => {
+    setOpenState(next)
+    if (typeof document !== 'undefined') {
+      document.cookie = `${SIDEBAR_COOKIE_NAME}=${next}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}; SameSite=Lax`
+    }
+  }, [])
+
   const toggleSidebar = useCallback(() => {
     if (isMobile) setOpenMobile((value) => !value)
-    else setOpen((value) => !value)
-  }, [isMobile])
+    else setOpen(!open)
+  }, [isMobile, open, setOpen])
 
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() !== 'b' || (!event.metaKey && !event.ctrlKey)) return
+      if (event.key.toLowerCase() !== SIDEBAR_KEYBOARD_SHORTCUT || (!event.metaKey && !event.ctrlKey)) return
       event.preventDefault()
       toggleSidebar()
     }
@@ -83,8 +97,9 @@ export function SidebarProvider({
       data-state={value.state}
       className={classes('nb-sidebar-wrapper', className)}
       style={{
-        '--sidebar-width': '285px',
-        '--sidebar-width-icon': '68px',
+        '--sidebar-width': SIDEBAR_WIDTH,
+        '--sidebar-width-mobile': SIDEBAR_WIDTH_MOBILE,
+        '--sidebar-width-icon': SIDEBAR_WIDTH_ICON,
         ...style,
       } as CSSProperties}
     >
@@ -162,16 +177,16 @@ export function SidebarMenuItem({ className, ...props }: HTMLAttributes<HTMLLIEl
 }
 
 export function SidebarMenuButton({
-  active = false,
+  isActive = false,
   tooltip,
   className,
   children,
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { active?: boolean; tooltip?: string }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & { isActive?: boolean; tooltip?: string }) {
   return <button
     type="button"
     data-slot="sidebar-menu-button"
-    data-active={active ? 'true' : 'false'}
+    data-active={isActive ? 'true' : 'false'}
     title={tooltip}
     className={classes('nb-sidebar-menu-button', className)}
     {...props}

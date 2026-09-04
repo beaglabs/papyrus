@@ -1,8 +1,8 @@
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport, type UIMessage } from 'ai'
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import type { AgentSession, AgentStatus } from './api.js'
-import { approveProposal, approveSkill, connectPlugin, createSessionProposal, denyProposal, issueIngestionToken, sessionMessages, setSessionAttention } from './api.js'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import type { AgentSession, AgentStatus, WorkspaceLibraryFile } from './api.js'
+import { approveProposal, approveSkill, connectPlugin, createSessionProposal, denyProposal, issueIngestionToken, sessionMessages, setSessionAttention, uploadWorkspaceAttachment, workspaceFiles } from './api.js'
 import { ModelGatewayCard } from './Models.js'
 import { Alert, Badge, Button, Card, Input, Label, NativeSelect, Textarea } from './components/ui/index.js'
 import { MarkdownMessage } from './Markdown.js'
@@ -45,6 +45,11 @@ interface UrlPreview {
   title?: string
   description?: string
   excerpt?: string
+  siteName?: string
+  type?: string
+  image?: string
+  imageAlt?: string
+  favicon?: string
 }
 
 interface ArtifactOutput {
@@ -112,9 +117,19 @@ function Chat({ session, status, initial, input, setInput, historyError, canAppr
   canManageSkills: boolean
   onChanged: () => Promise<void>
 }) {
+  const [attachments, setAttachments] = useState<WorkspaceLibraryFile[]>([])
+  const attachmentRef = useRef<WorkspaceLibraryFile[]>([])
   const transport = useMemo(() => new DefaultChatTransport<UIMessage>({
-    api: '/api/agent/chat', credentials: 'same-origin',
-    prepareSendMessagesRequest: ({ messages, trigger }) => ({ body: { threadId: session.id, messages, trigger } }),
+    api: '/api/agent/chat',
+    credentials: 'same-origin',
+    prepareSendMessagesRequest: ({ messages, trigger }) => ({
+      body: {
+        threadId: session.id,
+        messages,
+        trigger,
+        attachments: attachmentRef.current.map((file) => ({ path: file.path })),
+      },
+    }),
   }), [session.id])
   const { messages, sendMessage, status: chatStatus, error, stop } = useChat({ id: session.id, messages: initial, transport })
   const working = chatStatus === 'submitted' || chatStatus === 'streaming'
@@ -122,9 +137,13 @@ function Chat({ session, status, initial, input, setInput, historyError, canAppr
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     const text = input.trim()
-    if (!text || working || !status.agentReady) return
+    if ((!text && attachments.length === 0) || working || !status.agentReady) return
+    attachmentRef.current = attachments
+    const messageText = text || `Review the attached ${attachments.length === 1 ? 'file' : 'files'}.`
     setInput('')
-    await sendMessage({ text })
+    setAttachments([])
+    await sendMessage({ text: messageText })
+    attachmentRef.current = []
     await onChanged()
   }
 
@@ -138,12 +157,138 @@ function Chat({ session, status, initial, input, setInput, historyError, canAppr
       {working && <div className="agent-thinking"><span /><span /><span /> Papyrus is working</div>}
       {error && <Alert className="error">{error.message}</Alert>}
     </div>
-    <form className="composer" onSubmit={(event) => void submit(event)}>
-      <Textarea value={input} onChange={(event) => setInput(event.target.value)} disabled={!status.agentReady} placeholder="Ask Papyrus to investigate, create a document, build a spreadsheet, connect a plugin, or run a workflow…" onKeyDown={(event) => {
-        if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() }
+    <Composer
+      input={input}
+      setInput={setInput}
+      attachments={attachments}
+      setAttachments={setAttachments}
+      disabled={!status.agentReady}
+      working={working}
+      onStop={() => void stop()}
+      onSubmit={(event) => void submit(event)}
+      workspace={status.workspace}
+    />
+  </div>
+}
+
+function Composer({ input, setInput, attachments, setAttachments, disabled, working, onStop, onSubmit, workspace }: {
+  input: string
+  setInput: (value: string) => void
+  attachments: WorkspaceLibraryFile[]
+  setAttachments: (value: WorkspaceLibraryFile[] | ((current: WorkspaceLibraryFile[]) => WorkspaceLibraryFile[])) => void
+  disabled: boolean
+  working: boolean
+  onStop: () => void
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void
+  workspace: AgentStatus['workspace']
+}) {
+  const fileInput = useRef<HTMLInputElement>(null)
+  const [attachMenu, setAttachMenu] = useState(false)
+  const [libraryOpen, setLibraryOpen] = useState(false)
+  const [libraryQuery, setLibraryQuery] = useState('')
+  const [results, setResults] = useState<WorkspaceLibraryFile[]>([])
+  const [loading, setLoading] = useState(false)
+  const [attachmentError, setAttachmentError] = useState<string>()
+  const mention = mentionQuery(input)
+
+  useEffect(() => {
+    if (!libraryOpen && mention === undefined) return
+    let active = true
+    const query = libraryOpen ? libraryQuery : mention ?? ''
+    const timeout = window.setTimeout(() => {
+      setLoading(true)
+      workspaceFiles(query).then((files) => {
+        if (active) setResults(files)
+      }).catch((cause) => {
+        if (active) setAttachmentError(cause instanceof Error ? cause.message : 'Unable to read the workspace library')
+      }).finally(() => { if (active) setLoading(false) })
+    }, mention !== undefined && !libraryOpen ? 120 : 0)
+    return () => { active = false; window.clearTimeout(timeout) }
+  }, [libraryOpen, libraryQuery, mention])
+
+  const attach = (file: WorkspaceLibraryFile, fromMention = false) => {
+    setAttachments((current) => current.some((item) => item.path === file.path) ? current : [...current, file].slice(0, 12))
+    if (fromMention && mention !== undefined) {
+      const match = /(?:^|\s)@[^\s@]*$/.exec(input)
+      if (match) {
+        const at = input.lastIndexOf('@', match.index + match[0].length)
+        setInput(`${input.slice(0, at)}@${file.name} `)
+      }
+    }
+    setLibraryOpen(false)
+    setAttachMenu(false)
+  }
+
+  const upload = async (files: FileList | null) => {
+    if (!files?.length) return
+    setAttachmentError(undefined)
+    setLoading(true)
+    try {
+      for (const file of Array.from(files).slice(0, Math.max(0, 12 - attachments.length))) {
+        if (file.size > 8 * 1024 * 1024) throw new Error(`${file.name} exceeds the 8 MiB attachment limit`)
+        const saved = await uploadWorkspaceAttachment({
+          name: file.name,
+          ...(file.type ? { mediaType: file.type } : {}),
+          dataBase64: await fileBase64(file),
+        })
+        setAttachments((current) => current.some((item) => item.path === saved.path) ? current : [...current, saved].slice(0, 12))
+      }
+    } catch (cause) {
+      setAttachmentError(cause instanceof Error ? cause.message : 'Unable to attach file')
+    } finally {
+      setLoading(false)
+      if (fileInput.current) fileInput.current.value = ''
+      setAttachMenu(false)
+    }
+  }
+
+  const showMention = mention !== undefined && !libraryOpen && results.length > 0
+
+  return <form className="composer" onSubmit={onSubmit}>
+    {attachments.length > 0 && <div className="composer-attachments">{attachments.map((file) => <span className="composer-attachment-chip" key={file.path}><span>▤</span><span><strong>{file.name}</strong><small>{formatBytes(file.size)} · AgentFS</small></span><button type="button" aria-label={`Remove ${file.name}`} onClick={() => setAttachments((current) => current.filter((item) => item.path !== file.path))}>×</button></span>)}</div>}
+    <div className="composer-editor">
+      <Textarea value={input} onChange={(event) => setInput(event.target.value)} disabled={disabled} placeholder="Ask Papyrus… Use @ to attach from the AgentFS Library." onKeyDown={(event) => {
+        if (event.key === 'Enter' && !event.shiftKey && !showMention) { event.preventDefault(); event.currentTarget.form?.requestSubmit() }
+        if (event.key === 'Escape') { setLibraryOpen(false); setAttachMenu(false) }
       }} />
-      <div><small>Secrets never enter the conversation.</small>{working ? <Button type="button" onClick={() => void stop()}>Stop</Button> : <Button className="primary" disabled={!input.trim() || !status.agentReady}>Send ↑</Button>}</div>
-    </form>
+      {showMention && <LibraryResults files={results} query={mention ?? ''} loading={loading} label="ATTACH FROM LIBRARY" onSelect={(file) => attach(file, true)} />}
+    </div>
+    {libraryOpen && <div className="library-picker">
+      <div className="library-picker-head"><div><p className="eyebrow">AGENTFS LIBRARY</p><strong>Attach workspace context</strong></div><button type="button" onClick={() => setLibraryOpen(false)}>×</button></div>
+      <Input autoFocus value={libraryQuery} onChange={(event) => setLibraryQuery(event.target.value)} placeholder="Search files…" />
+      <LibraryResults files={results} query={libraryQuery} loading={loading} label="" onSelect={(file) => attach(file)} embedded />
+    </div>}
+    {attachmentError && <Alert className="error composer-error">{attachmentError}</Alert>}
+    <div className="composer-toolbar">
+      <div className="composer-tools">
+        <div className="composer-attach-menu-wrap">
+          <button className="composer-plus" type="button" aria-label="Attach context" onClick={() => setAttachMenu((open) => !open)}>+</button>
+          {attachMenu && <div className="composer-attach-menu">
+            <button type="button" onClick={() => fileInput.current?.click()}><span>↑</span><span><strong>Upload file</strong><small>Save into local AgentFS Library</small></span></button>
+            <button type="button" onClick={() => { setLibraryOpen(true); setAttachMenu(false); setLibraryQuery('') }}><span>@</span><span><strong>Attach from Library</strong><small>Reference an existing workspace file</small></span></button>
+          </div>}
+        </div>
+        <input ref={fileInput} className="composer-file-input" type="file" multiple onChange={(event) => void upload(event.currentTarget.files)} />
+        <span className="composer-workspace-state"><span className="status-dot" />{workspace ? `AgentFS · ${workspace.mountBackend.toUpperCase()} · nono ${workspace.isolation}` : 'Local workspace'}</span>
+      </div>
+      {working ? <Button type="button" onClick={onStop}>Stop</Button> : <Button className="primary" disabled={disabled || (!input.trim() && attachments.length === 0)}>Send ↑</Button>}
+    </div>
+  </form>
+}
+
+function LibraryResults({ files, query, loading, label, onSelect, embedded = false }: {
+  files: WorkspaceLibraryFile[]
+  query: string
+  loading: boolean
+  label: string
+  onSelect: (file: WorkspaceLibraryFile) => void
+  embedded?: boolean
+}) {
+  return <div className={embedded ? 'library-results embedded' : 'library-results'}>
+    {label && <p className="eyebrow">{label}</p>}
+    {loading && <small className="library-empty">Searching AgentFS…</small>}
+    {!loading && files.length === 0 && <small className="library-empty">{query ? `No files matching “${query}”` : 'No files in Library yet.'}</small>}
+    {!loading && files.slice(0, 10).map((file) => <button type="button" key={file.path} onClick={() => onSelect(file)}><span className="library-file-icon">{fileIcon(file.mediaType)}</span><span><strong>{file.name}</strong><small>{file.path} · {formatBytes(file.size)}</small></span><span className="library-attach-hint">Attach</span></button>)}
   </div>
 }
 
@@ -156,7 +301,7 @@ function Message({ message, sessionId, canApprove, canManageSkills, onChanged }:
 }
 
 function MessagePart({ part, sessionId, canApprove, canManageSkills, onChanged }: { part: Record<string, unknown>; sessionId: string; canApprove: boolean; canManageSkills: boolean; onChanged: () => Promise<void> }) {
-  if (part['type'] === 'text') return <p className="message-text">{String(part['text'] ?? '')}</p>
+  if (part['type'] === 'text') return <MarkdownMessage>{String(part['text'] ?? '')}</MarkdownMessage>
   if (part['type'] === 'source-url') return <a className="source-link" href={String(part['url'])} target="_blank" rel="noreferrer">{String(part['title'] ?? part['url'])} ↗</a>
   const type = String(part['type'] ?? '')
   if (type === 'dynamic-tool' || type.startsWith('tool-')) {
@@ -232,7 +377,21 @@ function PluginConnectionCard({ request, onChanged }: { request: PluginRequest; 
 function UrlPreviewCard({ preview }: { preview: UrlPreview }) {
   let host = preview.finalUrl
   try { host = new URL(preview.finalUrl).hostname } catch { /* keep URL */ }
-  return <a className="url-preview" href={preview.finalUrl} target="_blank" rel="noreferrer"><div className="url-preview-status"><span>{host}</span><Badge>{preview.status}</Badge></div><h3>{preview.title ?? preview.finalUrl}</h3>{preview.description && <p>{preview.description}</p>}{preview.excerpt && <small>{preview.excerpt}</small>}<span className="url-preview-open">Open URL ↗</span></a>
+  const image = preview.image ? previewAssetUrl(preview.image) : undefined
+  const favicon = preview.favicon ? previewAssetUrl(preview.favicon) : undefined
+  return <article className={`url-preview ${image ? 'with-image' : ''}`}>
+    {image && <a className="url-preview-hero" href={preview.finalUrl} target="_blank" rel="noreferrer"><img src={image} alt={preview.imageAlt ?? ''} loading="lazy" /></a>}
+    <div className="url-preview-body">
+      <div className="url-preview-status">
+        <span className="url-preview-site">{favicon && <img src={favicon} alt="" />}<span><strong>{preview.siteName ?? host}</strong><small>{host}{preview.type ? ` · ${preview.type}` : ''}</small></span></span>
+        <Badge>{preview.status}</Badge>
+      </div>
+      <h3><a href={preview.finalUrl} target="_blank" rel="noreferrer">{preview.title ?? preview.finalUrl}</a></h3>
+      {preview.description && <p>{preview.description}</p>}
+      {preview.excerpt && preview.excerpt !== preview.description && <small className="url-preview-excerpt">{preview.excerpt}</small>}
+      <a className="url-preview-open" href={preview.finalUrl} target="_blank" rel="noreferrer">Open URL ↗</a>
+    </div>
+  </article>
 }
 
 
@@ -284,6 +443,38 @@ function formatBytes(value: number): string {
   if (value < 1024) return `${value} B`
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
   return `${(value / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function mentionQuery(value: string): string | undefined {
+  const match = /(?:^|\s)@([^\s@]*)$/.exec(value)
+  return match ? match[1] ?? '' : undefined
+}
+
+function fileBase64(file: File): Promise<string> {
+  return new Promise((resolvePromise, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(reader.error ?? new Error('Unable to read attachment'))
+    reader.onload = () => {
+      const value = String(reader.result ?? '')
+      const comma = value.indexOf(',')
+      if (comma < 0) return reject(new Error('Unable to encode attachment'))
+      resolvePromise(value.slice(comma + 1))
+    }
+    reader.readAsDataURL(file)
+  })
+}
+
+function fileIcon(mediaType: string): string {
+  if (mediaType.includes('pdf')) return 'PDF'
+  if (mediaType.includes('spreadsheet') || mediaType.includes('csv')) return 'XLS'
+  if (mediaType.includes('wordprocessing') || mediaType.includes('text')) return 'DOC'
+  if (mediaType.startsWith('image/')) return 'IMG'
+  if (mediaType.startsWith('video/')) return 'VID'
+  return 'FILE'
+}
+
+function previewAssetUrl(url: string): string {
+  return `/api/url-preview/image?url=${encodeURIComponent(url)}`
 }
 
 function humanize(value: string): string { return value.replaceAll('_', ' ').replace(/([a-z])([A-Z])/g, '$1 $2') }

@@ -30,6 +30,14 @@ The **daemon** validates this before activation.
     expect(html).not.toContain('&lt;br&gt;')
   })
 
+  it('styles task identifiers through the remark AST', () => {
+    const html = renderToStaticMarkup(<MarkdownMessage>{'**Task ID:** c2c88f39-b1e4-4694-865d-3867719264ef'}</MarkdownMessage>)
+    expect(html).toContain('class="task-id-line"')
+    expect(html).toContain('<strong>Task ID:</strong>')
+    expect(html).toContain('c2c88f39-b1e4-4694-865d-3867719264ef')
+    expect(html).not.toContain('**Task ID:**')
+  })
+
   it('does not emit executable markdown links', () => {
     const html = renderToStaticMarkup(<MarkdownMessage>{'[safe](https://example.com) [unsafe](javascript:alert(1))'}</MarkdownMessage>)
     expect(html).toContain('href="https://example.com"')

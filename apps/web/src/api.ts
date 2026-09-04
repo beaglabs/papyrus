@@ -39,7 +39,24 @@ export interface AgentStatus {
   durable: boolean
   model: string | null
   mode: 'starlings' | 'centralized'
+  workspace?: {
+    filesystem: 'agentfs'
+    mountBackend: 'fuse' | 'nfs'
+    sandbox: 'nono'
+    isolation: 'landlock' | 'seatbelt' | 'unsupported'
+    network: 'blocked'
+  }
   signalBacklog: Record<'pending' | 'delivering' | 'delivered' | 'failed', number>
+}
+
+export interface WorkspaceLibraryFile {
+  path: string
+  name: string
+  mediaType: string
+  size: number
+  sha256?: string
+  updatedAt: string
+  source: 'library' | 'upload'
 }
 
 export interface AgentSession {
@@ -154,6 +171,26 @@ export async function createSessionProposal(id: string, input: {
 
 export async function approveSkill(id: string): Promise<unknown> {
   return api(`/api/skills/${encodeURIComponent(id)}/approve`, { method: 'POST', body: '{}' })
+}
+
+export async function workspaceFiles(query = ''): Promise<WorkspaceLibraryFile[]> {
+  const suffix = query.trim() ? `?q=${encodeURIComponent(query.trim())}` : ''
+  return (await api<{ files: WorkspaceLibraryFile[] }>(`/api/workspace/files${suffix}`)).files
+}
+
+export async function uploadWorkspaceAttachment(input: {
+  name: string
+  mediaType?: string
+  dataBase64: string
+}): Promise<WorkspaceLibraryFile> {
+  return (await api<{ file: WorkspaceLibraryFile }>('/api/workspace/attachments', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })).file
+}
+
+export function workspaceFileContentUrl(path: string, download = false): string {
+  return `/api/workspace/files/content?path=${encodeURIComponent(path)}${download ? '&download=1' : ''}`
 }
 
 export async function createSchedule(input: { name: string; cron: string; prompt: string; timezone?: string; threadId?: string }): Promise<AgentSchedule> {

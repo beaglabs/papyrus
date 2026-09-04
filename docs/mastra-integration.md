@@ -25,7 +25,8 @@ tar xzf mastra-core-<version>.tgz && mv package mastra-core-<version>
 | `handleChatStream` | `@mastra/ai-sdk` | Portal transport uses AI SDK UI v7 |
 | `WebhookSignalProvider` | `@mastra/core/signals` | HTTP mounting and subscription rehydration remain Papyrus responsibilities |
 | `createEventedAgent` | `@mastra/core/agent/durable` | Wraps the Papyrus agent for durable execution |
-| `LocalSandbox`, `LocalSandboxOptions` | `@mastra/core/workspace` | |
+| `MastraFilesystem`, filesystem types | `@mastra/core/workspace` | Papyrus extends this for the AgentFS-backed provider |
+| `MastraSandbox`, `SandboxProcessManager`, `ProcessHandle` | `@mastra/core/workspace` | Papyrus extends these for nono-backed execution |
 | `Workspace`, `WorkspaceConfig` | `@mastra/core/workspace` | There is no `@mastra/core/sandbox` subpath; sandbox types live under `workspace` |
 
 ## `Agent` constructor
@@ -86,24 +87,49 @@ single-daemon `full` mode with bounded global/per-agent concurrency. The URL
 preview tool opts into background execution with a 15-second timeout and one
 retry; configuration and action-suggestion tools remain foreground operations.
 
-## `Workspace` and `LocalSandbox`
+## `Workspace`, AgentFS, and nono
+
+Papyrus now supplies its own Mastra providers instead of constructing
+`LocalSandbox`:
 
 ```ts
-new Workspace({ sandbox: new LocalSandbox(options) })
+new Workspace({
+  id: 'papyrus-workspace',
+  filesystem: papyrusAgentFS,
+  sandbox: nonoWorkspaceSandbox,
+  autoSync: false,
+})
 ```
 
-`LocalSandboxOptions.isolation` is `IsolationBackend = 'none' | 'seatbelt' | 'bwrap'`.
-**The Mastra default is `'none'`**, which means commands run as the host process
-against the host filesystem — effectively no isolation. Papyrus never constructs
-a `LocalSandbox` in that state.
+`PapyrusAgentFSFilesystem extends MastraFilesystem` and persists the workspace
+to a local AgentFS SQLite database. The provider deliberately does **not**
+configure Turso sync, so the filesystem remains usable in disconnected
+deployments.
 
-Papyrus defaults to Bubblewrap on Linux. macOS stays disabled by default because
-`sandbox-exec` is deprecated, but local development can opt in explicitly with
-`PAPYRUS_SANDBOX_RUNTIME=seatbelt`. `PAPYRUS_SANDBOX_RUNTIME=bwrap` can likewise
-make the Linux choice explicit. Any missing or platform-incompatible backend
-fails closed and leaves command execution unavailable; there is no unisolated
-fallback. `LocalSandbox` does support background processes, unlike
-`AppleContainerSandbox`, which also requires Apple silicon and macOS 26+.
+`NonoWorkspaceSandbox extends MastraSandbox`. Its
+`NonoProcessManager extends SandboxProcessManager` and returns Papyrus
+`ProcessHandle` implementations with streaming stdout/stderr, stdin, timeout,
+kill, and process listing support. A command is executed through this chain:
+
+```text
+agentfs exec --backend <fuse|nfs> <db>
+  nono run --allow-cwd --block-net --
+    /bin/sh -lc <command>
+```
+
+AgentFS uses FUSE on Linux and NFS on macOS for the transient command mount.
+nono then applies Landlock on Linux or Seatbelt on macOS and denies network
+access. Credential-like environment variables are removed before child process
+spawn.
+
+This design is intentionally different from Mastra `LocalSandbox`: there is
+no `isolation: 'none'` state and no host-shell fallback. If AgentFS cannot
+mount or nono is missing, workspace execution fails rather than running the
+requested command directly on the host.
+
+`PAPYRUS_SANDBOX_RUNTIME=bwrap|seatbelt` is retained only for compatibility
+with the earlier LocalSandbox policy module; the active Mastra workspace does
+not use it.
 
 ## `sendSignal` — the one that is easy to get wrong
 

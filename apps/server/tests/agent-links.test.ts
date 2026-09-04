@@ -3,6 +3,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { AgentDatabase } from '../src/agent/database.js'
+import { ActionStore } from '../src/agent/action-store.js'
+import type { AgentConfig } from '../src/agent/config.js'
+import type { AgentService } from '../src/agent/service.js'
+import type { TerrainStore } from '../src/agent/terrain-store.js'
+import type { ArtifactRecord } from '../src/agent/artifact-store.js'
+import { MastraRuntime } from '../src/agent/mastra/runtime.js'
 import { LINK_EXECUTOR_INTEGRATION_ID, LinkStore } from '../src/agent/link-store.js'
 import { PapyrusAgentFSFilesystem } from '../src/agent/mastra/workspace-agentfs.js'
 
@@ -71,6 +77,45 @@ describe('AgentFS Links boundary', () => {
       expect(await subject.filesystem.readFile(live.blobPath, { encoding: 'utf8' })).toContain('<h1>Hello</h1>')
     } finally {
       await subject.close()
+    }
+  })
+
+  it('mirrors durable artifacts into AgentFS and repairs legacy missing mirrors by artifact name', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'papyrus-artifact-link-'))
+    const db = new AgentDatabase(':memory:')
+    const actionStore = new ActionStore(db)
+    const config: AgentConfig = {
+      mode: 'local', profile: 'gcc', host: '127.0.0.1', port: 3210,
+      publicOrigin: 'http://127.0.0.1:3210', dataDir: root, databasePath: ':memory:',
+      portalSecret: 'test-secret', organizationName: 'Test', cloud: 'Public',
+      agentfsId: 'artifact-link-test', licenseRequired: false, licenseAuthorities: {},
+    }
+    const runtime = new MastraRuntime(config, actionStore, {} as TerrainStore, {} as AgentService)
+    await runtime.workspaceFilesystem.init()
+    try {
+      const artifact = runtime.artifacts.create({
+        format: 'html', name: 'contractor-invite.html',
+        content: '<!doctype html><title>Invite</title><p>Hello</p>',
+      })
+      const bridge = runtime as unknown as {
+        artifactWithWorkspacePath(value: ArtifactRecord): Promise<ArtifactRecord & { workspacePath: string }>
+        resolveLinkSource(sourcePath?: string, artifactId?: string): Promise<string>
+      }
+      const output = await bridge.artifactWithWorkspacePath(artifact)
+      expect(output.workspacePath).toBe('/Library/Generated/contractor-invite.html')
+      expect((await runtime.workspaceFilesystem.describeLibraryFile(output.workspacePath)).sha256).toBe(artifact.sha256)
+      await runtime.workspaceFilesystem.deleteFile(output.workspacePath)
+      const repaired = await bridge.resolveLinkSource('/Library/Generated/contractor-invite.html')
+      expect(repaired).toBe('/Library/Generated/contractor-invite.html')
+      expect((await runtime.workspaceFilesystem.describeLibraryFile(repaired)).sha256).toBe(artifact.sha256)
+      await runtime.workspaceFilesystem.deleteFile(repaired)
+      const byId = await bridge.resolveLinkSource(undefined, artifact.id)
+      expect(byId).toBe('/Library/Generated/contractor-invite.html')
+      expect((await runtime.workspaceFilesystem.describeLibraryFile(byId)).sha256).toBe(artifact.sha256)
+    } finally {
+      await runtime.workspaceFilesystem.destroy()
+      db.close()
+      rmSync(root, { recursive: true, force: true })
     }
   })
 

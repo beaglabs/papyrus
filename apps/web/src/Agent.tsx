@@ -183,7 +183,8 @@ function Composer({ input, setInput, attachments, setAttachments, disabled, work
   workspace: AgentStatus['workspace']
 }) {
   const fileInput = useRef<HTMLInputElement>(null)
-  const [attachMenu, setAttachMenu] = useState(false)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [dragActive, setDragActive] = useState(false)
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [libraryQuery, setLibraryQuery] = useState('')
   const [results, setResults] = useState<WorkspaceLibraryFile[]>([])
@@ -216,7 +217,6 @@ function Composer({ input, setInput, attachments, setAttachments, disabled, work
       }
     }
     setLibraryOpen(false)
-    setAttachMenu(false)
   }
 
   const upload = async (files: FileList | null) => {
@@ -238,18 +238,38 @@ function Composer({ input, setInput, attachments, setAttachments, disabled, work
     } finally {
       setLoading(false)
       if (fileInput.current) fileInput.current.value = ''
-      setAttachMenu(false)
     }
   }
 
-  const showMention = mention !== undefined && !libraryOpen && results.length > 0
+  useEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    textarea.style.height = 'auto'
+    textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, 72), 180)}px`
+  }, [input])
 
-  return <form className="composer" onSubmit={onSubmit}>
+  const showMention = mention !== undefined && !libraryOpen
+
+  return <form
+    className={`composer${dragActive ? ' drag-active' : ''}`}
+    onSubmit={onSubmit}
+    onDragEnter={(event) => { event.preventDefault(); if (!disabled) setDragActive(true) }}
+    onDragOver={(event) => { event.preventDefault(); if (!disabled) setDragActive(true) }}
+    onDragLeave={(event) => {
+      if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
+      setDragActive(false)
+    }}
+    onDrop={(event) => {
+      event.preventDefault()
+      setDragActive(false)
+      if (!disabled) void upload(event.dataTransfer.files)
+    }}
+  >
     {attachments.length > 0 && <div className="composer-attachments">{attachments.map((file) => <span className="composer-attachment-chip" key={file.path}><span>▤</span><span><strong>{file.name}</strong><small>{formatBytes(file.size)} · AgentFS</small></span><button type="button" aria-label={`Remove ${file.name}`} onClick={() => setAttachments((current) => current.filter((item) => item.path !== file.path))}>×</button></span>)}</div>}
     <div className="composer-editor">
-      <Textarea value={input} onChange={(event) => setInput(event.target.value)} disabled={disabled} placeholder="Ask Papyrus… Use @ to attach from the AgentFS Library." onKeyDown={(event) => {
+      <Textarea ref={textareaRef} rows={3} value={input} onChange={(event) => setInput(event.target.value)} disabled={disabled} placeholder="Ask Papyrus… Type @ to attach from Library, or drop files here." onKeyDown={(event) => {
         if (event.key === 'Enter' && !event.shiftKey && !showMention) { event.preventDefault(); event.currentTarget.form?.requestSubmit() }
-        if (event.key === 'Escape') { setLibraryOpen(false); setAttachMenu(false) }
+        if (event.key === 'Escape') setLibraryOpen(false)
       }} />
       {showMention && <LibraryResults files={results} query={mention ?? ''} loading={loading} label="ATTACH FROM LIBRARY" onSelect={(file) => attach(file, true)} />}
     </div>
@@ -259,19 +279,19 @@ function Composer({ input, setInput, attachments, setAttachments, disabled, work
       <LibraryResults files={results} query={libraryQuery} loading={loading} label="" onSelect={(file) => attach(file)} embedded />
     </div>}
     {attachmentError && <Alert className="error composer-error">{attachmentError}</Alert>}
+    {dragActive && <div className="composer-drop-target"><span>＋</span><strong>Drop files to attach</strong><small>Files are stored in the local AgentFS Library.</small></div>}
     <div className="composer-toolbar">
       <div className="composer-tools">
-        <div className="composer-attach-menu-wrap">
-          <button className="composer-plus" type="button" aria-label="Attach context" onClick={() => setAttachMenu((open) => !open)}>+</button>
-          {attachMenu && <div className="composer-attach-menu">
-            <button type="button" onClick={() => fileInput.current?.click()}><span>↑</span><span><strong>Upload file</strong><small>Save into local AgentFS Library</small></span></button>
-            <button type="button" onClick={() => { setLibraryOpen(true); setAttachMenu(false); setLibraryQuery('') }}><span>@</span><span><strong>Attach from Library</strong><small>Reference an existing workspace file</small></span></button>
-          </div>}
-        </div>
+        <button className="composer-tool-button" type="button" disabled={disabled || loading} onClick={() => fileInput.current?.click()}>
+          <span className="composer-tool-icon">＋</span><span>Upload</span>
+        </button>
+        <button className="composer-tool-button" type="button" disabled={disabled} onClick={() => { setLibraryOpen(true); setLibraryQuery('') }}>
+          <span className="composer-tool-icon">▤</span><span>Library</span>
+        </button>
         <input ref={fileInput} className="composer-file-input" type="file" multiple onChange={(event) => void upload(event.currentTarget.files)} />
         <span className="composer-workspace-state"><span className="status-dot" />{workspace ? `AgentFS · Enclave STRICT · nono-ts ${workspace.isolation}` : 'Local workspace'}</span>
       </div>
-      {working ? <Button type="button" onClick={onStop}>Stop</Button> : <Button className="primary" disabled={disabled || (!input.trim() && attachments.length === 0)}>Send ↑</Button>}
+      {working ? <Button className="composer-send" type="button" onClick={onStop}>Stop</Button> : <Button className="primary composer-send" disabled={disabled || (!input.trim() && attachments.length === 0)}>Send ↑</Button>}
     </div>
   </form>
 }

@@ -101,6 +101,8 @@ export function probeIsolation(options: SandboxProbeOptions = {}): SandboxIsolat
 export interface ResolveSandboxPolicyInput extends SandboxProbeOptions {
   dataDir: string
   readOnlyPaths?: string[]
+  /** Override the command working directory, for example a persistent workspace mount. */
+  workingDirectory?: string
   /** Set false to keep code execution switched off even where native isolation exists. */
   allowExecution?: boolean
 }
@@ -129,7 +131,7 @@ export function resolveSandboxPolicy(input: ResolveSandboxPolicyInput): SandboxP
   const platform = input.platform ?? process.platform
   const requested = input.isolation
   const isolation = probeIsolation(input)
-  const workingDirectory = resolve(input.dataDir, 'sandbox')
+  const workingDirectory = resolve(input.workingDirectory ?? resolve(input.dataDir, 'sandbox'))
   const readOnlyPaths = input.readOnlyPaths ?? []
   const base = { isolation, workingDirectory, allowNetwork: false as const, readOnlyPaths }
 

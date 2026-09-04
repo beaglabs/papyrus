@@ -205,7 +205,7 @@ export function SidebarTrigger({ className, onClick, ...props }: ButtonHTMLAttri
     type="button"
     data-slot="sidebar-trigger"
     className={classes('nb-sidebar-trigger', className)}
-    aria-label={props['aria-label'] ?? (state === 'expanded' ? 'Collapse sidebar' : 'Expand sidebar')}
+    aria-label={state === 'expanded' ? 'Collapse sidebar' : 'Expand sidebar'}
     onClick={(event) => {
       onClick?.(event)
       if (!event.defaultPrevented) toggleSidebar()
@@ -220,7 +220,7 @@ export function SidebarRail({ className, onClick, ...props }: ButtonHTMLAttribut
     type="button"
     data-slot="sidebar-rail"
     tabIndex={-1}
-    aria-label={props['aria-label'] ?? 'Toggle sidebar'}
+    aria-label="Toggle sidebar"
     className={classes('nb-sidebar-rail', className)}
     onClick={(event) => {
       onClick?.(event)

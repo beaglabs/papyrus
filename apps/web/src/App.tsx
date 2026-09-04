@@ -121,7 +121,7 @@ export function App() {
 
 function SessionHistory({ sessions, selectedId, onSelect, onDelete }: { sessions: PortalData['sessions']; selectedId?: string | undefined; onSelect: (id: string) => void; onDelete: (id: string) => void }) {
   if (!sessions.length) return <small className="sidebar-empty">No sessions yet</small>
-  return <SidebarMenu className="session-history">{sessions.map((session) => <SidebarMenuItem className="session-row" key={session.id}><SidebarMenuButton active={selectedId === session.id} tooltip={session.title} onClick={() => onSelect(session.id)}>{session.attention ? <span className="attention-icon" title="Requires attention">!</span> : <span className="sidebar-session-mark">•</span>}<span className="sidebar-copy session-title">{session.title}</span></SidebarMenuButton><Button variant="ghost" className="session-delete sidebar-copy" aria-label={`Delete ${session.title}`} onClick={() => onDelete(session.id)}>×</Button></SidebarMenuItem>)}</SidebarMenu>
+  return <SidebarMenu className="session-history">{sessions.map((session) => <SidebarMenuItem className="session-row" key={session.id}><SidebarMenuButton isActive={selectedId === session.id} tooltip={session.title} onClick={() => onSelect(session.id)}>{session.attention ? <span className="attention-icon" title="Requires attention">!</span> : <span className="sidebar-session-mark">•</span>}<span className="sidebar-copy session-title">{session.title}</span></SidebarMenuButton><Button variant="ghost" className="session-delete sidebar-copy" aria-label={`Delete ${session.title}`} onClick={() => onDelete(session.id)}>×</Button></SidebarMenuItem>)}</SidebarMenu>
 }
 
 function EmptyAgent({ onCreate }: { onCreate: () => void }) { return <Card className="empty-agent"><span>✦</span><h2>Start a durable session</h2><p>Your conversation, tool activity, and signal history stay in this customer-hosted daemon.</p><Button className="primary" onClick={onCreate}>New session →</Button></Card> }
@@ -153,7 +153,7 @@ export function PrimaryNavigation({ view, onNavigate }: { view: PortalView; onNa
     { view: 'scheduled', icon: '◷', label: 'Scheduled' }, { view: 'workflows', icon: '⌬', label: 'Workflows' },
     { view: 'governance', icon: '◇', label: 'Governance' },
   ]
-  return <SidebarMenu aria-label="Primary navigation">{items.map((item) => <SidebarMenuItem key={item.view}><SidebarMenuButton active={view === item.view} tooltip={item.label} onClick={() => onNavigate(item.view)}><span className="sidebar-icon" aria-hidden="true">{item.icon}</span><span className="sidebar-copy">{item.label}</span></SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu>
+  return <SidebarMenu aria-label="Primary navigation">{items.map((item) => <SidebarMenuItem key={item.view}><SidebarMenuButton isActive={view === item.view} tooltip={item.label} onClick={() => onNavigate(item.view)}><span className="sidebar-icon" aria-hidden="true">{item.icon}</span><span className="sidebar-copy">{item.label}</span></SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu>
 }
 
 function PortalHeader({ view, data }: { view: PortalView; data: PortalData }) {

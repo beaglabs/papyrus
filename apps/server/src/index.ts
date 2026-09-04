@@ -1,31 +1,45 @@
-import { AuthService } from './auth.js'
-import { loadConfig } from './config.js'
-import { PapyrusDatabase } from './db.js'
-import { createGatewayServer } from './gateway.js'
-import { createPapyrusServer } from './http.js'
-import { createPapyrusMastra } from './mastra/server.js'
-import { PapyrusService } from './service.js'
+import { loadAgentConfig } from './agent/config.js'
+import { AgentDatabase } from './agent/database.js'
+import { EntraAuthService } from './agent/entra-auth.js'
+import { createAgentServer } from './agent/http.js'
+import { AgentService } from './agent/service.js'
+import { ActionExecutorRegistry, ActionWorker } from './agent/action-worker.js'
+import { ActionStore } from './agent/action-store.js'
+import { ConnectorRegistry, SyncWorker } from './agent/sync-worker.js'
+import { TerrainStore } from './agent/terrain-store.js'
+import { EmailExecutor } from './agent/executors/email-executor.js'
+import { ExchangeEmailDriver } from './agent/drivers/exchange-email-driver.js'
+import { HttpMicrosoftGraphClient } from './agent/graph-client.js'
+import { MastraRuntime } from './agent/mastra/runtime.js'
 
-const config = loadConfig()
-const database = new PapyrusDatabase(config.databasePath)
-const auth = new AuthService(config, database)
-const { mastra, workspaces } = createPapyrusMastra(config, database)
-const service = new PapyrusService(database, config, mastra, workspaces)
-const server = createPapyrusServer(config, service, auth)
-const gateway = config.gateway ? createGatewayServer(config, service, auth) : undefined
+const config = loadAgentConfig()
+const database = new AgentDatabase(config.databasePath)
+const auth = new EntraAuthService(config)
+const terrain = new TerrainStore(database)
+const connectors = new ConnectorRegistry()
+const graph = new HttpMicrosoftGraphClient(config)
+const actionStore = new ActionStore(database)
+const executorRegistry = new ActionExecutorRegistry()
+const worker = new SyncWorker(database, terrain, connectors)
+const actionWorker = new ActionWorker(database, actionStore, executorRegistry, config)
+const service = new AgentService(database, config, terrain, worker, actionStore, executorRegistry, actionWorker)
+const mastraRuntime = new MastraRuntime(config, actionStore, terrain, service)
+await mastraRuntime.start()
+const server = createAgentServer(config, service, auth, mastraRuntime)
+
+// Exchange shares one Graph client boundary for inbound mailbox delta sync and
+// approved outbound mail. The default client deliberately refuses to resolve
+// credentials until the customer supplies its vault/workload-identity adapter.
+connectors.register('exchange-email', new ExchangeEmailDriver(graph))
+executorRegistry.register('exchange-email', new EmailExecutor(database, graph, mastraRuntime.artifacts))
 
 server.listen(config.port, config.host, () => {
-  console.log(`Papyrus ${config.mode} server listening at ${config.publicOrigin}`)
-  console.log(`Profile: ${config.profile}; deployment: ${service.license.deploymentId}`)
+  worker.start()
+  actionWorker.start()
+  console.log(`Papyrus daemon listening at ${config.publicOrigin}`)
+  console.log(`Profile: ${config.profile}; Entra cloud: ${config.cloud}; deployment: ${service.license.deploymentId}`)
+  console.log(`Agent runtime: ${mastraRuntime.mode}`)
 })
-
-if (gateway && config.gateway) {
-  gateway.listen(config.gateway.port, config.gateway.host, () => {
-    const protocol = config.gateway!.tls ? 'https' : 'http'
-    const host = config.gateway!.host.includes(':') && !config.gateway!.host.startsWith('[') ? `[${config.gateway!.host}]` : config.gateway!.host
-    console.log(`Papyrus ACP Streamable HTTP listening at ${protocol}://${host}:${config.gateway!.port}/acp`)
-  })
-}
 
 let stopping = false
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
@@ -35,10 +49,11 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 async function shutdown(): Promise<void> {
   if (stopping) return
   stopping = true
-  await service.shutdown()
   server.closeAllConnections()
-  gateway?.closeAllConnections()
-  await Promise.all([closeServer(server), ...(gateway ? [closeServer(gateway)] : [])])
+  await worker.stop()
+  await actionWorker.stop()
+  await mastraRuntime.stop()
+  await closeServer(server)
   database.close()
   process.exit(0)
 }

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Secure agent gateway for regulated and disconnected environments.",
+  "description": "Customer-hosted durable agent runtime powered by Mastra and Starlings.",
   "license": "UNLICENSED",
   "packageManager": "pnpm@11.22.0+sha1.c824bce7ddda0454998313c86fcb3d613d3f18bc",
   "engines": {

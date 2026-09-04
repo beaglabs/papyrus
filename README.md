@@ -4,192 +4,166 @@
 
 # Papyrus
 
-**Secure, self-hosted ACP daemon for regulated and disconnected environments.**
-
-[![FOSSA Status](https://app.fossa.com/api/projects/custom%2B63623%2Fgithub.com%2Fbeaglabs%2Fpapyrus.svg?type=shield&issueType=license)](https://app.fossa.com/projects/custom%2B63623%2Fgithub.com%2Fbeaglabs%2Fpapyrus?ref=badge_shield&issueType=license)
-[![FOSSA Status](https://app.fossa.com/api/projects/custom%2B63623%2Fgithub.com%2Fbeaglabs%2Fpapyrus.svg?type=shield&issueType=security)](https://app.fossa.com/projects/custom%2B63623%2Fgithub.com%2Fbeaglabs%2Fpapyrus?ref=badge_shield&issueType=security)
+**Customer-hosted durable agent runtime powered by Mastra and Starlings.**
 
 </div>
 
----
+> This is the `experiment/agent-twin-terrain-runtime` product-reset branch. Entra remains the identity authority; the product surface is now a Mastra-native agent runtime rather than a agent-twin dashboard.
 
-Papyrus is a governed Mastra agent harness with an ACP-compatible gateway. It places authentication, Cedar authorization, session ownership, audit, approved-source retrieval, and MCP mediation around Mastra's durable agent runtime.
+Papyrus is a licensed daemon for durable, event-driven agent work. Mastra owns sessions, memory, schedules, workflows, and signal delivery. Starlings remains the heterogeneous collective-computation substrate. Teams, Exchange email, ACP, A2A, and customer systems are plugins around that core.
 
-## Current capabilities
-
-- **ACP gateway** — approved clients connect to `/acp/<runtimeId>`
-- **Authentication** — commercial OIDC with PKCE and government CAC/PIV through mTLS
-- **Authorization** — deny-by-default Cedar policy with fixed Owner, Admin, User, and Auditor roles
-- **Audit** — append-only SQLite events with a SHA-256 hash chain
-- **Sessions** — user-owned runtime sessions with administrative and audit visibility
-- **MCP mediation** — execution-target-scoped server and tool grants through a session-bound proxy
-- **Offline licensing** — deployment-bound signed licenses required in persistent mode
-- **Mastra harness** — persistent goals, working memory, semantic recall, attachments, skills, workspace search, and sandboxed execution
-- **Live browser** — thread-isolated BrowserViewer sessions controlled through Cedar-checked Papyrus tools and streamed into the session UI; raw browser control is privileged
-- **Runtime adapter** — Mastra is the sole in-process engine; ACP remains an external compatibility and durable-event projection boundary
-
-Mastra workspaces are isolated per Papyrus session. Files, search indexes, skills, and browser contexts have separate session namespaces. Organization sources and MCP tools continue to pass through Papyrus' live assignment checks and durable approval flow.
-
-### Runtime security boundary
-
-Every Mastra tool execution is checked before its implementation runs, including
-workspace commands, files, skills, working memory, image generation, and browser
-tools. Unknown tools fail closed. The gate reloads current roles and environment
-assignments, checks session ownership, and records Cedar decisions. MCP approval
-does not override a denial; permissions are checked again after approval.
-
-Commands run **without network access**, including loopback/CDP, with only their
-own workspace writable. Native profiles restrict host reads to system runtime
-paths and the current workspace. Neither browser endpoints nor server secrets
-are injected into command environments. When native isolation is unavailable,
-local mode exposes contained file tools but no shell; persistent mode refuses to
-start. A functional startup probe also rejects installed but unusable backends;
-failed command launches never fall back to unisolated execution. Host-launched LSP support is disabled pending an isolated
-implementation.
-
-The built-in `papyrus_browser_navigate` and `papyrus_browser_read` tools replace
-shell-based browser CLIs. The browser stays outside the command sandbox and is
-accessible only through PapyrusService. Because BrowserViewer runs page scripts
-and raw input can submit forms, download, upload, or use credentials, native
-browser tools, screencasts, and mouse/keyboard input require **all browser
-permissions** (currently Owner/Admin). Restricted Users should use assigned MCP
-browser tools with separate capability checks. A permitted navigation is not a
-claim that the destination is safe; deployment network controls must restrict
-browser and model egress to approved destinations.
-
-After upgrading, rebuild and restart; existing processes must not continue with
-the old sandbox configuration. This changes policy version to `papyrus-fixed-v2`.
-Run `pnpm test` for the policy and runtime regressions. CI also runs native
-isolation tests on Linux and macOS with `PAPYRUS_REQUIRE_SANDBOX_TESTS=1`; those
-tests must execute a permitted local command before testing denied host reads,
-sibling-session access, writes, symlinks, and loopback network requests.
-
-Papyrus does not expose environments as a user-facing workspace abstraction. New conversations resolve the deployment's internal default execution target automatically; the stored target identifier remains available for future enclave, runtime, or network-boundary routing.
-
-The active daemon-first migration plan is documented in [ACP daemon stack](docs/acp-daemon-stack.md). Runtime-neutral core interfaces, local stdio supervision, remote Streamable HTTP, external client bridging, adapter profiles, and the hardened FIPS image land as separate stacked pull requests.
-
-## Remote MCP OAuth
-
-Remote MCP connections discover RFC 9728 protected-resource metadata and bind OAuth credentials to the advertised authorization-server issuer. Papyrus chooses client registration in this order:
-
-1. an Owner/Admin configured pre-registered OAuth client for the issuer;
-2. a Client ID Metadata Document (CIMD) at `/.well-known/mcp-client.json` when the authorization server advertises CIMD support;
-3. Dynamic Client Registration (DCR) only when the authorization server advertises a registration endpoint.
-
-If none is available, the Integrations page marks the connection **OAuth setup required** instead of treating discovery as a generic error. Configure the provider's OAuth client ID/secret in that connection, then Papyrus resumes the authorization-code + PKCE flow. Client secrets, access tokens, refresh tokens, and PKCE verifiers are sealed before database persistence. Access tokens are refreshed before expiry and the MCP SDK gets a one-time refresh/retry hook when a server returns HTTP 401.
-
-For the GitHub remote MCP endpoint `https://api.githubcopilot.com/mcp/`, create a GitHub OAuth App for the Papyrus deployment and set its callback URL to:
+## Product boundary
 
 ```text
-<PAPYRUS_PUBLIC_ORIGIN>/api/mcp/oauth/callback
+Teams / Email / ACP / A2A / Customer plugins
+                         │
+                         ▼
+                  Papyrus daemon
+            Entra identity · licensing
+           plugin policy · action ledger · audit
+                         │
+                         ▼
+                 Starlings runtime
+        local operators · claims · conflicts
+                         │
+                         ▼
+        Mastra sessions · signals · workflows
 ```
 
-Then add the GitHub MCP endpoint under **Administration → Integrations**. Papyrus discovers the GitHub authorization issuer, prompts for the pre-registered OAuth client when needed, renders the authorization confirmation, and opens the GitHub approval flow.
+- **Identity and portal roles:** Microsoft Entra ID application roles. Papyrus has no invitation, password, provisioning, or local role database.
+- **Operational safety:** Starlings proposes actions; deterministic workflow policy and an Entra-authorized approver release them.
+- **Secrets:** Connector configuration accepts customer-vault, certificate, or managed-identity references. Inline tokens, passwords, client secrets, and private keys are rejected.
+- **Licensing:** The existing deployment-bound, signed, offline license format remains. No Beag cloud callback is required.
+- **Runtime independence:** Teams and email are adapters. Disabling them does not disable sessions, workflows, or the Starlings runtime.
+- **Sandboxed execution:** Agent code runs only on Linux under Bubblewrap, with network denied. On any other host execution is off, and the daemon reports why rather than falling back to unisolated execution.
 
-## Requirements
+## Portal
 
-- Node.js 24+
-- pnpm 11.22.0
-- A Chromium/Chrome executable for browser sessions (`PAPYRUS_BROWSER_EXECUTABLE`); browser tools no longer invoke a shell CLI
-- An approved customer model endpoint
+The web product is rooted at `/portal`:
 
-## Local development (commercial profile)
+- `/portal` — durable agent sessions and AI SDK UI tool cards
+- `/portal/models` — customer model gateways and the agent-guided model configuration form
+- `/portal/plugins` — installed plugins and the agent-visible tool catalog
+- `/portal/scheduled` — persistent Mastra agent schedules
+- `/portal/workflows` — durable, inspectable Mastra workflows
+- `/portal/governance` — Entra roles, licensing, and action boundary
+
+Plugin configuration happens inside agent messages. A generated tool exists for every catalog entry and returns a typed secure-configuration card. Credential values are never placed in model context; the card sends credential references directly to the daemon. The governed lifecycle remains:
+
+```text
+Draft → Tested → Awaiting Approval → Active → Degraded / Disabled
+```
+
+Integration registration, activation, configuration, and disable events form an append-only SHA-256 hash chain.
+
+## Entra application roles
+
+Create these application roles in the customer-owned Entra registration:
+
+| Application role | Authority |
+| --- | --- |
+| `Papyrus.Integration.View` | View connector configuration and health |
+| `Papyrus.Integration.Manage` | Create, test, submit, and disable ordinary connectors |
+| `Papyrus.Security.Manage` | Activate high-risk and action-capable connectors |
+| `Papyrus.Action.Approve` | Approve individual operational actions |
+| `Papyrus.Audit.View` | View append-only connector and decision history |
+| `Papyrus.System.Owner` | All portal permissions |
+
+Entra is authoritative. Roles are read from validated token claims and are not copied into a Papyrus role table.
+
+## Local development
+
+Node.js 24 and pnpm 11 are required. macOS and Windows are fine for development — the daemon, portal, connectors, and action ledger all run there. Agent code execution does not: it is Linux-only and enforced with Bubblewrap, and it turns itself off with an explicit log line anywhere else. See [docs/deployment.md](docs/deployment.md#platform-requirements).
 
 ```bash
 pnpm install --frozen-lockfile
 pnpm build
 
 export PAPYRUS_MODE=local
-export PAPYRUS_PROFILE=commercial
-export PAPYRUS_DEV_IDENTITY='owner:Local Owner'
-export PAPYRUS_BOOTSTRAP_SECRET='replace-with-single-use-bootstrap-secret'
-export PAPYRUS_SESSION_SECRET="$(openssl rand -hex 32)"
-export PAPYRUS_LICENSE_REQUIRED=false
-
-# Model endpoint (required for agent sessions)
-export PAPYRUS_MODEL_ENDPOINT=https://openrouter.ai/api
-export PAPYRUS_MODEL=liquid/lfm-2.5-2.6b:free
-export PAPYRUS_MODEL_API_KEY=your-openrouter-key
-
-# Optional browser overrides
-# export PAPYRUS_BROWSER_EXECUTABLE=/usr/bin/chromium
-# export PAPYRUS_BROWSER_HEADLESS=false
-
-# Optional: ACP gateway for Goose/ACP clients
-export PAPYRUS_GATEWAY_ENABLED=true
-export PAPYRUS_GATEWAY_DEV_TOKEN="$(openssl rand -hex 32)"
-
-pnpm start
-```
-
-The API listens on `http://127.0.0.1:3210`; the ACP gateway listens on `127.0.0.1:3220`. Do not set `GOOSE_SERVER__SECRET_KEY`; it belongs to the Goose runtime process.
-
-## Local development (government profile with mTLS)
-
-```bash
-pnpm install --frozen-lockfile
-pnpm build
-
-# Generate test certificates (one-time)
-mkdir -p certs
-openssl req -x509 -newkey rsa:4096 -keyout certs/cac-ca-key.pem -out certs/cac-ca.pem -days 365 -nodes -subj "/CN=Test CAC CA"
-openssl req -newkey rsa:4096 -keyout certs/server-key.pem -out certs/server.csr -nodes -subj "/CN=papyrus.local"
-openssl x509 -req -in certs/server.csr -CA certs/cac-ca.pem -CAkey certs/cac-ca-key.pem -CAcreateserial -out certs/server.pem -days 365 -sha256
-openssl req -newkey rsa:4096 -keyout certs/client-key.pem -out certs/client.csr -nodes -subj "/CN=Test User/emailAddress=user@test.local"
-openssl x509 -req -in certs/client.csr -CA certs/cac-ca.pem -CAkey certs/cac-ca-key.pem -CAcreateserial -out certs/client.pem -days 365 -sha256
-openssl pkcs12 -export -in certs/client.pem -inkey certs/client-key.pem -out certs/client.p12 -name "Test CAC User" -passout pass:test123
-
-export PAPYRUS_MODE=local
-export PAPYRUS_PROFILE=government-il4
+export PAPYRUS_PROFILE=gcc
 export PAPYRUS_HOST=127.0.0.1
 export PAPYRUS_PORT=3210
-export PAPYRUS_PUBLIC_ORIGIN=https://127.0.0.1:3210
-export PAPYRUS_TLS_CERT=/Users/jdbohrman/papyrus/certs/server.pem
-export PAPYRUS_TLS_KEY=/Users/jdbohrman/papyrus/certs/server-key.pem
-export PAPYRUS_TLS_CA=/Users/jdbohrman/papyrus/certs/cac-ca.pem
-export PAPYRUS_SESSION_SECRET="$(openssl rand -hex 32)"
-export PAPYRUS_BOOTSTRAP_SECRET="$(openssl rand -hex 32)"
+export PAPYRUS_PUBLIC_ORIGIN=http://127.0.0.1:3210
+export PAPYRUS_PORTAL_SECRET="$(openssl rand -hex 32)"
 export PAPYRUS_LICENSE_REQUIRED=false
-
-# Model endpoint
-export PAPYRUS_MODEL_ENDPOINT=https://openrouter.ai/api
-export PAPYRUS_MODEL=liquid/lfm-2.5-2.6b:free
-export PAPYRUS_MODEL_API_KEY=your-openrouter-key
-
-# Optional: sandbox runtime for code execution
-# export PAPYRUS_SANDBOX_API_KEY=... (not required for local sandbox-runtime)
+export PAPYRUS_DATABASE_PATH=:memory:
+# Optional one-time bootstrap; durable profiles can be configured at /portal/models.
+export PAPYRUS_AGENT_MODEL='openai/gpt-5'
+export PAPYRUS_MODEL_BASE_URL='https://api.openai.com/v1'
+export PAPYRUS_MODEL_CREDENTIAL_REF='env://OPENAI_API_KEY'
+export PAPYRUS_DEV_ENTRA_PRINCIPAL='{
+  "oid":"local-owner",
+  "tenantId":"local-tenant",
+  "displayName":"Operations Owner",
+  "preferredUsername":"owner@example.mil",
+  "roles":["Papyrus.System.Owner"],
+  "groups":[]
+}'
 
 pnpm start
 ```
 
-Import `certs/client.p12` into your browser (password: `test123`), then visit `https://127.0.0.1:3210` and select the certificate when prompted.
+`PAPYRUS_DEV_ENTRA_PRINCIPAL` is accepted only in local mode. Persistent mode requires a real Entra tenant and application registration.
 
-## Production profiles
+## Persistent Entra configuration
 
-| Profile | Authentication | Transport boundary |
-| --- | --- | --- |
-| `commercial` | OIDC authorization-code flow with PKCE | Direct TLS or an approved HTTPS boundary |
-| `government-il4` | CAC/PIV certificate identity | Direct mutual TLS |
-| `government-il6` | CAC/PIV certificate identity | Direct mutual TLS |
+```bash
+export PAPYRUS_MODE=persistent
+export PAPYRUS_PROFILE=gcch             # gcc | gcch | dod | restricted | disconnected
+export PAPYRUS_PUBLIC_ORIGIN=https://papyrus.customer.example
+export PAPYRUS_PORTAL_SECRET="..."
+export PAPYRUS_ENTRA_TENANT_ID="..."
+export PAPYRUS_ENTRA_CLIENT_ID="..."
+export PAPYRUS_ENTRA_CLIENT_SECRET="..." # omit when the selected deployment identity does not require it
+export PAPYRUS_ENTRA_SCOPE="api://<client-id>/access_as_user"
+export PAPYRUS_ENTRA_CLOUD=USGov         # Public | USGov | USGovDoD
+export PAPYRUS_TLS_CERT=/run/papyrus/tls/server.pem
+export PAPYRUS_TLS_KEY=/run/papyrus/tls/server-key.pem
+export PAPYRUS_LICENSE_AUTHORITIES='{ "beag-root": "-----BEGIN PUBLIC KEY-----..." }'
+```
 
-Profile names are deployment baselines, not accreditation or authorization claims.
+Cloud defaults are inferred from the deployment profile, but an explicit value is recommended in production.
 
-### Required production environment variables
+## Runtime API
 
-**Commercial:**
-- `PAPYRUS_OIDC_ISSUER`, `PAPYRUS_OIDC_CLIENT_ID`, `PAPYRUS_OIDC_REDIRECT_URI`
-- `PAPYRUS_SESSION_SECRET` (32+ random chars)
-- `PAPYRUS_BOOTSTRAP_SECRET` (single-use)
-- `PAPYRUS_MODEL_ENDPOINT`, `PAPYRUS_MODEL`, `PAPYRUS_MODEL_API_KEY`
+Authenticated portal clients use:
 
-**Government:**
-- `PAPYRUS_TLS_CERT`, `PAPYRUS_TLS_KEY`, `PAPYRUS_TLS_CA` (CAC/PIV trust bundle)
-- `PAPYRUS_TLS_CRL` (optional revocation list)
-- `PAPYRUS_SESSION_SECRET`, `PAPYRUS_BOOTSTRAP_SECRET`
-- `PAPYRUS_MODEL_ENDPOINT`, `PAPYRUS_MODEL`, `PAPYRUS_MODEL_API_KEY`
-- Node.js 24+ with `--enable-fips` (FIPS-validated OpenSSL required)
+- `GET|POST /api/sessions`
+- `GET /api/sessions/:id/messages`
+- `POST /api/agent/chat` — AI SDK UI v7 stream
+- `GET|POST /api/model-profiles`
+- `POST|DELETE /api/model-profiles/:id` — test, select, disable, or remove a durable model profile
+- `GET /api/plugins`
+- `POST /api/plugins/connect`
+- `GET|POST /api/schedules`
+- `GET /api/workflows`
+- `POST /api/workflows/:id/runs`
+- `POST /api/signals/:sourceId/webhook` — source-scoped token required
 
-Local mode does not require a production license. Persistent mode always requires a valid signed license and has no environment-variable bypass.
+- `GET /api/integrations/catalog`
+- `GET /api/integrations`
+- `POST /api/integrations`
+- `POST /api/integrations/:id/test`
+- `POST /api/integrations/:id/submit`
+- `POST /api/integrations/:id/activate`
+- `POST /api/integrations/:id/disable`
+- `GET /api/integrations/:id/events`
+- `POST /api/integrations/:id/observations`
+- `POST /api/integrations/:id/sync`
+- `GET /api/integrations/:id/sync-jobs`
+- `GET /api/terrain`
+
+Teams SSO tokens can be exchanged at `POST /api/auth/teams`; standard portal login uses Entra authorization code + PKCE through `/api/auth/entra/login`.
+
+## Current experiment boundary
+
+This branch implements the Entra-native daemon, offline licensing, governed plugin lifecycle, action ledger and leased executor worker, Mastra LibSQL memory, durable evented agent registration, session history, native schedules, a signal-intake workflow, WebhookSignalProvider delivery backed by a database-leased outbox, agent-rendered plugin configuration cards, and guarded URL previews.
+
+Mastra is now a server dependency. Its storage starts even when no model is configured, so session and workflow state remain available. When `PAPYRUS_AGENT_MODEL` is absent, the daemon refuses chat and keeps incoming signals in `agent_signal_outbox`; it does not invent a default provider or discard events.
+
+`fetchUrlPreview` permits HTTPS by default, follows redirects only after re-validation, limits response size, and rejects credentials, loopback, link-local, metadata, private, and reserved destinations. Reviewed internal hosts can be enumerated with `PAPYRUS_FETCH_ALLOWED_HOSTS`.
+
+The Observation API is an advanced custom-ingestion contract, not the primary production collection workflow. Selecting **Connect** registers a source identity and opens a one-record validation/developer bridge that mints a one-hour source-scoped token. Production telemetry should use native SIEM, EDR, OTEL, email, or OT connectors; unattended custom producers require customer-approved workload identity or mTLS plus durable spooling and batching. Waiting custom sources remain in the catalog rather than appearing as operational. Exchange now has a Microsoft Graph delta-polling and send-mail boundary, but customer deployments must supply the approved vault/workload-identity credential resolver before it performs external calls. Live Teams command handling, additional native security connectors, the customer-vault resolver, and the Starlings process adapter remain implementation slices. Pull integrations cannot activate until their driver is registered, and configuration-only tests leave health unknown rather than pretending that saving a connector performed live network validation.
 
 ## Verification
 
@@ -199,27 +173,8 @@ pnpm test
 pnpm build
 ```
 
-## Documentation
-
-- [ACP daemon stack](docs/acp-daemon-stack.md) — branch order, boundaries, and acceptance gates
-- [Product scope](docs/product-scope.md) — daemon-first product decision
-- [Deployment](docs/deployment.md) — deployment modes and requirements
-- [Security](docs/security.md) — security model and limitations
-- [Operations](docs/operations.md) — backup, recovery, and supervision runbooks
+The separate ACP package remains a machine-interface primitive; it does not provide a local identity system.
 
 ---
 
-*This repository is not an authorization to operate, a cross-domain solution, or a claim of IL4/IL6 accreditation.*
-
-## Approved sources and local retrieval
-
-Papyrus exposes one authorization-scoped retrieval surface regardless of how content reaches the host:
-
-- uploads and import packages
-- existing directories (including host-mounted NFS, SMB/CIFS, SAN, Kubernetes volumes, encrypted disks, removable media, and synchronized folders)
-- approved domains and APIs
-- MCP connectors
-
-Papyrus does **not** mount remote filesystems or retain NAS credentials. Infrastructure mounts storage, then an Owner or Admin registers the existing directory and assigns the source to identities. Assignments are rechecked for every list, search, and chunk read. The agent receives `papyrus_sources_list`, `papyrus_sources_search`, and `papyrus_sources_read`; results carry the source, URI, title, chunk location, and SHA-256 citation.
-
-FTS5 is always available and is the offline baseline. Semantic retrieval is optional: set `PAPYRUS_SQLITE_VEC_EXTENSION` to a locally packaged sqlite-vec library and `PAPYRUS_SQLITE_VEC_SHA256` to its approved checksum. Papyrus verifies the binary before loading it and disables further SQLite extension loading immediately afterward. The extension is optional so disconnected deployments remain operable without a model or vector runtime.
+Papyrus is not an authorization to operate, a cross-domain solution, or a claim of GCC High, DoD, IL4, IL6, or SIPR accreditation.

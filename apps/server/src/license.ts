@@ -2,7 +2,15 @@ import { createHash, generateKeyPairSync, sign, verify } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { DeploymentProfile, LicensePayload, LicenseStatus, SignedLicense } from '@papyrus/contracts'
-import type { PapyrusDatabase } from './db.js'
+
+interface LicenseDatabase {
+  sqlite: {
+    prepare(sql: string): {
+      get(...parameters: unknown[]): unknown
+      run(...parameters: unknown[]): unknown
+    }
+  }
+}
 
 function canonical(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
@@ -19,7 +27,7 @@ export class LicenseService {
   private readonly publicKeyPem: string
 
   constructor(
-    private readonly db: PapyrusDatabase,
+    private readonly db: LicenseDatabase,
     private readonly dataDir: string,
     private readonly profile: DeploymentProfile,
     private readonly authorities: Record<string, string>,

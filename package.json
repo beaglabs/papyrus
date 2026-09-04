@@ -15,6 +15,12 @@
     "build": "pnpm -r run build",
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",
-    "lint": "pnpm -r run lint"
+    "lint": "pnpm -r run lint",
+    "prepare": "node scripts/hooks/install.mjs",
+    "hooks:install": "node scripts/hooks/install.mjs",
+    "precommit:check": "node scripts/hooks/precommit.mjs",
+    "contracts:check": "node scripts/hooks/contracts-drift.mjs",
+    "compliance:generate": "node scripts/compliance/generate.mjs",
+    "compliance:check": "node scripts/compliance/generate.mjs --check"
   }
 }

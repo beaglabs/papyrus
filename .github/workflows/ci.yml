@@ -31,14 +31,23 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Verify contract/schema drift
+        run: pnpm contracts:check
+      - name: Generate and verify compliance evidence
+        run: pnpm compliance:check
       - name: Install Linux command isolation
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y bubblewrap
-          # GitHub's ephemeral Ubuntu runner restricts unprivileged namespaces
-          # by default. They are required for the sandbox integration test.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      - name: Upload SPDX SBOM
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: papyrus-sbom-spdx
+          path: compliance/sbom.spdx.json
+          if-no-files-found: error

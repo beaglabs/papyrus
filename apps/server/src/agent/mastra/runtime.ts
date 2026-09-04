@@ -14,7 +14,7 @@ import {
   type InvestigationToolName,
 } from './tools.js'
 import { INTEGRATION_CATALOG, LINK_PUBLISHER_CATALOG_ID } from '../catalog.js'
-import { LINK_EXECUTOR_INTEGRATION_ID, LinkStore } from '../link-store.js'
+import { LINK_EXECUTOR_INTEGRATION_ID, LinkStore, type LinkDraftAssetInput } from '../link-store.js'
 import { connectionRequest, modelGatewayRequest, pluginToolId } from './plugin-tools.js'
 import { fetchUrlPreview } from './fetch-preview.js'
 import { signalIntakeWorkflow, WORKFLOW_CATALOG } from './workflows.js'
@@ -973,14 +973,18 @@ export class MastraRuntime {
       },
       execute: async (inputData: Record<string, unknown>) => {
         const integration = this.links.ensureExecutorIntegration()
+        const linkType = String(inputData['type'] ?? '') as LinkType
+        const linkName = String(inputData['name'] ?? '')
         const sourcePath = await this.resolveLinkSource(
           typeof inputData['sourcePath'] === 'string' ? inputData['sourcePath'] : undefined,
           typeof inputData['artifactId'] === 'string' ? inputData['artifactId'] : undefined,
         )
+        const prepared = await this.prepareLinkSource(linkType, linkName, sourcePath)
         const draft = await this.links.prepareDraft({
-          name: String(inputData['name'] ?? ''),
-          type: String(inputData['type'] ?? '') as LinkType,
-          sourcePath,
+          name: linkName,
+          type: linkType,
+          sourcePath: prepared.sourcePath,
+          ...(prepared.assets.length ? { assets: prepared.assets } : {}),
           ...(typeof inputData['slug'] === 'string' && inputData['slug'].trim() ? { slug: inputData['slug'] } : {}),
           ...(typeof inputData['workflowId'] === 'string' && inputData['workflowId'].trim() ? { workflowId: inputData['workflowId'] } : {}),
           ...(typeof inputData['scheduleId'] === 'string' && inputData['scheduleId'].trim() ? { scheduleId: inputData['scheduleId'] } : {}),
@@ -1055,6 +1059,77 @@ export class MastraRuntime {
     const mirrored = await this.workspaceFilesystem.describeLibraryFile(preferred)
     if (mirrored.sha256 !== artifact.sha256) throw new Error('AgentFS artifact mirror failed SHA-256 verification')
     return mirrored
+  }
+
+  private async prepareLinkSource(
+    type: LinkType,
+    name: string,
+    sourcePath: string,
+  ): Promise<{ sourcePath: string; assets: LinkDraftAssetInput[] }> {
+    if (type !== 'webpage') return { sourcePath, assets: [] }
+
+    const source = await this.workspaceFilesystem.describeLibraryFile(sourcePath)
+    const mediaType = baseMediaType(source.mediaType)
+    if (mediaType === 'text/html') {
+      const html = String(await this.workspaceFilesystem.readFile(sourcePath, { encoding: 'utf8' }))
+      return { sourcePath, assets: await this.webpageArtifactAssets(html) }
+    }
+
+    if (
+      mediaType.startsWith('video/') ||
+      mediaType.startsWith('image/') ||
+      mediaType.startsWith('audio/') ||
+      mediaType === 'application/pdf'
+    ) {
+      const reference = 'papyrus-link-asset://primary'
+      const title = escapeHtml(name.trim() || source.name)
+      const safeMediaType = escapeHtml(mediaType)
+      const body = mediaType.startsWith('video/')
+        ? `<video controls preload="metadata"><source src="${reference}" type="${safeMediaType}">Your browser does not support the video element.</video>`
+        : mediaType.startsWith('image/')
+          ? `<img src="${reference}" alt="${title}">`
+          : mediaType.startsWith('audio/')
+            ? `<audio controls src="${reference}">Your browser does not support the audio element.</audio>`
+            : `<p><a href="${reference}">Open ${title}</a></p>`
+      const wrapperPath = `/Library/Generated/${crypto.randomUUID().slice(0, 8)}-link.html`
+      await this.workspaceFilesystem.writeFile(
+        wrapperPath,
+        `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title></head><body><main><h1>${title}</h1>${body}</main></body></html>`,
+        { overwrite: false, recursive: true },
+      )
+      return {
+        sourcePath: wrapperPath,
+        assets: [{ sourcePath, sourceReferences: [reference], publicName: source.name }],
+      }
+    }
+
+    throw new Error(`Webpage Links require HTML or a browser-renderable media source; received ${source.mediaType}`)
+  }
+
+  private async webpageArtifactAssets(html: string): Promise<LinkDraftAssetInput[]> {
+    const pattern = /(?:https?:\/\/[^\/"'<>\s]+)?\/api\/artifacts\/([0-9a-f-]{36})\/content(?:\?download=1)?/gi
+    const grouped = new Map<string, { references: Set<string> }>()
+    for (const match of html.matchAll(pattern)) {
+      const artifactId = match[1]
+      const reference = match[0]
+      if (!artifactId || !reference) continue
+      const current = grouped.get(artifactId) ?? { references: new Set<string>() }
+      current.references.add(reference)
+      grouped.set(artifactId, current)
+    }
+
+    const assets: LinkDraftAssetInput[] = []
+    for (const [artifactId, group] of grouped) {
+      const artifact = this.artifacts.get(artifactId)
+      if (!artifact) throw new Error(`Webpage references durable artifact ${artifactId}, but that artifact is unavailable`)
+      const mirrored = await this.materializeArtifactInLibrary(artifact)
+      assets.push({
+        sourcePath: mirrored.path,
+        sourceReferences: [...group.references],
+        publicName: `${artifact.id.slice(0, 8)}-${artifact.name}`,
+      })
+    }
+    return assets
   }
 
   private async resolveLinkSource(sourcePath?: string, artifactId?: string): Promise<string> {
@@ -1186,6 +1261,20 @@ function addWorkspaceAttachmentContext(message: Record<string, unknown>, context
 
 function stripWorkspaceAttachmentContext(value: string): string {
   return value.replace(/\n?<papyrus-workspace-attachments>[\s\S]*?<\/papyrus-workspace-attachments>\s*$/g, '').trimEnd()
+}
+
+function baseMediaType(value: string): string {
+  return value.split(';', 1)[0]?.trim().toLowerCase() ?? ''
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  })[character] as string)
 }
 
 function sha256Hex(bytes: Buffer): string {

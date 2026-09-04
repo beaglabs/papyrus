@@ -103,30 +103,75 @@ export class NonoWorkspaceSandbox extends MastraSandbox {
 
 class NonoProcessManager extends SandboxProcessManager<NonoWorkspaceSandbox> {
   private readonly filesystem: PapyrusAgentFSFilesystem
-  private readonly nonoBinary: string
   private readonly dataDir: string
+  private executionTail: Promise<void> = Promise.resolve()
 
-  constructor(options: { filesystem: PapyrusAgentFSFilesystem; nonoBinary: string; dataDir: string }) {
+  constructor(options: { filesystem: PapyrusAgentFSFilesystem; dataDir: string }) {
     super()
     this.filesystem = options.filesystem
-    this.nonoBinary = options.nonoBinary
-    this.dataDir = options.dataDir
+    this.dataDir = resolve(options.dataDir)
   }
 
   async spawn(command: string, options: SpawnProcessOptions = {}): Promise<ProcessHandle> {
-    const plan = buildNonoLaunchPlan(this.filesystem, this.nonoBinary, command, options.cwd ?? '/')
-    const environment = minimalEnvironment(this.dataDir, options.env)
-    const startedAt = Date.now()
-    const child = spawn(plan.binary, plan.args, {
-      cwd: this.dataDir,
-      env: environment,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      detached: process.platform !== 'win32',
-      windowsHide: true,
-    })
-    const handle = new NonoProcessHandle(child, startedAt, options)
-    this._tracked.set(handle.pid, handle)
-    return handle
+    if (!command.trim()) throw new Error('Workspace command is required')
+    if (Buffer.byteLength(command) > MAX_COMMAND_BYTES) throw new Error('Workspace command exceeds 64 KiB')
+
+    const releaseLease = await this.acquireExecutionLease()
+    let materialized: MaterializedWorkspace | undefined
+    let controlPath: string | undefined
+
+    try {
+      materialized = await this.filesystem.materializeForExecution()
+      const cwd = normalizeWorkspaceCwd(options.cwd ?? '/')
+      const hostCwd = materializedPath(materialized.root, cwd)
+      if (!existsSync(hostCwd)) throw new Error(`Workspace cwd does not exist: ${cwd}`)
+
+      const home = join(materialized.root, '.papyrus-home')
+      const temp = join(materialized.root, '.papyrus-tmp')
+      mkdirSync(home, { recursive: true, mode: 0o700 })
+      mkdirSync(temp, { recursive: true, mode: 0o700 })
+
+      const controlDirectory = join(this.dataDir, '.workspace-control')
+      mkdirSync(controlDirectory, { recursive: true, mode: 0o700 })
+      controlPath = join(controlDirectory, `${randomUUID()}.json`)
+      writeFileSync(controlPath, JSON.stringify({
+        workspaceRoot: materialized.root,
+        cwd,
+        command,
+        env: workspaceEnvironment(materialized.root, options.env),
+      }), { mode: 0o600, flag: 'wx' })
+
+      const startedAt = Date.now()
+      const child = spawn(process.execPath, [WORKER_PATH, controlPath], {
+        cwd: this.dataDir,
+        env: workerBootstrapEnvironment(this.dataDir),
+        stdio: ['pipe', 'pipe', 'pipe'],
+        detached: process.platform !== 'win32',
+        windowsHide: true,
+      })
+      let handle!: NonoProcessHandle
+      handle = new NonoProcessHandle(child, startedAt, options, async (exitCode) => {
+        let finalCode = exitCode
+        try {
+          await this.filesystem.reconcileExecution(materialized!)
+        } catch (error) {
+          handle.emitStderr(`\n[papyrus-workspace] Unable to reconcile command output into AgentFS: ${message(error)}\n`)
+          finalCode = finalCode === 0 ? 70 : finalCode
+        } finally {
+          this.filesystem.cleanupExecution(materialized!)
+          if (controlPath) rmSync(controlPath, { force: true })
+          releaseLease()
+        }
+        return finalCode
+      })
+      this._tracked.set(handle.pid, handle)
+      return handle
+    } catch (error) {
+      if (materialized) this.filesystem.cleanupExecution(materialized)
+      if (controlPath) rmSync(controlPath, { force: true })
+      releaseLease()
+      throw error
+    }
   }
 
   async list(): Promise<ProcessInfo[]> {
@@ -141,10 +186,23 @@ class NonoProcessManager extends SandboxProcessManager<NonoWorkspaceSandbox> {
   async killTracked(): Promise<void> {
     const handles = [...this._tracked.values()]
     await Promise.all(handles.filter((handle) => handle.exitCode === undefined).map((handle) => handle.kill().catch(() => false)))
+    await Promise.all(handles.map((handle) => handle.wait().catch(() => undefined)))
     for (const handle of handles) this.release(handle.pid)
   }
-}
 
+  private async acquireExecutionLease(): Promise<() => void> {
+    const previous = this.executionTail
+    let release!: () => void
+    this.executionTail = new Promise<void>((resolvePromise) => { release = resolvePromise })
+    await previous
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      release()
+    }
+  }
+}
 class NonoProcessHandle extends ProcessHandle {
   readonly pid: string
   private readonly child: ChildProcessWithoutNullStreams

@@ -265,6 +265,7 @@ p { color: var(--muted); line-height: 1.55; }
 .message-markdown blockquote { margin: 16px 0; padding: 11px 15px; border-left: 4px solid var(--main); background: #eee9df; }.message-markdown blockquote > :last-child { margin-bottom: 0; }
 .message-markdown a { color: #0f5a8d; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; font-weight: 650; }.message-markdown a:hover { color: #111; background: var(--blue); }
 .message-markdown .inline-code { padding: 1px 5px; border: 1px solid #c9c2b5; border-radius: 3px; background: #eee9df; color: #241e19; font: .9em ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+.message-markdown .task-id-line { display: inline-flex; align-items: baseline; gap: 7px; max-width: 100%; margin: 6px 0 14px; padding: 7px 9px; border: 1px solid #aaa298; border-left: 3px solid var(--main); border-radius: 4px; background: #f0ece4; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; white-space: normal; overflow-wrap: anywhere; }
 .message-code { margin: 14px 0 18px; overflow: auto; padding: 15px 16px; border: 2px solid #111; border-radius: 5px; background: #171717; color: #d8f6df; box-shadow: 3px 3px 0 #bbb3a7; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; white-space: pre; }
 .message-markdown hr { margin: 22px 0; border: 0; border-top: 1px solid #bbb3a7; }
 .message-table-wrap { max-width: 100%; overflow-x: auto; margin: 16px 0 20px; border: 1px solid #111; background: var(--surface); }

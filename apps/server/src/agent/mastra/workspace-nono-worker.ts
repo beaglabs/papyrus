@@ -58,13 +58,6 @@ for (const path of ['/dev/null', '/dev/urandom', '/dev/random']) {
   try { caps.allowFile(path, path === '/dev/null' ? AccessMode.ReadWrite : AccessMode.Read) } catch { /* optional */ }
 }
 
-caps.blockCommand('curl')
-caps.blockCommand('wget')
-caps.blockCommand('scp')
-caps.blockCommand('ssh')
-caps.blockCommand('nc')
-caps.blockCommand('ncat')
-caps.deduplicate()
 
 try {
   apply(caps)

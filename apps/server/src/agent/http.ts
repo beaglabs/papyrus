@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { createReadStream, readFileSync, statSync } from 'node:fs'
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { createServer as createHttpsServer } from 'node:https'
 import { extname, join, normalize } from 'node:path'
@@ -157,6 +157,39 @@ export function createAgentServer(config: AgentConfig, service: AgentService, au
         const streamed = await mastra.chat(requiredString(input.threadId, 'threadId', 256), input)
         await pipeWebResponse(response, streamed)
         return
+      }
+      if (url.pathname === '/api/artifacts' && request.method === 'GET') {
+        await principal(request, auth, service)
+        return json(response, 200, { artifacts: mastra.artifacts.list() })
+      }
+      const artifactContent = url.pathname.match(/^\/api\/artifacts\/([^/]+)\/content$/)
+      if (artifactContent && request.method === 'GET') {
+        await principal(request, auth, service)
+        const id = decodeURIComponent(artifactContent[1] as string)
+        const artifact = mastra.artifacts.get(id)
+        if (!artifact) throw new HttpError(404, 'ARTIFACT_NOT_FOUND', 'Artifact not found')
+        const path = mastra.artifacts.contentPath(id)
+        const stats = statSync(path)
+        securityHeaders(response)
+        const disposition = url.searchParams.get('download') === '1' ? 'attachment' : 'inline'
+        const fileName = artifact.name.replace(/[\r\n"]/g, '_')
+        response.writeHead(200, {
+          'content-type': artifact.mediaType,
+          'content-length': String(stats.size),
+          'content-disposition': `${disposition}; filename="${fileName}"`,
+        })
+        createReadStream(path).pipe(response)
+        return
+      }
+      if (url.pathname === '/api/skills' && request.method === 'GET') {
+        await principal(request, auth, service)
+        return json(response, 200, { skills: mastra.skills.list() })
+      }
+      const approveSkill = url.pathname.match(/^\/api\/skills\/([^/]+)\/approve$/)
+      if (approveSkill && request.method === 'POST') {
+        const actor = await principal(request, auth, service)
+        requireRole(actor, 'Papyrus.System.Owner')
+        return json(response, 200, { skill: mastra.skills.approveAndEnable(decodeURIComponent(approveSkill[1] as string), actor.oid) })
       }
       if (url.pathname === '/api/plugins' && request.method === 'GET') {
         const actor = await principal(request, auth, service)

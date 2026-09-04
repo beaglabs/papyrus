@@ -1,3 +1,6 @@
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { IntegrationConfiguration } from '@papyrus/contracts'
 import { ExchangeEmailDriver } from '../src/agent/drivers/exchange-email-driver.js'
@@ -10,6 +13,7 @@ import { ActionStore } from '../src/agent/action-store.js'
 import { AgentService } from '../src/agent/service.js'
 import { SyncWorker, ConnectorRegistry } from '../src/agent/sync-worker.js'
 import { TerrainStore } from '../src/agent/terrain-store.js'
+import { ArtifactStore } from '../src/agent/artifact-store.js'
 
 const exchangeIntegration: IntegrationConfiguration = {
   id: 'exchange-1', catalogId: 'exchange-email', name: 'Operations mailbox',
@@ -100,6 +104,47 @@ describe('Exchange Graph connector boundary', () => {
     })])
     expect(result.message).toContain('graph-request-1042')
     db.close()
+  })
+
+  it('attaches durable artifacts only through the approved Exchange executor path', async () => {
+    const db = new AgentDatabase(':memory:')
+    db.sqlite.prepare(`INSERT INTO agent_integrations(
+      id,catalog_id,name,integration_class,authority,risk,state,endpoint,scope,credential_ref,settings_json,health,created_by_oid,created_at,updated_at,version
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      exchangeIntegration.id, exchangeIntegration.catalogId, exchangeIntegration.name, exchangeIntegration.integrationClass,
+      exchangeIntegration.authority, exchangeIntegration.risk, exchangeIntegration.state, null, exchangeIntegration.scope,
+      exchangeIntegration.credentialRef, JSON.stringify(exchangeIntegration.settings), exchangeIntegration.health,
+      exchangeIntegration.createdByOid, exchangeIntegration.createdAt, exchangeIntegration.updatedAt, exchangeIntegration.version,
+    )
+
+    const dataDir = mkdtempSync(join(tmpdir(), 'papyrus-email-artifact-'))
+    try {
+      const artifacts = new ArtifactStore(dataDir)
+      const report = artifacts.create({ format: 'pdf', name: 'incident-report.pdf', content: 'Approved report.' })
+      const sent: Array<Record<string, unknown>> = []
+      const executor = new EmailExecutor(db, graph({
+        async sendMail(_integration, input) { sent.push(input as unknown as Record<string, unknown>); return { requestId: 'with-attachment' } },
+      }), artifacts)
+
+      await executor.execute(executorContext({
+        parameters: {
+          subject: 'Incident report',
+          body: 'Attached is the approved report.',
+          artifactIds: [report.id],
+        },
+      }))
+
+      const attachments = sent[0]?.['attachments'] as Array<Record<string, unknown>>
+      expect(attachments).toHaveLength(1)
+      expect(attachments[0]).toMatchObject({
+        name: 'incident-report.pdf',
+        contentType: 'application/pdf',
+        contentBytes: readFileSync(artifacts.contentPath(report.id)).toString('base64'),
+      })
+    } finally {
+      db.close()
+      rmSync(dataDir, { recursive: true, force: true })
+    }
   })
 
   it('permits an approved email proposal through an active Exchange integration', () => {

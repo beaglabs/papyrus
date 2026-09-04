@@ -39,7 +39,7 @@ function renderNode(node: MarkdownNode, key: string): ReactNode {
     case 'text':
       return node.value ?? ''
     case 'paragraph':
-      return <p>{children}</p>
+      return <p className={isTaskIdParagraph(node) ? 'task-id-line' : undefined}>{children}</p>
     case 'strong':
       return <strong>{children}</strong>
     case 'emphasis':
@@ -99,6 +99,16 @@ function MarkdownTable({ node, keyPrefix }: { node: MarkdownNode; keyPrefix: str
       {body.length > 0 && <tbody>{body.map((row, rowIndex) => <tr key={`${keyPrefix}-row-${rowIndex}`}>{(row.children ?? []).map((cell, cellIndex) => <td key={`${keyPrefix}-cell-${rowIndex}-${cellIndex}`}>{renderChildren(cell.children ?? [], `${keyPrefix}-cell-${rowIndex}-${cellIndex}`)}</td>)}</tr>)}</tbody>}
     </table>
   </div>
+}
+
+function isTaskIdParagraph(node: MarkdownNode): boolean {
+  const text = flattenText(node).trim()
+  return /^Task ID:\s*[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(text)
+}
+
+function flattenText(node: MarkdownNode): string {
+  if (node.type === 'text' || node.type === 'inlineCode') return node.value ?? ''
+  return (node.children ?? []).map(flattenText).join('')
 }
 
 function safeHref(value: string | undefined): string | undefined {

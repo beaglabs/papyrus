@@ -1,6 +1,8 @@
 import type {
   AgentActionProposal,
   AgentActionReceipt,
+  AgentLink,
+  LinkInbound,
   IntegrationCatalogEntry,
   IntegrationConfiguration,
   IntegrationEvent,
@@ -48,6 +50,7 @@ export interface AgentStatus {
     rawShell: false
   }
   signalBacklog: Record<'pending' | 'delivering' | 'delivered' | 'failed', number>
+  links?: { validation: 'local-static' | 'kitesurf' }
 }
 
 export interface WorkspaceLibraryFile {
@@ -179,6 +182,18 @@ export interface WorkspaceLibraryPage {
   offset: number
   limit: number
   nextOffset?: number
+}
+
+export async function listLinks(): Promise<AgentLink[]> {
+  return (await api<{ links: AgentLink[] }>('/api/links')).links
+}
+
+export async function linkInbounds(id: string): Promise<LinkInbound[]> {
+  return (await api<{ inbounds: LinkInbound[] }>(`/api/links/${encodeURIComponent(id)}/inbounds`)).inbounds
+}
+
+export function publicLinkUrl(link: Pick<AgentLink, 'publicPath'>): string {
+  return new URL(link.publicPath, window.location.origin).toString()
 }
 
 export async function workspaceFilesPage(query = '', offset = 0, limit = 100): Promise<WorkspaceLibraryPage> {

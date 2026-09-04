@@ -359,7 +359,7 @@ export class PapyrusAgentFSFilesystem extends MastraFilesystem {
   ): Promise<{ stdout: Buffer; stderr: Buffer; exitCode: number }> {
     const result = await runBinary(
       this.binary,
-      ['exec', '--backend', this.mountBackend, this.databasePath, '/bin/sh', '-c', script, 'papyrus-agentfs', ...args],
+      ['exec', '--backend', this.mountBackend, this.databasePath, '/bin/sh', '-c', script, 'papyrus-agentfs', ...args.map(mountedPathArgument)],
       { cwd: this.dataDir, input },
     )
     if (result.exitCode !== 0 && !allowedExitCodes.has(result.exitCode)) {
@@ -374,6 +374,11 @@ function normalizeFsPath(input: string): string {
   const normalized = posix.normalize(raw.startsWith('/') ? raw : `/${raw}`)
   if (normalized === '/..' || normalized.startsWith('/../')) throw new Error('Workspace path escapes root')
   return normalized
+}
+
+function mountedPathArgument(path: string): string {
+  const normalized = normalizeFsPath(path)
+  return normalized === '/' ? '.' : `.${normalized}`
 }
 
 function workspaceMediaType(path: string): string {

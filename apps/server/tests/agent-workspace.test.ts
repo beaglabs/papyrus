@@ -32,7 +32,7 @@ describe('Papyrus AgentFS workspace', () => {
       '--block-net',
     ]))
     expect(plan.args.join(' ')).toContain('python3 report.py')
-    expect(plan.args.join(' ')).toContain('/Library/Work')
+    expect(plan.args.join(' ')).toContain('./Library/Work')
   })
 
   it('refuses sandbox working directories that escape the AgentFS root', () => {

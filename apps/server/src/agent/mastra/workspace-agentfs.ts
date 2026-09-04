@@ -302,7 +302,7 @@ export class PapyrusAgentFSFilesystem extends MastraFilesystem {
     const date = new Date().toISOString().slice(0, 10)
     const path = `/Library/Uploads/${date}/${randomUUID().slice(0, 8)}-${safeName(input.name)}`
     await this.writeFile(path, data, { recursive: true, overwrite: false })
-    return this.describeLibraryFile(path, input.mediaType, 'upload')
+    return this.describeLibraryFile(path, undefined, 'upload')
   }
 
   async describeLibraryFile(path: string, mediaTypeOverride?: string, source?: WorkspaceLibraryFile['source']): Promise<WorkspaceLibraryFile> {
@@ -314,7 +314,7 @@ export class PapyrusAgentFSFilesystem extends MastraFilesystem {
     return {
       path: normalized,
       name: basename(normalized),
-      mediaType: mediaTypeOverride?.trim() || workspaceMediaType(normalized),
+      mediaType: workspaceMediaType(normalized),
       size: stat.size,
       sha256: createHash('sha256').update(buffer).digest('hex'),
       updatedAt: stat.modifiedAt.toISOString(),

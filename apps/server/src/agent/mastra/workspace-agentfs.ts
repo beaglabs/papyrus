@@ -118,8 +118,7 @@ export class PapyrusAgentFSFilesystem extends MastraFilesystem {
     if (!existsSync(this.databasePath)) {
       throw new Error(`AgentFS initialized without creating expected database ${this.databasePath}`)
     }
-    await this.mkdir('/Library', { recursive: true })
-    await this.mkdir('/Library/Uploads', { recursive: true })
+    await this.execMounted('mkdir -p -- /Library /Library/Uploads', [])
   }
 
   async destroy(): Promise<void> {
@@ -158,7 +157,7 @@ export class PapyrusAgentFSFilesystem extends MastraFilesystem {
       'if [ ! -e "$1" ]; then exit 44; fi',
       'rm -f -- "$1"',
     ].join('; ')
-    const result = await this.execMounted(script, [normalized], undefined, false, new Set([44, 74]))
+    const result = await this.execMounted(script, [normalized], undefined, new Set([44, 74]))
     if (result.exitCode === 74) throw new IsDirectoryError(normalized)
     if (result.exitCode === 44 && !options?.force) throw new FileNotFoundError(normalized)
   }
@@ -170,7 +169,7 @@ export class PapyrusAgentFSFilesystem extends MastraFilesystem {
     const overwriteGuard = options?.overwrite === false ? 'if [ -e "$2" ]; then exit 73; fi; ' : ''
     const recursive = options?.recursive ? '-R' : ''
     const script = `if [ ! -e "$1" ]; then exit 44; fi; ${overwriteGuard}mkdir -p -- "$(dirname -- "$2")"; cp ${recursive} -- "$1" "$2"`
-    const result = await this.execMounted(script, [source, target], undefined, false, new Set([44, 73]))
+    const result = await this.execMounted(script, [source, target], undefined, new Set([44, 73]))
     if (result.exitCode === 44) throw new FileNotFoundError(source)
     if (result.exitCode === 73) throw new FileExistsError(target)
   }
@@ -199,7 +198,7 @@ export class PapyrusAgentFSFilesystem extends MastraFilesystem {
     const script = options?.recursive
       ? 'if [ ! -e "$1" ]; then exit 44; fi; rm -rf -- "$1"'
       : 'if [ ! -d "$1" ]; then exit 44; fi; rmdir -- "$1" || exit 75'
-    const result = await this.execMounted(script, [normalized], undefined, false, new Set([44, 75]))
+    const result = await this.execMounted(script, [normalized], undefined, new Set([44, 75]))
     if (result.exitCode === 44 && !options?.force) throw new DirectoryNotFoundError(normalized)
     if (result.exitCode === 75) throw new DirectoryNotEmptyError(normalized)
   }
@@ -217,7 +216,7 @@ export class PapyrusAgentFSFilesystem extends MastraFilesystem {
       '  else size=$(wc -c < "$entry" | tr -d " "); printf "f\\t%s\\t%s\\n" "$name" "$size"; fi',
       'done',
     ].join('\n')
-    const result = await this.execMounted(script, [normalized], undefined, false, new Set([44, 76]))
+    const result = await this.execMounted(script, [normalized], undefined, new Set([44, 76]))
     if (result.exitCode === 44) throw new DirectoryNotFoundError(normalized)
     if (result.exitCode === 76) throw new NotDirectoryError(normalized)
     let entries = result.stdout.toString('utf8').split(/\r?\n/).filter(Boolean).map((line) => {
@@ -247,7 +246,7 @@ export class PapyrusAgentFSFilesystem extends MastraFilesystem {
 
   async exists(path: string): Promise<boolean> {
     const normalized = normalizeFsPath(path)
-    const result = await this.execMounted('[ -e "$1" ]', [normalized], undefined, false, new Set([1]))
+    const result = await this.execMounted('[ -e "$1" ]', [normalized], undefined, new Set([1]))
     return result.exitCode === 0
   }
 
@@ -255,7 +254,7 @@ export class PapyrusAgentFSFilesystem extends MastraFilesystem {
     const normalized = normalizeFsPath(path)
     const result = await this.execMounted(
       'if [ -d "$1" ]; then printf "d\\t0"; elif [ -f "$1" ]; then printf "f\\t"; wc -c < "$1" | tr -d " "; else exit 44; fi',
-      [normalized], undefined, false, new Set([44]),
+      [normalized], undefined, new Set([44]),
     )
     if (result.exitCode === 44) throw new FileNotFoundError(normalized)
     const [type, size = '0'] = result.stdout.toString('utf8').split('\t')
@@ -343,7 +342,6 @@ export class PapyrusAgentFSFilesystem extends MastraFilesystem {
     script: string,
     args: string[],
     input?: Buffer,
-    throwOnFailure = true,
     allowedExitCodes = new Set<number>(),
   ): Promise<{ stdout: Buffer; stderr: Buffer; exitCode: number }> {
     const result = await runBinary(
@@ -351,7 +349,7 @@ export class PapyrusAgentFSFilesystem extends MastraFilesystem {
       ['exec', '--backend', this.mountBackend, this.databasePath, '/bin/sh', '-c', script, 'papyrus-agentfs', ...args],
       { cwd: this.dataDir, input },
     )
-    if (throwOnFailure && result.exitCode !== 0 && !allowedExitCodes.has(result.exitCode)) {
+    if (result.exitCode !== 0 && !allowedExitCodes.has(result.exitCode)) {
       throw new Error(`AgentFS operation failed (${result.exitCode}): ${result.stderr.toString('utf8').slice(0, 1000)}`)
     }
     return result

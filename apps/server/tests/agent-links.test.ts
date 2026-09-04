@@ -164,6 +164,98 @@ describe('AgentFS Links boundary', () => {
     }
   })
 
+  it('prepares video webpage Links without requiring the model to create an HTML wrapper first', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'papyrus-video-link-'))
+    const db = new AgentDatabase(':memory:')
+    const actionStore = new ActionStore(db)
+    const config: AgentConfig = {
+      mode: 'local', profile: 'gcc', host: '127.0.0.1', port: 3210,
+      publicOrigin: 'http://127.0.0.1:3210', dataDir: root, databasePath: ':memory:',
+      portalSecret: 'test-secret', organizationName: 'Test', cloud: 'Public',
+      agentfsId: 'video-link-test', licenseRequired: false, licenseAuthorities: {},
+    }
+    const runtime = new MastraRuntime(config, actionStore, {} as TerrainStore, {} as AgentService)
+    await runtime.workspaceFilesystem.init()
+
+    try {
+      await runtime.workspaceFilesystem.writeFile('/Library/Generated/demo.mp4', Buffer.from('video-bytes'))
+      const bridge = runtime as unknown as {
+        prepareLinkSource(type: 'webpage', name: string, sourcePath: string): Promise<{
+          sourcePath: string
+          assets: Array<{ sourcePath: string; sourceReferences: string[]; publicName?: string }>
+        }>
+      }
+      const prepared = await bridge.prepareLinkSource('webpage', 'Video preview', '/Library/Generated/demo.mp4')
+      expect(prepared.sourcePath).toMatch(/^\/Library\/Generated\/[a-f0-9]{8}-link\.html$/)
+      expect(prepared.assets).toEqual([expect.objectContaining({
+        sourcePath: '/Library/Generated/demo.mp4',
+        sourceReferences: ['papyrus-link-asset://primary'],
+        publicName: 'demo.mp4',
+      })])
+
+      const draft = await runtime.links.prepareDraft({
+        name: 'Video preview webpage',
+        type: 'webpage',
+        sourcePath: prepared.sourcePath,
+        assets: prepared.assets,
+      })
+      const html = String(await runtime.workspaceFilesystem.readFile(draft.sourcePath, { encoding: 'utf8' }))
+      expect(html).toContain('<video controls')
+      expect(html).toContain('/l/video-preview-webpage/assets/demo.mp4')
+      expect(html).not.toContain('papyrus-link-asset://primary')
+    } finally {
+      await runtime.workspaceFilesystem.destroy()
+      db.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('bundles artifact URLs already embedded in generated HTML into the public Link snapshot', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'papyrus-html-asset-link-'))
+    const db = new AgentDatabase(':memory:')
+    const actionStore = new ActionStore(db)
+    const config: AgentConfig = {
+      mode: 'local', profile: 'gcc', host: '127.0.0.1', port: 3210,
+      publicOrigin: 'http://127.0.0.1:3210', dataDir: root, databasePath: ':memory:',
+      portalSecret: 'test-secret', organizationName: 'Test', cloud: 'Public',
+      agentfsId: 'html-asset-link-test', licenseRequired: false, licenseAuthorities: {},
+    }
+    const runtime = new MastraRuntime(config, actionStore, {} as TerrainStore, {} as AgentService)
+    await runtime.workspaceFilesystem.init()
+
+    try {
+      const video = runtime.artifacts.importBytes('preview.mp4', Buffer.from('video-content'))
+      const privateReference = `/api/artifacts/${video.id}/content`
+      await runtime.workspaceFilesystem.writeFile(
+        '/Library/Generated/video-preview.html',
+        `<!doctype html><video controls><source src="${privateReference}" type="video/mp4"></video>`,
+      )
+      const bridge = runtime as unknown as {
+        prepareLinkSource(type: 'webpage', name: string, sourcePath: string): Promise<{
+          sourcePath: string
+          assets: Array<{ sourcePath: string; sourceReferences: string[]; publicName?: string }>
+        }>
+      }
+      const prepared = await bridge.prepareLinkSource('webpage', 'Video preview', '/Library/Generated/video-preview.html')
+      expect(prepared.assets).toHaveLength(1)
+      expect(prepared.assets[0]?.sourceReferences).toContain(privateReference)
+
+      const draft = await runtime.links.prepareDraft({
+        name: 'Video preview webpage',
+        type: 'webpage',
+        sourcePath: prepared.sourcePath,
+        assets: prepared.assets,
+      })
+      const html = String(await runtime.workspaceFilesystem.readFile(draft.sourcePath, { encoding: 'utf8' }))
+      expect(html).not.toContain('/api/artifacts/')
+      expect(html).toMatch(/\/l\/video-preview-webpage\/assets\/[a-f0-9]{8}-preview\.mp4/)
+    } finally {
+      await runtime.workspaceFilesystem.destroy()
+      db.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it('refuses publication if the snapshotted draft changes after review', async () => {
     const subject = await fixture()
     try {

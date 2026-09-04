@@ -113,7 +113,7 @@ export function App() {
         {view === 'models' && <ModelsView profiles={data.models} onAskAgent={(prompt) => navigate('agent', { prompt, session: selectedSession?.id })} onChanged={refresh} canManage={data.me.roles.includes('Papyrus.System.Owner') || data.me.roles.includes('Papyrus.Integration.Manage')} />}
         {view === 'plugins' && <PluginsView catalog={data.catalog} configured={data.integrations} onAskAgent={(prompt) => navigate('agent', { prompt, session: selectedSession?.id })} onChanged={refresh} canManage={data.me.roles.includes('Papyrus.System.Owner') || data.me.roles.includes('Papyrus.Integration.Manage')} />}
         {view === 'scheduled' && <ScheduledView schedules={data.schedules} sessions={data.sessions} onChanged={refresh} />}
-        {view === 'links' && <LinksView validation={data.agent.links?.validation} />}
+        {view === 'links' && <LinksView {...(data.agent.links?.validation ? { validation: data.agent.links.validation } : {})} />}
         {view === 'library' && <LibraryView />}
         {view === 'governance' && <GovernanceView data={data} />}
       </SidebarInset>

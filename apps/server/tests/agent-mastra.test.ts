@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { AgentConfig } from '../src/agent/config.js'
+import { loadAgentConfig, type AgentConfig } from '../src/agent/config.js'
 import { ActionStore, ThreadConflictError } from '../src/agent/action-store.js'
 import { AgentDatabase } from '../src/agent/database.js'
 import { MastraRuntime } from '../src/agent/mastra/runtime.js'
@@ -128,28 +128,65 @@ describe('signal outbox', () => {
 })
 
 describe('sandbox policy', () => {
-  it('only recognises Bubblewrap on Linux', () => {
+  it('keeps Bubblewrap as the default Linux backend', () => {
     expect(probeIsolation({ platform: 'linux', canRun: CAN_RUN_ALL })).toBe('bwrap')
     expect(probeIsolation({ platform: 'linux', canRun: CAN_RUN_NONE })).toBe('none')
+    expect(probeIsolation({ platform: 'darwin', canRun: CAN_RUN_ALL })).toBe('none')
     expect(probeIsolation({ platform: 'win32', canRun: CAN_RUN_ALL })).toBe('none')
   })
 
-  it('never sandboxes macOS, even when a sandbox binary appears present', () => {
-    expect(probeIsolation({ platform: 'darwin', canRun: CAN_RUN_ALL })).toBe('none')
-    expect(probeIsolation({ platform: 'darwin', canRun: CAN_RUN_NONE })).toBe('none')
+  it('allows an explicit Seatbelt backend on macOS', () => {
+    const binaries: string[] = []
+    expect(probeIsolation({
+      platform: 'darwin',
+      isolation: 'seatbelt',
+      canRun: (binary) => { binaries.push(binary); return true },
+    })).toBe('seatbelt')
+    expect(binaries).toEqual(['sandbox-exec'])
+
+    const policy = resolveSandboxPolicy({
+      dataDir: '/srv/papyrus',
+      platform: 'darwin',
+      isolation: 'seatbelt',
+      canRun: CAN_RUN_ALL,
+    })
+    expect(policy).toMatchObject({
+      enabled: true,
+      isolation: 'seatbelt',
+      allowNetwork: false,
+      workingDirectory: '/srv/papyrus/sandbox',
+    })
+    expect(policy.reason).toMatch(/Seatbelt isolation/)
   })
 
-  it('explains why macOS is unsupported rather than silently degrading', () => {
+  it('does not silently select Seatbelt on macOS', () => {
     const policy = resolveSandboxPolicy({
       dataDir: '/srv/papyrus', platform: 'darwin', canRun: CAN_RUN_ALL,
     })
 
     expect(policy.enabled).toBe(false)
-    expect(policy.reason).toMatch(/requires Linux with Bubblewrap/)
-    expect(policy.reason).toMatch(/Seatbelt \(sandbox-exec\) is deprecated by Apple/)
+    expect(policy.isolation).toBe('none')
+    expect(policy.reason).toMatch(/PAPYRUS_SANDBOX_RUNTIME=seatbelt/)
   })
 
-  it('enables an isolated sandbox with network denied', () => {
+  it('rejects a backend on the wrong operating system before probing the binary', () => {
+    const shouldNotProbe = () => { throw new Error('binary probe should not run') }
+    expect(probeIsolation({
+      platform: 'darwin', isolation: 'bwrap', canRun: shouldNotProbe,
+    })).toBe('none')
+    expect(probeIsolation({
+      platform: 'linux', isolation: 'seatbelt', canRun: shouldNotProbe,
+    })).toBe('none')
+
+    expect(resolveSandboxPolicy({
+      dataDir: '/srv/p', platform: 'darwin', isolation: 'bwrap', canRun: CAN_RUN_ALL,
+    }).reason).toMatch(/bwrap requires Linux/)
+    expect(resolveSandboxPolicy({
+      dataDir: '/srv/p', platform: 'linux', isolation: 'seatbelt', canRun: CAN_RUN_ALL,
+    }).reason).toMatch(/seatbelt requires macOS/)
+  })
+
+  it('enables an isolated Bubblewrap sandbox with network denied', () => {
     const policy = resolveSandboxPolicy({
       dataDir: '/srv/papyrus', platform: 'linux', canRun: CAN_RUN_ALL,
     })
@@ -160,14 +197,24 @@ describe('sandbox policy', () => {
     expect(policy.workingDirectory).toBe('/srv/papyrus/sandbox')
   })
 
-  it('refuses to enable a sandbox when no isolation is available', () => {
-    const policy = resolveSandboxPolicy({
+  it('refuses to enable a selected sandbox when its binary is unavailable', () => {
+    const defaultBwrap = resolveSandboxPolicy({
       dataDir: '/srv/papyrus', platform: 'linux', canRun: CAN_RUN_NONE,
     })
+    expect(defaultBwrap.enabled).toBe(false)
+    expect(defaultBwrap.reason).toMatch(/Bubblewrap \(bwrap\).*refusing to run code unisolated/)
 
-    expect(policy.enabled).toBe(false)
-    expect(policy.isolation).toBe('none')
-    expect(policy.reason).toMatch(/refusing to run code unisolated/)
+    const bwrap = resolveSandboxPolicy({
+      dataDir: '/srv/papyrus', platform: 'linux', isolation: 'bwrap', canRun: CAN_RUN_NONE,
+    })
+    expect(bwrap.enabled).toBe(false)
+    expect(bwrap.reason).toMatch(/Bubblewrap \(bwrap\).*refusing to run code unisolated/)
+
+    const seatbelt = resolveSandboxPolicy({
+      dataDir: '/srv/papyrus', platform: 'darwin', isolation: 'seatbelt', canRun: CAN_RUN_NONE,
+    })
+    expect(seatbelt.enabled).toBe(false)
+    expect(seatbelt.reason).toMatch(/Seatbelt \(sandbox-exec\).*refusing to run code unisolated/)
   })
 
   it('honours an explicit execution opt-out even on a capable host', () => {
@@ -180,25 +227,50 @@ describe('sandbox policy', () => {
     expect(policy.reason).toMatch(/disabled by configuration/)
   })
 
-  it('yields no constructor options while disabled and a deny-by-default shape when enabled', () => {
+  it('returns Mastra constructor options for both supported native backends', () => {
     const disabled = resolveSandboxPolicy({ dataDir: '/srv/p', platform: 'darwin', canRun: CAN_RUN_ALL })
     expect(localSandboxOptions(disabled)).toBeUndefined()
 
-    const enabled = resolveSandboxPolicy({
-      dataDir: '/srv/p', platform: 'linux', canRun: CAN_RUN_ALL, readOnlyPaths: ['/srv/p/reference'],
+    const bwrap = resolveSandboxPolicy({
+      dataDir: '/srv/p', platform: 'linux', isolation: 'bwrap', canRun: CAN_RUN_ALL, readOnlyPaths: ['/srv/p/reference'],
     })
-    expect(localSandboxOptions(enabled)).toEqual({
+    expect(localSandboxOptions(bwrap)).toEqual({
       workingDirectory: '/srv/p/sandbox',
       isolation: 'bwrap',
       nativeSandbox: { allowNetwork: false, readOnlyPaths: ['/srv/p/reference'] },
     })
+
+    const seatbelt = resolveSandboxPolicy({
+      dataDir: '/srv/p', platform: 'darwin', isolation: 'seatbelt', canRun: CAN_RUN_ALL, readOnlyPaths: ['/srv/p/reference'],
+    })
+    expect(localSandboxOptions(seatbelt)).toEqual({
+      workingDirectory: '/srv/p/sandbox',
+      isolation: 'seatbelt',
+      nativeSandbox: { allowNetwork: false, readOnlyPaths: ['/srv/p/reference'] },
+    })
+  })
+
+  it('loads the sandbox backend from PAPYRUS_SANDBOX_RUNTIME and rejects unknown values', () => {
+    const env = {
+      PAPYRUS_MODE: 'local',
+      PAPYRUS_PORTAL_SECRET: 'development-portal-secret',
+      PAPYRUS_DEV_ENTRA_PRINCIPAL: JSON.stringify({
+        oid: 'dev', tenantId: 'tenant', displayName: 'Developer', roles: [],
+      }),
+    }
+
+    expect(loadAgentConfig({ ...env, PAPYRUS_SANDBOX_RUNTIME: 'bwrap' }).sandboxRuntime).toBe('bwrap')
+    expect(loadAgentConfig({ ...env, PAPYRUS_SANDBOX_RUNTIME: 'seatbelt' }).sandboxRuntime).toBe('seatbelt')
+    expect(() => loadAgentConfig({ ...env, PAPYRUS_SANDBOX_RUNTIME: 'docker' })).toThrow(
+      /PAPYRUS_SANDBOX_RUNTIME must be bwrap or seatbelt/,
+    )
   })
 
   it('fails closed when asserted', () => {
     const disabled = resolveSandboxPolicy({ dataDir: '/srv/p', platform: 'darwin', canRun: CAN_RUN_ALL })
     expect(() => assertUsableSandbox(disabled)).toThrow(SandboxUnavailableError)
 
-    const enabled = resolveSandboxPolicy({ dataDir: '/srv/p', platform: 'linux', canRun: CAN_RUN_ALL })
+    const enabled = resolveSandboxPolicy({ dataDir: '/srv/p', platform: 'darwin', isolation: 'seatbelt', canRun: CAN_RUN_ALL })
     expect(() => assertUsableSandbox(enabled)).not.toThrow()
   })
 })

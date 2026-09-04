@@ -93,15 +93,17 @@ new Workspace({ sandbox: new LocalSandbox(options) })
 ```
 
 `LocalSandboxOptions.isolation` is `IsolationBackend = 'none' | 'seatbelt' | 'bwrap'`.
-**The default is `'none'`**, which means commands run as the host process against
-the host filesystem — effectively no isolation. Papyrus never constructs one in
-that state; see `sandbox-policy.ts`, which returns `undefined` unless Bubblewrap
-is actually available.
+**The Mastra default is `'none'`**, which means commands run as the host process
+against the host filesystem — effectively no isolation. Papyrus never constructs
+a `LocalSandbox` in that state.
 
-`sandbox-policy.ts` is Linux/Bubblewrap-only. macOS is excluded because its only
-native mechanism is Seatbelt (`sandbox-exec`), which Apple has deprecated.
-`LocalSandbox` does support background processes, unlike `AppleContainerSandbox`,
-which also requires Apple silicon and macOS 26+.
+Papyrus defaults to Bubblewrap on Linux. macOS stays disabled by default because
+`sandbox-exec` is deprecated, but local development can opt in explicitly with
+`PAPYRUS_SANDBOX_RUNTIME=seatbelt`. `PAPYRUS_SANDBOX_RUNTIME=bwrap` can likewise
+make the Linux choice explicit. Any missing or platform-incompatible backend
+fails closed and leaves command execution unavailable; there is no unisolated
+fallback. `LocalSandbox` does support background processes, unlike
+`AppleContainerSandbox`, which also requires Apple silicon and macOS 26+.
 
 ## `sendSignal` — the one that is easy to get wrong
 

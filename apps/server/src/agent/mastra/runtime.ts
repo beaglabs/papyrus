@@ -124,7 +124,7 @@ export class MastraRuntime {
       dataDir: config.dataDir,
     })
     this.workspaceExecutors = new WorkspaceExecutorRegistry(this.workspaceSandbox)
-    this.enclave = new PapyrusEnclaveRuntime(this.workspaceFilesystem, this.workspaceExecutors)
+    this.enclave = new PapyrusEnclaveRuntime(this.workspaceFilesystem, this.workspaceExecutors, config.dataDir)
     this.tools = { actionStore, terrain }
   }
 

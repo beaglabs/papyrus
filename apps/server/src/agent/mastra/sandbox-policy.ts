@@ -116,6 +116,9 @@ function unavailableReason(platform: NodeJS.Platform, requested: SandboxIsolatio
     const binary = SANDBOX_BINARY_BY_RUNTIME[requested]
     return `${requested === 'bwrap' ? 'Bubblewrap' : 'Seatbelt'} (${binary}) was not found or is not executable; refusing to run code unisolated on the host`
   }
+  if (platform === 'linux') {
+    return 'Bubblewrap (bwrap) was not found or is not executable; refusing to run code unisolated on the host'
+  }
   if (platform === 'darwin') {
     return 'Sandbox execution is disabled by default on macOS; set PAPYRUS_SANDBOX_RUNTIME=seatbelt to explicitly use Seatbelt (sandbox-exec)'
   }

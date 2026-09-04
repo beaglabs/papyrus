@@ -10,6 +10,19 @@ type Row = Record<string, unknown>
 
 export const LINK_EXECUTOR_INTEGRATION_ID = 'papyrus-links-system'
 
+export interface LinkDraftAsset {
+  name: string
+  path: string
+  sha256: string
+  mediaType: string
+}
+
+export interface LinkDraftAssetInput {
+  sourcePath: string
+  sourceReferences: string[]
+  publicName?: string
+}
+
 export interface LinkDraftManifest {
   formatVersion: 1
   draftId: string
@@ -22,6 +35,7 @@ export interface LinkDraftManifest {
   createdAt: string
   workflowId?: string
   scheduleId?: string
+  assets?: LinkDraftAsset[]
 }
 
 export interface PrepareLinkInput {
@@ -31,6 +45,7 @@ export interface PrepareLinkInput {
   slug?: string
   workflowId?: string
   scheduleId?: string
+  assets?: LinkDraftAssetInput[]
 }
 
 export class LinkStore {
@@ -104,8 +119,40 @@ export class LinkStore {
     const draftId = randomUUID()
     const draftRoot = `/Library/Links/Drafts/${draftId}`
     const snapshotPath = `${draftRoot}/${posix.basename(source)}`
-    await this.filesystem.copyFile(source, snapshotPath, { overwrite: false })
+    const assets: LinkDraftAsset[] = []
+
+    if (input.type === 'webpage' && input.assets?.length) {
+      let html = String(await this.filesystem.readFile(source, { encoding: 'utf8' }))
+      const usedNames = new Set<string>()
+      for (let index = 0; index < input.assets.length; index++) {
+        const assetInput = input.assets[index] as LinkDraftAssetInput
+        const assetSource = normalizeLibrarySource(assetInput.sourcePath)
+        const describedAsset = await this.filesystem.describeLibraryFile(assetSource)
+        let assetName = safeAssetName(assetInput.publicName ?? describedAsset.name)
+        if (usedNames.has(assetName)) assetName = `${index + 1}-${assetName}`
+        usedNames.add(assetName)
+
+        const draftAssetPath = `${draftRoot}/assets/${assetName}`
+        await this.filesystem.copyFile(assetSource, draftAssetPath, { overwrite: false })
+        const draftAsset = await this.filesystem.describeLibraryFile(draftAssetPath)
+        const publicReference = `/l/${slug}/assets/${encodeURIComponent(assetName)}`
+        for (const reference of assetInput.sourceReferences) {
+          if (reference) html = html.split(reference).join(publicReference)
+        }
+        assets.push({
+          name: assetName,
+          path: draftAsset.path,
+          sha256: draftAsset.sha256,
+          mediaType: draftAsset.mediaType,
+        })
+      }
+      await this.filesystem.writeFile(snapshotPath, html, { overwrite: false, recursive: true })
+    } else {
+      await this.filesystem.copyFile(source, snapshotPath, { overwrite: false })
+    }
+
     const snapshot = await this.filesystem.describeLibraryFile(snapshotPath)
+    validateSource(input.type, snapshot.mediaType)
 
     const workflowId = cleanOptional(input.workflowId)
     const scheduleId = cleanOptional(input.scheduleId)
@@ -121,6 +168,7 @@ export class LinkStore {
       createdAt: new Date().toISOString(),
       ...(workflowId ? { workflowId } : {}),
       ...(scheduleId ? { scheduleId } : {}),
+      ...(assets.length ? { assets } : {}),
     }
     await this.filesystem.writeFile(`${draftRoot}/link.json`, JSON.stringify(manifest, null, 2) + '\n', { overwrite: false, recursive: true })
     return manifest
@@ -146,7 +194,19 @@ export class LinkStore {
     if (current.sha256 !== manifest.sourceSha256) throw new Error('Link source changed after the operator reviewed the publication request')
     validateSource(manifest.type, current.mediaType)
 
-    const finalPath = `/Library/Links/Published/${manifest.draftId}/${posix.basename(manifest.sourcePath)}`
+    const finalRoot = `/Library/Links/Published/${manifest.draftId}`
+    for (const asset of manifest.assets ?? []) {
+      const currentAsset = await this.filesystem.describeLibraryFile(asset.path)
+      if (currentAsset.sha256 !== asset.sha256) throw new Error(`Link asset ${asset.name} changed after the operator reviewed the publication request`)
+      const finalAssetPath = `${finalRoot}/assets/${asset.name}`
+      if (!(await this.filesystem.exists(finalAssetPath))) {
+        await this.filesystem.copyFile(asset.path, finalAssetPath, { overwrite: false })
+      }
+      const finalAsset = await this.filesystem.describeLibraryFile(finalAssetPath)
+      if (finalAsset.sha256 !== asset.sha256) throw new Error(`Published Link asset ${asset.name} does not match the approved snapshot`)
+    }
+
+    const finalPath = `${finalRoot}/${posix.basename(manifest.sourcePath)}`
     if (!(await this.filesystem.exists(finalPath))) {
       await this.filesystem.copyFile(manifest.sourcePath, finalPath, { overwrite: false })
     }
@@ -178,9 +238,19 @@ export class LinkStore {
       slug: manifest.slug,
       blobPath: final.path,
       sourceSha256: final.sha256,
+      assetCount: manifest.assets?.length ?? 0,
       actorOid,
     })
     return this.get(manifest.draftId) as AgentLink
+  }
+
+  recordValidation(id: string, provider: 'local-static' | 'kitesurf'): AgentLink {
+    this.require(id)
+    const now = new Date().toISOString()
+    this.db.sqlite.prepare('UPDATE agent_links SET validation_provider=?,validated_at=?,updated_at=? WHERE id=?')
+      .run(provider, now, now, id)
+    this.appendEvent(id, 'LinkValidated', { provider })
+    return this.get(id) as AgentLink
   }
 
   recordPing(id: string, metadata: Record<string, unknown> = {}): AgentLink {
@@ -270,6 +340,8 @@ export class LinkStore {
       ...(row.last_ping_at ? { lastPingAt: String(row.last_ping_at) } : {}),
       pingCount: Number(row.ping_count),
       inboundCount: Number(row.inbound_count),
+      ...(row.validation_provider ? { validationProvider: String(row.validation_provider) as 'local-static' | 'kitesurf' } : {}),
+      ...(row.validated_at ? { validatedAt: String(row.validated_at) } : {}),
     }
   }
 
@@ -293,6 +365,8 @@ export class LinkStore {
         last_ping_at TEXT,
         ping_count INTEGER NOT NULL DEFAULT 0,
         inbound_count INTEGER NOT NULL DEFAULT 0,
+        validation_provider TEXT,
+        validated_at TEXT,
         deleted_at TEXT
       );
       CREATE INDEX IF NOT EXISTS agent_links_type_state ON agent_links(type,state,updated_at DESC);
@@ -321,6 +395,13 @@ export class LinkStore {
       CREATE TRIGGER IF NOT EXISTS agent_link_events_no_delete BEFORE DELETE ON agent_link_events
       BEGIN SELECT RAISE(ABORT, 'agent link events are append-only'); END;
     `)
+    this.ensureColumn('agent_links', 'validation_provider', 'TEXT')
+    this.ensureColumn('agent_links', 'validated_at', 'TEXT')
+  }
+
+  private ensureColumn(table: string, column: string, definition: string): void {
+    const columns = this.db.sqlite.pragma(`table_info(${table})`) as Array<{ name: string }>
+    if (!columns.some((candidate) => candidate.name === column)) this.db.sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
   }
 }
 
@@ -372,6 +453,12 @@ function normalizedMediaType(value: string): string {
   return value.split(';', 1)[0]?.trim().toLowerCase() ?? ''
 }
 
+function safeAssetName(value: string): string {
+  const name = posix.basename(value.trim()).replace(/[\u0000-\u001f<>:"/\\|?*]/g, '-').slice(0, 180)
+  if (!name || name === '.' || name === '..') throw new Error('Link asset name is invalid')
+  return name
+}
+
 function validateManifest(value: unknown): LinkDraftManifest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Link draft manifest must be an object')
   const item = value as Record<string, unknown>
@@ -390,6 +477,19 @@ function validateManifest(value: unknown): LinkDraftManifest {
   if (!draftId || draftId.length > 128) throw new Error('Link draft id is invalid')
   const createdAt = String(item['createdAt'] ?? '')
   if (Number.isNaN(new Date(createdAt).getTime())) throw new Error('Link draft creation time is invalid')
+  const rawAssets = Array.isArray(item['assets']) ? item['assets'] : []
+  const assets = rawAssets.map((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Link draft asset must be an object')
+    const asset = value as Record<string, unknown>
+    const name = safeAssetName(String(asset['name'] ?? ''))
+    const path = normalizeLibrarySource(String(asset['path'] ?? ''))
+    if (path !== `/Library/Links/Drafts/${draftId}/assets/${name}`) throw new Error('Link draft asset path is outside the draft asset boundary')
+    const sha256 = String(asset['sha256'] ?? '')
+    if (!/^[a-f0-9]{64}$/.test(sha256)) throw new Error('Link draft asset hash is invalid')
+    const mediaType = String(asset['mediaType'] ?? '')
+    if (!normalizedMediaType(mediaType)) throw new Error('Link draft asset media type is invalid')
+    return { name, path, sha256, mediaType }
+  })
   return {
     formatVersion: 1,
     draftId,
@@ -402,5 +502,6 @@ function validateManifest(value: unknown): LinkDraftManifest {
     createdAt,
     ...(workflowId ? { workflowId } : {}),
     ...(scheduleId ? { scheduleId } : {}),
+    ...(assets.length ? { assets } : {}),
   }
 }

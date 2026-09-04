@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
-import type { AgentSignal, LinkType } from '@papyrus/contracts'
+import type { AgentLink, AgentSignal, LinkInbound, LinkType } from '@papyrus/contracts'
 import type { ActionStore } from '../action-store.js'
 import type { AgentConfig } from '../config.js'
 import type { AgentService } from '../service.js'
@@ -14,7 +14,7 @@ import {
   type InvestigationToolName,
 } from './tools.js'
 import { INTEGRATION_CATALOG, LINK_PUBLISHER_CATALOG_ID } from '../catalog.js'
-import { LinkStore } from '../link-store.js'
+import { LINK_EXECUTOR_INTEGRATION_ID, LinkStore, type LinkDraftAssetInput } from '../link-store.js'
 import { connectionRequest, modelGatewayRequest, pluginToolId } from './plugin-tools.js'
 import { fetchUrlPreview } from './fetch-preview.js'
 import { signalIntakeWorkflow, WORKFLOW_CATALOG } from './workflows.js'
@@ -241,6 +241,7 @@ export class MastraRuntime {
         rawShell: false,
       },
       signalBacklog: this.signals.counts(),
+      links: { validation: this.config.kitesurf ? 'kitesurf' : 'local-static' },
     }
   }
 
@@ -409,6 +410,34 @@ export class MastraRuntime {
     const workflow = (this.mastra?.instance as { getWorkflowById: (id: string) => { createRun: () => Promise<{ start: (input: unknown) => Promise<unknown> }> } }).getWorkflowById(id)
     const run = await workflow.createRun()
     return run.start({ inputData })
+  }
+
+  async acceptLinkInbound(
+    link: AgentLink,
+    inbound: LinkInbound,
+    payload: Record<string, unknown>,
+  ): Promise<{ investigationId: string }> {
+    const investigation = this.actionStore.createInvestigation({
+      title: `Link inbound · ${link.name}`,
+      trigger: 'signal',
+      triggerIntegrationId: LINK_EXECUTOR_INTEGRATION_ID,
+    })
+    if (this.mastra?.agent) this.actionStore.setMastraThreadId(investigation.id, threadIdFor(investigation.id))
+    this.emitSignal({
+      type: 'investigation_created',
+      investigationId: investigation.id,
+      payload: {
+        trigger: 'link',
+        linkId: link.id,
+        linkType: link.type,
+        linkName: link.name,
+        inboundId: inbound.id,
+        blobPath: inbound.blobPath,
+        method: inbound.method,
+        payload,
+      },
+    })
+    return { investigationId: investigation.id }
   }
 
   async acceptWebhook(sourceId: string, body: Record<string, unknown>, headers: Record<string, string>): Promise<{ accepted: true; sessionId: string; signalId: string }> {
@@ -675,7 +704,7 @@ export class MastraRuntime {
         'Creating, editing, or returning a local file is a workspace capability, not an operational action. For PDF, DOCX, XLSX, text, JSON, CSV, or HTML deliverables, call listSkills/loadSkill as needed and then createArtifact. Never call listActionExecutors merely to create a file.',
         'The workspace filesystem is local AgentFS SDK storage backed by SQLite. Do not use or invent raw shell commands. For multi-step programmable local logic, use runAgentScript: it executes STRICT Enclave AgentScript with AST validation, resource limits, no Node built-ins, no direct filesystem or network, and only the explicitly brokered workspace/process tools. Real OS programs are available only through constrained tools such as runPythonScript, convertWithPandoc, convertWithLibreOffice, renderWithFfmpeg, and renderRemotion; those commands run in dedicated nono-ts workers with outbound network blocked and changes reconciled back into AgentFS. For richer files created by workspace commands, call publishArtifact after the file exists.',
         'Only external side effects use action executors. Before suggesting an operational action such as sending mail, changing a firewall, or publishing to an external system, list the active executors, then call suggestAction. A suggestion is only a UI artifact until the operator submits it to the ledger. When an approved Exchange action should send generated files, put their durable artifact ids in parameters.artifactIds; never inline binary data into chat.',
-        'Links expose AgentFS content outside the private workspace. When a Webpage, API, or Webhook would materially help the operator, ask whether they want to expose it as that specific Link type. Do not create a Link without that confirmation. createArtifact and publishArtifact return a canonical AgentFS workspacePath under /Library/Generated; pass that workspacePath, or the durable artifactId, to prepareLink. Do not invent a /Library path from an artifact filename. prepareLink snapshots the exact AgentFS bytes and returns the normal human-approval action suggestion; it never publishes directly.',
+        'Links expose AgentFS content outside the private workspace. When a Webpage, API, or Webhook would materially help the operator, ask whether they want to expose it as that specific Link type. Do not create a Link without that confirmation. createArtifact and publishArtifact return a canonical AgentFS workspacePath under /Library/Generated; pass that workspacePath, or the durable artifactId, to prepareLink. Do not invent a /Library path from an artifact filename. For Webpage Links, prepareLink accepts HTML directly and can wrap a video, image, audio file, or PDF itself; do not create a redundant HTML wrapper just to expose one media artifact. Existing HTML references to /api/artifacts/<id>/content are bundled into the approved Link snapshot automatically. prepareLink returns the normal human-approval action suggestion; it never publishes directly.',
         'Skills teach procedures but never grant authority. Dynamically created skills remain inert drafts until a Papyrus.System.Owner approves them.',
         'You may inspect action proposals, but you cannot approve or execute them. Human Entra authority and the Papyrus action ledger are mandatory.',
       ].join(' '),
@@ -927,7 +956,7 @@ export class MastraRuntime {
     })
     registered['prepareLink'] = createTool({
       id: 'prepareLink',
-      description: 'After the operator explicitly agrees to expose content, snapshot a canonical AgentFS file as a Webpage, API, or Webhook Link draft and return the standard human-approval action suggestion. Pass workspacePath returned by createArtifact/publishArtifact, or artifactId for an existing durable artifact. This tool does not publish directly.',
+      description: 'After the operator explicitly agrees to expose content, prepare a Webpage, API, or Webhook Link draft and return the standard human-approval action suggestion. Pass workspacePath returned by createArtifact/publishArtifact, or artifactId. Webpage input may be HTML or a video/image/audio/PDF; renderable media is wrapped automatically and artifact URLs embedded in HTML are snapshotted into the Link bundle. This tool does not publish directly.',
       inputSchema: {
         type: 'object',
         required: ['name', 'type'],
@@ -944,14 +973,18 @@ export class MastraRuntime {
       },
       execute: async (inputData: Record<string, unknown>) => {
         const integration = this.links.ensureExecutorIntegration()
+        const linkType = String(inputData['type'] ?? '') as LinkType
+        const linkName = String(inputData['name'] ?? '')
         const sourcePath = await this.resolveLinkSource(
           typeof inputData['sourcePath'] === 'string' ? inputData['sourcePath'] : undefined,
           typeof inputData['artifactId'] === 'string' ? inputData['artifactId'] : undefined,
         )
+        const prepared = await this.prepareLinkSource(linkType, linkName, sourcePath)
         const draft = await this.links.prepareDraft({
-          name: String(inputData['name'] ?? ''),
-          type: String(inputData['type'] ?? '') as LinkType,
-          sourcePath,
+          name: linkName,
+          type: linkType,
+          sourcePath: prepared.sourcePath,
+          ...(prepared.assets.length ? { assets: prepared.assets } : {}),
           ...(typeof inputData['slug'] === 'string' && inputData['slug'].trim() ? { slug: inputData['slug'] } : {}),
           ...(typeof inputData['workflowId'] === 'string' && inputData['workflowId'].trim() ? { workflowId: inputData['workflowId'] } : {}),
           ...(typeof inputData['scheduleId'] === 'string' && inputData['scheduleId'].trim() ? { scheduleId: inputData['scheduleId'] } : {}),
@@ -1026,6 +1059,77 @@ export class MastraRuntime {
     const mirrored = await this.workspaceFilesystem.describeLibraryFile(preferred)
     if (mirrored.sha256 !== artifact.sha256) throw new Error('AgentFS artifact mirror failed SHA-256 verification')
     return mirrored
+  }
+
+  private async prepareLinkSource(
+    type: LinkType,
+    name: string,
+    sourcePath: string,
+  ): Promise<{ sourcePath: string; assets: LinkDraftAssetInput[] }> {
+    if (type !== 'webpage') return { sourcePath, assets: [] }
+
+    const source = await this.workspaceFilesystem.describeLibraryFile(sourcePath)
+    const mediaType = baseMediaType(source.mediaType)
+    if (mediaType === 'text/html') {
+      const html = String(await this.workspaceFilesystem.readFile(sourcePath, { encoding: 'utf8' }))
+      return { sourcePath, assets: await this.webpageArtifactAssets(html) }
+    }
+
+    if (
+      mediaType.startsWith('video/') ||
+      mediaType.startsWith('image/') ||
+      mediaType.startsWith('audio/') ||
+      mediaType === 'application/pdf'
+    ) {
+      const reference = 'papyrus-link-asset://primary'
+      const title = escapeHtml(name.trim() || source.name)
+      const safeMediaType = escapeHtml(mediaType)
+      const body = mediaType.startsWith('video/')
+        ? `<video controls preload="metadata"><source src="${reference}" type="${safeMediaType}">Your browser does not support the video element.</video>`
+        : mediaType.startsWith('image/')
+          ? `<img src="${reference}" alt="${title}">`
+          : mediaType.startsWith('audio/')
+            ? `<audio controls src="${reference}">Your browser does not support the audio element.</audio>`
+            : `<p><a href="${reference}">Open ${title}</a></p>`
+      const wrapperPath = `/Library/Generated/${crypto.randomUUID().slice(0, 8)}-link.html`
+      await this.workspaceFilesystem.writeFile(
+        wrapperPath,
+        `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title></head><body><main><h1>${title}</h1>${body}</main></body></html>`,
+        { overwrite: false, recursive: true },
+      )
+      return {
+        sourcePath: wrapperPath,
+        assets: [{ sourcePath, sourceReferences: [reference], publicName: source.name }],
+      }
+    }
+
+    throw new Error(`Webpage Links require HTML or a browser-renderable media source; received ${source.mediaType}`)
+  }
+
+  private async webpageArtifactAssets(html: string): Promise<LinkDraftAssetInput[]> {
+    const pattern = /(?:https?:\/\/[^\/"'<>\s]+)?\/api\/artifacts\/([0-9a-f-]{36})\/content(?:\?download=1)?/gi
+    const grouped = new Map<string, { references: Set<string> }>()
+    for (const match of html.matchAll(pattern)) {
+      const artifactId = match[1]
+      const reference = match[0]
+      if (!artifactId || !reference) continue
+      const current = grouped.get(artifactId) ?? { references: new Set<string>() }
+      current.references.add(reference)
+      grouped.set(artifactId, current)
+    }
+
+    const assets: LinkDraftAssetInput[] = []
+    for (const [artifactId, group] of grouped) {
+      const artifact = this.artifacts.get(artifactId)
+      if (!artifact) throw new Error(`Webpage references durable artifact ${artifactId}, but that artifact is unavailable`)
+      const mirrored = await this.materializeArtifactInLibrary(artifact)
+      assets.push({
+        sourcePath: mirrored.path,
+        sourceReferences: [...group.references],
+        publicName: `${artifact.id.slice(0, 8)}-${artifact.name}`,
+      })
+    }
+    return assets
   }
 
   private async resolveLinkSource(sourcePath?: string, artifactId?: string): Promise<string> {
@@ -1157,6 +1261,20 @@ function addWorkspaceAttachmentContext(message: Record<string, unknown>, context
 
 function stripWorkspaceAttachmentContext(value: string): string {
   return value.replace(/\n?<papyrus-workspace-attachments>[\s\S]*?<\/papyrus-workspace-attachments>\s*$/g, '').trimEnd()
+}
+
+function baseMediaType(value: string): string {
+  return value.split(';', 1)[0]?.trim().toLowerCase() ?? ''
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  })[character] as string)
 }
 
 function sha256Hex(bytes: Buffer): string {

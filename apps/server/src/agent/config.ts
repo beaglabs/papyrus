@@ -29,6 +29,7 @@ export interface AgentConfig {
   developmentPrincipal?: PortalPrincipal
   licenseRequired: boolean
   licenseAuthorities: Record<string, string>
+  kitesurf?: { accountId: string; apiTokenEnv: string }
   tls?: { certPath: string; keyPath: string; caPath?: string }
 }
 
@@ -118,6 +119,11 @@ export function loadAgentConfig(env: NodeJS.ProcessEnv = process.env): AgentConf
   const authority = tenantId ? `${authorityHost(cloud)}/${encodeURIComponent(tenantId)}/v2.0` : undefined
   const dataDir = resolve(env.PAPYRUS_DATA_DIR ?? './papyrus-agent-data')
   const databasePath = mode === 'local' && env.PAPYRUS_DATABASE_PATH === ':memory:' ? ':memory:' : resolve(env.PAPYRUS_DATABASE_PATH ?? `${dataDir}/agent.db`)
+  const kitesurfAccountId = env.PAPYRUS_KITESURF_ACCOUNT_ID?.trim()
+  const kitesurfTokenEnv = env.PAPYRUS_KITESURF_API_TOKEN_ENV?.trim()
+  if (Boolean(kitesurfAccountId) !== Boolean(kitesurfTokenEnv)) throw new Error('PAPYRUS_KITESURF_ACCOUNT_ID and PAPYRUS_KITESURF_API_TOKEN_ENV must be configured together')
+  if (kitesurfAccountId && selectedProfile !== 'commercial') throw new Error('Kitesurf validation is available only in the commercial profile; government, restricted, and disconnected profiles remain external-browser deny-by-default')
+
   const certPath = env.PAPYRUS_TLS_CERT?.trim()
   const keyPath = env.PAPYRUS_TLS_KEY?.trim()
   if (Boolean(certPath) !== Boolean(keyPath)) throw new Error('PAPYRUS_TLS_CERT and PAPYRUS_TLS_KEY must be configured together')
@@ -146,6 +152,7 @@ export function loadAgentConfig(env: NodeJS.ProcessEnv = process.env): AgentConf
     ...(development ? { developmentPrincipal: development } : {}),
     licenseRequired: mode === 'persistent' || env.PAPYRUS_LICENSE_REQUIRED === 'true',
     licenseAuthorities: parseAuthorities(env.PAPYRUS_LICENSE_AUTHORITIES),
+    ...(kitesurfAccountId && kitesurfTokenEnv ? { kitesurf: { accountId: kitesurfAccountId, apiTokenEnv: kitesurfTokenEnv } } : {}),
     ...(certPath && keyPath ? { tls: {
       certPath: resolve(certPath), keyPath: resolve(keyPath),
       ...(env.PAPYRUS_TLS_CA?.trim() ? { caPath: resolve(env.PAPYRUS_TLS_CA.trim()) } : {}),

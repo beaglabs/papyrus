@@ -693,6 +693,8 @@ export interface AgentLink {
   lastPingAt?: string
   pingCount: number
   inboundCount: number
+  validationProvider?: 'local-static' | 'kitesurf'
+  validatedAt?: string
 }
 
 export interface LinkInbound {

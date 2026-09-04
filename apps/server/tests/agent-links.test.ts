@@ -8,8 +8,8 @@ import type { AgentConfig } from '../src/agent/config.js'
 import type { AgentService } from '../src/agent/service.js'
 import type { TerrainStore } from '../src/agent/terrain-store.js'
 import type { ArtifactRecord } from '../src/agent/artifact-store.js'
-import { LINK_EXECUTOR_INTEGRATION_ID, LinkStore, validateSource } from '../src/agent/link-store.js'
 import { MastraRuntime } from '../src/agent/mastra/runtime.js'
+import { LINK_EXECUTOR_INTEGRATION_ID, LinkStore, validateSource } from '../src/agent/link-store.js'
 import { PapyrusAgentFSFilesystem } from '../src/agent/mastra/workspace-agentfs.js'
 
 async function fixture() {
@@ -57,6 +57,44 @@ describe('AgentFS Links boundary', () => {
     expect(() => validateSource('webpage', 'video/mp4')).toThrow(/HTML source/)
   })
 
+  it('rewrites private artifact references to immutable Link asset snapshots', async () => {
+    const subject = await fixture()
+    try {
+      const privateReference = '/api/artifacts/31b4a400-a60a-4c99-98da-a1afeb953b2d/content'
+      await subject.filesystem.writeFile('/Library/Generated/video-preview.html', `<!doctype html><video controls><source src="${privateReference}" type="video/mp4"></video>`)
+      await subject.filesystem.writeFile('/Library/Generated/video.mp4', Buffer.from('fake-video-bytes'))
+
+      const draft = await subject.links.prepareDraft({
+        name: 'Video preview webpage',
+        type: 'webpage',
+        sourcePath: '/Library/Generated/video-preview.html',
+        assets: [{
+          sourcePath: '/Library/Generated/video.mp4',
+          sourceReferences: [privateReference],
+          publicName: '31b4a400-video.mp4',
+        }],
+      })
+
+      expect(draft.assets).toHaveLength(1)
+      expect(draft.assets?.[0]).toMatchObject({
+        name: '31b4a400-video.mp4',
+        mediaType: 'video/mp4',
+      })
+      const html = String(await subject.filesystem.readFile(draft.sourcePath, { encoding: 'utf8' }))
+      expect(html).toContain('/l/video-preview-webpage/assets/31b4a400-video.mp4')
+      expect(html).not.toContain('/api/artifacts/')
+
+      const live = await subject.links.publishFromManifest(
+        `/Library/Links/Drafts/${draft.draftId}/link.json`,
+        'operator-1',
+      )
+      const publishedAsset = `/Library/Links/Published/${live.id}/assets/31b4a400-video.mp4`
+      expect(await subject.filesystem.readFile(publishedAsset, { encoding: 'utf8' })).toBe('fake-video-bytes')
+    } finally {
+      await subject.close()
+    }
+  })
+
   it('snapshots approved AgentFS bytes before publication', async () => {
     const subject = await fixture()
     try {
@@ -92,49 +130,125 @@ describe('AgentFS Links boundary', () => {
     const db = new AgentDatabase(':memory:')
     const actionStore = new ActionStore(db)
     const config: AgentConfig = {
-      mode: 'local',
-      profile: 'gcc',
-      host: '127.0.0.1',
-      port: 3210,
-      publicOrigin: 'http://127.0.0.1:3210',
-      dataDir: root,
-      databasePath: ':memory:',
-      portalSecret: 'test-secret',
-      organizationName: 'Test',
-      cloud: 'Public',
-      agentfsId: 'artifact-link-test',
-      licenseRequired: false,
-      licenseAuthorities: {},
+      mode: 'local', profile: 'gcc', host: '127.0.0.1', port: 3210,
+      publicOrigin: 'http://127.0.0.1:3210', dataDir: root, databasePath: ':memory:',
+      portalSecret: 'test-secret', organizationName: 'Test', cloud: 'Public',
+      agentfsId: 'artifact-link-test', licenseRequired: false, licenseAuthorities: {},
     }
     const runtime = new MastraRuntime(config, actionStore, {} as TerrainStore, {} as AgentService)
     await runtime.workspaceFilesystem.init()
-
     try {
       const artifact = runtime.artifacts.create({
-        format: 'html',
-        name: 'contractor-invite.html',
+        format: 'html', name: 'contractor-invite.html',
         content: '<!doctype html><title>Invite</title><p>Hello</p>',
       })
       const bridge = runtime as unknown as {
         artifactWithWorkspacePath(value: ArtifactRecord): Promise<ArtifactRecord & { workspacePath: string }>
         resolveLinkSource(sourcePath?: string, artifactId?: string): Promise<string>
       }
-
       const output = await bridge.artifactWithWorkspacePath(artifact)
       expect(output.workspacePath).toBe('/Library/Generated/contractor-invite.html')
       expect((await runtime.workspaceFilesystem.describeLibraryFile(output.workspacePath)).sha256).toBe(artifact.sha256)
-
       await runtime.workspaceFilesystem.deleteFile(output.workspacePath)
-      expect(await runtime.workspaceFilesystem.exists(output.workspacePath)).toBe(false)
-
       const repaired = await bridge.resolveLinkSource('/Library/Generated/contractor-invite.html')
       expect(repaired).toBe('/Library/Generated/contractor-invite.html')
       expect((await runtime.workspaceFilesystem.describeLibraryFile(repaired)).sha256).toBe(artifact.sha256)
-
       await runtime.workspaceFilesystem.deleteFile(repaired)
       const byId = await bridge.resolveLinkSource(undefined, artifact.id)
       expect(byId).toBe('/Library/Generated/contractor-invite.html')
       expect((await runtime.workspaceFilesystem.describeLibraryFile(byId)).sha256).toBe(artifact.sha256)
+    } finally {
+      await runtime.workspaceFilesystem.destroy()
+      db.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('prepares video webpage Links without requiring the model to create an HTML wrapper first', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'papyrus-video-link-'))
+    const db = new AgentDatabase(':memory:')
+    const actionStore = new ActionStore(db)
+    const config: AgentConfig = {
+      mode: 'local', profile: 'gcc', host: '127.0.0.1', port: 3210,
+      publicOrigin: 'http://127.0.0.1:3210', dataDir: root, databasePath: ':memory:',
+      portalSecret: 'test-secret', organizationName: 'Test', cloud: 'Public',
+      agentfsId: 'video-link-test', licenseRequired: false, licenseAuthorities: {},
+    }
+    const runtime = new MastraRuntime(config, actionStore, {} as TerrainStore, {} as AgentService)
+    await runtime.workspaceFilesystem.init()
+
+    try {
+      await runtime.workspaceFilesystem.writeFile('/Library/Generated/demo.mp4', Buffer.from('video-bytes'))
+      const bridge = runtime as unknown as {
+        prepareLinkSource(type: 'webpage', name: string, sourcePath: string): Promise<{
+          sourcePath: string
+          assets: Array<{ sourcePath: string; sourceReferences: string[]; publicName?: string }>
+        }>
+      }
+      const prepared = await bridge.prepareLinkSource('webpage', 'Video preview', '/Library/Generated/demo.mp4')
+      expect(prepared.sourcePath).toMatch(/^\/Library\/Generated\/[a-f0-9]{8}-link\.html$/)
+      expect(prepared.assets).toEqual([expect.objectContaining({
+        sourcePath: '/Library/Generated/demo.mp4',
+        sourceReferences: ['papyrus-link-asset://primary'],
+        publicName: 'demo.mp4',
+      })])
+
+      const draft = await runtime.links.prepareDraft({
+        name: 'Video preview webpage',
+        type: 'webpage',
+        sourcePath: prepared.sourcePath,
+        assets: prepared.assets,
+      })
+      const html = String(await runtime.workspaceFilesystem.readFile(draft.sourcePath, { encoding: 'utf8' }))
+      expect(html).toContain('<video controls')
+      expect(html).toContain('/l/video-preview-webpage/assets/demo.mp4')
+      expect(html).not.toContain('papyrus-link-asset://primary')
+    } finally {
+      await runtime.workspaceFilesystem.destroy()
+      db.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('bundles artifact URLs already embedded in generated HTML into the public Link snapshot', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'papyrus-html-asset-link-'))
+    const db = new AgentDatabase(':memory:')
+    const actionStore = new ActionStore(db)
+    const config: AgentConfig = {
+      mode: 'local', profile: 'gcc', host: '127.0.0.1', port: 3210,
+      publicOrigin: 'http://127.0.0.1:3210', dataDir: root, databasePath: ':memory:',
+      portalSecret: 'test-secret', organizationName: 'Test', cloud: 'Public',
+      agentfsId: 'html-asset-link-test', licenseRequired: false, licenseAuthorities: {},
+    }
+    const runtime = new MastraRuntime(config, actionStore, {} as TerrainStore, {} as AgentService)
+    await runtime.workspaceFilesystem.init()
+
+    try {
+      const video = runtime.artifacts.importBytes('preview.mp4', Buffer.from('video-content'))
+      const privateReference = `/api/artifacts/${video.id}/content`
+      await runtime.workspaceFilesystem.writeFile(
+        '/Library/Generated/video-preview.html',
+        `<!doctype html><video controls><source src="${privateReference}" type="video/mp4"></video>`,
+      )
+      const bridge = runtime as unknown as {
+        prepareLinkSource(type: 'webpage', name: string, sourcePath: string): Promise<{
+          sourcePath: string
+          assets: Array<{ sourcePath: string; sourceReferences: string[]; publicName?: string }>
+        }>
+      }
+      const prepared = await bridge.prepareLinkSource('webpage', 'Video preview', '/Library/Generated/video-preview.html')
+      expect(prepared.assets).toHaveLength(1)
+      expect(prepared.assets[0]?.sourceReferences).toContain(privateReference)
+
+      const draft = await runtime.links.prepareDraft({
+        name: 'Video preview webpage',
+        type: 'webpage',
+        sourcePath: prepared.sourcePath,
+        assets: prepared.assets,
+      })
+      const html = String(await runtime.workspaceFilesystem.readFile(draft.sourcePath, { encoding: 'utf8' }))
+      expect(html).not.toContain('/api/artifacts/')
+      expect(html).toMatch(/\/l\/video-preview-webpage\/assets\/[a-f0-9]{8}-preview\.mp4/)
     } finally {
       await runtime.workspaceFilesystem.destroy()
       db.close()

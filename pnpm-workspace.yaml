@@ -8,4 +8,4 @@ allowBuilds:
   onnxruntime-node: true
 
 overrides:
-  'nono-ts@0.3.0>mintlify': '-'
+  'nono-ts@0.4.2>mintlify': '-'

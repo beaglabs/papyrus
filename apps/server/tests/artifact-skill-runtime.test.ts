@@ -97,11 +97,11 @@ describe('skill registry', () => {
   function registry() {
     const dataDir = mkdtempSync(join(tmpdir(), 'papyrus-skills-'))
     roots.push(dataDir)
-    return new SkillRegistry(dataDir)
+    return { dataDir, skills: new SkillRegistry(dataDir) }
   }
 
   it('ships artifact skills as enabled Papyrus built-ins', () => {
-    const skills = registry().list()
+    const skills = registry().skills.list()
     for (const name of ['pdf', 'docx', 'xlsx', 'remotion', 'skill-creator']) {
       expect(skills).toContainEqual(expect.objectContaining({
         name,
@@ -112,7 +112,7 @@ describe('skill registry', () => {
   })
 
   it('keeps generated skills inert until an owner approves them', () => {
-    const skills = registry()
+    const { dataDir, skills } = registry()
     const draft = skills.draft({
       name: 'weekly-incident-brief',
       description: 'Create the weekly incident briefing.',
@@ -124,15 +124,18 @@ describe('skill registry', () => {
     expect(draft.trust).toBe('workspace_draft')
     expect(draft.requestedCapabilities).toEqual(['terrainQuery', 'createArtifact'])
     expect(() => skills.load(draft.name)).toThrow(/not enabled/)
+    expect(readFileSync(join(dataDir, 'skills', draft.id, 'SKILL.md'), 'utf8')).toContain('state: draft')
 
     const enabled = skills.approveAndEnable(draft.id, 'owner-oid')
     expect(enabled.state).toBe('enabled')
     expect(enabled.trust).toBe('organization_approved')
+    expect(enabled.approvedByOid).toBe('owner-oid')
     expect(skills.load(draft.name).id).toBe(draft.id)
+    expect(readFileSync(join(dataDir, 'skills', draft.id, 'SKILL.md'), 'utf8')).toContain('state: enabled')
   })
 
   it('does not allow a generated skill to replace a built-in', () => {
-    const skills = registry()
+    const { skills } = registry()
     expect(() => skills.draft({
       name: 'pdf',
       description: 'replace',

@@ -180,7 +180,7 @@ function Chat({ session, status, initial, input, setInput, historyError, history
   </div>
 }
 
-function Composer({ input, setInput, attachments, setAttachments, disabled, working, onStop, onSubmit, workspace }: {
+export function Composer({ input, setInput, attachments, setAttachments, disabled, working, onStop, onSubmit, workspace }: {
   input: string
   setInput: (value: string) => void
   attachments: WorkspaceLibraryFile[]

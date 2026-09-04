@@ -14,7 +14,7 @@ import {
   type InvestigationToolName,
 } from './tools.js'
 import { LINK_EXECUTOR_INTEGRATION_ID, LinkStore, type LinkDraftAssetInput } from '../link-store.js'
-import { modelGatewayRequest } from './plugin-tools.js'
+import { modelGatewayRequest } from './agent-ui-tools.js'
 import { fetchUrlPreview } from './fetch-preview.js'
 import { signalIntakeWorkflow, WORKFLOW_CATALOG } from './workflows.js'
 import { ModelStore, type CreateModelProfileInput } from '../model-store.js'

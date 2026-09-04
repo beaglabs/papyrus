@@ -157,7 +157,13 @@ export class PapyrusAgentFSFilesystem extends MastraFilesystem {
     if (options?.overwrite === false && await this.exists(normalized)) throw new FileExistsError(normalized)
     if (options?.recursive !== false) await this.mkdirRecursive(agent, parentPath(normalized))
     try {
-      await agent.fs.writeFile(normalized, typeof content === 'string' ? content : Buffer.from(Uint8Array.from(content)))
+      if (typeof content === 'string') {
+        await agent.fs.writeFile(normalized, content)
+      } else {
+        const owned = new Uint8Array(content.byteLength)
+        owned.set(content)
+        await agent.fs.writeFile(normalized, Buffer.from(owned.buffer))
+      }
     } catch (error) {
       throw mapAgentFsError(error, normalized, 'file')
     }
@@ -165,15 +171,18 @@ export class PapyrusAgentFSFilesystem extends MastraFilesystem {
 
   async appendFile(path: string, content: FileContent): Promise<void> {
     this.assertWritable('appendFile')
-    let existing = Buffer.alloc(0)
+    let existing = new Uint8Array(0)
     try {
       const value = await this.readFile(path)
-      existing = Buffer.isBuffer(value) ? value : Buffer.from(value)
+      existing = typeof value === 'string' ? new TextEncoder().encode(value) : new Uint8Array(value)
     } catch (error) {
       if (!(error instanceof FileNotFoundError)) throw error
     }
-    const addition = typeof content === 'string' ? Buffer.from(content) : Buffer.from(content)
-    await this.writeFile(path, Buffer.concat([existing, addition]))
+    const addition = typeof content === 'string' ? new TextEncoder().encode(content) : new Uint8Array(content)
+    const combined = new Uint8Array(existing.byteLength + addition.byteLength)
+    combined.set(existing, 0)
+    combined.set(addition, existing.byteLength)
+    await this.writeFile(path, combined)
   }
 
   async deleteFile(path: string, options?: RemoveOptions): Promise<void> {

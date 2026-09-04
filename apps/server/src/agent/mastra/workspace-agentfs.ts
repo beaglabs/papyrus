@@ -305,7 +305,6 @@ export class PapyrusAgentFSFilesystem extends MastraFilesystem {
         size: stat.size,
         createdAt: new Date(stat.ctime * 1000),
         modifiedAt: new Date(stat.mtime * 1000),
-        ...(!stat.isDirectory() ? { mimeType: workspaceMediaType(normalized) } : {}),
       }
     } catch (error) {
       throw mapAgentFsError(error, normalized, 'file')

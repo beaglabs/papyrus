@@ -95,15 +95,14 @@ export class NonoWorkspaceSandbox extends MastraSandbox {
       throw new Error(`nono workspace sandbox requires Linux or macOS; ${this.platform} is unsupported`)
     }
     mkdirSync(join(this.dataDir, '.workspace-home'), { recursive: true, mode: 0o700 })
-    await runBinary(this.nonoBinary, ['--version'], { cwd: this.dataDir })
+    const nono = await runBinary(this.nonoBinary, ['--version'], { cwd: this.dataDir })
+    if (nono.exitCode !== 0) throw new Error(`nono preflight failed: ${nono.stderr.toString('utf8').slice(0, 1000)}`)
     await this.filesystem._init()
   }
 
   async stop(): Promise<void> {
     const manager = this.processes as NonoProcessManager | undefined
-    if (!manager) return
-    const processes = await manager.list().catch(() => [])
-    await Promise.all(processes.filter((process) => process.running).map((process) => manager.kill(process.pid).catch(() => false)))
+    if (manager) await manager.killTracked()
   }
 
   async destroy(): Promise<void> {
@@ -172,6 +171,12 @@ class NonoProcessManager extends SandboxProcessManager<NonoWorkspaceSandbox> {
       running: handle.exitCode === undefined,
       ...(handle.exitCode !== undefined ? { exitCode: handle.exitCode } : {}),
     }))
+  }
+
+  async killTracked(): Promise<void> {
+    const handles = [...this._tracked.values()]
+    await Promise.all(handles.filter((handle) => handle.exitCode === undefined).map((handle) => handle.kill().catch(() => false)))
+    for (const handle of handles) this.release(handle.pid)
   }
 }
 

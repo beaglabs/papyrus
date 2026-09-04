@@ -54,7 +54,7 @@ export interface WorkspaceLibraryFile {
   name: string
   mediaType: string
   size: number
-  sha256: string
+  sha256?: string
   updatedAt: string
   source: 'library' | 'upload'
 }

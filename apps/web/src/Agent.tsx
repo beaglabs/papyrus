@@ -239,7 +239,7 @@ function Composer({ input, setInput, attachments, setAttachments, disabled, work
           ...(file.type ? { mediaType: file.type } : {}),
           dataBase64: await fileBase64(file),
         })
-        setAttachments((current) => current.some((item) => item.path === saved.path ? current : [...current, saved].slice(0, 12)))
+        setAttachments((current) => current.some((item) => item.path === saved.path) ? current : [...current, saved].slice(0, 12))
       }
     } catch (cause) {
       setAttachmentError(cause instanceof Error ? cause.message : 'Unable to attach file')

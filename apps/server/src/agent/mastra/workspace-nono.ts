@@ -23,7 +23,8 @@ export interface NonoWorkspaceSandboxOptions {
 }
 
 const MAX_COMMAND_BYTES = 64 * 1024
-const WORKER_PATH = fileURLToPath(new URL('./workspace-nono-worker.js', import.meta.url))
+const WORKER_JS_PATH = fileURLToPath(new URL('./workspace-nono-worker.js', import.meta.url))
+const WORKER_TS_PATH = fileURLToPath(new URL('./workspace-nono-worker.ts', import.meta.url))
 
 export class NonoWorkspaceSandbox extends MastraSandbox {
   readonly id = 'papyrus-nono'
@@ -142,7 +143,7 @@ class NonoProcessManager extends SandboxProcessManager<NonoWorkspaceSandbox> {
       }), { mode: 0o600, flag: 'wx' })
 
       const startedAt = Date.now()
-      const child = spawn(process.execPath, [WORKER_PATH, controlPath], {
+      const child = spawn(process.execPath, workerArguments(controlPath), {
         cwd: this.dataDir,
         env: workerBootstrapEnvironment(this.dataDir),
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -300,6 +301,15 @@ export function normalizeWorkspaceCwd(value: string): string {
   return normalized
 }
 
+function workerArguments(controlPath: string): string[] {
+  if (existsSync(WORKER_JS_PATH)) return [WORKER_JS_PATH, controlPath]
+  if (existsSync(WORKER_TS_PATH)) {
+    // pnpm dev executes the source tree through tsx. Resolve the exact loader
+    // from this trusted module rather than relying on PATH.
+    return ['--import', import.meta.resolve('tsx'), WORKER_TS_PATH, controlPath]
+  }
+  throw new Error('Papyrus workspace executor worker is missing from this build')
+}
 function materializedPath(root: string, virtualPath: string): string {
   const normalized = normalizeWorkspaceCwd(virtualPath)
   const target = resolve(root, normalized.replace(/^\/+/, ''))

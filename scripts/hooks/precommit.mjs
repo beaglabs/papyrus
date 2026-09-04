@@ -14,6 +14,8 @@ function run(label, command, args) {
 const changed = (prefix) => staged.some((path) => path === prefix || path.startsWith(prefix))
 const securityChanged = staged.some((path) =>
   path === 'apps/server/src/agent/config.ts' ||
+  path === 'apps/server/src/agent/link-store.ts' ||
+  path.startsWith('apps/server/src/agent/executors/') ||
   path.startsWith('apps/server/src/agent/action-') ||
   path.startsWith('apps/server/src/agent/mastra/') ||
   path.startsWith('packages/contracts/'))

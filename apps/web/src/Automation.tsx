@@ -35,10 +35,11 @@ export function ScheduledView({ schedules, sessions, onChanged }: { schedules: A
   const [timezone, setTimezone] = useState('UTC')
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); setBusy(true); setError(undefined)
-    const form = new FormData(event.currentTarget)
+    const formElement = event.currentTarget
+    const form = new FormData(formElement)
     try {
       await createSchedule({ name: String(form.get('name')), cron, prompt: String(form.get('prompt')), timezone, ...(form.get('threadId') ? { threadId: String(form.get('threadId')) } : {}) })
-      event.currentTarget.reset()
+      formElement.reset()
       setCron('0 9 * * 1-5')
       setTimezone('UTC')
       await onChanged()

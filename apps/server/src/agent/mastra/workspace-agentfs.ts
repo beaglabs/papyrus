@@ -37,7 +37,8 @@ import {
 } from '@mastra/core/workspace'
 
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024
-const MAX_LIBRARY_RESULTS = 100
+const DEFAULT_LIBRARY_LIMIT = 100
+const MAX_LIBRARY_LIMIT = 500
 const MAX_LIBRARY_SCAN = 4_000
 const MAX_EXECUTION_FILES = 10_000
 const MAX_EXECUTION_BYTES = 256 * 1024 * 1024
@@ -323,13 +324,23 @@ export class PapyrusAgentFSFilesystem extends MastraFilesystem {
   }
 
   async listLibrary(query = ''): Promise<WorkspaceLibraryFile[]> {
+    return (await this.listLibraryPage(query)).files
+  }
+
+  async listLibraryPage(
+    query = '',
+    options: { offset?: number; limit?: number } = {},
+  ): Promise<{ files: WorkspaceLibraryFile[]; total: number; offset: number; limit: number; nextOffset?: number }> {
     const needle = query.trim().toLowerCase()
-    const results: WorkspaceLibraryFile[] = []
+    const offset = Math.max(0, Math.floor(options.offset ?? 0))
+    const limit = Math.min(MAX_LIBRARY_LIMIT, Math.max(1, Math.floor(options.limit ?? DEFAULT_LIBRARY_LIMIT)))
+    const matches: Array<{ path: string; updatedAt: string }> = []
     let scanned = 0
+
     const visit = async (directory: string): Promise<void> => {
-      if (results.length >= MAX_LIBRARY_RESULTS || scanned >= MAX_LIBRARY_SCAN) return
+      if (scanned >= MAX_LIBRARY_SCAN) return
       for (const entry of await this.readdir(directory)) {
-        if (results.length >= MAX_LIBRARY_RESULTS || scanned >= MAX_LIBRARY_SCAN) break
+        if (scanned >= MAX_LIBRARY_SCAN) break
         const path = joinFsPath(directory, entry.name)
         if (entry.type === 'directory') {
           await visit(path)
@@ -337,11 +348,24 @@ export class PapyrusAgentFSFilesystem extends MastraFilesystem {
         }
         scanned++
         if (needle && !path.toLowerCase().includes(needle) && !entry.name.toLowerCase().includes(needle)) continue
-        results.push(await this.describeLibraryFile(path))
+        const stat = await this.stat(path)
+        matches.push({ path, updatedAt: stat.modifiedAt.toISOString() })
       }
     }
+
     await visit('/Library')
-    return results.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    matches.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    const selected = matches.slice(offset, offset + limit)
+    const files: WorkspaceLibraryFile[] = []
+    for (const item of selected) files.push(await this.describeLibraryFile(item.path))
+    const nextOffset = offset + files.length < matches.length ? offset + files.length : undefined
+    return {
+      files,
+      total: matches.length,
+      offset,
+      limit,
+      ...(nextOffset !== undefined ? { nextOffset } : {}),
+    }
   }
 
   async saveUpload(input: { name: string; mediaType?: string; dataBase64: string }): Promise<WorkspaceLibraryFile> {

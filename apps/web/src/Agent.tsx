@@ -5,6 +5,7 @@ import type { AgentSession, AgentStatus } from './api.js'
 import { approveProposal, connectPlugin, createSessionProposal, denyProposal, issueIngestionToken, sessionMessages, setSessionAttention } from './api.js'
 import { ModelGatewayCard } from './Models.js'
 import { Alert, Badge, Button, Card, Input, Label, NativeSelect, Textarea } from './components/ui/index.js'
+import { MarkdownMessage } from './Markdown.js'
 
 interface PluginField {
   name: string
@@ -122,7 +123,7 @@ function Message({ message, sessionId, canApprove, onChanged }: { message: UIMes
 }
 
 function MessagePart({ part, sessionId, canApprove, onChanged }: { part: Record<string, unknown>; sessionId: string; canApprove: boolean; onChanged: () => Promise<void> }) {
-  if (part['type'] === 'text') return <p className="message-text">{String(part['text'] ?? '')}</p>
+  if (part['type'] === 'text') return <MarkdownMessage>{String(part['text'] ?? '')}</MarkdownMessage>
   if (part['type'] === 'source-url') return <a className="source-link" href={String(part['url'])} target="_blank" rel="noreferrer">{String(part['title'] ?? part['url'])} ↗</a>
   const type = String(part['type'] ?? '')
   if (type === 'dynamic-tool' || type.startsWith('tool-')) {

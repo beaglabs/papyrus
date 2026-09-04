@@ -89,7 +89,7 @@ p { color: var(--muted); line-height: 1.55; }
 .nb-sidebar[data-state="collapsed"] .account-trigger-content { display: flex; justify-content: center; }
 .nb-sidebar-rail { position: absolute; z-index: 5; inset: 0 -5px 0 auto; width: 9px; border: 0; background: transparent; cursor: ew-resize; }
 .nb-sidebar-rail:hover::after { content: ""; position: absolute; inset: 0 3px; background: var(--main); }
-.nb-sidebar-inset { min-width: 0; flex: 1; background: var(--background); }
+.nb-sidebar-inset { min-width: 0; min-height: 0; height: 100%; flex: 1; background: var(--background); }
 .nb-sidebar-trigger { width: 36px; height: 36px; flex: none; display: grid; place-items: center; padding: 0; border: 2px solid #111; border-radius: 5px; background: var(--surface); color: #111; box-shadow: 2px 2px 0 #111; cursor: pointer; font: 900 14px/1 ui-monospace, monospace; }
 .nb-sidebar-trigger:hover { background: var(--blue); transform: translate(1px, 1px); box-shadow: 1px 1px 0 #111; }
 .nb-sidebar-backdrop { display: none; }
@@ -277,8 +277,8 @@ p { color: var(--muted); line-height: 1.55; }
    desktop/base rules, which collapses the chat surface and strips message
    formatting even though the attachment/Library JSX is present. */
 .attention-icon { flex: 0 0 18px; width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%; background: var(--main); color: #111; font: 900 12px ui-monospace, monospace; }
-.agent-main { padding-bottom: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
-.agent-surface { min-height: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; max-width: 980px; width: 100%; margin: 0 auto; }
+.agent-main { height: 100%; padding-bottom: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
+.agent-surface { min-height: 0; height: 100%; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; max-width: 980px; width: 100%; margin: 0 auto; }
 .agent-session-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-bottom: 14px; border-bottom: 1px solid #cfc9bc; }
 .agent-session-head h2 { margin: 0; }
 .agent-badges { display: flex; gap: 7px; }
@@ -333,7 +333,7 @@ p { color: var(--muted); line-height: 1.55; }
 .agent-thinking { display: flex; align-items: center; gap: 5px; padding: 18px 0 18px 98px; color: var(--muted); font: 11px ui-monospace, monospace; }
 .agent-thinking span { width: 6px; height: 6px; border-radius: 50%; background: var(--main); animation: pulse 1s infinite alternate; }
 
-.composer { position: sticky; z-index: 45; bottom: 0; margin: 0 4px; padding: 10px 0 14px; overflow: visible; background: var(--background); }
+.composer { position: relative; z-index: 45; min-height: 0; margin: 0 4px; padding: 10px 0 max(14px, env(safe-area-inset-bottom)); overflow: visible; background: var(--background); }
 .composer.drag-active .composer-prompt-input { border-color: var(--main); box-shadow: 4px 4px 0 var(--main); }
 .composer-input-row { position: relative; display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 10px; }
 .composer-prompt-input { height: 48px; min-width: 0; border-radius: 8px; padding: 0 15px; background: var(--surface); font-size: 15px; box-shadow: 3px 3px 0 #111; }

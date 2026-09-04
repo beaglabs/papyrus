@@ -5,9 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentConfig } from '../src/agent/config.js'
 import { ActionStore } from '../src/agent/action-store.js'
 import { AgentDatabase } from '../src/agent/database.js'
-import { INTEGRATION_CATALOG } from '../src/agent/catalog.js'
 import { fetchUrlPreview, htmlMetadata, UnsafeFetchTargetError } from '../src/agent/mastra/fetch-preview.js'
-import { connectionRequest, modelGatewayRequest, pluginToolId } from '../src/agent/mastra/plugin-tools.js'
+import { modelGatewayRequest } from '../src/agent/mastra/agent-ui-tools.js'
 import { MastraRuntime } from '../src/agent/mastra/runtime.js'
 import { PapyrusModelGateway } from '../src/agent/model-gateway.js'
 import { ModelStore } from '../src/agent/model-store.js'
@@ -33,21 +32,6 @@ describe('Mastra-native product surface', () => {
     const service = new AgentService(db, config(dataDir), terrain, undefined, actions)
     return { db, subject: new MastraRuntime(config(dataDir), actions, terrain, service), service }
   }
-
-  it('generates a secure connection tool and form for every catalog plugin', () => {
-    const ids = new Set<string>()
-    for (const entry of INTEGRATION_CATALOG) {
-      const id = pluginToolId(entry)
-      expect(id).toMatch(/^connect_[a-z0-9_]+$/)
-      expect(ids.has(id)).toBe(false)
-      ids.add(id)
-      const request = connectionRequest(entry)
-      expect(request.catalogId).toBe(entry.id)
-      expect(request.kind).toBe('plugin_connection_request')
-      expect(request.fields.some((field) => field.name === 'name')).toBe(true)
-      expect(JSON.stringify(request)).not.toMatch(/apiKey|clientSecret|password/i)
-    }
-  })
 
   it('rejects SSRF targets before fetch', async () => {
     await expect(fetchUrlPreview('http://169.254.169.254/latest/meta-data')).rejects.toBeInstanceOf(UnsafeFetchTargetError)
@@ -136,20 +120,45 @@ describe('Mastra-native product surface', () => {
     expect(await restarted.subject.listSessions()).toContainEqual(expect.objectContaining({ id: created.id, title: 'Persistent operator task' }))
   })
 
-  it('turns an authenticated plugin event into a durable signal session and outbox record', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'papyrus-native-signal-'))
+  it('keeps schedule operations scoped to the current Agent thread', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'papyrus-agentic-schedule-'))
     disposers.push(() => rmSync(dataDir, { recursive: true, force: true }))
-    const { db, subject, service } = runtime(dataDir)
-    disposers.push(async () => { await subject.stop(); db.close() })
-    await subject.start()
-    const owner = { oid: 'owner', tenantId: 'tenant', displayName: 'Owner', roles: ['Papyrus.System.Owner'], groups: [], source: 'development' }
-    const source = service.createIntegration(owner as never, 'observation-api', { name: 'Webhook source', scope: 'daemon', settings: {} })
+    const { db, subject } = runtime(dataDir)
+    disposers.push(async () => { await subject.stop().catch(() => undefined); db.close() })
 
-    const accepted = await subject.acceptWebhook(source.id, { kind: 'alert', summary: 'A new event arrived' }, { authorization: 'must-not-persist' })
-    expect(accepted.sessionId).toBe(`papyrus-signal-${source.id}`)
-    expect(subject.signals.get(accepted.signalId)).toMatchObject({ type: 'external_signal', status: 'pending' })
-    expect(await subject.listSessions()).toContainEqual(expect.objectContaining({ id: accepted.sessionId, attention: true, kind: 'signal_session' }))
-    expect(subject.signals.get(accepted.signalId)?.payload.headers).toEqual({})
+    const rows = [
+      { id: 'schedule-a', resourceId: 'papyrus:gcc:Example Agency', threadId: 'thread-a', name: 'A' },
+      { id: 'schedule-b', resourceId: 'papyrus:gcc:Example Agency', threadId: 'thread-b', name: 'B' },
+    ]
+    const create = vi.fn(async (value: Record<string, unknown>) => ({ id: 'created', ...value }))
+    const remove = vi.fn(async () => undefined)
+    ;(subject as unknown as { mastra: unknown }).mastra = {
+      agent: {},
+      instance: {
+        schedules: {
+          list: vi.fn(async () => rows),
+          create,
+          get: vi.fn(async (id: string) => rows.find((row) => row.id === id) ?? null),
+          delete: remove,
+        },
+      },
+      memory: {
+        getThreadById: vi.fn(async ({ threadId }: { threadId: string }) => ({ id: threadId, resourceId: 'papyrus:gcc:Example Agency', metadata: {} })),
+      },
+    }
+
+    expect(await subject.listSchedules('thread-a')).toEqual([expect.objectContaining({ id: 'schedule-a' })])
+    await subject.createSchedule({ name: 'Morning brief', cron: '0 8 * * *', prompt: 'Review signals', timezone: 'UTC', threadId: 'thread-a' })
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      resourceId: 'papyrus:gcc:Example Agency',
+      threadId: 'thread-a',
+      ifActive: { behavior: 'deliver' },
+      metadata: { createdBy: 'papyrus-agent', threadScoped: true },
+    }))
+
+    await expect(subject.deleteSchedule('schedule-b', 'thread-a')).rejects.toThrow(/current Agent session/)
+    await subject.deleteSchedule('schedule-a', 'thread-a')
+    expect(remove).toHaveBeenCalledWith('schedule-a')
   })
 
   it('runs the deterministic signal workflow without an LLM', async () => {

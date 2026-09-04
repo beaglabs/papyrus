@@ -7,6 +7,7 @@ import type { AgentConfig } from './config.js'
 import { EntraAuthError, EntraAuthService, hasAppRole } from './entra-auth.js'
 import { AgentService, AgentServiceError } from './service.js'
 import { MastraRuntime, MastraRuntimeError } from './mastra/runtime.js'
+import { fetchUrlPreviewImage } from './mastra/fetch-preview.js'
 import { ModelProfileError } from './model-store.js'
 
 class HttpError extends Error {
@@ -28,13 +29,13 @@ function json(response: ServerResponse, status: number, value: unknown, headers:
   response.end(JSON.stringify(value))
 }
 
-async function body(request: IncomingMessage): Promise<Record<string, unknown>> {
+async function body(request: IncomingMessage, maximumBytes = 1_048_576): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = []
   let size = 0
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
     size += buffer.length
-    if (size > 1_048_576) throw new HttpError(413, 'BODY_TOO_LARGE', 'Request body exceeds one MiB')
+    if (size > maximumBytes) throw new HttpError(413, 'BODY_TOO_LARGE', `Request body exceeds ${Math.ceil(maximumBytes / 1_048_576)} MiB`)
     chunks.push(buffer)
   }
   if (!chunks.length) return {}
@@ -150,6 +151,54 @@ export function createAgentServer(config: AgentConfig, service: AgentService, au
         await principal(request, auth, service)
         await mastra.deleteSession(decodeURIComponent(sessionResource[1] as string))
         securityHeaders(response); response.writeHead(204); return response.end()
+      }
+      if (url.pathname === '/api/url-preview/image' && request.method === 'GET') {
+        await principal(request, auth, service)
+        const target = requiredString(url.searchParams.get('url'), 'url', 4096)
+        const image = await fetchUrlPreviewImage(target)
+        securityHeaders(response)
+        const bytes = Buffer.from(image.bytes)
+        response.writeHead(200, {
+          'content-type': image.contentType,
+          'content-length': String(bytes.byteLength),
+          'content-disposition': 'inline',
+        })
+        response.end(bytes)
+        return
+      }
+      if (url.pathname === '/api/workspace/files' && request.method === 'GET') {
+        await principal(request, auth, service)
+        const query = (url.searchParams.get('q') ?? '').slice(0, 256)
+        return json(response, 200, { files: await mastra.workspaceFilesystem.listLibrary(query) })
+      }
+      if (url.pathname === '/api/workspace/attachments' && request.method === 'POST') {
+        await principal(request, auth, service)
+        const input = await body(request, 12 * 1024 * 1024)
+        const file = await mastra.workspaceFilesystem.saveUpload({
+          name: requiredString(input.name, 'name', 255),
+          dataBase64: requiredString(input.dataBase64, 'dataBase64', 11 * 1024 * 1024),
+          ...(typeof input.mediaType === 'string' && input.mediaType.trim() ? { mediaType: input.mediaType.trim().slice(0, 255) } : {}),
+        })
+        return json(response, 201, { file })
+      }
+      if (url.pathname === '/api/workspace/files/content' && request.method === 'GET') {
+        await principal(request, auth, service)
+        const path = requiredString(url.searchParams.get('path'), 'path', 2048)
+        const file = await mastra.workspaceFilesystem.describeLibraryFile(path)
+        const value = await mastra.workspaceFilesystem.readFile(file.path)
+        const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value)
+        const activeContent = file.mediaType.startsWith('text/html') || file.mediaType === 'image/svg+xml'
+        securityHeaders(response)
+        if (activeContent) response.setHeader('content-security-policy', "sandbox; default-src 'none'")
+        const download = url.searchParams.get('download') === '1' || activeContent
+        const name = file.name.replace(/[\r\n"]/g, '_')
+        response.writeHead(200, {
+          'content-type': activeContent ? 'application/octet-stream' : file.mediaType,
+          'content-length': String(bytes.byteLength),
+          'content-disposition': `${download ? 'attachment' : 'inline'}; filename="${name}"`,
+        })
+        response.end(bytes)
+        return
       }
       if (url.pathname === '/api/agent/chat' && request.method === 'POST') {
         await principal(request, auth, service)

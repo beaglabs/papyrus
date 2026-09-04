@@ -171,10 +171,12 @@ export function createAgentServer(config: AgentConfig, service: AgentService, au
         const path = mastra.artifacts.contentPath(id)
         const stats = statSync(path)
         securityHeaders(response)
-        const disposition = url.searchParams.get('download') === '1' ? 'attachment' : 'inline'
+        const activeContent = artifact.mediaType.startsWith('text/html') || artifact.mediaType === 'image/svg+xml'
+        if (activeContent) response.setHeader('content-security-policy', "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:")
+        const disposition = url.searchParams.get('download') === '1' || activeContent ? 'attachment' : 'inline'
         const fileName = artifact.name.replace(/[\r\n"]/g, '_')
         response.writeHead(200, {
-          'content-type': artifact.mediaType,
+          'content-type': activeContent ? 'application/octet-stream' : artifact.mediaType,
           'content-length': String(stats.size),
           'content-disposition': `${disposition}; filename="${fileName}"`,
         })

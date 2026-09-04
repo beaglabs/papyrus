@@ -107,6 +107,8 @@ export class LinkStore {
     await this.filesystem.copyFile(source, snapshotPath, { overwrite: false })
     const snapshot = await this.filesystem.describeLibraryFile(snapshotPath)
 
+    const workflowId = cleanOptional(input.workflowId)
+    const scheduleId = cleanOptional(input.scheduleId)
     const manifest: LinkDraftManifest = {
       formatVersion: 1,
       draftId,
@@ -117,8 +119,8 @@ export class LinkStore {
       sourceSha256: snapshot.sha256,
       mediaType: snapshot.mediaType,
       createdAt: new Date().toISOString(),
-      ...(cleanOptional(input.workflowId) ? { workflowId: cleanOptional(input.workflowId) } : {}),
-      ...(cleanOptional(input.scheduleId) ? { scheduleId: cleanOptional(input.scheduleId) } : {}),
+      ...(workflowId ? { workflowId } : {}),
+      ...(scheduleId ? { scheduleId } : {}),
     }
     await this.filesystem.writeFile(`${draftRoot}/link.json`, JSON.stringify(manifest, null, 2) + '\n', { overwrite: false, recursive: true })
     return manifest
@@ -377,17 +379,23 @@ function validateManifest(value: unknown): LinkDraftManifest {
   if (!/^[a-f0-9]{64}$/.test(sourceSha256)) throw new Error('Link draft source hash is invalid')
   const mediaType = String(item['mediaType'] ?? '')
   validateSource(type, mediaType)
+  const workflowId = typeof item['workflowId'] === 'string' ? cleanOptional(item['workflowId']) : undefined
+  const scheduleId = typeof item['scheduleId'] === 'string' ? cleanOptional(item['scheduleId']) : undefined
+  const draftId = String(item['draftId'] ?? '').trim()
+  if (!draftId || draftId.length > 128) throw new Error('Link draft id is invalid')
+  const createdAt = String(item['createdAt'] ?? '')
+  if (Number.isNaN(new Date(createdAt).getTime())) throw new Error('Link draft creation time is invalid')
   return {
     formatVersion: 1,
-    draftId: String(item['draftId'] ?? ''),
+    draftId,
     name: cleanName(String(item['name'] ?? '')),
     slug: normalizeSlug(String(item['slug'] ?? '')),
     type,
     sourcePath,
     sourceSha256,
     mediaType,
-    createdAt: String(item['createdAt'] ?? ''),
-    ...(typeof item['workflowId'] === 'string' && item['workflowId'].trim() ? { workflowId: cleanOptional(item['workflowId']) } : {}),
-    ...(typeof item['scheduleId'] === 'string' && item['scheduleId'].trim() ? { scheduleId: cleanOptional(item['scheduleId']) } : {}),
+    createdAt,
+    ...(workflowId ? { workflowId } : {}),
+    ...(scheduleId ? { scheduleId } : {}),
   }
 }

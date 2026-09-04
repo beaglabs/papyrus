@@ -1,0 +1,17 @@
+{
+  "formatVersion": 1,
+  "sources": [
+    {
+      "path": "packages/contracts/src/index.ts",
+      "gitBlob": "3686835a3d756872e67fd1700093351e868ad958"
+    },
+    {
+      "path": "apps/server/src/agent/mastra/tools.ts",
+      "gitBlob": "94f1e5aa39f30e1b938b0f89c2487857bafa832e"
+    },
+    {
+      "path": "apps/server/src/agent/mastra/workspace-agentfs.ts",
+      "gitBlob": "f8fd58884ec7864944858b1ebdb1fdd0125918f7"
+    }
+  ]
+}

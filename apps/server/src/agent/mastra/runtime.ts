@@ -30,9 +30,10 @@ import { SkillRegistry } from '../skills.js'
  * MastraRuntime wraps the Mastra durable agent harness.
  *
  * The agent layer investigates and proposes; it never directly alters a
- * firewall, account, route, or mailbox. Every tool it holds is read-only
- * (see tools.ts) — the only way to reach an executor is a proposal that a
- * human approves through the action ledger.
+ * firewall, account, route, mailbox, or other external system. Investigation
+ * tools are read-only. Workspace tools may create local artifacts or inert
+ * skill drafts, but external side effects can only reach an executor through
+ * a proposal that a human approves in the action ledger.
  *
  * Signals are durable first: they land in agent_signal_outbox before any
  * delivery attempt, so a restart, a crashed harness, or a missing agent thread

@@ -55,12 +55,23 @@ p { color: var(--muted); line-height: 1.55; }
 .classification { margin: 4px 0 0; padding: 7px 8px; overflow: hidden; border: 1px solid #666; color: var(--rose); font: 600 9px ui-monospace, monospace; letter-spacing: .08em; text-align: center; white-space: nowrap; }
 .new-session { color: #111; background: var(--surface); box-shadow: 2px 2px 0 #fff; }
 .new-session:hover { color: #111; background: var(--blue); }
-.session-history { max-height: 32vh; overflow-y: auto; padding-right: 3px; scrollbar-width: thin; }
-.session-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
-.session-row .nb-sidebar-menu-button { padding-right: 6px; }
+.session-history { max-height: 32vh; overflow-y: auto; overflow-x: hidden; padding: 0 3px 2px 0; scrollbar-width: thin; }
+.session-row { --history-depth: 0; position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; margin-left: calc(var(--history-depth) * 3px); }
+.session-row[data-history-depth="1"] { --history-depth: 1; }
+.session-row[data-history-depth="2"] { --history-depth: 2; }
+.session-row[data-history-depth="3"] { --history-depth: 3; }
+.session-row[data-history-depth="4"] { --history-depth: 4; }
+.session-row[data-history-depth="5"] { --history-depth: 5; }
+.session-row[data-history-depth="6"] { --history-depth: 6; }
+.session-row::before { content: ""; position: absolute; left: -4px; top: 7px; bottom: 7px; width: 1px; background: #3b3b3b; opacity: calc(.18 + (var(--history-depth) * .06)); pointer-events: none; }
+.session-row:first-child::before { display: none; }
+.session-row .nb-sidebar-menu-button { min-height: 34px; padding: 6px 6px 6px 8px; border-radius: 0; color: #aaa; background: transparent; box-shadow: none; }
+.session-row .nb-sidebar-menu-button:hover { color: #fff; background: #232323; box-shadow: none; }
+.session-row .nb-sidebar-menu-button[data-active="true"] { color: #fff; background: transparent; box-shadow: none; }
+.session-row .nb-sidebar-menu-button[data-active="true"] .sidebar-session-mark { color: #fff; }
 .session-title { font-size: 11px; }
 .session-delete { visibility: hidden; width: 24px; height: 24px; padding: 0; border: 0; background: transparent; box-shadow: none; color: #777; }
-.session-row:hover .session-delete { visibility: visible; }
+.session-row:hover .session-delete, .session-row:focus-within .session-delete { visibility: visible; }
 .session-delete:hover { color: var(--rose); transform: none; }
 .sidebar-empty { display: block; padding: 8px; color: #777; font: 10px ui-monospace, monospace; }
 .runtime-panel { margin: 0; padding: 10px; border: 1px solid #4b4b4b; display: grid; gap: 6px; background: #202020; }

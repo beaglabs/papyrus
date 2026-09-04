@@ -3,12 +3,8 @@ import type {
   AgentActionReceipt,
   AgentLink,
   LinkInbound,
-  IntegrationCatalogEntry,
-  IntegrationConfiguration,
-  IntegrationEvent,
   PortalOverview,
   PortalPrincipal,
-  SyncJob,
   ModelProfile,
 } from '@papyrus/contracts'
 import type { UIMessage } from 'ai'
@@ -26,11 +22,8 @@ export interface PortalData {
   config: PublicConfig
   me: PortalPrincipal
   overview: PortalOverview
-  catalog: IntegrationCatalogEntry[]
-  integrations: IntegrationConfiguration[]
   agent: AgentStatus
   sessions: AgentSession[]
-  schedules: AgentSchedule[]
   models: ModelProfile[]
 }
 
@@ -117,34 +110,17 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 export async function loadPortal(): Promise<PortalData> {
   const config = await api<PublicConfig>('/api/config/public')
-  const [me, overview, plugins, agent, sessions, schedules, models] = await Promise.all([
+  const [me, overview, agent, sessions, models] = await Promise.all([
     api<PortalPrincipal>('/api/me'),
     api<PortalOverview>('/api/portal/overview'),
-    api<{ catalog: IntegrationCatalogEntry[]; configured: IntegrationConfiguration[] }>('/api/plugins'),
     api<AgentStatus>('/api/agent/status'),
     api<{ sessions: AgentSession[] }>('/api/sessions'),
-    api<{ schedules: AgentSchedule[] }>('/api/schedules'),
     api<{ profiles: ModelProfile[] }>('/api/model-profiles'),
   ])
-  return { config, me, overview, catalog: plugins.catalog, integrations: plugins.configured, agent, sessions: sessions.sessions, schedules: schedules.schedules, models: models.profiles }
+  return { config, me, overview, agent, sessions: sessions.sessions, models: models.profiles }
 }
 
 export async function publicConfig(): Promise<PublicConfig> { return api('/api/config/public') }
-
-export async function createIntegration(input: {
-  catalogId: string
-  name: string
-  endpoint?: string
-  scope?: string
-  credentialRef?: string
-  settings: Record<string, string | number | boolean>
-}): Promise<IntegrationConfiguration> {
-  return api('/api/integrations', { method: 'POST', body: JSON.stringify(input) })
-}
-
-export async function connectPlugin(input: Parameters<typeof createIntegration>[0]): Promise<{ plugin: IntegrationConfiguration; notice?: string }> {
-  return api('/api/plugins/connect', { method: 'POST', body: JSON.stringify(input) })
-}
 
 export async function createSession(title = 'New session'): Promise<AgentSession> {
   return api('/api/sessions', { method: 'POST', body: JSON.stringify({ title }) })
@@ -221,14 +197,6 @@ export function workspaceFileContentUrl(path: string, download = false): string 
   return `/api/workspace/files/content?path=${encodeURIComponent(path)}${download ? '&download=1' : ''}`
 }
 
-export async function createSchedule(input: { name: string; cron: string; prompt: string; timezone?: string; threadId: string }): Promise<AgentSchedule> {
-  return api('/api/schedules', { method: 'POST', body: JSON.stringify(input) })
-}
-
-export async function deleteSchedule(id: string): Promise<void> {
-  await api(`/api/schedules/${encodeURIComponent(id)}`, { method: 'DELETE' })
-}
-
 export async function runWorkflow(id: string, input: Record<string, unknown>): Promise<unknown> {
   return api(`/api/workflows/${encodeURIComponent(id)}/runs`, { method: 'POST', body: JSON.stringify(input) })
 }
@@ -251,28 +219,6 @@ export async function disableModelProfile(id: string): Promise<ModelProfile> {
 
 export async function deleteModelProfile(id: string): Promise<void> {
   await api(`/api/model-profiles/${encodeURIComponent(id)}`, { method: 'DELETE' })
-}
-
-export async function transitionIntegration(id: string, action: 'test' | 'submit' | 'activate' | 'disable', reason?: string): Promise<IntegrationConfiguration> {
-  return api(`/api/integrations/${encodeURIComponent(id)}/${action}`, {
-    method: 'POST', body: JSON.stringify(reason ? { reason } : {}),
-  })
-}
-
-export async function deleteIntegration(id: string): Promise<void> {
-  await api(`/api/integrations/${encodeURIComponent(id)}`, { method: 'DELETE' })
-}
-
-export async function issueIngestionToken(id: string): Promise<{ token: string; expiresAt: string }> {
-  return api(`/api/integrations/${encodeURIComponent(id)}/ingestion-token`, { method: 'POST', body: '{}' })
-}
-
-export async function integrationEvents(id: string): Promise<IntegrationEvent[]> {
-  return (await api<{ events: IntegrationEvent[] }>(`/api/integrations/${encodeURIComponent(id)}/events`)).events
-}
-
-export async function requestIntegrationSync(id: string): Promise<SyncJob> {
-  return api(`/api/integrations/${encodeURIComponent(id)}/sync`, { method: 'POST', body: '{}' })
 }
 
 export async function logout(): Promise<void> { await api('/api/auth/logout', { method: 'POST', body: '{}' }) }

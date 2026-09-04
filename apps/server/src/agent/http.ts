@@ -327,62 +327,12 @@ export function createAgentServer(config: AgentConfig, service: AgentService, au
         requireRole(actor, 'Papyrus.Integration.Manage')
         return json(response, 202, await mastra.runWorkflow(decodeURIComponent(workflowRun[1] as string), await body(request)))
       }
-      if (url.pathname === '/api/integrations/catalog' && request.method === 'GET') return json(response, 200, { integrations: service.catalog(await principal(request, auth, service)) })
-      if (url.pathname === '/api/integrations' && request.method === 'GET') return json(response, 200, { integrations: service.integrations(await principal(request, auth, service)) })
       if (url.pathname === '/api/terrain' && request.method === 'GET') return json(response, 200, service.terrainSnapshot(await principal(request, auth, service)))
-      if (url.pathname === '/api/integrations' && request.method === 'POST') {
-        const input = await body(request)
-        return json(response, 201, service.createIntegration(await principal(request, auth, service), input.catalogId, input))
-      }
-      const integrationResource = url.pathname.match(/^\/api\/integrations\/([^/]+)$/)
-      if (integrationResource && request.method === 'DELETE') {
-        service.deleteIntegration(await principal(request, auth, service), decodeURIComponent(integrationResource[1] as string))
-        securityHeaders(response); response.writeHead(204); return response.end()
-      }
       if (url.pathname === '/api/license/activate' && request.method === 'POST') {
         const actor = await principal(request, auth, service)
         requireRole(actor, 'Papyrus.System.Owner')
         return json(response, 200, service.license.activate(await body(request) as unknown as SignedLicense))
       }
-
-      const action = url.pathname.match(/^\/api\/integrations\/([^/]+)\/(test|submit|activate|disable)$/)
-      if (action && request.method === 'POST') {
-        const actor = await principal(request, auth, service)
-        const id = decodeURIComponent(action[1] as string)
-        if (action[2] === 'test') return json(response, 200, await service.testIntegration(actor, id))
-        if (action[2] === 'submit') return json(response, 200, service.submitIntegration(actor, id))
-        if (action[2] === 'activate') return json(response, 200, service.activateIntegration(actor, id))
-        const input = await body(request)
-        return json(response, 200, service.disableIntegration(actor, id, input.reason))
-      }
-      const events = url.pathname.match(/^\/api\/integrations\/([^/]+)\/events$/)
-      if (events && request.method === 'GET') return json(response, 200, { events: service.events(await principal(request, auth, service), decodeURIComponent(events[1] as string)) })
-      const ingestionToken = url.pathname.match(/^\/api\/integrations\/([^/]+)\/ingestion-token$/)
-      if (ingestionToken && request.method === 'POST') {
-        const actor = await principal(request, auth, service)
-        const id = decodeURIComponent(ingestionToken[1] as string)
-        service.authorizeIngestionToken(actor, id)
-        const issued = auth.issueIngestionToken(id, actor.oid)
-        service.recordIngestionTokenIssued(actor, id, issued.expiresAt)
-        return json(response, 201, issued)
-      }
-      const observations = url.pathname.match(/^\/api\/integrations\/([^/]+)\/observations$/)
-      if (observations && request.method === 'POST') {
-        const id = decodeURIComponent(observations[1] as string)
-        const input = await body(request)
-        const result = auth.verifyIngestionRequest(request, id)
-          ? service.ingestObservationWithScopedCredential(id, input)
-          : service.ingestObservation(await principal(request, auth, service), id, input)
-        return json(response, result.created ? 201 : 200, result)
-      }
-      const sync = url.pathname.match(/^\/api\/integrations\/([^/]+)\/sync$/)
-      if (sync && request.method === 'POST') return json(response, 202, service.requestSync(
-        await principal(request, auth, service), decodeURIComponent(sync[1] as string),
-      ))
-      const jobs = url.pathname.match(/^\/api\/integrations\/([^/]+)\/sync-jobs$/)
-      if (jobs && request.method === 'GET') return json(response, 200, { jobs: service.syncJobs(
-        await principal(request, auth, service), decodeURIComponent(jobs[1] as string),
-      ) })
 
       // ─── Investigations ────────────────────────────────────────────
       if (url.pathname === '/api/investigations' && request.method === 'GET') {

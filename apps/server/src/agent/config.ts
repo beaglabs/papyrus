@@ -17,10 +17,10 @@ export interface AgentConfig {
   organizationName: string
   cloud: EntraCloud
   sandboxRuntime?: SandboxRuntime
-  agentfsBinary: string
-  agentfsId: string
-  agentfsDatabasePath: string
-  nonoBinary: string
+  agentfsBinary?: string
+  agentfsId?: string
+  agentfsDatabasePath?: string
+  nonoBinary?: string
   entra?: {
     tenantId: string
     clientId: string

@@ -280,36 +280,6 @@ export function createAgentServer(config: AgentConfig, service: AgentService, au
         requireRole(actor, 'Papyrus.System.Owner')
         return json(response, 200, { skill: mastra.skills.approveAndEnable(decodeURIComponent(approveSkill[1] as string), actor.oid) })
       }
-      if (url.pathname === '/api/plugins' && request.method === 'GET') {
-        const actor = await principal(request, auth, service)
-        return json(response, 200, { catalog: service.catalog(actor), configured: service.integrations(actor) })
-      }
-      if (url.pathname === '/api/plugins/connect' && request.method === 'POST') {
-        const actor = await principal(request, auth, service)
-        const input = await body(request)
-        const rawSettings = input.settings && typeof input.settings === 'object' && !Array.isArray(input.settings)
-          ? input.settings as Record<string, unknown> : {}
-        let plugin = service.createIntegration(actor, input.catalogId, {
-          name: input.name, scope: input.scope, endpoint: input.endpoint, credentialRef: input.credentialRef,
-          settings: rawSettings,
-        })
-        if (plugin.state === 'draft') {
-          try {
-            plugin = await service.testIntegration(actor, plugin.id)
-            plugin = service.submitIntegration(actor, plugin.id)
-          } catch (cause) {
-            service.deleteIntegration(actor, plugin.id)
-            throw cause
-          }
-          try {
-            plugin = service.activateIntegration(actor, plugin.id)
-          } catch (cause) {
-            service.deleteIntegration(actor, plugin.id)
-            throw cause
-          }
-        }
-        return json(response, 201, { plugin })
-      }
       if (url.pathname === '/api/model-profiles' && request.method === 'GET') {
         await principal(request, auth, service)
         return json(response, 200, { profiles: mastra.listModelProfiles() })
@@ -345,28 +315,6 @@ export function createAgentServer(config: AgentConfig, service: AgentService, au
         const actor = await principal(request, auth, service)
         requireRole(actor, 'Papyrus.Integration.Manage')
         await mastra.deleteModelProfile(decodeURIComponent(modelResource[1] as string), actor.oid)
-        securityHeaders(response); response.writeHead(204); return response.end()
-      }
-      if (url.pathname === '/api/schedules' && request.method === 'GET') {
-        await principal(request, auth, service)
-        return json(response, 200, { schedules: await mastra.listSchedules() })
-      }
-      if (url.pathname === '/api/schedules' && request.method === 'POST') {
-        const actor = await principal(request, auth, service)
-        requireRole(actor, 'Papyrus.Integration.Manage')
-        const input = await body(request)
-        return json(response, 201, await mastra.createSchedule({
-          name: requiredString(input.name, 'name', 120), cron: requiredString(input.cron, 'cron', 120),
-          prompt: requiredString(input.prompt, 'prompt', 10_000),
-          threadId: requiredString(input.threadId, 'threadId', 256),
-          ...(typeof input.timezone === 'string' && input.timezone ? { timezone: input.timezone } : {}),
-        }))
-      }
-      const scheduleResource = url.pathname.match(/^\/api\/schedules\/([^/]+)$/)
-      if (scheduleResource && request.method === 'DELETE') {
-        const actor = await principal(request, auth, service)
-        requireRole(actor, 'Papyrus.Integration.Manage')
-        await mastra.deleteSchedule(decodeURIComponent(scheduleResource[1] as string))
         securityHeaders(response); response.writeHead(204); return response.end()
       }
       if (url.pathname === '/api/workflows' && request.method === 'GET') {
@@ -426,13 +374,6 @@ export function createAgentServer(config: AgentConfig, service: AgentService, au
           ? service.ingestObservationWithScopedCredential(id, input)
           : service.ingestObservation(await principal(request, auth, service), id, input)
         return json(response, result.created ? 201 : 200, result)
-      }
-      const signalWebhook = url.pathname.match(/^\/api\/signals\/([^/]+)\/webhook$/)
-      if (signalWebhook && request.method === 'POST') {
-        const id = decodeURIComponent(signalWebhook[1] as string)
-        if (!auth.verifyIngestionRequest(request, id)) throw new HttpError(401, 'SIGNAL_AUTHENTICATION_REQUIRED', 'A source-scoped bearer token is required')
-        const headers = Object.fromEntries(Object.entries(request.headers).flatMap(([name, value]) => typeof value === 'string' ? [[name, value]] : []))
-        return json(response, 202, await mastra.acceptWebhook(id, await body(request), headers))
       }
       const sync = url.pathname.match(/^\/api\/integrations\/([^/]+)\/sync$/)
       if (sync && request.method === 'POST') return json(response, 202, service.requestSync(

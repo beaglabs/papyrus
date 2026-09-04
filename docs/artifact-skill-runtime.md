@@ -11,7 +11,8 @@ Agent / Starlings
       |
       +-- listSkills / loadSkill
       |
-      +-- createArtifact --------> durable artifact store
+      +-- createArtifact --------> durable artifact metadata/card
+      |                              + /Library/Generated/<name> in AgentFS
       |
       +-- sandbox workspace
               |
@@ -114,3 +115,7 @@ The existing Exchange executor can attach durable artifacts after approval:
 ```
 
 The executor resolves artifact bytes only after the proposal has crossed the normal approval and leased-worker boundary. Direct Graph sends are capped to a small aggregate attachment size; larger publication should use a customer upload/publishing workflow.
+
+## AgentFS and Links
+
+Durable artifact cards are presentation/provenance metadata; AgentFS is the workspace authority. Artifact tools return `workspacePath`, and `prepareLink` accepts that path or `artifactId`. Missing legacy mirrors are reconstructed only after SHA-256 verification.

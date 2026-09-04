@@ -42,9 +42,11 @@ export interface AgentStatus {
   workspace?: {
     filesystem: 'agentfs-sdk'
     storage: 'local-sqlite'
-    sandbox: 'nono-ts'
+    programmableRuntime: 'enclave-strict'
+    processSandbox: 'nono-ts'
     isolation: 'landlock' | 'seatbelt' | 'unsupported'
     network: 'blocked'
+    rawShell: false
   }
   signalBacklog: Record<'pending' | 'delivering' | 'delivered' | 'failed', number>
 }

@@ -20,6 +20,7 @@ const evidencePaths = [
   'apps/server/src/agent/link-http.ts',
   'apps/server/src/agent/link-preview.ts',
   'apps/server/src/agent/executors/link-publisher-executor.ts',
+  'apps/server/src/agent/mastra/runtime.ts',
   'apps/server/src/agent/mastra/workspace-agentfs.ts',
   'apps/server/src/agent/mastra/workspace-nono.ts',
   'apps/server/src/agent/mastra/workspace-nono-worker.ts',
@@ -44,12 +45,19 @@ const sspText = `# Papyrus System Security Plan (Repository-Derived)
 
 ## System boundary
 
-Papyrus is a customer-hosted durable agent runtime. The repository boundary includes the portal, daemon, Mastra runtime, Starlings integration, AgentFS workspace, nono isolation workers, Enclave broker, action ledger, and approved action executors.
+Papyrus is a customer-hosted durable agent runtime. The repository boundary includes the portal, daemon, Mastra runtime, Starlings integration, AgentFS workspace, nono isolation workers, Enclave broker, action ledger, approved action executors, and the approval-backed Links publication and serving boundary.
 
 ## Security invariants
 
 - External side effects cross the proposal → human approval → ledger → leased executor boundary.
 - AgentFS is the durable file authority; native processes work through bounded materialize → isolate → reconcile behavior.
+- Link publication snapshots exact AgentFS bytes before approval and verifies the SHA-256 again before making the Link live.
+- Link drafts, published blobs, logos, assets, and inbound payloads remain under /Library/Links in the same Workspace filesystem.
+- Webpage Links are served as static documents with a restrictive CSP and without Papyrus-injected presentation styles or scripts.
+- API Links serve approved JSON snapshots or explicitly bound durable workflows.
+- Webhook Links are scoped to the creating Mastra {resourceId, threadId}; WebhookSignalProvider routes each inbound event back into that exact session.
+- Webhook logo identity is snapshotted with the approved Link rather than loaded from an untrusted mutable URL.
+- Kitesurf is optional validation only; it is not the hosting authority and is not configurable for government, restricted, or disconnected profiles.
 - nono applies kernel-backed filesystem authority and blocks network access for workspace command execution.
 - AgentScript runs in Enclave STRICT and receives only Papyrus-brokered capabilities.
 - Credential-like environment variables are stripped before workspace commands execute.

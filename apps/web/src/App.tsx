@@ -2,19 +2,17 @@ import { useCallback, useEffect, useState } from 'react'
 import type { PortalData, PublicConfig } from './api.js'
 import { AuthenticationRequired, createSession, deleteSession, loadPortal, logout, publicConfig } from './api.js'
 import { AgentView } from './Agent.js'
-import { PluginsView } from './Plugins.js'
-import { ScheduledView } from './Automation.js'
 import { LibraryView } from './Library.js'
 import { LinksView } from './Links.js'
 import { ModelsView } from './Models.js'
 import { Alert, Avatar, Badge, Button, Card, DropdownMenu, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, Skeleton } from './components/ui/index.js'
 import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarRail, SidebarTrigger } from './components/ui/sidebar.js'
 
-export type PortalView = 'agent' | 'models' | 'plugins' | 'scheduled' | 'links' | 'library' | 'governance'
+export type PortalView = 'agent' | 'models' | 'links' | 'library' | 'governance'
 type AppState = { phase: 'loading' } | { phase: 'signed-out'; config: PublicConfig } | { phase: 'ready'; data: PortalData } | { phase: 'error'; message: string }
 
 const ROUTES: Record<PortalView, string> = {
-  agent: '/portal', models: '/portal/models', plugins: '/portal/plugins', scheduled: '/portal/scheduled', links: '/portal/links', library: '/portal/library', governance: '/portal/governance',
+  agent: '/portal', models: '/portal/models', links: '/portal/links', library: '/portal/library', governance: '/portal/governance',
 }
 
 function viewFromPath(): PortalView {
@@ -111,8 +109,6 @@ export function App() {
           ? <AgentView key={selectedSession.id} session={selectedSession} status={data.agent} initialPrompt={initialPrompt} canApprove={data.me.roles.includes('Papyrus.System.Owner') || data.me.roles.includes('Papyrus.Action.Approve')} canManageSkills={data.me.roles.includes('Papyrus.System.Owner')} onChanged={refresh} />
           : <EmptyAgent onCreate={() => void newSession()} />)}
         {view === 'models' && <ModelsView profiles={data.models} onAskAgent={(prompt) => navigate('agent', { prompt, session: selectedSession?.id })} onChanged={refresh} canManage={data.me.roles.includes('Papyrus.System.Owner') || data.me.roles.includes('Papyrus.Integration.Manage')} />}
-        {view === 'plugins' && <PluginsView catalog={data.catalog} configured={data.integrations} onAskAgent={(prompt) => navigate('agent', { prompt, session: selectedSession?.id })} onChanged={refresh} canManage={data.me.roles.includes('Papyrus.System.Owner') || data.me.roles.includes('Papyrus.Integration.Manage')} />}
-        {view === 'scheduled' && <ScheduledView schedules={data.schedules} sessions={data.sessions} onChanged={refresh} />}
         {view === 'links' && <LinksView {...(data.agent.links?.validation ? { validation: data.agent.links.validation } : {})} />}
         {view === 'library' && <LibraryView />}
         {view === 'governance' && <GovernanceView data={data} />}
@@ -135,7 +131,7 @@ function PortalSkeleton() {
       <div className="portal-skeleton-brand"><Skeleton className="skeleton-square" /><Skeleton className="skeleton-brand-line" /></div>
       <Skeleton className="skeleton-sidebar-wide" />
       <Skeleton className="skeleton-sidebar-wide" />
-      <div className="portal-skeleton-nav">{Array.from({ length: 6 }, (_, index) => <Skeleton className="skeleton-nav-line" key={index} />)}</div>
+      <div className="portal-skeleton-nav">{Array.from({ length: 5 }, (_, index) => <Skeleton className="skeleton-nav-line" key={index} />)}</div>
     </aside>
     <main>
       <div className="portal-skeleton-header"><div><Skeleton className="skeleton-eyebrow" /><Skeleton className="skeleton-title" /></div><Skeleton className="skeleton-status" /></div>
@@ -152,8 +148,8 @@ function SignedOut({ config }: { config: PublicConfig }) {
 
 export function PrimaryNavigation({ view, onNavigate }: { view: PortalView; onNavigate: (view: PortalView) => void }) {
   const items: Array<{ view: PortalView; icon: string; label: string }> = [
-    { view: 'agent', icon: '✦', label: 'Agent' }, { view: 'models', icon: '◎', label: 'Models' }, { view: 'plugins', icon: '⌘', label: 'Plugins' },
-    { view: 'scheduled', icon: '◷', label: 'Scheduled' }, { view: 'links', icon: '◎', label: 'Links' }, { view: 'library', icon: '▤', label: 'Library' },
+    { view: 'agent', icon: '✦', label: 'Agent' }, { view: 'models', icon: '◎', label: 'Models' },
+    { view: 'links', icon: '◎', label: 'Links' }, { view: 'library', icon: '▤', label: 'Library' },
     { view: 'governance', icon: '◇', label: 'Governance' },
   ]
   return <SidebarMenu aria-label="Primary navigation">{items.map((item) => <SidebarMenuItem key={item.view}><SidebarMenuButton isActive={view === item.view} tooltip={item.label} onClick={() => onNavigate(item.view)}><span className="sidebar-icon" aria-hidden="true">{item.icon}</span><span className="sidebar-copy">{item.label}</span></SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu>
@@ -161,7 +157,7 @@ export function PrimaryNavigation({ view, onNavigate }: { view: PortalView; onNa
 
 function PortalHeader({ view, data }: { view: PortalView; data: PortalData }) {
   const copy: Record<PortalView, [string, string]> = {
-    agent: ['MASTRA + STARLINGS', 'Agent'], models: ['MODEL GATEWAYS', 'Models'], plugins: ['TOOLS AND SIGNALS', 'Plugins'], scheduled: ['PERSISTENT TRIGGERS', 'Scheduled'],
+    agent: ['MASTRA + STARLINGS', 'Agent'], models: ['MODEL GATEWAYS', 'Models'],
     links: ['AGENT-CREATED PUBLIC BOUNDARIES', 'Links'], library: ['AGENTFS FILE AUTHORITY', 'Library'], governance: ['IDENTITY, LICENSING AND AUDIT', 'Governance'],
   }
   return <header className="portal-header"><div className="portal-header-title"><SidebarTrigger /><div><p className="eyebrow">{copy[view][0]}</p><h1>{copy[view][1]}</h1></div></div><div className="header-status"><span><i className="dot good" />DAEMON HEALTHY</span><small>{data.config.organizationName}</small></div></header>

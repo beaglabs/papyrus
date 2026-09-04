@@ -127,7 +127,11 @@ export class MastraRuntime {
     if (this.started) return
     this.started = true
 
-    this.sandbox = resolveSandboxPolicy({ dataDir: this.config.dataDir, platform: process.platform })
+    this.sandbox = resolveSandboxPolicy({
+      dataDir: this.config.dataDir,
+      platform: process.platform,
+      ...(this.config.sandboxRuntime ? { isolation: this.config.sandboxRuntime } : {}),
+    })
     if (!this.sandbox.enabled) console.warn(`[mastra] ${this.sandbox.reason}`)
 
     const core = await tryImport('@mastra/core')

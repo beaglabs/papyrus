@@ -5,6 +5,7 @@ import type { AgentSession, AgentStatus } from './api.js'
 import { approveProposal, approveSkill, connectPlugin, createSessionProposal, denyProposal, issueIngestionToken, sessionMessages, setSessionAttention } from './api.js'
 import { ModelGatewayCard } from './Models.js'
 import { Alert, Badge, Button, Card, Input, Label, NativeSelect, Textarea } from './components/ui/index.js'
+import { MarkdownMessage } from './Markdown.js'
 
 interface PluginField {
   name: string

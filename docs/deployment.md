@@ -18,31 +18,72 @@ The mapping is a deployment default, not an accreditation claim. The operator re
 
 ## Platform requirements
 
-Papyrus runs anywhere Node.js runs, but **agent code execution is Linux-only**. Deploy on Linux with Bubblewrap (`bwrap`) installed.
+Papyrus's agent workspace is local-first and has two deliberately separate
+providers:
 
-| Host | Papyrus daemon | Agent code execution |
-| --- | --- | --- |
-| Linux + `bwrap` on PATH | Supported | **Supported** (Bubblewrap isolation, network denied) |
-| Linux without `bwrap` | Supported | **Disabled** — refuses to run code unisolated |
-| macOS | Supported | **Disabled** — unsupported, not degraded |
-| Windows | Supported | **Disabled** — unsupported, not degraded |
+- **AgentFS** is the durable `WorkspaceFilesystem`. Its SQLite database lives
+  under `PAPYRUS_DATA_DIR/.agentfs`; cloud sync is not enabled or required.
+- **nono** is the `WorkspaceSandbox` and process boundary. Commands are launched
+  with only the AgentFS workspace writable and outbound network blocked.
 
-The sandbox never falls back to running unisolated. If Bubblewrap is missing, or the host is not Linux, execution stays off and the daemon logs the specific reason at startup. Everything that does not execute agent code — Entra identity, connectors, observations, terrain, the action ledger, and the portal — works identically on every platform.
+Papyrus drives AgentFS's local transient mount backend according to the host:
 
-macOS is excluded deliberately rather than for lack of effort: its only native mechanism is Seatbelt (`sandbox-exec`), which Apple has deprecated. Shipping it would advertise an isolation guarantee we could not stand behind.
+| Host | AgentFS command view | nono isolation | Workspace execution |
+| --- | --- | --- | --- |
+| Linux | FUSE | Landlock | Supported |
+| macOS | NFS | Seatbelt | Supported |
+| Windows | — | — | Disabled |
 
-Development on macOS is fine and expected. It simply runs with execution disabled, and says so instead of quietly pretending otherwise.
+Both `agentfs` and `nono` must be present in the deployment image or on the
+customer-controlled host before Papyrus starts an agent with workspace tools.
+Disconnected deployments should vendor the binaries into their approved image;
+the daemon never downloads a sandbox or filesystem runtime at execution time.
+
+The default executable names can be overridden when the binaries are staged in
+a fixed approved location:
 
 ```bash
-# Debian / Ubuntu
-sudo apt-get install bubblewrap
-# RHEL / Fedora / Rocky
-sudo dnf install bubblewrap
-
-bwrap --version   # verify it is on PATH before starting Papyrus
+export PAPYRUS_AGENTFS_BINARY=/opt/papyrus/bin/agentfs
+export PAPYRUS_NONO_BINARY=/opt/papyrus/bin/nono
+export PAPYRUS_AGENTFS_ID=papyrus-workspace
 ```
 
-Papyrus resolves execution policy at startup from `process.platform` and a PATH lookup. There is no configuration flag to force the sandbox on — the only supported inputs are the platform and the presence of `bwrap`.
+The workspace process chain is:
+
+```text
+Mastra Workspace tool
+       |
+       v
+Papyrus SandboxProcessManager
+       |
+       v
+agentfs exec --backend fuse|nfs <local-db>
+       |
+       v
+nono run --allow-cwd --block-net
+       |
+       v
+requested command
+```
+
+AgentFS remains the filesystem source of truth across sessions. The transient
+FUSE/NFS mount exists only for the lifetime of a command. nono then constrains
+the command to that mounted workspace and blocks network access. Papyrus also
+removes credential-like environment variables before spawning workspace
+processes.
+
+The older `PAPYRUS_SANDBOX_RUNTIME=bwrap|seatbelt` selector is retained for
+configuration compatibility, but the Mastra workspace path no longer uses
+`LocalSandbox`; new workspace execution uses nono.
+
+### Container note
+
+AgentFS FUSE/NFS mounts need the corresponding host/container mount support.
+The hardened Kubernetes manifest intentionally does not add broad privileges
+just to make workspace execution function. A deployment that enables workspace
+commands must explicitly provide the approved mount capability/device for its
+platform, or run the daemon on a host where AgentFS can mount normally. The
+daemon must not be given `privileged: true` as a shortcut.
 
 ## Agent configuration
 
@@ -55,11 +96,7 @@ export PAPYRUS_MODEL_BASE_URL='https://api.openai.com/v1'
 export PAPYRUS_MODEL_CREDENTIAL_REF='env://OPENAI_API_KEY'
 ```
 
-<<<<<<< Updated upstream
 Without it the agent is not registered. Mastra storage, session history, workflows, and plugin configuration still start normally, while signals accumulate durably in `agent_signal_outbox`. Nothing is dropped while unconfigured. The Models tab stores only gateway metadata and a customer-owned credential reference; it never stores raw key material.
-=======
-Without it the agent is not registered. Mastra storage, session history, workflows, and plugin configuration still start normally, while signals accumulate durably in `agent_signal_outbox`. Nothing is dropped while unconfigured.
->>>>>>> Stashed changes
 
 Storage for durable threads is LibSQL at `<data-dir>/mastra.db`, created alongside the main database.
 

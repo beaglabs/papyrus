@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import type { AgentSession, AgentStatus, WorkspaceLibraryFile } from './api.js'
 import { approveProposal, approveSkill, connectPlugin, createSessionProposal, denyProposal, issueIngestionToken, sessionMessages, setSessionAttention, uploadWorkspaceAttachment, workspaceFiles } from './api.js'
 import { ModelGatewayCard } from './Models.js'
-import { Alert, Badge, Button, Card, Input, Label, NativeSelect, Textarea } from './components/ui/index.js'
+import { Alert, Badge, Button, Card, Input, Label, NativeSelect, Skeleton } from './components/ui/index.js'
 import { MarkdownMessage } from './Markdown.js'
 
 interface PluginField {
@@ -94,25 +94,33 @@ export function AgentView({ session, status, initialPrompt, canApprove, canManag
   const [initial, setInitial] = useState<UIMessage[]>([])
   const [input, setInput] = useState(initialPrompt ?? '')
   const [historyError, setHistoryError] = useState<string>()
+  const [historyLoading, setHistoryLoading] = useState(true)
 
   useEffect(() => {
     let active = true
-    sessionMessages(session.id).then((messages) => { if (active) setInitial(messages) }).catch((cause) => {
+    setHistoryLoading(true)
+    setHistoryError(undefined)
+    sessionMessages(session.id).then((messages) => {
+      if (active) setInitial(messages)
+    }).catch((cause) => {
       if (active) setHistoryError(cause instanceof Error ? cause.message : 'Unable to load session history')
+    }).finally(() => {
+      if (active) setHistoryLoading(false)
     })
     return () => { active = false }
   }, [session.id])
 
-  return <Chat key={`${session.id}:${initial.length}`} session={session} status={status} initial={initial} input={input} setInput={setInput} historyError={historyError} canApprove={canApprove} canManageSkills={canManageSkills} onChanged={onChanged} />
+  return <Chat key={`${session.id}:${initial.length}`} session={session} status={status} initial={initial} input={input} setInput={setInput} historyError={historyError} historyLoading={historyLoading} canApprove={canApprove} canManageSkills={canManageSkills} onChanged={onChanged} />
 }
 
-function Chat({ session, status, initial, input, setInput, historyError, canApprove, canManageSkills, onChanged }: {
+function Chat({ session, status, initial, input, setInput, historyError, historyLoading, canApprove, canManageSkills, onChanged }: {
   session: AgentSession
   status: AgentStatus
   initial: UIMessage[]
   input: string
   setInput: (value: string) => void
   historyError: string | undefined
+  historyLoading: boolean
   canApprove: boolean
   canManageSkills: boolean
   onChanged: () => Promise<void>
@@ -152,7 +160,8 @@ function Chat({ session, status, initial, input, setInput, historyError, canAppr
     {!status.agentReady && <Alert className="agent-config-alert"><strong>Agent model not configured</strong><span>Open <a href="/portal/models">Models</a> to configure an approved gateway using the first-run form. Chat unlocks after the daemon has a tested model profile.</span></Alert>}
     {historyError && <Alert className="error">{historyError}</Alert>}
     <div className="message-list" aria-live="polite">
-      {messages.length === 0 && <Welcome />}
+      {historyLoading && messages.length === 0 && <MessageSkeleton />}
+      {!historyLoading && messages.length === 0 && <Welcome />}
       {messages.map((message) => <Message key={message.id} message={message} sessionId={session.id} canApprove={canApprove} canManageSkills={canManageSkills} onChanged={onChanged} />)}
       {working && <div className="agent-thinking"><span /><span /><span /> Papyrus is working</div>}
       {error && <Alert className="error">{error.message}</Alert>}
@@ -183,7 +192,6 @@ function Composer({ input, setInput, attachments, setAttachments, disabled, work
   workspace: AgentStatus['workspace']
 }) {
   const fileInput = useRef<HTMLInputElement>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [dragActive, setDragActive] = useState(false)
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [libraryQuery, setLibraryQuery] = useState('')
@@ -231,7 +239,7 @@ function Composer({ input, setInput, attachments, setAttachments, disabled, work
           ...(file.type ? { mediaType: file.type } : {}),
           dataBase64: await fileBase64(file),
         })
-        setAttachments((current) => current.some((item) => item.path === saved.path) ? current : [...current, saved].slice(0, 12))
+        setAttachments((current) => current.some((item) => item.path === saved.path ? current : [...current, saved].slice(0, 12)))
       }
     } catch (cause) {
       setAttachmentError(cause instanceof Error ? cause.message : 'Unable to attach file')
@@ -240,13 +248,6 @@ function Composer({ input, setInput, attachments, setAttachments, disabled, work
       if (fileInput.current) fileInput.current.value = ''
     }
   }
-
-  useEffect(() => {
-    const textarea = textareaRef.current
-    if (!textarea) return
-    textarea.style.height = 'auto'
-    textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, 72), 180)}px`
-  }, [input])
 
   const showMention = mention !== undefined && !libraryOpen
 
@@ -266,12 +267,35 @@ function Composer({ input, setInput, attachments, setAttachments, disabled, work
     }}
   >
     {attachments.length > 0 && <div className="composer-attachments">{attachments.map((file) => <span className="composer-attachment-chip" key={file.path}><span>▤</span><span><strong>{file.name}</strong><small>{formatBytes(file.size)} · AgentFS</small></span><button type="button" aria-label={`Remove ${file.name}`} onClick={() => setAttachments((current) => current.filter((item) => item.path !== file.path))}>×</button></span>)}</div>}
-    <div className="composer-editor">
-      <Textarea ref={textareaRef} rows={3} value={input} onChange={(event) => setInput(event.target.value)} disabled={disabled} placeholder="Ask Papyrus… Type @ to attach from Library, or drop files here." onKeyDown={(event) => {
-        if (event.key === 'Enter' && !event.shiftKey && !showMention) { event.preventDefault(); event.currentTarget.form?.requestSubmit() }
-        if (event.key === 'Escape') setLibraryOpen(false)
-      }} />
+    <div className="composer-input-row">
+      <Input
+        className="composer-prompt-input"
+        value={input}
+        onChange={(event) => setInput(event.target.value)}
+        disabled={disabled}
+        autoComplete="off"
+        placeholder="Ask Papyrus… Type @ to attach from Library."
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') setLibraryOpen(false)
+          if (event.key === 'Enter' && !showMention) event.currentTarget.form?.requestSubmit()
+        }}
+      />
+      {working
+        ? <Button className="composer-send-circle" size="icon" type="button" aria-label="Stop generation" onClick={onStop}>■</Button>
+        : <Button className="primary composer-send-circle" size="icon" type="submit" aria-label="Send message" disabled={disabled || (!input.trim() && attachments.length === 0)}>↑</Button>}
       {showMention && <LibraryResults files={results} query={mention ?? ''} loading={loading} label="ATTACH FROM LIBRARY" onSelect={(file) => attach(file, true)} />}
+    </div>
+    <div className="composer-toolbar">
+      <div className="composer-tools">
+        <Button variant="neutral" className="composer-tool-button" type="button" disabled={disabled || loading} onClick={() => fileInput.current?.click()}>
+          <span className="composer-tool-icon">＋</span><span>Upload</span>
+        </Button>
+        <Button variant="neutral" className="composer-tool-button" type="button" disabled={disabled} onClick={() => { setLibraryOpen(true); setLibraryQuery('') }}>
+          <span className="composer-tool-icon">▤</span><span>Library</span>
+        </Button>
+        <input ref={fileInput} className="composer-file-input" type="file" multiple onChange={(event) => void upload(event.currentTarget.files)} />
+        <span className="composer-workspace-state"><span className="status-dot" />{workspace ? `AgentFS · Enclave STRICT · nono-ts ${workspace.isolation}` : 'Local workspace'}</span>
+      </div>
     </div>
     {libraryOpen && <div className="library-picker">
       <div className="library-picker-head"><div><p className="eyebrow">AGENTFS LIBRARY</p><strong>Attach workspace context</strong></div><button type="button" onClick={() => setLibraryOpen(false)}>×</button></div>
@@ -280,19 +304,6 @@ function Composer({ input, setInput, attachments, setAttachments, disabled, work
     </div>}
     {attachmentError && <Alert className="error composer-error">{attachmentError}</Alert>}
     {dragActive && <div className="composer-drop-target"><span>＋</span><strong>Drop files to attach</strong><small>Files are stored in the local AgentFS Library.</small></div>}
-    <div className="composer-toolbar">
-      <div className="composer-tools">
-        <button className="composer-tool-button" type="button" disabled={disabled || loading} onClick={() => fileInput.current?.click()}>
-          <span className="composer-tool-icon">＋</span><span>Upload</span>
-        </button>
-        <button className="composer-tool-button" type="button" disabled={disabled} onClick={() => { setLibraryOpen(true); setLibraryQuery('') }}>
-          <span className="composer-tool-icon">▤</span><span>Library</span>
-        </button>
-        <input ref={fileInput} className="composer-file-input" type="file" multiple onChange={(event) => void upload(event.currentTarget.files)} />
-        <span className="composer-workspace-state"><span className="status-dot" />{workspace ? `AgentFS · Enclave STRICT · nono-ts ${workspace.isolation}` : 'Local workspace'}</span>
-      </div>
-      {working ? <Button className="composer-send" type="button" onClick={onStop}>Stop</Button> : <Button className="primary composer-send" disabled={disabled || (!input.trim() && attachments.length === 0)}>Send ↑</Button>}
-    </div>
   </form>
 }
 
@@ -306,9 +317,16 @@ function LibraryResults({ files, query, loading, label, onSelect, embedded = fal
 }) {
   return <div className={embedded ? 'library-results embedded' : 'library-results'}>
     {label && <p className="eyebrow">{label}</p>}
-    {loading && <small className="library-empty">Searching AgentFS…</small>}
+    {loading && <div className="library-loading"><Skeleton /><Skeleton /><Skeleton /></div>}
     {!loading && files.length === 0 && <small className="library-empty">{query ? `No files matching “${query}”` : 'No files in Library yet.'}</small>}
     {!loading && files.slice(0, 10).map((file) => <button type="button" key={file.path} onClick={() => onSelect(file)}><span className="library-file-icon">{fileIcon(file.mediaType)}</span><span><strong>{file.name}</strong><small>{file.path} · {formatBytes(file.size)}</small></span><span className="library-attach-hint">Attach</span></button>)}
+  </div>
+}
+
+function MessageSkeleton() {
+  return <div className="message-skeleton" aria-label="Loading session history">
+    <div><Skeleton className="skeleton-author" /><div><Skeleton className="skeleton-line wide" /><Skeleton className="skeleton-line" /><Skeleton className="skeleton-line short" /></div></div>
+    <div><Skeleton className="skeleton-author" /><div><Skeleton className="skeleton-line wide" /><Skeleton className="skeleton-line short" /></div></div>
   </div>
 }
 

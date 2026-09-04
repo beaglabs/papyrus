@@ -213,11 +213,11 @@ class NonoProcessHandle extends ProcessHandle {
   private readonly completion: Promise<CommandResult>
   private timeout: ReturnType<typeof setTimeout> | undefined
 
-  constructor(child: ChildProcessWithoutNullStreams, startedAt: number, options: SpawnProcessOptions) {
+  constructor(child: ChildProcessWithoutNullStreams, startedAt: number, options: SpawnProcessOptions, finalize: (exitCode: number) => Promise<number>) {
     super(options)
     this.child = child
     this.startedAt = startedAt
-    this.pid = String(child.pid ?? crypto.randomUUID())
+    this.pid = String(child.pid ?? randomUUID())
 
     child.stdout.setEncoding('utf8')
     child.stderr.setEncoding('utf8')
@@ -225,19 +225,30 @@ class NonoProcessHandle extends ProcessHandle {
     child.stderr.on('data', (value: string) => this.emitStderr(value))
 
     this.completion = new Promise((resolvePromise, reject) => {
-      child.once('error', reject)
-      child.once('close', (code, signal) => {
+      let settled = false
+      child.once('error', (error) => {
+        if (settled) return
+        settled = true
         if (this.timeout) clearTimeout(this.timeout)
-        this._exitCode = code ?? (signal ? 128 : 1)
-        resolvePromise({
-          success: this._exitCode === 0,
-          exitCode: this._exitCode,
-          stdout: this.stdout,
-          stderr: this.stderr,
-          executionTimeMs: Date.now() - this.startedAt,
-          ...(this._timedOut ? { timedOut: true } : {}),
-          ...(this._killed ? { killed: true } : {}),
-        })
+        reject(error)
+      })
+      child.once('close', (code, signal) => {
+        if (settled) return
+        settled = true
+        if (this.timeout) clearTimeout(this.timeout)
+        const processCode = code ?? (signal ? 128 : 1)
+        void finalize(processCode).then((finalCode) => {
+          this._exitCode = finalCode
+          resolvePromise({
+            success: finalCode === 0,
+            exitCode: finalCode,
+            stdout: this.stdout,
+            stderr: this.stderr,
+            executionTimeMs: Date.now() - this.startedAt,
+            ...(this._timedOut ? { timedOut: true } : {}),
+            ...(this._killed ? { killed: true } : {}),
+          })
+        }, reject)
       })
     })
 
@@ -282,13 +293,47 @@ class NonoProcessHandle extends ProcessHandle {
   }
 }
 
-function normalizeWorkspaceCwd(value: string): string {
+export function normalizeWorkspaceCwd(value: string): string {
   const raw = value.trim() || '/'
   const normalized = posix.normalize(raw.startsWith('/') ? raw : `/${raw}`)
   if (normalized === '/..' || normalized.startsWith('/../')) throw new Error('Sandbox cwd escapes AgentFS workspace')
   return normalized
 }
 
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`
+function materializedPath(root: string, virtualPath: string): string {
+  const normalized = normalizeWorkspaceCwd(virtualPath)
+  const target = resolve(root, normalized.replace(/^\/+/, ''))
+  if (target !== root && !target.startsWith(root + sep)) throw new Error('Sandbox path escapes materialized workspace')
+  return target
+}
+
+export function workspaceEnvironment(root: string, overlay: Record<string, string | undefined> = {}): Record<string, string> {
+  const environment: Record<string, string> = {
+    PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin',
+    LANG: process.env.LANG ?? 'C.UTF-8',
+    HOME: join(root, '.papyrus-home'),
+    TMPDIR: join(root, '.papyrus-tmp'),
+  }
+  for (const [key, value] of Object.entries(overlay)) {
+    if (value === undefined || sensitiveEnvironmentKey(key)) continue
+    environment[key] = value
+  }
+  return environment
+}
+
+function workerBootstrapEnvironment(dataDir: string): NodeJS.ProcessEnv {
+  return {
+    PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin',
+    LANG: process.env.LANG ?? 'C.UTF-8',
+    HOME: join(dataDir, '.workspace-worker-home'),
+    TMPDIR: join(dataDir, '.workspace-worker-tmp'),
+  }
+}
+
+function sensitiveEnvironmentKey(key: string): boolean {
+  return /(SECRET|TOKEN|PASSWORD|PASSWD|API[_-]?KEY|PRIVATE[_-]?KEY|CREDENTIAL)/i.test(key)
+}
+
+function message(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }

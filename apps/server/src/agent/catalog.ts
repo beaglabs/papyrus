@@ -4,6 +4,8 @@ import { observationProtocol } from './source-profiles.js'
 const CONNECTED: DeploymentProfile[] = ['commercial', 'government-il4', 'government-il6', 'gcc', 'gcch', 'dod', 'restricted']
 const ALL: DeploymentProfile[] = [...CONNECTED, 'disconnected']
 
+export const LINK_PUBLISHER_CATALOG_ID = 'papyrus-links'
+
 export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
   {
     id: 'observation-api', name: 'Custom Source', vendor: 'Observation API', initials: 'CS', accent: '#ffcf33',
@@ -101,6 +103,14 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
     evidenceTypes: ['AssetInventory'], syncMode: 'push', authSchemes: ['certificate', 'mTLS', 'none'],
     observationProtocol: observationProtocol('asset-inventory'),
     supportedProfiles: ALL, licenseFeature: 'security-connectors',
+  },
+  {
+    id: LINK_PUBLISHER_CATALOG_ID, name: 'Papyrus Links', vendor: 'Papyrus', initials: 'LK', accent: '#6ee7b7',
+    description: 'Internal approval-backed publisher for AgentFS Webpage, API, and Webhook links.',
+    integrationClass: 'action_executor', authority: 'controlled_actions', risk: 'high',
+    capabilities: ['publish webpage', 'publish API', 'publish webhook'],
+    evidenceTypes: ['ActionResult', 'LinkInbound'], syncMode: 'none', authSchemes: ['none'],
+    supportedProfiles: ALL, licenseFeature: 'core',
   },
   {
     id: 'firewall-executor', name: 'Firewall Control', vendor: 'Customer selected', initials: 'FW', accent: '#ff6b4a',

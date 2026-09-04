@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { AgentLink, LinkType } from '@papyrus/contracts'
-import { listLinks, publicLinkUrl } from './api.js'
+import { listLinks, publicLinkUrl, workspaceFileContentUrl } from './api.js'
 import { Alert, Badge, Button, Input, Skeleton } from './components/ui/index.js'
 
 type LinkFilter = 'all' | LinkType
@@ -77,15 +77,33 @@ function LinkCard({ link }: { link: AgentLink }) {
     <div className="link-preview">
       {link.type === 'webpage' && <iframe src={link.publicPath} title={`${link.name} preview`} sandbox="" loading="lazy" />}
       {link.type === 'api' && <ApiPreview url={link.publicPath} />}
-      {link.type === 'webhook' && <div className="webhook-preview"><span>ϟ</span><strong>WEBHOOK</strong><small>{link.publicPath}</small></div>}
+      {link.type === 'webhook' && <WebhookPreview link={link} />}
       <Badge className="link-type-badge">{link.type.toUpperCase()} ↗</Badge>
     </div>
     <div className="link-card-body">
       <div className="link-card-title"><a href={url} target="_blank" rel="noreferrer">{link.name}</a><Badge>{link.state.toUpperCase()}</Badge></div>
       <div className="link-meta"><span className="link-live-dot" />Live<span>·</span><span>{link.pingCount} pings</span><span>·</span><span>{link.inboundCount} inbounds</span></div>
-      <div className="link-card-foot"><span>{link.workflowId ? `Workflow · ${link.workflowId}` : link.scheduleId ? `Schedule · ${link.scheduleId}` : 'General'}</span><span>{link.validationProvider ? `Validated · ${link.validationProvider}` : 'Approved snapshot'}</span><Button variant="ghost" onClick={() => void copy()} aria-label={`Copy ${link.name} Link`}>{copied ? 'Copied ✓' : 'Copy link'}</Button></div>
+      <div className="link-card-foot"><span>{link.type === 'webhook' && link.threadId ? `Session · ${shortId(link.threadId)}` : link.workflowId ? `Workflow · ${link.workflowId}` : link.scheduleId ? `Schedule · ${link.scheduleId}` : 'General'}</span><span>{link.type === 'webhook' ? 'Mastra Webhook Signal' : link.validationProvider ? `Validated · ${link.validationProvider}` : 'Approved snapshot'}</span><Button variant="ghost" onClick={() => void copy()} aria-label={`Copy ${link.name} Link`}>{copied ? 'Copied ✓' : 'Copy link'}</Button></div>
     </div>
   </article>
+}
+
+function WebhookPreview({ link }: { link: AgentLink }) {
+  const logoUrl = link.logoPath ? workspaceFileContentUrl(link.logoPath) : undefined
+  return <div className="webhook-preview">
+    <div className="webhook-logo">
+      {logoUrl
+        ? <img src={logoUrl} alt={`${link.name} logo`} loading="lazy" />
+        : <span aria-hidden="true">{link.logoText || 'ϟ'}</span>}
+    </div>
+    <strong>{link.name}</strong>
+    <small>{link.threadId ? `Session-scoped · ${shortId(link.threadId)}` : 'Webhook'}</small>
+    <code>{link.publicPath}</code>
+  </div>
+}
+
+function shortId(value: string): string {
+  return value.length <= 18 ? value : `${value.slice(0, 8)}…${value.slice(-6)}`
 }
 
 function ApiPreview({ url }: { url: string }) {

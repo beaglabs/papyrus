@@ -199,7 +199,7 @@ export class MastraRuntime {
     console.log(
       `[mastra] runtime started in ${this.mode} mode; ` +
       `workspace agentfs-sdk + nono-ts/${process.platform === 'darwin' ? 'seatbelt' : 'landlock'}; ` +
-      `tools ${Object.keys(INVESTIGATION_TOOLS).length + 19} registered`,
+      `tools ${Object.keys(INVESTIGATION_TOOLS).length + 20} registered`,
     )
   }
 
@@ -327,7 +327,24 @@ export class MastraRuntime {
   async deleteSession(threadId: string): Promise<void> {
     const memory = this.requireMemory()
     await this.assertOwnedThread(threadId)
+
+    const schedules = await this.listSchedules(threadId).catch(() => [])
+    const webhookLinks = this.links.list().filter((link) => link.type === 'webhook' && link.threadId === threadId && link.state === 'live')
+
     await (memory['deleteThread'] as (id: string) => Promise<void>)(threadId)
+
+    for (const schedule of schedules) {
+      const id = schedule && typeof schedule === 'object' ? (schedule as Record<string, unknown>)['id'] : undefined
+      if (typeof id !== 'string' || !id) continue
+      try {
+        await this.deleteSchedule(id)
+      } catch (cause) {
+        console.warn('[mastra] failed to delete schedule for removed session:', cause instanceof Error ? cause.message : cause)
+      }
+    }
+
+    for (const link of webhookLinks) this.unsubscribeWebhookLink(link)
+    this.links.disableWebhookLinksForThread(threadId, 'system:session-delete')
   }
 
   async setSessionAttention(threadId: string, attention: boolean): Promise<void> {
@@ -1290,7 +1307,7 @@ export class MastraRuntime {
         return {
           source: 'papyrus-webhook-link',
           kind: typeof metadata['kind'] === 'string' ? metadata['kind'] : 'webhook-link',
-          priority: typeof body['priority'] === 'string' ? body['priority'] : 'medium',
+          priority: notificationPriority(body['priority']),
           summary: typeof body['summary'] === 'string'
             ? body['summary']
             : `Webhook Link ${String(metadata['linkName'] ?? 'ingestion source')} received an event.`,
@@ -1310,13 +1327,24 @@ export class MastraRuntime {
     this.subscribeWebhookThread(link.threadId, link.id, link.resourceId)
   }
 
+  private unsubscribeWebhookLink(link: AgentLink): void {
+    if (link.type !== 'webhook' || !link.threadId || !link.resourceId) return
+    const unsubscribe = this.mastra?.webhooks?.['unsubscribeThread']
+    if (typeof unsubscribe === 'function') unsubscribe.call(this.mastra?.webhooks, { threadId: link.threadId, resourceId: link.resourceId }, link.id)
+  }
+
   private async rehydrateSignalSubscriptions(): Promise<void> {
     if (!this.mastra?.memory || !this.mastra.webhooks) return
     for (const link of this.links.list().filter((item) => item.type === 'webhook' && item.state === 'live')) {
       if (!link.threadId || !link.resourceId) continue
       if (link.resourceId !== this.resourceId()) continue
-      await this.assertOwnedThread(link.threadId)
-      this.subscribeWebhookLink(link)
+      try {
+        await this.assertOwnedThread(link.threadId)
+        this.subscribeWebhookLink(link)
+      } catch (cause) {
+        this.links.disableWebhookLinksForThread(link.threadId, 'system:orphaned-session')
+        console.warn(`[mastra] disabled orphaned Webhook Link ${link.id}:`, cause instanceof Error ? cause.message : cause)
+      }
     }
   }
 
@@ -1366,6 +1394,10 @@ function addWorkspaceAttachmentContext(message: Record<string, unknown>, context
 
 function stripWorkspaceAttachmentContext(value: string): string {
   return value.replace(/\n?<papyrus-workspace-attachments>[\s\S]*?<\/papyrus-workspace-attachments>\s*$/g, '').trimEnd()
+}
+
+function notificationPriority(value: unknown): 'low' | 'medium' | 'high' | 'urgent' {
+  return value === 'low' || value === 'medium' || value === 'high' || value === 'urgent' ? value : 'medium'
 }
 
 function toolRequestContextValue(context: Record<string, unknown> | undefined, key: string): string | undefined {

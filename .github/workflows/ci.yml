@@ -31,6 +31,10 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Generate and verify compliance evidence
+        run: pnpm compliance:check
+      - name: Verify contract/schema manifest
+        run: pnpm contracts:check
       - name: Install Linux command isolation
         if: runner.os == 'Linux'
         run: |
@@ -42,3 +46,10 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      - name: Upload SPDX SBOM
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: papyrus-sbom-spdx
+          path: compliance/sbom.spdx.json
+          if-no-files-found: error

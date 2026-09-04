@@ -73,9 +73,11 @@ apps/server/.papyrus/
 # Cache
 .cache/
 
-# Compliance artifacts (large, generated)
+# Compliance artifacts
+# SSP and contract manifest are tracked evidence; the timestamped SBOM is regenerated locally and in CI.
 compliance/*.json
 compliance/*.spdx.json
+!compliance/contracts.manifest.json
 
 # OSCAL output (large, generated)
 oscal-output/

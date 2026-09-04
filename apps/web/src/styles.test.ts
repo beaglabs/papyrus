@@ -23,12 +23,12 @@ describe('Agent chat style contract', () => {
     }
   })
 
-  it('pins the composer as the final grid row without letting it escape the viewport', () => {
+  it('keeps the composer in a sticky overlay layer independent of transcript height', () => {
     expect(styles).toMatch(/\.agent-main\s*\{[^}]*height:\s*100%;[^}]*overflow:\s*hidden;/s)
-    expect(styles).toMatch(/\.agent-surface\s*\{[^}]*min-height:\s*0;[^}]*grid-template-rows:\s*auto auto minmax\(0, 1fr\) auto;/s)
-    expect(styles).toMatch(/\.composer\s*\{[^}]*position:\s*relative;[^}]*padding:[^;]*safe-area-inset-bottom/s)
-    expect(styles).not.toMatch(/\.composer\s*\{[^}]*position:\s*sticky/s)
-    expect(styles).toMatch(/\.message-list\s*\{[^}]*overflow-y:\s*auto;[^}]*overscroll-behavior:\s*contain;/s)
+    expect(styles).toMatch(/\.agent-surface\s*\{[^}]*position:\s*relative;[^}]*height:\s*100%;[^}]*grid-template-rows:\s*auto auto minmax\(0, 1fr\);/s)
+    expect(styles).toMatch(/\.composer-layer\s*\{[^}]*position:\s*sticky;[^}]*z-index:\s*80;[^}]*grid-row:\s*3;[^}]*bottom:\s*0;/s)
+    expect(styles).toMatch(/\.composer\s*\{[^}]*z-index:\s*81;[^}]*pointer-events:\s*auto;/s)
+    expect(styles).toMatch(/\.message-list\s*\{[^}]*z-index:\s*1;[^}]*grid-row:\s*3;[^}]*overflow-y:\s*auto;[^}]*padding:[^;]*--composer-clearance/s)
     expect(styles).not.toContain('.message-list { overflow: visible; }')
   })
 

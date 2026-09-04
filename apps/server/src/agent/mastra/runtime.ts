@@ -236,7 +236,6 @@ export class MastraRuntime {
       mode: this.mode,
       workspace: {
         filesystem: 'agentfs',
-        database: this.workspaceFilesystem.databasePath,
         mountBackend: this.workspaceFilesystem.mountBackend,
         sandbox: 'nono',
         isolation: process.platform === 'darwin' ? 'seatbelt' : process.platform === 'linux' ? 'landlock' : 'unsupported',

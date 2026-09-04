@@ -128,6 +128,7 @@ function Chat({ session, status, initial, input, setInput, historyError, history
   const [attachments, setAttachments] = useState<WorkspaceLibraryFile[]>([])
   const attachmentRef = useRef<WorkspaceLibraryFile[]>([])
   const messageListRef = useRef<HTMLDivElement>(null)
+  const composerLayerRef = useRef<HTMLDivElement>(null)
   const followLatestRef = useRef(true)
   const transport = useMemo(() => new DefaultChatTransport<UIMessage>({
     api: '/api/agent/chat',
@@ -152,6 +153,25 @@ function Chat({ session, status, initial, input, setInput, historyError, history
     })
     return () => window.cancelAnimationFrame(frame)
   }, [messages, working, error, historyLoading])
+
+  useEffect(() => {
+    const layer = composerLayerRef.current
+    if (!layer) return
+    const surface = layer.parentElement
+    if (!surface) return
+
+    const updateClearance = () => {
+      surface.style.setProperty('--composer-clearance', `${Math.ceil(layer.getBoundingClientRect().height)}px`)
+    }
+    updateClearance()
+
+    const observer = new ResizeObserver(updateClearance)
+    observer.observe(layer)
+    return () => {
+      observer.disconnect()
+      surface.style.removeProperty('--composer-clearance')
+    }
+  }, [])
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -183,17 +203,19 @@ function Chat({ session, status, initial, input, setInput, historyError, history
       {working && <div className="agent-thinking"><span /><span /><span /> Papyrus is working</div>}
       {error && <Alert className="error">{error.message}</Alert>}
     </div>
-    <Composer
-      input={input}
-      setInput={setInput}
-      attachments={attachments}
-      setAttachments={setAttachments}
-      disabled={!status.agentReady}
-      working={working}
-      onStop={() => void stop()}
-      onSubmit={(event) => void submit(event)}
-      workspace={status.workspace}
-    />
+    <div ref={composerLayerRef} className="composer-layer">
+      <Composer
+        input={input}
+        setInput={setInput}
+        attachments={attachments}
+        setAttachments={setAttachments}
+        disabled={!status.agentReady}
+        working={working}
+        onStop={() => void stop()}
+        onSubmit={(event) => void submit(event)}
+        workspace={status.workspace}
+      />
+    </div>
   </div>
 }
 

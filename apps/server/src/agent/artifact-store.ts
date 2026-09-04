@@ -93,6 +93,17 @@ export class ArtifactStore {
     }, previewForGenerated(input.format, content, input.sheets))
   }
 
+  importBytes(name: string, bytes: Buffer, options: { skill?: string; skillVersion?: string; sessionId?: string } = {}): ArtifactRecord {
+    if (bytes.byteLength > 100 * 1024 * 1024) throw new Error('Artifact exceeds the 100 MiB publication limit')
+    const safe = normalizedName(name, extname(name) || '.bin')
+    return this.persist(safe, bytes, {
+      producer: 'workspace',
+      ...(options.skill ? { skill: options.skill } : {}),
+      ...(options.skillVersion ? { skillVersion: options.skillVersion } : {}),
+      ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+    }, previewForPath(safe, bytes))
+  }
+
   importWorkspaceFile(path: string, workspaceRoot: string, options: { name?: string; skill?: string; skillVersion?: string; sessionId?: string } = {}): ArtifactRecord {
     const root = realpathSync(workspaceRoot)
     const target = realpathSync(resolve(root, path))

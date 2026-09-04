@@ -687,6 +687,13 @@ export interface AgentLink {
   publicPath: string
   workflowId?: string
   scheduleId?: string
+  /** Mastra thread/resource target for a session-scoped Link. Required for webhook Links. */
+  threadId?: string
+  resourceId?: string
+  /** Optional immutable webhook identity mark, captured with the approved Link snapshot. */
+  logoPath?: string
+  logoMediaType?: string
+  logoText?: string
   createdByOid: string
   createdAt: string
   updatedAt: string

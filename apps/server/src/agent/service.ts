@@ -149,7 +149,7 @@ export class AgentService {
 
   catalog(principal: PortalPrincipal) {
     this.requirePortalAccess(principal)
-    return INTEGRATION_CATALOG.filter((entry) => entry.supportedProfiles.includes(this.config.profile))
+    return INTEGRATION_CATALOG.filter((entry) => entry.id !== 'papyrus-links' && entry.supportedProfiles.includes(this.config.profile))
   }
 
   integrations(principal: PortalPrincipal): IntegrationConfiguration[] {

@@ -129,6 +129,8 @@ export class PapyrusAgentFSFilesystem extends MastraFilesystem {
     this.agent = await AgentFS.open({ id: this.agentId, path: this.databasePath })
     await this.mkdir('/Library', { recursive: true })
     await this.mkdir('/Library/Uploads', { recursive: true })
+    await this.mkdir('/Library/Generated', { recursive: true })
+    await this.mkdir('/Workspace', { recursive: true })
   }
 
   async destroy(): Promise<void> {

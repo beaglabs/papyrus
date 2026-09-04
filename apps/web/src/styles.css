@@ -289,7 +289,7 @@ p { color: var(--muted); line-height: 1.55; }
    formatting even though the attachment/Library JSX is present. */
 .attention-icon { flex: 0 0 18px; width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%; background: var(--main); color: #111; font: 900 12px ui-monospace, monospace; }
 .agent-main { height: 100%; padding-bottom: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
-.agent-surface { --composer-clearance: 116px; position: relative; min-height: 0; height: 100%; display: grid; grid-template-rows: auto auto minmax(0, 1fr); max-width: 980px; width: 100%; margin: 0 auto; overflow: hidden; }
+.agent-surface { --composer-clearance: 116px; position: relative; align-self: stretch; min-width: 0; min-height: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr); max-width: 980px; width: 100%; margin: 0 auto; overflow: hidden; }
 .agent-session-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-bottom: 14px; border-bottom: 1px solid #cfc9bc; }
 .agent-session-head h2 { margin: 0; }
 .agent-badges { display: flex; gap: 7px; }
@@ -344,8 +344,8 @@ p { color: var(--muted); line-height: 1.55; }
 .agent-thinking { display: flex; align-items: center; gap: 5px; padding: 18px 0 18px 98px; color: var(--muted); font: 11px ui-monospace, monospace; }
 .agent-thinking span { width: 6px; height: 6px; border-radius: 50%; background: var(--main); animation: pulse 1s infinite alternate; }
 
-.composer-layer { position: sticky; z-index: 80; grid-row: 3; align-self: end; bottom: 0; min-width: 0; pointer-events: none; }
-.composer { position: relative; z-index: 81; min-height: 0; margin: 0 4px; padding: 10px 0 max(14px, env(safe-area-inset-bottom)); overflow: visible; background: var(--background); pointer-events: auto; isolation: isolate; }
+.composer-layer { position: absolute; z-index: 80; left: 0; right: 0; bottom: 0; width: 100%; min-width: 0; pointer-events: none; }
+.composer { position: relative; z-index: 81; width: 100%; min-width: 0; min-height: 0; margin: 0; padding: 10px 4px max(14px, env(safe-area-inset-bottom)); overflow: visible; background: var(--background); pointer-events: auto; isolation: isolate; }
 .composer::before { content: ""; position: absolute; z-index: -1; inset: -18px -6px 0; background: linear-gradient(to bottom, transparent, var(--background) 18px, var(--background)); pointer-events: none; }
 .composer.drag-active .composer-prompt-input { border-color: var(--main); box-shadow: 4px 4px 0 var(--main); }
 .composer-input-row { position: relative; display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 10px; }
@@ -354,12 +354,12 @@ p { color: var(--muted); line-height: 1.55; }
 .composer-send-circle { width: 46px !important; height: 46px !important; min-width: 46px !important; padding: 0 !important; border-radius: 50% !important; font-size: 20px; line-height: 1; box-shadow: 3px 3px 0 #111 !important; }
 .composer-send-circle:hover:not(:disabled) { transform: translate(2px, 2px) !important; box-shadow: 1px 1px 0 #111 !important; }
 .composer-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 0 0; border: 0; }
-.composer-tools { min-width: 0; display: flex; align-items: center; gap: 7px; }
+.composer-tools { width: 100%; min-width: 0; display: flex; align-items: center; gap: 7px; overflow: hidden; }
 .composer-file-input { display: none; }
 .composer-tool-button { height: 30px; display: inline-flex; align-items: center; gap: 5px; flex: none; padding: 0 8px !important; border: 1px solid #aaa298 !important; border-radius: 6px; background: #f4efe5; box-shadow: none !important; color: #27241f; font: 750 9px/1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; letter-spacing: .015em; cursor: pointer; }
 .composer-tool-button:hover:not(:disabled) { border-color: #111 !important; background: var(--blue); transform: none !important; box-shadow: none !important; }
 .composer-tool-icon { width: 16px; height: 16px; display: grid; place-items: center; font: 900 13px/1 ui-monospace, monospace; }
-.composer-workspace-state { min-width: 0; max-width: min(420px, 42vw); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: 2px; color: var(--muted); font: 700 8px ui-monospace, monospace; text-transform: uppercase; letter-spacing: .035em; }
+.composer-workspace-state { flex: 1 1 auto; min-width: 0; max-width: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: 2px; color: var(--muted); font: 700 8px ui-monospace, monospace; text-transform: uppercase; letter-spacing: .035em; }
 .composer-workspace-state .status-dot { display: inline-block; width: 7px; height: 7px; margin-right: 5px; border: 1px solid #111; border-radius: 50%; background: var(--green); vertical-align: -1px; }
 .composer-attachments { display: flex; gap: 7px; overflow-x: auto; padding: 0 0 9px; scrollbar-width: thin; }
 .composer-attachment-chip { flex: none; max-width: 280px; display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 7px; padding: 7px 8px; border: 1px solid #aaa298; border-radius: 7px; background: #eee9df; }

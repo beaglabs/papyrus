@@ -198,6 +198,12 @@ describe('sandbox policy', () => {
   })
 
   it('refuses to enable a selected sandbox when its binary is unavailable', () => {
+    const defaultBwrap = resolveSandboxPolicy({
+      dataDir: '/srv/papyrus', platform: 'linux', canRun: CAN_RUN_NONE,
+    })
+    expect(defaultBwrap.enabled).toBe(false)
+    expect(defaultBwrap.reason).toMatch(/Bubblewrap \(bwrap\).*refusing to run code unisolated/)
+
     const bwrap = resolveSandboxPolicy({
       dataDir: '/srv/papyrus', platform: 'linux', isolation: 'bwrap', canRun: CAN_RUN_NONE,
     })

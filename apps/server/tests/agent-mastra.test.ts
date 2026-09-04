@@ -369,10 +369,13 @@ describe('mastra runtime without the harness installed', () => {
     expect(subject.signals.byInvestigation(investigation.id)[0]?.type).toBe('investigation_created')
   })
 
-  it('resolves a sandbox policy at startup', async () => {
+  it('reports the local AgentFS + nono workspace boundary', async () => {
     const subject = await runtime()
-    expect(subject.sandboxPolicy).toBeDefined()
-    expect(subject.sandboxPolicy?.allowNetwork).toBe(false)
+    expect(subject.status.workspace).toMatchObject({
+      filesystem: 'agentfs',
+      sandbox: 'nono',
+      network: 'blocked',
+    })
   })
 })
 

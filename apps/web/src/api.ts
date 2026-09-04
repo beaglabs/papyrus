@@ -40,9 +40,9 @@ export interface AgentStatus {
   model: string | null
   mode: 'starlings' | 'centralized'
   workspace?: {
-    filesystem: 'agentfs'
-    mountBackend: 'fuse' | 'nfs'
-    sandbox: 'nono'
+    filesystem: 'agentfs-sdk'
+    storage: 'local-sqlite'
+    sandbox: 'nono-ts'
     isolation: 'landlock' | 'seatbelt' | 'unsupported'
     network: 'blocked'
   }

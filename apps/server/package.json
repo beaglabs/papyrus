@@ -23,7 +23,7 @@
     "libsql": "^0.5.29",
     "zod": "4.5.4",
     "agentfs-sdk": "0.6.4",
-    "nono-ts": "0.4.2",
+    "nono-ts": "0.3.0",
     "@enclave-vm/core": "2.15.2"
   },
   "devDependencies": {

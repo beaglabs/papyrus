@@ -11,11 +11,13 @@ Agent / Starlings
       |
       +-- listSkills / loadSkill
       |
-      +-- createArtifact --------> durable artifact store
+      +-- createArtifact --------> durable artifact metadata/card
+      |                              + /Library/Generated/<name> in AgentFS
       |
-      +-- sandbox workspace
+      +-- sandbox / AgentFS workspace
               |
-              +-- publishArtifact -> durable artifact store
+              +-- publishArtifact -> durable artifact metadata/card
+                                      + canonical /Library/Generated mirror
 ```
 
 External side effects remain behind the action ledger:
@@ -44,7 +46,7 @@ A skill teaches a procedure. It cannot add tools, network access, or external au
 
 ### `createArtifact`
 
-Creates a durable artifact directly for deterministic document formats:
+Creates a durable artifact directly for deterministic document formats. The returned object includes a canonical `workspacePath`; the exact artifact bytes are SHA-256 verified and mirrored into AgentFS under `/Library/Generated` so Library, attachments, and Links all see the same content:
 
 - PDF
 - DOCX
@@ -58,7 +60,7 @@ The tool returns a typed `kind: "artifact"` object. Agent Chat renders that obje
 
 ### `publishArtifact`
 
-Publishes a file that already exists inside the Mastra sandbox workspace. The implementation resolves real paths and rejects paths outside the configured sandbox root. This path is intended for richer local toolchains such as Remotion, advanced Office generation, or other customer-installed renderers.
+Publishes a file that already exists inside the Mastra/AgentFS workspace. The durable artifact card remains available for preview/download, while Papyrus also preserves a SHA-256-verified canonical copy under `/Library/Generated`. This path is intended for richer local toolchains such as Remotion, advanced Office generation, or other customer-installed renderers.
 
 ### `listArtifacts`
 
@@ -114,3 +116,20 @@ The existing Exchange executor can attach durable artifacts after approval:
 ```
 
 The executor resolves artifact bytes only after the proposal has crossed the normal approval and leased-worker boundary. Direct Graph sends are capped to a small aggregate attachment size; larger publication should use a customer upload/publishing workflow.
+
+## AgentFS and Links
+
+The durable artifact store is presentation/provenance metadata, not a second workspace authority. Link publication always snapshots from AgentFS.
+
+`createArtifact` and `publishArtifact` therefore return `workspacePath`. `prepareLink` accepts either that path or the durable `artifactId`. For artifacts created by an older runtime, a missing `/Library/Generated/<name>` reference is repaired from the durable artifact bytes only after their recorded SHA-256 is revalidated.
+
+This means the supported path is:
+
+```text
+artifact generation
+      -> durable artifact record
+      -> SHA-256 verified AgentFS /Library/Generated mirror
+      -> prepareLink snapshot
+      -> human approval
+      -> Link publication
+```

@@ -17,6 +17,8 @@ const evidencePaths = [
   'apps/server/src/agent/action-worker.ts',
   'apps/server/src/agent/catalog.ts',
   'apps/server/src/agent/link-store.ts',
+  'apps/server/src/agent/link-http.ts',
+  'apps/server/src/agent/link-preview.ts',
   'apps/server/src/agent/executors/link-publisher-executor.ts',
   'apps/server/src/agent/mastra/workspace-agentfs.ts',
   'apps/server/src/agent/mastra/workspace-nono.ts',

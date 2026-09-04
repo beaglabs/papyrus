@@ -379,7 +379,7 @@ p { color: var(--muted); line-height: 1.55; }
   .with-handling-banner { height: 100vh; overflow: hidden; }
   .nb-sidebar-wrapper { display: block; }
   .nb-sidebar[data-mobile="true"],
-  .nb-sidebar[data-mobile="true"][data-collapsible="icon"] { position: fixed; z-index: 90; top: 32px; bottom: 0; left: 0; width: min(86vw, 320px); min-width: min(86vw, 320px); height: auto; transform: translateX(-105%); box-shadow: 6px 0 0 #111; }
+  .nb-sidebar[data-mobile="true"][data-collapsible="icon"] { position: fixed; z-index: 90; top: 32px; bottom: 0; left: 0; width: min(86vw, var(--sidebar-width-mobile)); min-width: min(86vw, var(--sidebar-width-mobile)); height: auto; transform: translateX(-105%); box-shadow: 6px 0 0 #111; }
   .nb-sidebar[data-mobile="true"][data-open="true"] { transform: translateX(0); }
   .nb-sidebar[data-mobile="true"] .sidebar-copy,
   .nb-sidebar[data-mobile="true"] .classification,

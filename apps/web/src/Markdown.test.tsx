@@ -30,10 +30,11 @@ The **daemon** validates this before activation.
     expect(html).not.toContain('&lt;br&gt;')
   })
 
-  it('styles task identifiers with emphasis and inline code', () => {
-    const html = renderToStaticMarkup(<MarkdownMessage>{'**Task ID:** `c2c88f39-b1e4-4694-865d-3867719264ef`'}</MarkdownMessage>)
+  it('styles task identifiers through the remark AST', () => {
+    const html = renderToStaticMarkup(<MarkdownMessage>{'**Task ID:** c2c88f39-b1e4-4694-865d-3867719264ef'}</MarkdownMessage>)
+    expect(html).toContain('class="task-id-line"')
     expect(html).toContain('<strong>Task ID:</strong>')
-    expect(html).toContain('<code class="inline-code">c2c88f39-b1e4-4694-865d-3867719264ef</code>')
+    expect(html).toContain('c2c88f39-b1e4-4694-865d-3867719264ef')
     expect(html).not.toContain('**Task ID:**')
   })
 

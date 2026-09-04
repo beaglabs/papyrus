@@ -80,7 +80,9 @@ export class ArtifactStore {
   }
 
   create(input: CreateArtifactInput): ArtifactRecord {
-    const name = normalizedName(input.name, FORMAT_EXT[input.format])
+    const extension = FORMAT_EXT[input.format]
+    if (!extension) throw new Error('Unsupported artifact format')
+    const name = normalizedGeneratedName(input.name, extension)
     const content = (input.content ?? '').slice(0, 1_000_000)
     const bytes = this.generate(input.format, content, input.title ?? basename(name, extname(name)), input.sheets)
     return this.persist(name, bytes, {
@@ -167,6 +169,13 @@ export class ArtifactStore {
       default: return Buffer.from(content)
     }
   }
+}
+
+function normalizedGeneratedName(value: string, extension: string): string {
+  const raw = basename(value.trim() || `artifact${extension}`).replace(/[\u0000-\u001f<>:"/\\|?*]/g, '-').slice(0, 180)
+  const current = extname(raw)
+  const stem = current ? basename(raw, current) : raw
+  return `${stem || 'artifact'}${extension}`
 }
 
 function normalizedName(value: string, fallbackExtension: string): string {

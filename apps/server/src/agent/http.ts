@@ -7,7 +7,7 @@ import type { AgentConfig } from './config.js'
 import { EntraAuthError, EntraAuthService, hasAppRole } from './entra-auth.js'
 import { AgentService, AgentServiceError } from './service.js'
 import { MastraRuntime, MastraRuntimeError } from './mastra/runtime.js'
-import { fetchUrlPreviewImage } from './mastra/fetch-preview.js'
+import { fetchUrlPreviewImage, UnsafeFetchTargetError } from './mastra/fetch-preview.js'
 import { ModelProfileError } from './model-store.js'
 
 class HttpError extends Error {
@@ -478,6 +478,8 @@ export function createAgentServer(config: AgentConfig, service: AgentService, au
           ? new HttpError(400, cause.code, cause.message)
         : cause instanceof EntraAuthError
           ? new HttpError(401, cause.code, cause.message)
+        : cause instanceof UnsafeFetchTargetError
+          ? new HttpError(400, 'UNSAFE_FETCH_TARGET', cause.message)
           : new HttpError(500, 'INTERNAL_ERROR', cause instanceof Error ? cause.message : 'Unexpected server failure')
       return json(response, failure.status, { error: failure.message, code: failure.code, requestId })
     }

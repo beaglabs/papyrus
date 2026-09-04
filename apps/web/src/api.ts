@@ -195,7 +195,7 @@ export function workspaceFileContentUrl(path: string, download = false): string 
   return `/api/workspace/files/content?path=${encodeURIComponent(path)}${download ? '&download=1' : ''}`
 }
 
-export async function createSchedule(input: { name: string; cron: string; prompt: string; timezone?: string; threadId?: string }): Promise<AgentSchedule> {
+export async function createSchedule(input: { name: string; cron: string; prompt: string; timezone?: string; threadId: string }): Promise<AgentSchedule> {
   return api('/api/schedules', { method: 'POST', body: JSON.stringify(input) })
 }
 

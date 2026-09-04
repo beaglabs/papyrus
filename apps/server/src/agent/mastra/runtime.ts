@@ -377,13 +377,13 @@ export class MastraRuntime {
     return schedules ? schedules.list({ agentId: AGENT_ID, resourceId: this.resourceId() }) : []
   }
 
-  async createSchedule(input: { name: string; cron: string; prompt: string; timezone?: string; threadId?: string }) {
+  async createSchedule(input: { name: string; cron: string; prompt: string; timezone?: string; threadId: string }) {
     if (!this.mastra?.agent) throw new MastraRuntimeError(503, 'AGENT_MODEL_NOT_CONFIGURED', 'The agent must be configured before creating schedules')
-    if (input.threadId) await this.assertOwnedThread(input.threadId)
+    await this.assertOwnedThread(input.threadId)
     const schedules = (this.mastra?.instance as { schedules: { create: (value: unknown) => Promise<unknown> } }).schedules
     return schedules.create({
       agentId: AGENT_ID, name: input.name, cron: input.cron, prompt: input.prompt,
-      resourceId: this.resourceId(), ...(input.threadId ? { threadId: input.threadId } : {}),
+      resourceId: this.resourceId(), threadId: input.threadId,
       ...(input.timezone ? { timezone: input.timezone } : {}),
       tagName: 'schedule', ifActive: { behavior: 'deliver' }, metadata: { createdBy: 'papyrus-portal' },
     })

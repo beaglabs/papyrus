@@ -1,10 +1,18 @@
-import { Enclave } from '@enclave-vm/core'
+import { spawn } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
+import { existsSync, mkdirSync, rmSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join, resolve } from 'node:path'
+import { createInterface } from 'node:readline'
 import type { PapyrusAgentFSFilesystem } from './workspace-agentfs.js'
 import { WorkspaceExecutorRegistry, assertWorkspacePath } from './workspace-executors.js'
 
 const MAX_PROGRAM_BYTES = 128 * 1024
 const MAX_TEXT_READ_BYTES = 256 * 1024
 const MAX_TEXT_WRITE_BYTES = 512 * 1024
+const MAX_PROTOCOL_BYTES = 2 * 1024 * 1024
+const WORKER_JS_PATH = fileURLToPath(new URL('./workspace-enclave-worker.js', import.meta.url))
+const WORKER_TS_PATH = fileURLToPath(new URL('./workspace-enclave-worker.ts', import.meta.url))
 
 export interface AgentScriptResult {
   kind: 'agentscript_result'
@@ -23,63 +31,139 @@ export interface AgentScriptResult {
   }
 }
 
+interface WorkerToolCall {
+  type: 'tool_call'
+  id: string
+  name: string
+  args: Record<string, unknown>
+}
+interface WorkerResult { type: 'result'; result: AgentScriptResult }
+interface WorkerError { type: 'worker_error'; error: string }
+type WorkerMessage = WorkerToolCall | WorkerResult | WorkerError
+
+/**
+ * Enclave is intentionally hosted in a child process that is itself wrapped
+ * by nono-ts. A future Enclave regression therefore reaches only the isolated
+ * worker, not the Papyrus daemon, AgentFS database, credentials, or network.
+ */
 export class PapyrusEnclaveRuntime {
+  private readonly dataDir: string
+
   constructor(
     private readonly filesystem: PapyrusAgentFSFilesystem,
     private readonly executors: WorkspaceExecutorRegistry,
-  ) {}
+    dataDir: string,
+  ) {
+    this.dataDir = resolve(dataDir)
+  }
 
   async run(code: string): Promise<AgentScriptResult> {
     if (typeof code !== 'string' || !code.trim()) throw new Error('AgentScript code is required')
     if (Buffer.byteLength(code) > MAX_PROGRAM_BYTES) throw new Error('AgentScript program exceeds 128 KiB')
 
-    const enclave = new Enclave({
-      securityLevel: 'STRICT',
-      preset: 'agentscript',
-      timeout: 15_000,
-      memoryLimit: 16 * 1024 * 1024,
-      maxToolCalls: 32,
-      maxIterations: 2_500,
-      allowBuiltins: false,
-      sanitizeStackTraces: true,
-      sidecar: {
-        enabled: true,
-        extractionThreshold: 16 * 1024,
-        maxTotalSize: 4 * 1024 * 1024,
-        maxReferenceSize: 2 * 1024 * 1024,
-        maxResolvedSize: 2 * 1024 * 1024,
-        maxReferenceCount: 64,
-        allowComposites: false,
-      },
-      scoringGate: {
-        scorer: 'rule-based',
-        blockThreshold: 70,
-        warnThreshold: 40,
-      },
-      toolHandler: async (name, args) => this.callTool(name, args),
-    })
+    const runRoot = join(this.dataDir, '.enclave-runs', randomUUID())
+    mkdirSync(runRoot, { recursive: true, mode: 0o700 })
 
     try {
-      const result = await enclave.run(code)
-      return {
-        kind: 'agentscript_result',
-        success: result.success,
-        ...(result.success ? { value: result.value } : {}),
-        ...(result.error ? { error: {
-          name: result.error.name,
-          message: result.error.message,
-          ...(result.error.code ? { code: result.error.code } : {}),
-        } } : {}),
-        stats: {
-          duration: result.stats.duration,
-          toolCallCount: result.stats.toolCallCount,
-          iterationCount: result.stats.iterationCount,
-          ...(result.stats.memoryUsage !== undefined ? { memoryUsage: result.stats.memoryUsage } : {}),
-        },
-      }
+      return await this.executeWorker(code, runRoot)
     } finally {
-      enclave.dispose()
+      rmSync(runRoot, { recursive: true, force: true })
     }
+  }
+
+  private executeWorker(code: string, runRoot: string): Promise<AgentScriptResult> {
+    return new Promise((resolvePromise, reject) => {
+      const child = spawn(process.execPath, workerArguments(), {
+        cwd: dirname(workerSourcePath()),
+        env: {
+          PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin',
+          LANG: process.env.LANG ?? 'C.UTF-8',
+          HOME: runRoot,
+          TMPDIR: runRoot,
+          PAPYRUS_ENCLAVE_TEMP: runRoot,
+        },
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
+      })
+
+      const output = createInterface({ input: child.stdout, crlfDelay: Infinity })
+      let result: AgentScriptResult | undefined
+      let protocolBytes = 0
+      let stderr = ''
+      let settled = false
+
+      const timer = setTimeout(() => {
+        stderr += '\n[papyrus-enclave] Worker exceeded 20 second parent timeout'
+        child.kill('SIGKILL')
+      }, 20_000)
+      timer.unref?.()
+
+      child.stderr.setEncoding('utf8')
+      child.stderr.on('data', (value: string) => {
+        if (Buffer.byteLength(stderr) < 64 * 1024) stderr += value.slice(0, 64 * 1024)
+      })
+
+      output.on('line', (line) => {
+        protocolBytes += Buffer.byteLength(line)
+        if (protocolBytes > MAX_PROTOCOL_BYTES) {
+          child.kill('SIGKILL')
+          return
+        }
+
+        let packet: WorkerMessage
+        try {
+          packet = JSON.parse(line) as WorkerMessage
+        } catch {
+          stderr += '\n[papyrus-enclave] Worker emitted malformed protocol data'
+          child.kill('SIGKILL')
+          return
+        }
+
+        if (packet.type === 'result') {
+          result = packet.result
+          return
+        }
+        if (packet.type === 'worker_error') {
+          stderr += `\n[papyrus-enclave] ${packet.error}`
+          return
+        }
+        if (packet.type === 'tool_call') {
+          void this.handleToolCall(packet).then(
+            (value) => writePacket(child, { type: 'tool_result', id: packet.id, success: true, value }),
+            (error) => writePacket(child, {
+              type: 'tool_result',
+              id: packet.id,
+              success: false,
+              error: error instanceof Error ? error.message.slice(0, 2000) : String(error).slice(0, 2000),
+            }),
+          )
+        }
+      })
+
+      child.once('error', (error) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        reject(error)
+      })
+
+      child.once('close', (code, signal) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        output.close()
+        if (result) return resolvePromise(result)
+        reject(new Error(
+          `Enclave worker exited without a result (code ${code ?? 'none'}${signal ? `, signal ${signal}` : ''})${stderr.trim() ? `: ${stderr.trim().slice(0, 4000)}` : ''}`,
+        ))
+      })
+
+      writePacket(child, { type: 'run', code })
+    })
+  }
+
+  private async handleToolCall(packet: WorkerToolCall): Promise<unknown> {
+    return this.callTool(packet.name, isRecord(packet.args) ? packet.args : {})
   }
 
   private async callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
@@ -139,10 +223,7 @@ export class PapyrusEnclaveRuntime {
   private async list(args: Record<string, unknown>) {
     const path = typeof args['path'] === 'string' ? assertReadablePath(args['path']) : '/Workspace'
     const recursive = args['recursive'] === true
-    return this.filesystem.readdir(path, {
-      recursive,
-      maxDepth: recursive ? 4 : 1,
-    })
+    return this.filesystem.readdir(path, { recursive, maxDepth: recursive ? 4 : 1 })
   }
 
   private async readText(args: Record<string, unknown>): Promise<{ path: string; text: string }> {
@@ -164,16 +245,32 @@ export class PapyrusEnclaveRuntime {
   }
 }
 
+function workerArguments(): string[] {
+  if (existsSync(WORKER_JS_PATH)) return [WORKER_JS_PATH]
+  if (existsSync(WORKER_TS_PATH)) return ['--import', import.meta.resolve('tsx'), WORKER_TS_PATH]
+  throw new Error('Papyrus Enclave worker is missing from this build')
+}
+
+function workerSourcePath(): string {
+  if (existsSync(WORKER_JS_PATH)) return WORKER_JS_PATH
+  if (existsSync(WORKER_TS_PATH)) return WORKER_TS_PATH
+  throw new Error('Papyrus Enclave worker is missing from this build')
+}
+
+function writePacket(child: ReturnType<typeof spawn>, value: unknown): void {
+  if (child.stdin.destroyed) return
+  child.stdin.write(JSON.stringify(value) + '\n')
+}
+
 function readPath(args: Record<string, unknown>): string {
   return assertReadablePath(requiredString(args['path'], 'path'))
 }
 
 function assertReadablePath(value: string): string {
   const path = assertWorkspacePath(value)
-  if (
-    path !== '/Workspace' && !path.startsWith('/Workspace/') &&
-    path !== '/Library' && !path.startsWith('/Library/')
-  ) throw new Error('AgentScript may only read /Workspace and /Library')
+  if (path !== '/Workspace' && !path.startsWith('/Workspace/') && path !== '/Library' && !path.startsWith('/Library/')) {
+    throw new Error('AgentScript may only read /Workspace and /Library')
+  }
   return path
 }
 

@@ -250,7 +250,7 @@ describe('sandbox policy', () => {
     })
   })
 
-  it('loads the sandbox backend from PAPYRUS_SANDBOX_RUNTIME and rejects unknown values', () => {
+  it('retains the legacy LocalSandbox selector while defaulting the active workspace to AgentFS + nono', () => {
     const env = {
       PAPYRUS_MODE: 'local',
       PAPYRUS_PORTAL_SECRET: 'development-portal-secret',
@@ -259,6 +259,11 @@ describe('sandbox policy', () => {
       }),
     }
 
+    const defaults = loadAgentConfig(env)
+    expect(defaults.agentfsBinary).toBe('agentfs')
+    expect(defaults.agentfsId).toBe('papyrus-workspace')
+    expect(defaults.agentfsDatabasePath).toMatch(/\.agentfs[/\\]papyrus-workspace\.db$/)
+    expect(defaults.nonoBinary).toBe('nono')
     expect(loadAgentConfig({ ...env, PAPYRUS_SANDBOX_RUNTIME: 'bwrap' }).sandboxRuntime).toBe('bwrap')
     expect(loadAgentConfig({ ...env, PAPYRUS_SANDBOX_RUNTIME: 'seatbelt' }).sandboxRuntime).toBe('seatbelt')
     expect(() => loadAgentConfig({ ...env, PAPYRUS_SANDBOX_RUNTIME: 'docker' })).toThrow(

@@ -100,7 +100,7 @@ export class ArtifactStore {
     const stats = statSync(target)
     if (!stats.isFile()) throw new Error('Artifact path must identify a regular file')
     if (stats.size > 100 * 1024 * 1024) throw new Error('Artifact exceeds the 100 MiB workspace publication limit')
-    const name = normalizedName(options.name ?? basename(target), extname(target) || '.bin')
+    const name = normalizedImportedName(options.name, basename(target))
     const bytes = readFileSync(target)
     return this.persist(name, bytes, {
       producer: 'workspace',
@@ -178,10 +178,12 @@ function normalizedGeneratedName(value: string, extension: string): string {
   return `${stem || 'artifact'}${extension}`
 }
 
-function normalizedName(value: string, fallbackExtension: string): string {
-  const raw = basename(value.trim() || `artifact${fallbackExtension}`).replace(/[\u0000-\u001f<>:"/\\|?*]/g, '-').slice(0, 180)
-  const ext = extname(raw)
-  return ext ? raw : `${raw}${fallbackExtension}`
+function normalizedImportedName(requested: string | undefined, sourceName: string): string {
+  const sourceExtension = extname(sourceName).toLowerCase() || '.bin'
+  const raw = basename((requested ?? sourceName).trim() || sourceName).replace(/[\u0000-\u001f<>:"/\\|?*]/g, '-').slice(0, 180)
+  const current = extname(raw)
+  const stem = current ? basename(raw, current) : raw
+  return `${stem || 'artifact'}${sourceExtension}`
 }
 
 function mediaType(name: string): string {
@@ -195,7 +197,7 @@ function previewForGenerated(format: ArtifactFormat, content: string, sheets?: A
     kind: 'spreadsheet',
     sheets: (sheets?.length ? sheets : [{ name: 'Sheet1', rows: tabularContent(content) }]).slice(0, 8).map((sheet, index) => ({
       name: safeSheetName(sheet.name ?? `Sheet${index + 1}`),
-      rows: sheet.rows.slice(0, 20).map((row) => row.slice(0, 12)),
+      rows: sheet.rows.slice(0, 20).map((row) => row.slice(0, 12).map(previewCell)),
     })),
   }
   return { kind: 'text', text: content.slice(0, 2400) }
@@ -207,7 +209,8 @@ function previewForPath(path: string, bytes: Buffer): ArtifactPreview {
   if (ext === '.docx') return { kind: 'document' }
   if (ext === '.xlsx' || ext === '.csv') return { kind: 'spreadsheet' }
   if (ext === '.mp4' || ext === '.webm') return { kind: 'video' }
-  if (['.png', '.jpg', '.jpeg', '.gif', '.svg'].includes(ext)) return { kind: 'image' }
+  if (['.png', '.jpg', '.jpeg', '.gif'].includes(ext)) return { kind: 'image' }
+  if (ext === '.svg') return { kind: 'generic' }
   if (['.txt', '.md', '.json', '.html'].includes(ext)) return { kind: 'text', text: bytes.toString('utf8', 0, Math.min(bytes.length, 2400)) }
   return { kind: 'generic' }
 }
@@ -221,4 +224,8 @@ function tabularContent(content: string): Array<Array<string | number | boolean 
 
 function safeSheetName(value: string): string {
   return value.replace(/[\\/*?:\[\]]/g, '-').slice(0, 31) || 'Sheet'
+}
+
+function previewCell(value: string | number | boolean | null): string | number | boolean | null {
+  return typeof value === 'string' && value.length > 500 ? value.slice(0, 497) + '…' : value
 }

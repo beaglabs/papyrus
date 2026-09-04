@@ -104,7 +104,8 @@ export class NonoWorkspaceSandbox extends MastraSandbox {
   }
 
   async destroy(): Promise<void> {
-    await this.stop()
+    const manager = this.processes as NonoProcessManager | undefined
+    if (manager) await manager.killTracked()
   }
 
   getInstructions(): string {

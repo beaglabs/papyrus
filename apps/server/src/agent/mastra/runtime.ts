@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import type { AgentSignal } from '@papyrus/contracts'
+import type { AgentSignal, LinkType } from '@papyrus/contracts'
 import type { ActionStore } from '../action-store.js'
 import type { AgentConfig } from '../config.js'
 import type { AgentService } from '../service.js'
@@ -11,7 +11,8 @@ import {
   type InvestigationToolContext,
   type InvestigationToolName,
 } from './tools.js'
-import { INTEGRATION_CATALOG } from '../catalog.js'
+import { INTEGRATION_CATALOG, LINK_PUBLISHER_CATALOG_ID } from '../catalog.js'
+import { LinkStore } from '../link-store.js'
 import { connectionRequest, modelGatewayRequest, pluginToolId } from './plugin-tools.js'
 import { fetchUrlPreview } from './fetch-preview.js'
 import { signalIntakeWorkflow, WORKFLOW_CATALOG } from './workflows.js'
@@ -98,6 +99,7 @@ export class MastraRuntime {
   readonly workspaceSandbox: NonoWorkspaceSandbox
   readonly workspaceExecutors: WorkspaceExecutorRegistry
   readonly enclave: PapyrusEnclaveRuntime
+  readonly links: LinkStore
   private mastra: MastraHandle | undefined
   private started = false
   private timer: ReturnType<typeof setInterval> | undefined
@@ -125,6 +127,7 @@ export class MastraRuntime {
     })
     this.workspaceExecutors = new WorkspaceExecutorRegistry(this.workspaceSandbox)
     this.enclave = new PapyrusEnclaveRuntime(this.workspaceFilesystem, this.workspaceExecutors, config.dataDir)
+    this.links = new LinkStore(actionStore.db, this.workspaceFilesystem)
     this.tools = { actionStore, terrain }
   }
 
@@ -136,6 +139,7 @@ export class MastraRuntime {
     if (this.started) return
     this.started = true
     await this.workspaceFilesystem.init()
+    this.links.ensureExecutorIntegration()
 
     const core = await tryImport('@mastra/core')
     const libsql = await tryImport('@mastra/libsql')
@@ -669,6 +673,7 @@ export class MastraRuntime {
         'Creating, editing, or returning a local file is a workspace capability, not an operational action. For PDF, DOCX, XLSX, text, JSON, CSV, or HTML deliverables, call listSkills/loadSkill as needed and then createArtifact. Never call listActionExecutors merely to create a file.',
         'The workspace filesystem is local AgentFS SDK storage backed by SQLite. Do not use or invent raw shell commands. For multi-step programmable local logic, use runAgentScript: it executes STRICT Enclave AgentScript with AST validation, resource limits, no Node built-ins, no direct filesystem or network, and only the explicitly brokered workspace/process tools. Real OS programs are available only through constrained tools such as runPythonScript, convertWithPandoc, convertWithLibreOffice, renderWithFfmpeg, and renderRemotion; those commands run in dedicated nono-ts workers with outbound network blocked and changes reconciled back into AgentFS. For richer files created by workspace commands, call publishArtifact after the file exists.',
         'Only external side effects use action executors. Before suggesting an operational action such as sending mail, changing a firewall, or publishing to an external system, list the active executors, then call suggestAction. A suggestion is only a UI artifact until the operator submits it to the ledger. When an approved Exchange action should send generated files, put their durable artifact ids in parameters.artifactIds; never inline binary data into chat.',
+        'Links expose AgentFS content outside the private workspace. When a Webpage, API, or Webhook would materially help the operator, ask whether they want to expose it as that specific Link type. Do not create a Link without that confirmation. First create the HTML/JSON/contract file under /Library/Generated using the normal sandboxed workspace tools, then call prepareLink. prepareLink snapshots the exact AgentFS bytes and returns the normal human-approval action suggestion; it never publishes directly.',
         'Skills teach procedures but never grant authority. Dynamically created skills remain inert drafts until a Papyrus.System.Owner approves them.',
         'You may inspect action proposals, but you cannot approve or execute them. Human Entra authority and the Papyrus action ledger are mandatory.',
       ].join(' '),
@@ -693,7 +698,7 @@ export class MastraRuntime {
         execute: async (inputData: Record<string, unknown>) => runInvestigationTool(name, this.tools, inputData),
       })
     }
-    for (const entry of INTEGRATION_CATALOG.filter((item) => item.supportedProfiles.includes(this.config.profile))) {
+    for (const entry of INTEGRATION_CATALOG.filter((item) => item.id !== LINK_PUBLISHER_CATALOG_ID && item.supportedProfiles.includes(this.config.profile))) {
       const id = pluginToolId(entry)
       registered[id] = createTool({
         id,
@@ -914,6 +919,50 @@ export class MastraRuntime {
         }
       },
     })
+    registered['prepareLink'] = createTool({
+      id: 'prepareLink',
+      description: 'After the operator explicitly agrees to expose content, snapshot an AgentFS file as a Webpage, API, or Webhook Link draft and return the standard human-approval action suggestion. This tool does not publish directly.',
+      inputSchema: {
+        type: 'object',
+        required: ['name', 'type', 'sourcePath'],
+        properties: {
+          name: { type: 'string', maxLength: 160 },
+          type: { type: 'string', enum: ['webpage', 'api', 'webhook'] },
+          sourcePath: { type: 'string', description: 'AgentFS file under /Library, normally /Library/Generated' },
+          slug: { type: 'string', maxLength: 96 },
+          workflowId: { type: 'string', maxLength: 256 },
+          scheduleId: { type: 'string', maxLength: 256 },
+        },
+        additionalProperties: false,
+      },
+      execute: async (inputData: Record<string, unknown>) => {
+        const integration = this.links.ensureExecutorIntegration()
+        const draft = await this.links.prepareDraft({
+          name: String(inputData['name'] ?? ''),
+          type: String(inputData['type'] ?? '') as LinkType,
+          sourcePath: String(inputData['sourcePath'] ?? ''),
+          ...(typeof inputData['slug'] === 'string' && inputData['slug'].trim() ? { slug: inputData['slug'] } : {}),
+          ...(typeof inputData['workflowId'] === 'string' && inputData['workflowId'].trim() ? { workflowId: inputData['workflowId'] } : {}),
+          ...(typeof inputData['scheduleId'] === 'string' && inputData['scheduleId'].trim() ? { scheduleId: inputData['scheduleId'] } : {}),
+        })
+        return {
+          kind: 'action_suggestion',
+          executorIntegrationId: integration.id,
+          action: 'publish_link',
+          target: draft.slug,
+          rationale: `Expose the approved AgentFS snapshot as a ${draft.type} Link.`,
+          rationaleClaimIds: [],
+          parameters: {
+            manifestPath: `/Library/Links/Drafts/${draft.draftId}/link.json`,
+            linkType: draft.type,
+            sourcePath: draft.sourcePath,
+            sourceSha256: draft.sourceSha256,
+            ...(draft.workflowId ? { workflowId: draft.workflowId } : {}),
+            ...(draft.scheduleId ? { scheduleId: draft.scheduleId } : {}),
+          },
+        }
+      },
+    })
     registered['listActionExecutors'] = createTool({
       id: 'listActionExecutors',
       description: 'List active controlled-action plugins that can receive a human-approved action.',
@@ -1009,6 +1058,9 @@ export class MastraRuntime {
       id: 'papyrus-workspace',
       name: 'Papyrus Workspace',
       filesystem: this.workspaceFilesystem,
+      // Link drafts, published snapshots, and inbound payloads intentionally
+      // share this filesystem so Workspace reads observe the same AgentFS
+      // authority used by the approval-backed Links executor.
       // Deliberately do not expose the WorkspaceSandbox through Mastra's
       // generic shell tool surface. Papyrus invokes it only behind constrained
       // process tools and the Enclave capability broker.

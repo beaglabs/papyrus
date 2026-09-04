@@ -1,13 +1,16 @@
+import { readFileSync } from 'node:fs'
 import type { IntegrationConfiguration } from '@papyrus/contracts'
 import type { AgentDatabase } from '../database.js'
 import { exchangeMailbox, type MicrosoftGraphClient } from '../graph-client.js'
 import type { ActionResult, ActionExecutor, ActionExecutorContext } from '../action-worker.js'
+import type { ArtifactStore } from '../artifact-store.js'
 
 interface EmailActionParameters {
   to?: unknown
   subject?: unknown
   body?: unknown
   bodyContentType?: unknown
+  artifactIds?: unknown
 }
 
 function recipients(target: string, parameters: Record<string, unknown> | undefined): string[] {
@@ -38,7 +41,11 @@ function content(job: ActionExecutorContext['job']): { subject: string; body: st
  * authorization, queueing, and idempotency are handled by the action ledger.
  */
 export class EmailExecutor implements ActionExecutor {
-  constructor(private readonly db: AgentDatabase, private readonly graph: MicrosoftGraphClient) {}
+  constructor(
+    private readonly db: AgentDatabase,
+    private readonly graph: MicrosoftGraphClient,
+    private readonly artifacts?: ArtifactStore,
+  ) {}
 
   async test(context: ActionExecutorContext): Promise<{ reachable: boolean; authenticated: boolean; message: string }> {
     const integration = this.integration(context.proposal.executorIntegrationId)
@@ -49,12 +56,14 @@ export class EmailExecutor implements ActionExecutor {
   async execute(context: ActionExecutorContext): Promise<ActionResult> {
     const integration = this.integration(context.proposal.executorIntegrationId)
     const mail = content(context.job)
+    const attachments = this.attachments(context.job.parameters)
     const sent = await this.graph.sendMail(integration, {
       mailbox: exchangeMailbox(integration),
       to: recipients(context.job.target, context.job.parameters),
       subject: mail.subject,
       body: mail.body,
       bodyContentType: mail.bodyContentType,
+      ...(attachments.length ? { attachments } : {}),
       // Persisted action idempotency is supplied to Graph as a trace key.
       clientRequestId: context.job.idempotencyKey,
     }, context.signal)
@@ -63,6 +72,31 @@ export class EmailExecutor implements ActionExecutor {
       result: 'success',
       message: `Microsoft Graph accepted approved email action ${context.job.action} for ${context.job.target}${sent.requestId ? ` (request-id ${sent.requestId})` : ''}`,
     }
+  }
+
+  private attachments(parameters: Record<string, unknown> | undefined) {
+    const ids = (parameters as EmailActionParameters | undefined)?.artifactIds
+    if (ids === undefined) return []
+    if (!Array.isArray(ids) || ids.some((value) => typeof value !== 'string')) {
+      throw new Error('Email action parameters.artifactIds must be an array of artifact ids')
+    }
+    if (!this.artifacts && ids.length) throw new Error('Artifact attachments are unavailable in this runtime')
+    const attachments = ids.slice(0, 10).map((id) => {
+      const artifact = this.artifacts?.get(id as string)
+      if (!artifact || !this.artifacts) throw new Error(`Artifact ${String(id)} was not found`)
+      const bytes = readFileSync(this.artifacts.contentPath(artifact.id))
+      return {
+        name: artifact.name,
+        contentType: artifact.mediaType.split(';')[0] ?? 'application/octet-stream',
+        contentBytes: bytes.toString('base64'),
+        byteLength: bytes.byteLength,
+      }
+    })
+    const totalBytes = attachments.reduce((sum, attachment) => sum + attachment.byteLength, 0)
+    if (totalBytes > 2_500_000) {
+      throw new Error('Approved email attachments exceed the 2.5 MiB direct-send limit; publish a smaller artifact or use a customer upload workflow')
+    }
+    return attachments.map(({ byteLength: _byteLength, ...attachment }) => attachment)
   }
 
   private integration(id: string): IntegrationConfiguration {

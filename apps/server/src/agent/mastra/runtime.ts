@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import type { AgentSignal, LinkType } from '@papyrus/contracts'
+import type { AgentLink, AgentSignal, LinkInbound, LinkType } from '@papyrus/contracts'
 import type { ActionStore } from '../action-store.js'
 import type { AgentConfig } from '../config.js'
 import type { AgentService } from '../service.js'
@@ -12,7 +12,7 @@ import {
   type InvestigationToolName,
 } from './tools.js'
 import { INTEGRATION_CATALOG, LINK_PUBLISHER_CATALOG_ID } from '../catalog.js'
-import { LinkStore } from '../link-store.js'
+import { LINK_EXECUTOR_INTEGRATION_ID, LinkStore } from '../link-store.js'
 import { connectionRequest, modelGatewayRequest, pluginToolId } from './plugin-tools.js'
 import { fetchUrlPreview } from './fetch-preview.js'
 import { signalIntakeWorkflow, WORKFLOW_CATALOG } from './workflows.js'
@@ -239,6 +239,7 @@ export class MastraRuntime {
         rawShell: false,
       },
       signalBacklog: this.signals.counts(),
+      links: { validation: this.config.kitesurf ? 'kitesurf' : 'local-static' },
     }
   }
 
@@ -407,6 +408,34 @@ export class MastraRuntime {
     const workflow = (this.mastra?.instance as { getWorkflowById: (id: string) => { createRun: () => Promise<{ start: (input: unknown) => Promise<unknown> }> } }).getWorkflowById(id)
     const run = await workflow.createRun()
     return run.start({ inputData })
+  }
+
+  async acceptLinkInbound(
+    link: AgentLink,
+    inbound: LinkInbound,
+    payload: Record<string, unknown>,
+  ): Promise<{ investigationId: string }> {
+    const investigation = this.actionStore.createInvestigation({
+      title: `Link inbound · ${link.name}`,
+      trigger: 'signal',
+      triggerIntegrationId: LINK_EXECUTOR_INTEGRATION_ID,
+    })
+    if (this.mastra?.agent) this.actionStore.setMastraThreadId(investigation.id, threadIdFor(investigation.id))
+    this.emitSignal({
+      type: 'investigation_created',
+      investigationId: investigation.id,
+      payload: {
+        trigger: 'link',
+        linkId: link.id,
+        linkType: link.type,
+        linkName: link.name,
+        inboundId: inbound.id,
+        blobPath: inbound.blobPath,
+        method: inbound.method,
+        payload,
+      },
+    })
+    return { investigationId: investigation.id }
   }
 
   async acceptWebhook(sourceId: string, body: Record<string, unknown>, headers: Record<string, string>): Promise<{ accepted: true; sessionId: string; signalId: string }> {

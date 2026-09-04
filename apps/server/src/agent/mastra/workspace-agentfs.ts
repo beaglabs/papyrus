@@ -83,7 +83,7 @@ export class PapyrusAgentFSFilesystem extends MastraFilesystem {
   readonly displayName = 'Workspace Library'
   readonly description = 'Customer-hosted AgentFS SQLite workspace'
   readonly icon = 'database' as const
-  readonly readOnly?: boolean
+  readonly readOnly: boolean
   readonly databasePath: string
   readonly agentId: string
   status: ProviderStatus = 'pending'
@@ -96,7 +96,7 @@ export class PapyrusAgentFSFilesystem extends MastraFilesystem {
     this.dataDir = resolve(options.dataDir)
     this.agentId = options.agentId
     this.databasePath = resolve(options.databasePath)
-    this.readOnly = options.readOnly
+    this.readOnly = options.readOnly ?? false
   }
 
   getInfo(): FilesystemInfo<{ agentId: string; storage: 'local-sqlite'; localOnly: true }> {
@@ -157,7 +157,7 @@ export class PapyrusAgentFSFilesystem extends MastraFilesystem {
     if (options?.overwrite === false && await this.exists(normalized)) throw new FileExistsError(normalized)
     if (options?.recursive !== false) await this.mkdirRecursive(agent, parentPath(normalized))
     try {
-      await agent.fs.writeFile(normalized, typeof content === 'string' ? content : Buffer.from(content))
+      await agent.fs.writeFile(normalized, typeof content === 'string' ? content : Buffer.from(Uint8Array.from(content)))
     } catch (error) {
       throw mapAgentFsError(error, normalized, 'file')
     }
@@ -244,7 +244,7 @@ export class PapyrusAgentFSFilesystem extends MastraFilesystem {
     const agent = await this.getAgent()
     const normalized = normalizeFsPath(path)
     try {
-      if (options?.recursive) await agent.fs.rm(normalized, { recursive: true, force: options.force })
+      if (options?.recursive) await agent.fs.rm(normalized, { recursive: true, force: options.force ?? false })
       else await agent.fs.rmdir(normalized)
     } catch (error) {
       if (options?.force && hasCode(error, 'ENOENT')) return
@@ -399,7 +399,7 @@ export class PapyrusAgentFSFilesystem extends MastraFilesystem {
           continue
         }
         files++
-        bytes += entry.size
+        bytes += entry.size ?? 0
         assertExecutionBudget(files, bytes)
         const value = await this.readFile(virtualPath)
         const data = Buffer.isBuffer(value) ? value : Buffer.from(value)

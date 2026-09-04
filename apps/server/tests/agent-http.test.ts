@@ -66,6 +66,12 @@ describe('agent portal HTTP surface', () => {
       [`${origin}/api/schedules`, 'POST'],
       [`${origin}/api/schedules/legacy`, 'DELETE'],
       [`${origin}/api/signals/legacy/webhook`, 'POST'],
+      [`${origin}/api/integrations/catalog`, 'GET'],
+      [`${origin}/api/integrations`, 'GET'],
+      [`${origin}/api/integrations`, 'POST'],
+      [`${origin}/api/integrations/legacy`, 'DELETE'],
+      [`${origin}/api/integrations/legacy/ingestion-token`, 'POST'],
+      [`${origin}/api/integrations/legacy/observations`, 'POST'],
     ] as const) {
       const response = await fetch(request[0], {
         method: request[1],

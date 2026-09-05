@@ -2,7 +2,7 @@ import { createReadStream, readFileSync, statSync } from 'node:fs'
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { createServer as createHttpsServer } from 'node:https'
 import { extname, join, normalize } from 'node:path'
-import { MODEL_AUTH_SCHEMES, MODEL_GATEWAY_KINDS, type EntraAppRole, type ModelAuthScheme, type ModelGatewayKind, type PortalPrincipal, type SignedLicense } from '@papyrus/contracts'
+import { MODEL_AUTH_SCHEMES, MODEL_GATEWAY_KINDS, OBSERVABILITY_APP_ROLES, type EntraAppRole, type ModelAuthScheme, type ModelGatewayKind, type PortalPrincipal, type SignedLicense } from '@papyrus/contracts'
 import type { AgentConfig } from './config.js'
 import { EntraAuthError, EntraAuthService, hasAppRole } from './entra-auth.js'
 import { AgentService, AgentServiceError } from './service.js'
@@ -63,6 +63,15 @@ function requireRole(principal: PortalPrincipal, role: EntraAppRole): void {
   if (!hasAppRole(principal, role)) throw new HttpError(403, 'ENTRA_ROLE_REQUIRED', `${role} is required`)
 }
 
+function requireAnyRole(principal: PortalPrincipal, roles: readonly EntraAppRole[]): void {
+  if (roles.some((role) => hasAppRole(principal, role))) return
+  throw new HttpError(
+    403,
+    'ENTRA_OBSERVABILITY_ROLE_REQUIRED',
+    'System Owner, Audit Viewer, or Security Manager is required to view observability data',
+  )
+}
+
 async function principal(request: IncomingMessage, auth: EntraAuthService, service: AgentService): Promise<PortalPrincipal> {
   const value = await auth.authenticate(request)
   if (!value) throw new HttpError(401, 'ENTRA_AUTHENTICATION_REQUIRED', 'Microsoft Entra authentication is required')
@@ -119,6 +128,47 @@ export function createAgentServer(config: AgentConfig, service: AgentService, au
       if (url.pathname === '/api/agent/status' && request.method === 'GET') {
         await principal(request, auth, service)
         return json(response, 200, mastra.status)
+      }
+      if (url.pathname === '/api/observability/traces' && request.method === 'GET') {
+        const actor = await principal(request, auth, service)
+        requireAnyRole(actor, OBSERVABILITY_APP_ROLES)
+        const page = boundedInteger(url.searchParams.get('page'), 0, 100_000, 0)
+        const perPage = boundedInteger(url.searchParams.get('perPage'), 1, 100, 50)
+        const rawStatus = url.searchParams.get('status')
+        const status = rawStatus && ['success', 'error', 'running'].includes(rawStatus) ? rawStatus as 'success' | 'error' | 'running' : undefined
+        if (rawStatus && !status) throw new HttpError(400, 'INVALID_TRACE_STATUS', 'status must be success, error, or running')
+        const rawTraceId = url.searchParams.get('traceId')
+        const traceId = rawTraceId ? requiredString(rawTraceId, 'traceId', 256) : undefined
+        return json(response, 200, await mastra.listObservabilityTraces({
+          page,
+          perPage,
+          ...(status ? { status } : {}),
+          ...(traceId ? { traceId } : {}),
+        }))
+      }
+      const observabilityTrace = url.pathname.match(/^\/api\/observability\/traces\/([^/]+)$/)
+      if (observabilityTrace && request.method === 'GET') {
+        const actor = await principal(request, auth, service)
+        requireAnyRole(actor, OBSERVABILITY_APP_ROLES)
+        const traceId = requiredString(decodeURIComponent(observabilityTrace[1] as string), 'traceId', 256)
+        return json(response, 200, await mastra.getObservabilityTrace(traceId))
+      }
+      if (url.pathname === '/api/observability/logs' && request.method === 'GET') {
+        const actor = await principal(request, auth, service)
+        requireAnyRole(actor, OBSERVABILITY_APP_ROLES)
+        const page = boundedInteger(url.searchParams.get('page'), 0, 100_000, 0)
+        const perPage = boundedInteger(url.searchParams.get('perPage'), 1, 100, 50)
+        const rawLevel = url.searchParams.get('level')
+        const level = rawLevel && ['debug', 'info', 'warn', 'error', 'fatal'].includes(rawLevel) ? rawLevel as 'debug' | 'info' | 'warn' | 'error' | 'fatal' : undefined
+        if (rawLevel && !level) throw new HttpError(400, 'INVALID_LOG_LEVEL', 'level must be debug, info, warn, error, or fatal')
+        const rawTraceId = url.searchParams.get('traceId')
+        const traceId = rawTraceId ? requiredString(rawTraceId, 'traceId', 256) : undefined
+        return json(response, 200, await mastra.listObservabilityLogs({
+          page,
+          perPage,
+          ...(level ? { level } : {}),
+          ...(traceId ? { traceId } : {}),
+        }))
       }
       if (url.pathname === '/api/sessions' && request.method === 'GET') {
         await principal(request, auth, service)

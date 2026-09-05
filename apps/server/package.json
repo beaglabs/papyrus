@@ -17,6 +17,7 @@
     "@mastra/core": "1.63.2",
     "@mastra/libsql": "1.22.2",
     "@mastra/memory": "1.28.1",
+    "@mastra/observability": "1.17.4",
     "@papyrus/contracts": "workspace:*",
     "ai": "7.0.89",
     "jose": "6.2.9",

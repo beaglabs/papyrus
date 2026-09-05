@@ -3,7 +3,7 @@
   "sources": [
     {
       "path": "packages/contracts/src/index.ts",
-      "gitBlob": "5414d709c29e4eb83131d0d1ea433e59a1c7326d"
+      "gitBlob": "774a4dd503ce5fd8165be11fb04aa5adb59582ac"
     },
     {
       "path": "apps/server/src/agent/mastra/tools.ts",

@@ -5,6 +5,7 @@ import { AgentView } from './Agent.js'
 import { LibraryView } from './Library.js'
 import { LinksView } from './Links.js'
 import { ModelsView } from './Models.js'
+import { ObservabilityPanel } from './Observability.js'
 import { Alert, Avatar, Badge, Button, Card, DropdownMenu, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, Skeleton } from './components/ui/index.js'
 import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarRail, SidebarTrigger } from './components/ui/sidebar.js'
 
@@ -164,5 +165,12 @@ function PortalHeader({ view, data }: { view: PortalView; data: PortalData }) {
 }
 
 function GovernanceView({ data }: { data: PortalData }) {
-  return <div className="governance-grid"><Card><p className="eyebrow">IDENTITY AUTHORITY</p><h2>Microsoft Entra ID</h2><p>Users, groups, and application roles are assigned in the customer tenant. Papyrus maintains no invitation or local role database.</p><div className="role-list">{data.me.roles.map((role) => <Badge key={role}>{role.replace('Papyrus.', '')}</Badge>)}</div></Card><Card><p className="eyebrow">OFFLINE ENTITLEMENT</p><h2>{data.overview.deployment.license.valid ? 'License active' : 'Activation required'}</h2><p>Licensing remains deployment-bound and locally verified. No vendor cloud callback is required.</p><code>{data.overview.deployment.license.deploymentId.slice(0, 24)}…</code></Card><Card><p className="eyebrow">ACTION BOUNDARY</p><h2>Suggestions are not authority</h2><p>Agent suggestions appear with a <strong>!</strong>. Only deterministic policy and an Entra-authorized approver can release an action to the leased executor worker.</p></Card></div>
+  return <div className="governance-surface">
+    <div className="governance-grid">
+      <Card><p className="eyebrow">IDENTITY AUTHORITY</p><h2>Microsoft Entra ID</h2><p>Users, groups, and application roles are assigned in the customer tenant. Papyrus maintains no invitation or local role database.</p><div className="role-list">{data.me.roles.map((role) => <Badge key={role}>{role.replace('Papyrus.', '')}</Badge>)}</div></Card>
+      <Card><p className="eyebrow">OFFLINE ENTITLEMENT</p><h2>{data.overview.deployment.license.valid ? 'License active' : 'Activation required'}</h2><p>Licensing remains deployment-bound and locally verified. No vendor cloud callback is required.</p><code>{data.overview.deployment.license.deploymentId.slice(0, 24)}…</code></Card>
+      <Card><p className="eyebrow">ACTION BOUNDARY</p><h2>Suggestions are not authority</h2><p>Agent suggestions appear with a <strong>!</strong>. Only deterministic policy and an Entra-authorized approver can release an action to the leased executor worker.</p></Card>
+    </div>
+    <ObservabilityPanel roles={data.me.roles} />
+  </div>
 }

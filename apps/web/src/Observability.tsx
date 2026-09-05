@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { OBSERVABILITY_APP_ROLES, type EntraAppRole } from '@papyrus/contracts'
 import {
   observabilityLogs,
@@ -33,7 +33,7 @@ const LOG_LEVELS: Array<{ value: '' | ObservabilityLogLevel; label: string }> = 
 ]
 
 export function ObservabilityPanel({ roles }: { roles: EntraAppRole[] }) {
-  const allowed = roles.some((role) => OBSERVABILITY_APP_ROLES.includes(role as (typeof OBSERVABILITY_APP_ROLES)[number]))
+  const allowed = OBSERVABILITY_APP_ROLES.some((role) => roles.includes(role))
   const [tab, setTab] = useState<ObservabilityTab>('traces')
   const [traceStatus, setTraceStatus] = useState<'' | ObservabilityTraceStatus>('')
   const [logLevel, setLogLevel] = useState<'' | ObservabilityLogLevel>('')
@@ -128,7 +128,7 @@ export function ObservabilityPanel({ roles }: { roles: EntraAppRole[] }) {
         <p>Inspect persisted Mastra execution traces and trace-correlated logs without leaving the customer-hosted Papyrus boundary.</p>
       </div>
       <div className="obs-storage" title="Observability storage backend">
-        <span className="dot good" />
+        <span className={`dot ${error ? 'warning' : 'good'}`} />
         <span><strong>LibSQL</strong><small>{storage?.database ?? 'mastra.db'} · local</small></span>
       </div>
     </div>
@@ -225,7 +225,7 @@ function TraceDetail({ detail, loading }: { detail?: ObservabilityTraceDetail; l
     <div className="obs-span-tree">{spans.map((span) => {
       const depth = spanDepth(span, byId)
       const status = statusForSpan(span)
-      return <details className={`obs-span ${status}`} key={span.spanId} style={{ '--span-depth': Math.min(depth, 8) } as React.CSSProperties}>
+      return <details className={`obs-span ${status}`} key={span.spanId} style={{ '--span-depth': Math.min(depth, 8) } as CSSProperties}>
         <summary>
           <span className="obs-span-line" />
           <span className="obs-span-copy"><strong>{span.name}</strong><small>{span.spanType} · {formatDuration(span.startedAt, span.endedAt)}</small></span>

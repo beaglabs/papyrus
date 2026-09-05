@@ -312,6 +312,13 @@ export const ENTRA_APP_ROLES = [
 ] as const
 export type EntraAppRole = (typeof ENTRA_APP_ROLES)[number]
 
+export const OBSERVABILITY_APP_ROLES = [
+  'Papyrus.System.Owner',
+  'Papyrus.Audit.View',
+  'Papyrus.Security.Manage',
+] as const satisfies readonly EntraAppRole[]
+
+
 export interface PortalPrincipal {
   oid: string
   tenantId: string

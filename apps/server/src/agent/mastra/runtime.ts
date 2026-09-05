@@ -64,6 +64,7 @@ interface MastraHandle {
   agent: Record<string, unknown> | undefined
   memory?: Record<string, unknown>
   storage?: Record<string, unknown>
+  observability?: Record<string, unknown>
   webhooks?: Record<string, unknown>
 }
 
@@ -85,6 +86,22 @@ interface SendSignalResult {
   accepted: Promise<{ action: 'wake' | 'deliver' | 'persist' | 'discard' | 'blocked' }>
   persisted?: Promise<void>
 }
+
+interface ObservabilityPagination {
+  total: number
+  page: number
+  perPage: number
+  hasMore: boolean
+}
+
+interface ObservabilityStore {
+  listTraces(input: Record<string, unknown>): Promise<{ pagination?: ObservabilityPagination; spans: Array<Record<string, unknown>> }>
+  getTrace(input: { traceId: string }): Promise<{ traceId: string; spans: Array<Record<string, unknown>> } | null>
+  listLogs(input: Record<string, unknown>): Promise<{ pagination?: ObservabilityPagination; logs: Array<Record<string, unknown>> }>
+}
+
+export type ObservabilityTraceStatus = 'success' | 'error' | 'running'
+export type ObservabilityLogLevel = 'debug' | 'info' | 'warn' | 'error' | 'fatal'
 
 const AGENT_ID = 'papyrus'
 const SIGNAL_LEASE_MS = 30_000
@@ -146,6 +163,7 @@ export class MastraRuntime {
     const core = await tryImport('@mastra/core')
     const libsql = await tryImport('@mastra/libsql')
     const memoryModule = await tryImport('@mastra/memory')
+    const observabilityModule = await tryImport('@mastra/observability')
     if (!core?.Mastra) {
       console.warn(
         '[mastra] @mastra/core is not installed; signals are retained in agent_signal_outbox and will drain once it is. ' +
@@ -165,11 +183,34 @@ export class MastraRuntime {
       ? new memoryModule.Memory({ storage, options: { lastMessages: 50 }, vector: false })
       : undefined
 
+    const observability = observabilityModule?.Observability && observabilityModule?.MastraStorageExporter && storage
+      ? new observabilityModule.Observability({
+          sensitiveDataFilter: true,
+          configs: {
+            papyrus: {
+              serviceName: 'papyrus',
+              exporters: [new observabilityModule.MastraStorageExporter()],
+              logging: { enabled: true, level: 'info' },
+              serializationOptions: {
+                maxStringLength: 20_000,
+                maxDepth: 8,
+                maxArrayLength: 100,
+                maxObjectKeys: 100,
+              },
+            },
+          },
+        })
+      : undefined
+    if (storage && !observability) {
+      console.warn('[mastra] observability exporter unavailable; Governance traces and logs will remain disabled')
+    }
+
     const webhooks = await this.buildWebhookProvider()
     const agent = await this.buildAgent(core, memory, webhooks)
     const gateway = new PapyrusModelGateway(this.models)
     const instance = new core.Mastra({
         ...(storage ? { storage } : {}),
+        ...(observability ? { observability } : {}),
         ...(agent ? { agents: { [AGENT_ID]: agent } } : {}),
         gateways: { papyrus: gateway },
         workflows: { signalIntake: signalIntakeWorkflow },
@@ -180,6 +221,7 @@ export class MastraRuntime {
       agent,
       ...(memory ? { memory } : {}),
       ...(storage ? { storage } : {}),
+      ...(observability ? { observability } : {}),
       ...(webhooks ? { webhooks } : {}),
     }
 
@@ -243,6 +285,81 @@ export class MastraRuntime {
       signalBacklog: this.signals.counts(),
       links: { validation: this.config.kitesurf ? 'kitesurf' : 'local-static' },
     }
+  }
+
+  async listObservabilityTraces(input: {
+    page: number
+    perPage: number
+    status?: ObservabilityTraceStatus
+    traceId?: string
+  }) {
+    const store = await this.requireObservabilityStore()
+    const filters: Record<string, unknown> = {}
+    if (input.status) filters['status'] = input.status
+    if (input.traceId) filters['traceId'] = input.traceId
+    const result = await store.listTraces({
+      ...(Object.keys(filters).length ? { filters } : {}),
+      pagination: { page: input.page, perPage: input.perPage },
+      orderBy: { field: 'startedAt', direction: 'DESC' },
+    })
+    return {
+      storage: { provider: 'libsql', database: 'mastra.db' },
+      pagination: result.pagination ?? { total: result.spans.length, page: input.page, perPage: input.perPage, hasMore: false },
+      traces: sanitizeObservabilityValue(result.spans),
+    }
+  }
+
+  async getObservabilityTrace(traceId: string) {
+    const store = await this.requireObservabilityStore()
+    const result = await store.getTrace({ traceId })
+    if (!result) throw new MastraRuntimeError(404, 'OBSERVABILITY_TRACE_NOT_FOUND', 'Trace not found')
+    return {
+      storage: { provider: 'libsql', database: 'mastra.db' },
+      traceId: result.traceId,
+      spans: sanitizeObservabilityValue(result.spans),
+    }
+  }
+
+  async listObservabilityLogs(input: {
+    page: number
+    perPage: number
+    level?: ObservabilityLogLevel
+    traceId?: string
+  }) {
+    const store = await this.requireObservabilityStore()
+    const filters: Record<string, unknown> = {}
+    if (input.level) filters['level'] = input.level
+    if (input.traceId) filters['traceId'] = input.traceId
+    const result = await store.listLogs({
+      ...(Object.keys(filters).length ? { filters } : {}),
+      pagination: { page: input.page, perPage: input.perPage },
+      orderBy: { field: 'timestamp', direction: 'DESC' },
+    })
+    return {
+      storage: { provider: 'libsql', database: 'mastra.db' },
+      pagination: result.pagination ?? { total: result.logs.length, page: input.page, perPage: input.perPage, hasMore: false },
+      logs: sanitizeObservabilityValue(result.logs),
+    }
+  }
+
+  private async requireObservabilityStore(): Promise<ObservabilityStore> {
+    if (!this.mastra?.observability) {
+      throw new MastraRuntimeError(503, 'OBSERVABILITY_NOT_CONFIGURED', 'Mastra observability is not configured')
+    }
+    const storage = this.mastra.storage
+    const getStore = storage?.['getStore']
+    if (typeof getStore !== 'function') {
+      throw new MastraRuntimeError(503, 'OBSERVABILITY_STORAGE_UNAVAILABLE', 'Mastra storage does not expose observability')
+    }
+    const store = await (getStore as (domain: string) => Promise<unknown>).call(storage, 'observability')
+    if (!store || typeof store !== 'object') {
+      throw new MastraRuntimeError(503, 'OBSERVABILITY_STORAGE_UNAVAILABLE', 'LibSQL observability storage is unavailable')
+    }
+    const candidate = store as Partial<ObservabilityStore>
+    if (typeof candidate.listTraces !== 'function' || typeof candidate.getTrace !== 'function' || typeof candidate.listLogs !== 'function') {
+      throw new MastraRuntimeError(503, 'OBSERVABILITY_STORAGE_UNAVAILABLE', 'LibSQL observability storage does not support trace and log queries')
+    }
+    return store as ObservabilityStore
   }
 
   listModelProfiles(): ModelProfile[] { return this.models.list() }
@@ -1529,6 +1646,25 @@ function inputSchemaFor(name: InvestigationToolName): Record<string, unknown> {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+const OBSERVABILITY_SENSITIVE_KEY = /(?:authorization|cookie|password|passwd|secret|token|api[-_]?key|credential|private[-_]?key)/i
+const OBSERVABILITY_BEARER = /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi
+
+function sanitizeObservabilityValue(value: unknown, key?: string): unknown {
+  if (key && OBSERVABILITY_SENSITIVE_KEY.test(key)) return '[REDACTED]'
+  if (value instanceof Date) return value.toISOString()
+  if (typeof value === 'string') return value.replace(OBSERVABILITY_BEARER, 'Bearer [REDACTED]')
+  if (Array.isArray(value)) return value.map((item) => sanitizeObservabilityValue(item))
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([childKey, childValue]) => [
+        childKey,
+        sanitizeObservabilityValue(childValue, childKey),
+      ]),
+    )
+  }
+  return value
+}
+
 async function tryImport(spec: string): Promise<any> {
   try {
     return await import(spec)

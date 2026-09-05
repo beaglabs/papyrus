@@ -84,6 +84,75 @@ export interface WorkflowSummary {
   trigger: string
 }
 
+export type ObservabilityTraceStatus = 'success' | 'error' | 'running'
+export type ObservabilityLogLevel = 'debug' | 'info' | 'warn' | 'error' | 'fatal'
+
+export interface ObservabilityPagination {
+  total: number
+  page: number
+  perPage: number
+  hasMore: boolean
+}
+
+export interface ObservabilityStorageInfo {
+  provider: 'libsql'
+  database: string
+}
+
+export interface ObservabilitySpan {
+  [key: string]: unknown
+  traceId: string
+  spanId: string
+  parentSpanId?: string | null
+  name: string
+  spanType: string
+  isEvent?: boolean
+  startedAt: string
+  endedAt?: string | null
+  error?: unknown
+  status?: ObservabilityTraceStatus
+  entityType?: string | null
+  entityId?: string | null
+  entityName?: string | null
+  input?: unknown
+  output?: unknown
+  attributes?: Record<string, unknown> | null
+  metadata?: Record<string, unknown> | null
+}
+
+export interface ObservabilityLogRecord {
+  [key: string]: unknown
+  logId?: string | null
+  timestamp: string
+  level: ObservabilityLogLevel
+  message: string
+  data?: Record<string, unknown> | null
+  traceId?: string | null
+  spanId?: string | null
+  entityType?: string | null
+  entityId?: string | null
+  entityName?: string | null
+  metadata?: Record<string, unknown> | null
+}
+
+export interface ObservabilityTraceList {
+  storage: ObservabilityStorageInfo
+  pagination: ObservabilityPagination
+  traces: ObservabilitySpan[]
+}
+
+export interface ObservabilityTraceDetail {
+  storage: ObservabilityStorageInfo
+  traceId: string
+  spans: ObservabilitySpan[]
+}
+
+export interface ObservabilityLogList {
+  storage: ObservabilityStorageInfo
+  pagination: ObservabilityPagination
+  logs: ObservabilityLogRecord[]
+}
+
 export class ApiError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message) }
 }
@@ -121,6 +190,40 @@ export async function loadPortal(): Promise<PortalData> {
 }
 
 export async function publicConfig(): Promise<PublicConfig> { return api('/api/config/public') }
+
+export async function observabilityTraces(input: {
+  page?: number
+  perPage?: number
+  status?: ObservabilityTraceStatus
+  traceId?: string
+} = {}): Promise<ObservabilityTraceList> {
+  const params = new URLSearchParams({
+    page: String(input.page ?? 0),
+    perPage: String(input.perPage ?? 50),
+  })
+  if (input.status) params.set('status', input.status)
+  if (input.traceId?.trim()) params.set('traceId', input.traceId.trim())
+  return api<ObservabilityTraceList>(`/api/observability/traces?${params}`)
+}
+
+export async function observabilityTrace(traceId: string): Promise<ObservabilityTraceDetail> {
+  return api<ObservabilityTraceDetail>(`/api/observability/traces/${encodeURIComponent(traceId)}`)
+}
+
+export async function observabilityLogs(input: {
+  page?: number
+  perPage?: number
+  level?: ObservabilityLogLevel
+  traceId?: string
+} = {}): Promise<ObservabilityLogList> {
+  const params = new URLSearchParams({
+    page: String(input.page ?? 0),
+    perPage: String(input.perPage ?? 50),
+  })
+  if (input.level) params.set('level', input.level)
+  if (input.traceId?.trim()) params.set('traceId', input.traceId.trim())
+  return api<ObservabilityLogList>(`/api/observability/logs?${params}`)
+}
 
 export async function createSession(title = 'New session'): Promise<AgentSession> {
   return api('/api/sessions', { method: 'POST', body: JSON.stringify({ title }) })

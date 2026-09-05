@@ -41,6 +41,9 @@ importers:
       '@mastra/memory':
         specifier: 1.28.1
         version: 1.28.1(@mastra/core@1.63.2(ai@7.0.89(zod@4.5.4))(zod@4.5.4))
+      '@mastra/observability':
+        specifier: 1.17.4
+        version: 1.17.4(@mastra/core@1.63.2(ai@7.0.89(zod@4.5.4))(zod@4.5.4))(zod@4.5.4)
       '@papyrus/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -481,6 +484,13 @@ packages:
     engines: {node: '>=22.13.0'}
     peerDependencies:
       '@mastra/core': '>=1.4.1-0 <2.0.0-0'
+
+  '@mastra/observability@1.17.4':
+    resolution: {integrity: sha512-7TzbNNPR6h1LPUPW+kPkqqBKyubF9fZapGWJF4Y2f5JAhGva8Qj/NX0hbDgx54hqtvkTNh56+flAerwuNf1mMw==}
+    engines: {node: '>=22.13.0'}
+    peerDependencies:
+      '@mastra/core': '>=1.16.0-0 <2.0.0-0'
+      zod: ^3.25.0 || ^4.0.0
 
   '@mastra/schema-compat@1.3.7':
     resolution: {integrity: sha512-06WfY+j9rulYnDp8CM7pL7JIyrntkMolqmyyb1VJNEzlYTQCIcJcY0SwQiubZv2tztmoYGikszDiRVyXp0E9gA==}
@@ -1875,6 +1885,11 @@ snapshots:
       zod: 4.4.3
     transitivePeerDependencies:
       - supports-color
+
+  '@mastra/observability@1.17.4(@mastra/core@1.63.2(ai@7.0.89(zod@4.5.4))(zod@4.5.4))(zod@4.5.4)':
+    dependencies:
+      '@mastra/core': 1.63.2(ai@7.0.89(zod@4.5.4))(zod@4.5.4)
+      zod: 4.5.4
 
   '@mastra/schema-compat@1.3.7(zod@4.4.3)':
     dependencies:

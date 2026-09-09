@@ -178,7 +178,7 @@ export function ObservabilityPanel({ roles }: { roles: EntraAppRole[] }) {
 
 function TraceRows({ traces, selectedTraceId, loading, onSelect }: {
   traces: ObservabilitySpan[]
-  selectedTraceId?: string
+  selectedTraceId: string | undefined
   loading: boolean
   onSelect: (traceId: string) => void
 }) {
@@ -198,7 +198,7 @@ function TraceRows({ traces, selectedTraceId, loading, onSelect }: {
 
 function LogRows({ logs, selectedLog, loading, onSelect }: {
   logs: ObservabilityLogRecord[]
-  selectedLog?: ObservabilityLogRecord
+  selectedLog: ObservabilityLogRecord | undefined
   loading: boolean
   onSelect: (log: ObservabilityLogRecord) => void
 }) {
@@ -215,7 +215,7 @@ function LogRows({ logs, selectedLog, loading, onSelect }: {
   })}</div>
 }
 
-function TraceDetail({ detail, loading }: { detail?: ObservabilityTraceDetail; loading: boolean }) {
+function TraceDetail({ detail, loading }: { detail: ObservabilityTraceDetail | undefined; loading: boolean }) {
   if (loading) return <div className="obs-detail-empty"><span>◇</span><strong>Loading trace</strong><small>Resolving the complete span tree from LibSQL.</small></div>
   if (!detail) return <div className="obs-detail-empty"><span>◇</span><strong>Select a trace</strong><small>Inspect model calls, tools, workflow steps, timing, inputs, outputs, and errors.</small></div>
   const spans = [...detail.spans].sort((left, right) => new Date(left.startedAt).getTime() - new Date(right.startedAt).getTime())
@@ -245,7 +245,7 @@ function TraceDetail({ detail, loading }: { detail?: ObservabilityTraceDetail; l
   </div>
 }
 
-function LogDetail({ log, onOpenTrace }: { log?: ObservabilityLogRecord; onOpenTrace: (traceId: string) => void }) {
+function LogDetail({ log, onOpenTrace }: { log: ObservabilityLogRecord | undefined; onOpenTrace: (traceId: string) => void }) {
   if (!log) return <div className="obs-detail-empty"><span>≡</span><strong>Select a log record</strong><small>Structured metadata and trace correlation appear here.</small></div>
   return <div className="obs-log-detail">
     <div className="obs-detail-head"><span><p className="eyebrow">LOG RECORD</p><strong className={`obs-level ${log.level}`}>{log.level}</strong></span><small>{formatTime(log.timestamp)}</small></div>

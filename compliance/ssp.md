@@ -28,17 +28,17 @@ Papyrus is a customer-hosted durable agent runtime. The repository boundary incl
 
 | Evidence source | Git blob |
 | --- | --- |
-| `apps/server/src/agent/config.ts` | `288d607bac86deda4f53f8f795900b960d4f59cf` |
+| `apps/server/src/agent/config.ts` | `552fb9bf10069fdfa8a9874de2323c7e2fbb5a5c` |
 | `apps/server/src/agent/http.ts` | `80b5919eafa105959ad1813c5551a022bd89b6a5` |
 | `apps/server/src/agent/action-worker.ts` | `edee5c81e503ea46f5596c806c73b39884e0383f` |
-| `apps/server/src/agent/catalog.ts` | `e31ac4a9b8f39775708149ba4a3a5e883c577dcd` |
+| `apps/server/src/agent/catalog.ts` | `bfc6157d7319270f72cc5392d0eed583a406de68` |
 | `apps/server/src/agent/link-store.ts` | `774cef0cce09023d636a0c654ea2a3e5d3a58ee2` |
 | `apps/server/src/agent/link-http.ts` | `528c4307baf755403d62219869318dc3935922ec` |
 | `apps/server/src/agent/link-preview.ts` | `fc30c91eea30af9999019d6bc0c565240e13ace7` |
 | `apps/server/src/agent/executors/link-publisher-executor.ts` | `7f31a74af751f8d7009d1667f835b35890663cbd` |
-| `apps/server/src/agent/mastra/runtime.ts` | `818bc2eb16c087bbb880cdac029943788dee0ca4` |
+| `apps/server/src/agent/mastra/runtime.ts` | `dc96450fd1a5c327ab5ac48d716e34c41c5b52da` |
 | `apps/server/src/agent/mastra/workspace-agentfs.ts` | `c2b86023b6a6e33270fc07c745afc63c2fff55b3` |
-| `apps/server/src/agent/mastra/workspace-nono.ts` | `f3ad0004c050eff5658ddc5af62015cea2b40c01` |
+| `apps/server/src/agent/mastra/workspace-nono.ts` | `80f6ff30dc91cb10fe4b5370b1e93831fb4d09ef` |
 | `apps/server/src/agent/mastra/workspace-nono-worker.ts` | `0dcadce525f5f77664a580ceb444382ace17c0d1` |
 | `apps/server/src/agent/mastra/workspace-enclave.ts` | `18527b84887f2937733fb88c65d127e9e52164ee` |
 

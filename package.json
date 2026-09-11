@@ -22,5 +22,8 @@
     "contracts:check": "node scripts/hooks/contracts-drift.mjs",
     "compliance:generate": "node scripts/compliance/generate.mjs",
     "compliance:check": "node scripts/compliance/generate.mjs --check"
+  },
+  "dependencies": {
+    "docx": "^9.7.1"
   }
 }

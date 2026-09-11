@@ -5,6 +5,9 @@ const CONNECTED: DeploymentProfile[] = ['commercial', 'government-il4', 'governm
 const ALL: DeploymentProfile[] = [...CONNECTED, 'disconnected']
 
 export const LINK_PUBLISHER_CATALOG_ID = 'papyrus-links'
+/** Appliance consoles have no API: the served page is the interface, so it is read
+ * as evidence and every change crosses the approval boundary. */
+export const APPLIANCE_CONSOLE_CATALOG_ID = 'appliance-console'
 
 export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
   {
@@ -118,6 +121,14 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
     integrationClass: 'action_executor', authority: 'controlled_actions', risk: 'critical',
     capabilities: ['block route', 'quarantine segment', 'revoke temporary rule'],
     evidenceTypes: ['ActionResult', 'NetworkPolicy'], syncMode: 'none', authSchemes: ['certificate', 'mTLS', 'vault_reference'],
+    supportedProfiles: ALL, licenseFeature: 'action-executors',
+  },
+  {
+    id: APPLIANCE_CONSOLE_CATALOG_ID, name: 'Appliance Console', vendor: 'Customer selected', initials: 'AC', accent: '#7fd6ff',
+    description: 'Authenticated HTTP console sessions against legacy network appliances that have no API: read served pages as structured evidence, and propose form submissions for human release.',
+    integrationClass: 'action_executor', authority: 'controlled_actions', risk: 'critical',
+    capabilities: ['device page reads', 'structured console extraction', 'approval-bound form submission', 'appliance CA trust'],
+    evidenceTypes: ['ActionResult', 'DevicePage'], syncMode: 'pull', authSchemes: ['vault_reference', 'none'],
     supportedProfiles: ALL, licenseFeature: 'action-executors',
   },
   {

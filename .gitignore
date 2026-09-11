@@ -38,6 +38,17 @@ apps/server/.papyrus/
 *.db-journal
 *.db-wal
 *.db-shm
+*.zon
+# Zig build artifacts
+zig-cache/
+zig-out/
+
+# Zig package manager dependencies
+zig-pkg/
+apps/video/
 
 # Generated compliance artifacts
 compliance/sbom.spdx.json
+
+# Runtime state written by test and dev runs; never a source tree artifact.
+papyrus-agent-data/

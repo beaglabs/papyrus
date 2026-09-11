@@ -13,19 +13,21 @@
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "3.0.43",
+    "@ai-sdk/provider": "4.0.7",
+    "@enclave-vm/core": "2.15.2",
     "@mastra/ai-sdk": "1.10.0",
+    "@mastra/browser-viewer": "0.2.3",
     "@mastra/core": "1.63.2",
     "@mastra/libsql": "1.22.2",
     "@mastra/memory": "1.28.1",
     "@mastra/observability": "1.17.4",
     "@papyrus/contracts": "workspace:*",
+    "agentfs-sdk": "0.6.4",
     "ai": "7.0.89",
     "jose": "6.2.9",
     "libsql": "^0.5.29",
-    "zod": "4.5.4",
-    "agentfs-sdk": "0.6.4",
     "nono-ts": "0.3.0",
-    "@enclave-vm/core": "2.15.2"
+    "zod": "4.5.4"
   },
   "devDependencies": {
     "@types/node": "24.10.1",

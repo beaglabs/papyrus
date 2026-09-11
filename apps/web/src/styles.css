@@ -405,7 +405,12 @@ p { color: var(--muted); line-height: 1.55; }
 
 .tool-card { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; background: #eee9df; box-shadow: none; }.tool-card > div { display: flex; gap: 9px; align-items: center; }
 .tool-icon { display: grid; place-items: center; width: 30px; height: 30px; flex: 0 0 auto; border: 2px solid #111; border-radius: 50%; background: var(--green); }
-.action-suggestion { padding: 18px; border-color: var(--main); box-shadow: 4px 4px 0 var(--main); }.action-suggestion-head { display: flex; align-items: center; gap: 12px; }.action-suggestion-head > div { flex: 1; }.action-suggestion-head h3 { margin: 0; font-size: 20px; text-transform: capitalize; }.action-suggestion dl { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }.action-suggestion dl div { padding: 9px; background: #f1ece2; }.action-suggestion dt { color: var(--muted); font: 9px ui-monospace, monospace; text-transform: uppercase; }.action-suggestion dd { margin: 3px 0 0; font-weight: 700; }.proposal-controls { display: flex; justify-content: flex-end; gap: 8px; }
+.action-suggestion { padding: 18px; border-color: var(--main); box-shadow: 4px 4px 0 var(--main); }.action-suggestion-head { display: flex; align-items: center; gap: 12px; }.action-suggestion-head > div { flex: 1; }.action-suggestion-head h3 { margin: 0; font-size: 20px; text-transform: capitalize; }.action-suggestion dl { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }.action-suggestion dl div { padding: 9px; background: #f1ece2; }.action-suggestion dt { color: var(--muted); font: 9px ui-monospace, monospace; text-transform: uppercase; }.action-suggestion dd { margin: 3px 0 0; font-weight: 700; }
+/* A device-console rationale is a line-by-line list of exactly what will be sent.
+   Collapsed into one run-on sentence it stops being reviewable, and this is the
+   text an operator is approving on. Single-line rationales are unaffected. */
+.action-suggestion > p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.proposal-controls { display: flex; justify-content: flex-end; gap: 8px; }
 .agent-setup-card { padding: 20px; border-color: var(--main); box-shadow: 4px 4px 0 var(--main); }.agent-setup-card.connected { display: flex; gap: 14px; box-shadow: none; border-color: #111; }
 .agent-setup-card.connected > div:last-child { min-width: 0; flex: 1; }
 .agent-setup-head, .agent-setup-foot, .url-preview-status { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }.agent-setup-head h3 { font-size: 22px; }

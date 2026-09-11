@@ -5,6 +5,7 @@ import { Alert, Badge, Button, Card } from './components/ui/index.js'
 
 const directSetupRequest = {
   fields: [
+    { name: 'gatewayKind', label: 'Gateway type', kind: 'select', required: true, options: [{ label: 'OpenAI compatible', value: 'openai-compatible' }, { label: 'Azure OpenAI', value: 'azure-openai' }, { label: 'Cloudflare Workers AI', value: 'cloudflare-workers-ai' }, { label: 'Ollama (local)', value: 'ollama' }] },
     { name: 'model', label: 'Model ID', kind: 'text', required: true, placeholder: 'qwen3-32b' },
     { name: 'baseUrl', label: 'Base URL', kind: 'url', required: true, placeholder: 'https://inference.example.gov/v1', help: 'HTTPS is required outside loopback development.' },
     { name: 'authScheme', label: 'Authentication', kind: 'select', required: true, options: [{ label: 'No authentication', value: 'none' }, { label: 'API key from daemon environment', value: 'api_key' }] },
@@ -59,11 +60,12 @@ export function ModelGatewayCard({ request, onChanged }: { request: { fields: Ar
     event.preventDefault(); setState('saving'); setError(undefined)
     const form = new FormData(event.currentTarget)
     const model = String(form.get('model') ?? '').trim()
+    const gatewayKind = String(form.get('gatewayKind') ?? 'openai-compatible').trim()
     const authScheme = String(form.get('authScheme') ?? 'none')
     const baseUrl = String(form.get('baseUrl') ?? '').trim()
     const credential = String(form.get('credentialRef') ?? '').trim()
     const input: Record<string, unknown> = {
-      name: `${model} gateway`, gatewayKind: 'openai-compatible', provider: 'openai-compatible',
+      name: `${model} gateway`, gatewayKind, provider: gatewayKind === 'azure-openai' ? 'azure' : 'openai-compatible',
       model, baseUrl, authScheme, scope: 'daemon',
       ...(authScheme === 'api_key' && credential ? { credentialRef: credential.startsWith('env://') ? credential : `env://${credential}` } : {}),
     }

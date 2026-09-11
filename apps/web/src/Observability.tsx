@@ -12,7 +12,7 @@ import {
   type ObservabilityTraceList,
   type ObservabilityTraceStatus,
 } from './api.js'
-import { Alert } from './components/ui/index.js'
+import { Alert, CommandBlock } from './components/ui/index.js'
 
 type ObservabilityTab = 'traces' | 'logs'
 
@@ -234,9 +234,9 @@ function TraceDetail({ detail, loading }: { detail: ObservabilityTraceDetail | u
         <div className="obs-span-body">
           <KeyValue label="Span ID" value={span.spanId} />
           {span.entityName && <KeyValue label="Entity" value={String(span.entityName)} />}
-          {span.error != null && <JsonValue label="Error" value={span.error} />}
+          {span.error != null && <JsonValue label="Error" value={span.error} defaultOpen />}
           {span.input != null && <JsonValue label="Input" value={span.input} />}
-          {span.output != null && <JsonValue label="Output" value={span.output} />}
+          {span.output != null && <JsonValue label="Output" value={span.output} defaultOpen />}
           {span.attributes != null && <JsonValue label="Attributes" value={span.attributes} />}
           {span.metadata != null && <JsonValue label="Metadata" value={span.metadata} />}
         </div>
@@ -253,7 +253,7 @@ function LogDetail({ log, onOpenTrace }: { log: ObservabilityLogRecord | undefin
     {log.traceId && <div className="obs-correlation"><span><small>TRACE</small><code>{log.traceId}</code></span><button type="button" onClick={() => onOpenTrace(log.traceId as string)}>Open trace →</button></div>}
     {log.spanId && <KeyValue label="Span ID" value={log.spanId} />}
     {log.entityName && <KeyValue label="Entity" value={String(log.entityName)} />}
-    {log.data != null && <JsonValue label="Data" value={log.data} />}
+    {log.data != null && <JsonValue label="Data" value={log.data} defaultOpen />}
     {log.metadata != null && <JsonValue label="Metadata" value={log.metadata} />}
   </div>
 }
@@ -266,8 +266,41 @@ function KeyValue({ label, value }: { label: string; value: string }) {
   return <div className="obs-kv"><span>{label}</span><code>{value}</code></div>
 }
 
-function JsonValue({ label, value }: { label: string; value: unknown }) {
-  return <details className="obs-json"><summary>{label}</summary><pre>{formatJson(value)}</pre></details>
+// Command output history is the reason most operators open a trace, so a span whose
+// payload is a shell result renders as a readable `$` command + output block instead of
+// escaped JSON. Plain strings (logs, stdout) render verbatim rather than JSON-quoted, and
+// the most-wanted fields (Output, Error, Data) open by default.
+function JsonValue({ label, value, defaultOpen = false }: { label: string; value: unknown; defaultOpen?: boolean }) {
+  const command = commandOutputFromValue(value)
+  const text = typeof value === 'string' ? value : undefined
+  return <details className="obs-json" {...(defaultOpen ? { open: true } : {})}>
+    <summary>{label}</summary>
+    {command
+      ? <CommandBlock className="obs-command" {...(command.command !== undefined ? { command: command.command } : {})} {...(command.output !== undefined ? { output: command.output } : {})} {...(command.exitCode !== undefined ? { exitCode: command.exitCode } : {})} />
+      : <pre className={text !== undefined ? 'obs-json-text' : ''}>{text ?? formatJson(value)}</pre>}
+  </details>
+}
+
+function commandOutputFromValue(value: unknown): { command?: string; output?: string; exitCode?: number } | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  let command: string | undefined
+  for (const key of ['command', 'cmd', 'script']) {
+    const candidate = record[key]
+    if (typeof candidate === 'string' && candidate.trim()) { command = candidate; break }
+  }
+  const streams: string[] = []
+  for (const key of ['stdout', 'stderr', 'output']) {
+    const stream = record[key]
+    if (typeof stream === 'string' && stream) streams.push(stream)
+  }
+  if (command === undefined && streams.length === 0) return undefined
+  const exit = record['exitCode'] ?? record['code']
+  const result: { command?: string; output?: string; exitCode?: number } = {}
+  if (command !== undefined) result.command = command
+  if (streams.length) result.output = streams.join('\n')
+  if (typeof exit === 'number') result.exitCode = exit
+  return result
 }
 
 function formatJson(value: unknown): string {

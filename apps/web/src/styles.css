@@ -403,8 +403,36 @@ p { color: var(--muted); line-height: 1.55; }
 .skeleton-line.short { width: 45%; }
 
 
-.tool-card { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; background: #eee9df; box-shadow: none; }.tool-card > div { display: flex; gap: 9px; align-items: center; }
-.tool-icon { display: grid; place-items: center; width: 30px; height: 30px; flex: 0 0 auto; border: 2px solid #111; border-radius: 50%; background: var(--green); }
+/* Tool calls + bash output: a quiet one-line row that recedes behind the answer, with a
+   status dot, muted mono label, an inline detail preview, and a right-aligned status.
+   Semi-neobrutalist — hard 1px edges and mono type, but no filled circles, big icons, or
+   drop shadows. Expands to the shared command block below. */
+.tool-activity { margin: 3px 0; }
+.tool-activity-summary { width: 100%; display: flex; align-items: center; gap: 9px; padding: 6px 4px; border: 0; border-top: 1px solid #e0d9cb; background: transparent; color: var(--muted); text-align: left; font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; cursor: pointer; }
+.tool-activity-summary:disabled { cursor: default; }
+.tool-activity-summary:hover:not(:disabled) { background: #f2ede3; }
+.tool-activity-dot { width: 8px; height: 8px; flex: none; border: 1px solid #111; border-radius: 50%; background: #cfc7b8; }
+.tool-activity.done .tool-activity-dot { background: var(--green); }
+.tool-activity.running .tool-activity-dot { background: var(--yellow); animation: pulse 1s infinite alternate; }
+.tool-activity.error .tool-activity-dot { background: var(--rose); }
+.tool-activity-label { flex: none; color: #322e28; font-weight: 750; }
+.tool-activity-detail { min-width: 0; flex: 1; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.tool-activity-status { flex: none; margin-left: auto; color: var(--muted); font: 800 8px ui-monospace, monospace; letter-spacing: .07em; text-transform: uppercase; }
+.tool-activity-status.error { color: #b4322d; }
+.tool-activity-chevron { flex: none; color: #8f887b; font-size: 9px; }
+.tool-activity-body { margin: 6px 0 8px 17px; display: grid; gap: 8px; }
+.tool-activity-json { max-height: 300px; overflow: auto; margin: 0; padding: 11px 13px; border: 1px solid #c9c1b3; background: var(--surface); color: #2b2925; font: 11px/1.55 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tool-activity-error { margin: 0; padding: 9px 12px; border-left: 3px solid var(--rose); background: #fbeceb; color: #6d201d; font-size: 12px; overflow-wrap: anywhere; }
+
+/* Shared bash/command output block (agent transcript + Governance command history). */
+.nb-command { overflow: hidden; border: 1px solid #c7bfb1; background: var(--surface); }
+.nb-command-bar { display: flex; align-items: center; gap: 8px; padding: 7px 11px; border-bottom: 1px solid #d8d0c2; background: #efe9df; }
+.nb-command-prompt { flex: none; color: #2f7d4e; font: 800 11px ui-monospace, monospace; }
+.nb-command-bar code { min-width: 0; flex: 1; overflow-x: auto; color: #24221f; font: 11px/1.5 ui-monospace, monospace; white-space: pre; }
+.nb-command-exit { flex: none; padding: 2px 6px; border: 1px solid #111; font: 800 8px ui-monospace, monospace; letter-spacing: .04em; text-transform: uppercase; }
+.nb-command-exit.ok { background: var(--green); }
+.nb-command-exit.bad { background: #ff918f; }
+.nb-command-output { max-height: 340px; overflow: auto; margin: 0; padding: 12px 13px; background: #17150f; color: #e4dfd2; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .action-suggestion { padding: 18px; border-color: var(--main); box-shadow: 4px 4px 0 var(--main); }.action-suggestion-head { display: flex; align-items: center; gap: 12px; }.action-suggestion-head > div { flex: 1; }.action-suggestion-head h3 { margin: 0; font-size: 20px; text-transform: capitalize; }.action-suggestion dl { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }.action-suggestion dl div { padding: 9px; background: #f1ece2; }.action-suggestion dt { color: var(--muted); font: 9px ui-monospace, monospace; text-transform: uppercase; }.action-suggestion dd { margin: 3px 0 0; font-weight: 700; }
 /* A device-console rationale is a line-by-line list of exactly what will be sent.
    Collapsed into one run-on sentence it stops being reviewable, and this is the
@@ -648,11 +676,15 @@ p { color: var(--muted); line-height: 1.55; }
 .obs-span-copy small { color: var(--muted); font: 8px ui-monospace, monospace; }
 .obs-span-body { display: grid; gap: 8px; padding: 0 8px 12px 13px; }
 .obs-kv { display: grid; gap: 4px; }
-.obs-kv > span, .obs-json > summary, .obs-correlation small { color: var(--muted); font: 800 7px ui-monospace, monospace; letter-spacing: .06em; text-transform: uppercase; }
-.obs-kv code, .obs-correlation code { overflow-wrap: anywhere; font: 9px/1.45 ui-monospace, monospace; }
+.obs-kv > span, .obs-json > summary, .obs-correlation small { color: var(--muted); font: 800 8px ui-monospace, monospace; letter-spacing: .06em; text-transform: uppercase; }
+.obs-json > summary { padding: 8px 10px; }
+.obs-kv code, .obs-correlation code { overflow-wrap: anywhere; font: 11px/1.5 ui-monospace, monospace; color: #24221f; }
 .obs-json { border: 1px solid #c7c0b4; background: var(--surface); }
 .obs-json > summary { padding: 7px 9px; cursor: pointer; }
-.obs-json pre { max-height: 300px; overflow: auto; margin: 0; padding: 10px; border-top: 1px solid #c7c0b4; background: #171717; color: #d8f6df; font: 9px/1.55 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.obs-json pre { max-height: 360px; overflow: auto; margin: 0; padding: 12px 13px; border-top: 1px solid #c7c0b4; background: #17150f; color: #e4dfd2; font: 11px/1.6 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.obs-json pre.obs-json-text { color: #ece7da; }
+.obs-json > .nb-command { border-width: 1px 0 0; }
+.obs-json > .nb-command .nb-command-output { max-height: 360px; }
 
 .obs-log-detail { padding-bottom: 18px; }
 .obs-log-detail > h3 { margin: 18px 15px 10px; font-size: 18px; line-height: 1.35; overflow-wrap: anywhere; }

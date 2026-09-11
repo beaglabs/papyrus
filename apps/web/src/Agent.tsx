@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import type { AgentSession, AgentStatus, WorkspaceLibraryFile } from './api.js'
 import { approveProposal, approveSkill, createSessionProposal, denyProposal, sessionMessages, setSessionAttention, uploadWorkspaceAttachment, workspaceFiles } from './api.js'
 import { ModelGatewayCard } from './Models.js'
-import { Alert, Badge, Button, Card, Input, Skeleton } from './components/ui/index.js'
+import { Alert, Badge, Button, Card, CommandBlock, Input, Skeleton } from './components/ui/index.js'
 import { MarkdownMessage } from './Markdown.js'
 
 interface AgentFormField {
@@ -374,11 +374,113 @@ function MessagePart({ part, sessionId, canApprove, canManageSkills, onChanged }
     if (output?.['kind'] === 'action_suggestion') return <ActionSuggestionCard suggestion={output} sessionId={sessionId} canApprove={canApprove} onChanged={onChanged} />
     if (output?.['kind'] === 'artifact') return <ArtifactCard artifact={output as unknown as ArtifactOutput} />
     if (output?.['kind'] === 'skill_draft') return <SkillDraftCard output={output as unknown as SkillDraftOutput} canManage={canManageSkills} onChanged={onChanged} />
-    const name = type === 'dynamic-tool' ? String(part['toolName'] ?? 'tool') : type.slice(5)
-    const state = String(part['state'] ?? 'running')
-    return <Card className="tool-card"><div><span className="tool-icon">⌁</span><strong>{humanize(name)}</strong></div><Badge>{humanize(state)}</Badge>{state === 'output-error' && <p>{String(part['errorText'] ?? 'Tool failed')}</p>}</Card>
+    return <ToolActivity part={part} />
   }
   return null
+}
+
+// Tool calls and bash output render as a quiet, collapsible line that stays out of the
+// way of the answer (Claude-style), while keeping Papyrus's mono type, hard 1px edges,
+// and status dot (semi-neobrutalist). Failed calls open by default; everything else is
+// one line until the reader expands it.
+function ToolActivity({ part }: { part: Record<string, unknown> }) {
+  const type = String(part['type'] ?? '')
+  const name = type === 'dynamic-tool' ? String(part['toolName'] ?? 'tool') : type.slice(5)
+  const state = String(part['state'] ?? 'running')
+  const kind = state === 'output-error' ? 'error' : state === 'output-available' ? 'done' : 'running'
+  const statusLabel = kind === 'error' ? 'Failed' : kind === 'done' ? 'Done' : 'Working'
+  const command = commandFromValue(part['input'])
+  const detail = command ?? summaryDetail(part['input'])
+  const output = toolOutputText(part['output'])
+  const exitCode = exitCodeFromValue(part['output'])
+  const inputJson = command === undefined && output === undefined && part['input'] != null ? formatToolValue(part['input']) : undefined
+  const hasBody = command !== undefined || output !== undefined || inputJson !== undefined || kind === 'error'
+  const [open, setOpen] = useState(kind === 'error')
+  return <div className={`tool-activity ${kind}${open ? ' open' : ''}`}>
+    <button type="button" className="tool-activity-summary" aria-expanded={open} disabled={!hasBody} onClick={() => setOpen((value) => !value)}>
+      <span className="tool-activity-dot" aria-hidden="true" />
+      <span className="tool-activity-label">{describeTool(name, command !== undefined)}</span>
+      {detail && <span className="tool-activity-detail">{firstLine(detail)}</span>}
+      <span className={`tool-activity-status ${kind}`}>{statusLabel}</span>
+      {hasBody && <span className="tool-activity-chevron" aria-hidden="true">{open ? '▾' : '▸'}</span>}
+    </button>
+    {open && hasBody && <div className="tool-activity-body">
+      {(command !== undefined || output !== undefined)
+        ? <CommandBlock {...(command !== undefined ? { command } : {})} {...(output !== undefined ? { output } : {})} {...(exitCode !== undefined ? { exitCode } : {})} />
+        : inputJson !== undefined && <pre className="tool-activity-json">{inputJson}</pre>}
+      {kind === 'error' && <p className="tool-activity-error">{String(part['errorText'] ?? 'Tool failed')}</p>}
+    </div>}
+  </div>
+}
+
+const COMMAND_TOOL = /(bash|shell|exec|command|terminal|run_|process|subprocess)/i
+const SEARCH_TOOL = /(search|google|lookup)/i
+const FETCH_TOOL = /(fetch|http|url|browse|open_page|read_url|scrape)/i
+
+function describeTool(name: string, hasCommand: boolean): string {
+  if (COMMAND_TOOL.test(name)) return 'Ran command'
+  if (SEARCH_TOOL.test(name)) return 'Searched'
+  if (FETCH_TOOL.test(name)) return 'Read a page'
+  if (hasCommand) return 'Ran command'
+  return humanize(name)
+}
+
+function commandFromValue(value: unknown): string | undefined {
+  if (value == null || typeof value !== 'object') return undefined
+  const record = value as Record<string, unknown>
+  for (const key of ['command', 'cmd', 'script', 'bash', 'shell']) {
+    const candidate = record[key]
+    if (typeof candidate === 'string' && candidate.trim()) return candidate
+  }
+  const argv = record['argv'] ?? record['args']
+  if (Array.isArray(argv) && argv.every((item) => typeof item === 'string')) return (argv as string[]).join(' ')
+  return undefined
+}
+
+function summaryDetail(value: unknown): string | undefined {
+  if (typeof value === 'string') return value.trim() || undefined
+  if (value == null || typeof value !== 'object') return undefined
+  const record = value as Record<string, unknown>
+  for (const key of ['query', 'q', 'url', 'path', 'name', 'title', 'prompt']) {
+    const candidate = record[key]
+    if (typeof candidate === 'string' && candidate.trim()) return candidate
+  }
+  return undefined
+}
+
+function toolOutputText(value: unknown): string | undefined {
+  if (value == null) return undefined
+  if (typeof value === 'string') return value.trim() ? value : undefined
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>
+    if (record['kind'] !== undefined) return undefined
+    const streams: string[] = []
+    for (const key of ['stdout', 'output', 'stderr', 'result', 'text']) {
+      const stream = record[key]
+      if (typeof stream === 'string' && stream) streams.push(stream)
+    }
+    if (streams.length) return streams.join('\n')
+    return formatToolValue(value)
+  }
+  return formatToolValue(value)
+}
+
+function exitCodeFromValue(value: unknown): number | undefined {
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  const code = record['exitCode'] ?? record['code']
+  return typeof code === 'number' ? code : undefined
+}
+
+function formatToolValue(value: unknown): string {
+  if (typeof value === 'string') return value
+  try { return JSON.stringify(value, null, 2) ?? String(value) }
+  catch { return String(value) }
+}
+
+function firstLine(value: string): string {
+  const line = value.split('\n', 1)[0] ?? value
+  return line.length > 160 ? `${line.slice(0, 157)}…` : line
 }
 
 function ActionSuggestionCard({ suggestion, sessionId, canApprove, onChanged }: { suggestion: Record<string, unknown>; sessionId: string; canApprove: boolean; onChanged: () => Promise<void> }) {

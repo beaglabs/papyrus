@@ -55,6 +55,18 @@ export function Alert({className,...props}:HTMLAttributes<HTMLDivElement>){
 export function Skeleton({className,...props}:HTMLAttributes<HTMLDivElement>){
   return <div aria-hidden="true" data-slot="skeleton" className={classes('nb-skeleton',className)} {...props}/>
 }
+// Shared command/bash output renderer. Used both in the agent transcript (bash tool
+// output) and on the Governance page (command output history) so a shell result reads
+// the same everywhere: a `$` command bar plus a scrollable monospace output pane.
+export function CommandBlock({command,output,exitCode,className}:{command?:string;output?:string;exitCode?:number;className?:string}){
+  const hasExit=typeof exitCode==='number'
+  const failed=hasExit&&exitCode!==0
+  if(command===undefined&&(output===undefined||output===''))return null
+  return <div data-slot="command-block" className={classes('nb-command',className)}>
+    {command!==undefined&&<div className="nb-command-bar"><span className="nb-command-prompt" aria-hidden="true">$</span><code>{command}</code>{hasExit&&<span className={classes('nb-command-exit',failed?'bad':'ok')}>exit {exitCode}</span>}</div>}
+    {output!==undefined&&output!==''&&<pre className="nb-command-output">{output}</pre>}
+  </div>
+}
 
 export function EmptyState({title,description,action,className}:{title:string;description?:string;action?:ReactNode;className?:string}){
   return <Card className={classes('nb-empty-state',className)}><CardContent><span className="nb-empty-mark" aria-hidden="true">＋</span><h2>{title}</h2>{description&&<p>{description}</p>}{action}</CardContent></Card>

@@ -305,10 +305,23 @@ class NonoProcessHandle extends ProcessHandle {
 }
 
 export function normalizeWorkspaceCwd(value: string): string {
-  const raw = value.trim() || '/'
-  const normalized = posix.normalize(raw.startsWith('/') ? raw : `/${raw}`)
-  if (normalized === '/..' || normalized.startsWith('/../')) throw new Error('Sandbox cwd escapes AgentFS workspace')
-  return normalized
+  const path = (value.trim() || '/').replace(/\\/g, '/')
+  const rooted = path.startsWith('/') ? path : `/${path}`
+  const kept: string[] = []
+  for (const segment of rooted.split('/')) {
+    if (segment === '' || segment === '.') continue
+    // posix.normalize cannot be used as the guard here: it resolves a leading `..`
+    // against the root and quietly returns `/etc` for `/../../etc`, which is the
+    // escape this function exists to refuse. Depth has to be tracked by hand so
+    // climbing past the workspace root is visible instead of normalised away.
+    if (segment === '..') {
+      if (kept.length === 0) throw new Error('Sandbox cwd escapes AgentFS workspace')
+      kept.pop()
+      continue
+    }
+    kept.push(segment)
+  }
+  return `/${kept.join('/')}`
 }
 
 function workerArguments(controlPath: string): string[] {

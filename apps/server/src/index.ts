@@ -14,6 +14,11 @@ import { LINK_PUBLISHER_CATALOG_ID } from './agent/catalog.js'
 import { ExchangeEmailDriver } from './agent/drivers/exchange-email-driver.js'
 import { HttpMicrosoftGraphClient } from './agent/graph-client.js'
 import { MastraRuntime } from './agent/mastra/runtime.js'
+import { ApplianceConsoleExecutor } from './agent/executors/appliance-console-executor.js'
+import { UnconfiguredDeviceCredentialResolver } from './agent/browser/credential.js'
+import { APPLIANCE_CONSOLE_CATALOG_ID } from './agent/catalog.js'
+import { getRenderSource } from './agent/browser/render.js'
+import { resolveBrowserExecutable } from './agent/browser/executable.js'
 
 const config = loadAgentConfig()
 const database = new AgentDatabase(config.databasePath)
@@ -35,7 +40,23 @@ const server = createAgentServer(config, service, auth, mastraRuntime)
 // credentials until the customer supplies its vault/workload-identity adapter.
 connectors.register('exchange-email', new ExchangeEmailDriver(graph))
 executorRegistry.register('exchange-email', new EmailExecutor(database, graph, mastraRuntime.artifacts))
-executorRegistry.register(LINK_PUBLISHER_CATALOG_ID, new LinkPublisherExecutor(mastraRuntime.links, new KitesurfLinkValidator(config)))
+executorRegistry.register(LINK_PUBLISHER_CATALOG_ID, new LinkPublisherExecutor(mastraRuntime.links, new KitesurfLinkValidator(config))
+)
+// The appliance console is an action executor, not a data connector: it produces
+// evidence as page snapshots inside the runtime and only ever changes a device
+// through a proposal an operator released. Like Graph, its credential boundary
+// defaults to a resolver that refuses until the customer wires its own vault, so a
+// console can be read and described immediately but cannot log in unconfigured.
+const deviceCredentials = new UnconfiguredDeviceCredentialResolver()
+// A browser is operator-supplied and optional: with nothing configured the rendered
+// path refuses and the executor will not release a rendered submission, so the
+// daemon never reaches for a browser it was not given.
+executorRegistry.register(APPLIANCE_CONSOLE_CATALOG_ID, new ApplianceConsoleExecutor(database, mastraRuntime.consoles, deviceCredentials, (integration, policy) => getRenderSource({
+  integrationId: integration.id,
+  integrationName: integration.name,
+  executable: () => resolveBrowserExecutable(integration, config),
+  assertAllowedUrl: (url) => { policy.assertAllowed(url) },
+})))
 
 server.listen(config.port, config.host, () => {
   worker.start()

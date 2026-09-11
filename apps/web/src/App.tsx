@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { PortalData, PublicConfig } from './api.js'
-import { AuthenticationRequired, createSession, deleteSession, loadPortal, logout, publicConfig } from './api.js'
+import { AuthenticationRequired, createSession, deleteSession, loadPortal, logout, publicConfig, type AgentSession } from './api.js'
 import { AgentView } from './Agent.js'
 import { LibraryView } from './Library.js'
 import { LinksView } from './Links.js'
@@ -65,8 +65,12 @@ export function App() {
     const created = await createSession()
     await refresh(); navigate('agent', { session: created.id })
   }
-  const removeSession = async (id: string) => {
-    await deleteSession(id); if (selectedSessionId === id) setSelectedSessionId(undefined); await refresh()
+  // Confirmation lives here rather than in the row, so the destructive call has one
+  // guard no matter which surface invokes it. The title is quoted back because the
+  // sidebar lists conversations by name and "Delete session?" identifies nothing.
+  const removeSession = async (session: AgentSession) => {
+    if (!window.confirm(`Delete \u201C${session.title}\u201D? Its transcript is removed with it.`)) return
+    await deleteSession(session.id); if (selectedSessionId === session.id) setSelectedSessionId(undefined); await refresh()
   }
   const signOut = async () => { await logout(); window.location.replace('/portal') }
 
@@ -87,7 +91,7 @@ export function App() {
           <SidebarGroup className="sidebar-history-group">
             <SidebarGroupLabel>History</SidebarGroupLabel>
             <SidebarGroupContent>
-              <SessionHistory sessions={data.sessions} selectedId={selectedSession?.id} onSelect={(id) => navigate('agent', { session: id })} onDelete={(id) => void removeSession(id)} />
+              <SessionHistory sessions={data.sessions} selectedId={selectedSession?.id} onSelect={(id) => navigate('agent', { session: id })} onDelete={(session) => void removeSession(session)} />
             </SidebarGroupContent>
           </SidebarGroup>
           <SidebarGroup>
@@ -119,9 +123,9 @@ export function App() {
 
 }
 
-function SessionHistory({ sessions, selectedId, onSelect, onDelete }: { sessions: PortalData['sessions']; selectedId?: string | undefined; onSelect: (id: string) => void; onDelete: (id: string) => void }) {
+function SessionHistory({ sessions, selectedId, onSelect, onDelete }: { sessions: PortalData['sessions']; selectedId?: string | undefined; onSelect: (id: string) => void; onDelete: (session: AgentSession) => void }) {
   if (!sessions.length) return <small className="sidebar-empty">No sessions yet</small>
-  return <SidebarMenu className="session-history">{sessions.map((session, index) => <SidebarMenuItem className="session-row" data-history-depth={Math.min(index, 6)} key={session.id}><SidebarMenuButton isActive={selectedId === session.id} tooltip={session.title} onClick={() => onSelect(session.id)}>{session.attention ? <span className="attention-icon" title="Requires attention">!</span> : <span className="sidebar-session-mark">•</span>}<span className="sidebar-copy session-title">{session.title}</span></SidebarMenuButton><Button variant="ghost" className="session-delete sidebar-copy" aria-label={`Delete ${session.title}`} onClick={() => onDelete(session.id)}>×</Button></SidebarMenuItem>)}</SidebarMenu>
+  return <SidebarMenu className="session-history">{sessions.map((session, index) => <SidebarMenuItem className="session-row" data-history-depth={Math.min(index, 6)} key={session.id}><SidebarMenuButton isActive={selectedId === session.id} tooltip={session.title} onClick={() => onSelect(session.id)}>{session.attention ? <span className="attention-icon" title="Requires attention">!</span> : <span className="sidebar-session-mark">•</span>}<span className="sidebar-copy session-title">{session.title}</span></SidebarMenuButton><Button variant="ghost" className="session-delete sidebar-copy" aria-label={`Delete ${session.title}`} onClick={() => onDelete(session)}>×</Button></SidebarMenuItem>)}</SidebarMenu>
 }
 
 function EmptyAgent({ onCreate }: { onCreate: () => void }) { return <Card className="empty-agent"><span>✦</span><h2>Start a durable session</h2><p>Your conversation, tool activity, and signal history stay in this customer-hosted daemon.</p><Button className="primary" onClick={onCreate}>New session →</Button></Card> }

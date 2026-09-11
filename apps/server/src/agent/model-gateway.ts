@@ -60,12 +60,27 @@ export class PapyrusModelGateway implements MastraModelGatewayInterface {
   }): GatewayLanguageModel {
     const profile = this.profiles.get(providerId)
     if (!profile || profile.state !== 'active') throw new Error('Configured Papyrus model profile not found')
+
+    // Cloudflare Workers AI requires system message to be first in the messages array
+    const isCloudflare = profile.gatewayKind === 'cloudflare-workers-ai'
+
     const provider = createOpenAICompatible({
       name: `papyrus.${providerId}`,
       baseURL: profile.baseUrl,
       ...(apiKey ? { apiKey } : {}),
       ...(headers && Object.keys(headers).length ? { headers } : {}),
       supportsStructuredOutputs: profile.capabilities.includes('structured_outputs'),
+      ...(isCloudflare ? {
+        transformRequestBody: (args: Record<string, any>) => {
+          const messages = args.messages
+          if (Array.isArray(messages)) {
+            const systemMessages = messages.filter((m: any) => m.role === 'system')
+            const otherMessages = messages.filter((m: any) => m.role !== 'system')
+            args.messages = [...systemMessages, ...otherMessages]
+          }
+          return args
+        },
+      } : {}),
     })
     return provider.chatModel(modelId)
   }

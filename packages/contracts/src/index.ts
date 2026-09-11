@@ -414,7 +414,7 @@ export interface IntegrationConfiguration {
   version: number
 }
 
-export const MODEL_GATEWAY_KINDS = ['openai-compatible', 'azure-openai', 'ollama', 'custom'] as const
+export const MODEL_GATEWAY_KINDS = ['openai-compatible', 'azure-openai', 'ollama', 'cloudflare-workers-ai', 'custom'] as const
 export type ModelGatewayKind = (typeof MODEL_GATEWAY_KINDS)[number]
 export const MODEL_AUTH_SCHEMES = ['none', 'api_key', 'entra', 'credential_ref'] as const
 export type ModelAuthScheme = (typeof MODEL_AUTH_SCHEMES)[number]

@@ -31,6 +31,11 @@ export interface AgentConfig {
   licenseAuthorities: Record<string, string>
   kitesurf?: { accountId: string; apiTokenEnv: string }
   tls?: { certPath: string; keyPath: string; caPath?: string }
+  /**
+   * Absolute path to an operator-installed browser. Absent means no browser is
+   * available and device console rendering refuses; Papyrus never downloads one.
+   */
+  browser?: { executablePath: string }
 }
 
 function required(name: string, value: string | undefined): string {
@@ -157,5 +162,9 @@ export function loadAgentConfig(env: NodeJS.ProcessEnv = process.env): AgentConf
       certPath: resolve(certPath), keyPath: resolve(keyPath),
       ...(env.PAPYRUS_TLS_CA?.trim() ? { caPath: resolve(env.PAPYRUS_TLS_CA.trim()) } : {}),
     } } : {}),
+    // Read once, at the edge, like every other environment value. The render path
+    // takes a resolved config so nothing deep in the browser boundary reads process
+    // state it cannot be tested with.
+    ...(env.PAPYRUS_BROWSER_EXECUTABLE?.trim() ? { browser: { executablePath: resolve(env.PAPYRUS_BROWSER_EXECUTABLE.trim()) } } : {}),
   }
 }

@@ -260,10 +260,12 @@ describe('sandbox policy', () => {
     }
 
     const defaults = loadAgentConfig(env)
-    expect(defaults.agentfsBinary).toBe('agentfs')
+    // No assertion on the sandbox CLI paths: they were removed deliberately, since
+    // the runtime resolves its own binaries rather than accepting operator paths.
     expect(defaults.agentfsId).toBe('papyrus-workspace')
-    expect(defaults.agentfsDatabasePath).toMatch(/\.agentfs[/\\]papyrus-workspace\.db$/)
-    expect(defaults.nonoBinary).toBe('nono')
+    // The database path is no longer a configuration field; the runtime derives it
+    // as <dataDir>/.agentfs/<agentfsId>.db (runtime.ts), which the boundary test
+    // below exercises through the reported status instead.
     expect(loadAgentConfig({ ...env, PAPYRUS_SANDBOX_RUNTIME: 'bwrap' }).sandboxRuntime).toBe('bwrap')
     expect(loadAgentConfig({ ...env, PAPYRUS_SANDBOX_RUNTIME: 'seatbelt' }).sandboxRuntime).toBe('seatbelt')
     expect(() => loadAgentConfig({ ...env, PAPYRUS_SANDBOX_RUNTIME: 'docker' })).toThrow(
@@ -377,8 +379,9 @@ describe('mastra runtime without the harness installed', () => {
   it('reports the local AgentFS + nono workspace boundary', async () => {
     const subject = await runtime()
     expect(subject.status.workspace).toMatchObject({
-      filesystem: 'agentfs',
-      sandbox: 'nono',
+      // The SDK-backed runtime reports 'agentfs-sdk'; the separate sandbox key went
+      // away when the workspace and sandbox became one runtime choice.
+      filesystem: 'agentfs-sdk',
       network: 'blocked',
     })
   })

@@ -392,20 +392,8 @@ export class MastraRuntime {
     const hadUsableDefault = Boolean(this.models.getDefault())
     try {
       const credential = resolveModelCredential(profile)
-      let testUrl: string
-      let testMethod = 'GET'
-      let testHeaders: Record<string, string> = credential ? { authorization: `Bearer ${credential}` } : {}
-      if (profile.gatewayKind === 'cloudflare-workers-ai') {
-        testUrl = `${profile.baseUrl}/chat/completions`
-        testMethod = 'POST'
-        testHeaders = { ...testHeaders, 'content-type': 'application/json' }
-        const response = await fetch(testUrl, { method: testMethod, headers: testHeaders, body: JSON.stringify({ model: profile.model, messages: [{ role: 'user', content: 'test' }], max_tokens: 1 }), signal: AbortSignal.timeout(8_000) })
-        if (response.status >= 400) throw new Error(`Model endpoint returned ${response.status}`)
-      } else {
-        testUrl = `${profile.baseUrl}/models`
-        const response = await fetch(testUrl, { method: testMethod, headers: testHeaders, signal: AbortSignal.timeout(8_000) })
-        if (response.status >= 400) throw new Error(`Model endpoint returned ${response.status}`)
-      }
+      const response = await fetch(`${profile.baseUrl}/models`, { method: 'GET', headers: credential ? { authorization: `Bearer ${credential}` } : {}, signal: AbortSignal.timeout(8_000) })
+      if (response.status >= 400) throw new Error(`Model endpoint returned ${response.status}`)
       const tested = this.models.markTested(id, undefined, actorOid)
       const selected = !hadUsableDefault && !tested.isDefault ? this.models.setDefault(id) : tested
       if (!hadUsableDefault) await this.reloadAgent()

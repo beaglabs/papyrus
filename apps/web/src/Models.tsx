@@ -5,7 +5,7 @@ import { Alert, Badge, Button, Card } from './components/ui/index.js'
 
 const directSetupRequest = {
   fields: [
-    { name: 'gatewayKind', label: 'Gateway type', kind: 'select', required: true, options: [{ label: 'OpenAI compatible', value: 'openai-compatible' }, { label: 'Azure OpenAI', value: 'azure-openai' }, { label: 'Cloudflare Workers AI', value: 'cloudflare-workers-ai' }, { label: 'Ollama (local)', value: 'ollama' }] },
+    { name: 'gatewayKind', label: 'Gateway type', kind: 'select', required: true, options: [{ label: 'OpenAI compatible', value: 'openai-compatible' }, { label: 'Azure OpenAI', value: 'azure-openai' }, { label: 'Ollama (local)', value: 'ollama' }] },
     { name: 'model', label: 'Model ID', kind: 'text', required: true, placeholder: 'qwen3-32b' },
     { name: 'baseUrl', label: 'Base URL', kind: 'url', required: true, placeholder: 'https://inference.example.gov/v1', help: 'HTTPS is required outside loopback development.' },
     { name: 'authScheme', label: 'Authentication', kind: 'select', required: true, options: [{ label: 'No authentication', value: 'none' }, { label: 'API key from daemon environment', value: 'api_key' }] },

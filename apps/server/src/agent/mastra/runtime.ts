@@ -8,11 +8,14 @@ import type { AgentService } from '../service.js'
 import type { TerrainStore } from '../terrain-store.js'
 import { SignalOutbox, type SignalRecord } from './signal-outbox.js'
 import {
+  assertAgentSafeTool,
   INVESTIGATION_TOOLS,
   runInvestigationTool,
   type InvestigationToolContext,
   type InvestigationToolName,
 } from './tools.js'
+import { collectExtensionTools } from 'papyrus-extension-sdk'
+import { gnssToolProvider } from 'papyrus-gnss/tools'
 import { LINK_EXECUTOR_INTEGRATION_ID, LinkStore, type LinkDraftAssetInput } from '../link-store.js'
 import { modelGatewayRequest } from './agent-ui-tools.js'
 import { fetchUrlPreview } from './fetch-preview.js'
@@ -984,6 +987,18 @@ export class MastraRuntime {
       background: { enabled: true, timeoutMs: 15_000, maxRetries: 1, waitTimeoutMs: 15_000 },
       execute: async (inputData: { url: string }) => fetchUrlPreview(inputData.url),
     })
+    // Extension tools (papyrus-extensions). Providers contribute read-only,
+    // side-effect-free tools that return kind-tagged UI objects. Every id passes
+    // through assertAgentSafeTool -- the same gate the built-in tools use -- so an
+    // extension can never register a forbidden, authority-bearing tool.
+    for (const tool of collectExtensionTools([gnssToolProvider], { assertSafe: assertAgentSafeTool })) {
+      registered[tool.id] = createTool({
+        id: tool.id,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+        execute: async (inputData: Record<string, unknown>) => tool.execute(inputData),
+      })
+    }
     // Device console tools. Reads and proposals are registered separately because
     // they do different things: a read fetches and reports, and a write only
     // describes a submission for a human to release. Neither can send — the

@@ -6,6 +6,8 @@ import { approveProposal, approveSkill, createSessionProposal, denyProposal, ses
 import { ModelGatewayCard } from './Models.js'
 import { Alert, Badge, Button, Card, CommandBlock, Input, Skeleton } from './components/ui/index.js'
 import { MarkdownMessage } from './Markdown.js'
+import { buildCardRegistry } from 'papyrus-extension-sdk'
+import { gnssUiProvider } from 'papyrus-gnss/ui'
 
 interface AgentFormField {
   name: string
@@ -363,6 +365,10 @@ function Message({ message, sessionId, canApprove, canManageSkills, onChanged }:
   return <article className={`chat-message ${message.role}`}><div className="message-author">{message.role === 'user' ? 'YOU' : 'PAPYRUS'}</div><div className="message-body">{message.parts.map((part, index) => <MessagePart key={`${part.type}:${index}`} part={part as unknown as Record<string, unknown>} sessionId={sessionId} canApprove={canApprove} canManageSkills={canManageSkills} onChanged={onChanged} />)}</div></article>
 }
 
+// Registry of extension UI cards keyed by output.kind, built once from the
+// installed extension packages' UI providers (papyrus-extensions).
+const EXTENSION_CARDS = buildCardRegistry([gnssUiProvider])
+
 function MessagePart({ part, sessionId, canApprove, canManageSkills, onChanged }: { part: Record<string, unknown>; sessionId: string; canApprove: boolean; canManageSkills: boolean; onChanged: () => Promise<void> }) {
   if (part['type'] === 'text') return <MarkdownMessage>{String(part['text'] ?? '')}</MarkdownMessage>
   if (part['type'] === 'source-url') return <a className="source-link" href={String(part['url'])} target="_blank" rel="noreferrer">{String(part['title'] ?? part['url'])} ↗</a>
@@ -374,6 +380,10 @@ function MessagePart({ part, sessionId, canApprove, canManageSkills, onChanged }
     if (output?.['kind'] === 'action_suggestion') return <ActionSuggestionCard suggestion={output} sessionId={sessionId} canApprove={canApprove} onChanged={onChanged} />
     if (output?.['kind'] === 'artifact') return <ArtifactCard artifact={output as unknown as ArtifactOutput} />
     if (output?.['kind'] === 'skill_draft') return <SkillDraftCard output={output as unknown as SkillDraftOutput} canManage={canManageSkills} onChanged={onChanged} />
+    if (output && typeof output['kind'] === 'string') {
+      const ExtensionCard = EXTENSION_CARDS[output['kind']]
+      if (ExtensionCard) return <ExtensionCard output={output} />
+    }
     return <ToolActivity part={part} />
   }
   return null

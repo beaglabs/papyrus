@@ -27,6 +27,8 @@
     "jose": "6.2.9",
     "libsql": "^0.5.29",
     "nono-ts": "0.3.0",
+    "papyrus-extension-sdk": "^0.1.0",
+    "papyrus-gnss": "^0.1.0",
     "zod": "4.5.4"
   },
   "devDependencies": {

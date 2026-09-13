@@ -4,7 +4,7 @@
 
 # Papyrus
 
-**Customer-hosted durable agent runtime powered by Mastra and Starlings.**
+**Customer-hosted durable agent runtime powered by Mastra.**
 
 [![CDAO Tradewinds — Awardable][badge-tsm]][link-tsm]
 [![Status: Experimental][badge-status]][link-status] ![Version 0.1.0][badge-version] ![License: Proprietary][badge-license]
@@ -21,7 +21,7 @@ _Deemed **Awardable** on the DoW CDAO [Tradewinds Solutions Marketplace](https:/
 > [!NOTE]
 > This is the `experiment/agent-twin-terrain-runtime` product-reset branch. Entra remains the identity authority; the product surface is now a Mastra-native agent runtime rather than an agent-twin dashboard.
 
-Papyrus is a licensed daemon for durable, event-driven agent work. Mastra owns sessions, memory, schedules, workflows, and signal delivery. Starlings remains the heterogeneous collective-computation substrate. Teams, Exchange email, ACP, A2A, and customer systems are plugins around that core.
+Papyrus is a licensed daemon for durable, event-driven agent work. Mastra owns sessions, memory, schedules, workflows, and signal delivery. Teams, Exchange email, ACP, A2A, and customer systems are plugins around that core.
 
 ## Contents
 
@@ -41,10 +41,10 @@ Papyrus is a licensed daemon for durable, event-driven agent work. Mastra owns s
 | | |
 | --- | --- |
 | **Identity and portal roles** | Microsoft Entra ID application roles. Papyrus has no invitation, password, provisioning, or local role database. |
-| **Operational safety** | Starlings proposes actions; deterministic workflow policy and an Entra-authorized approver release them. |
+| **Operational safety** | The agent proposes actions; deterministic workflow policy and an Entra-authorized approver release them. |
 | **Secrets** | Connector configuration accepts customer-vault, certificate, or managed-identity references. Inline tokens, passwords, client secrets, and private keys are rejected. |
 | **Licensing** | The existing deployment-bound, signed, offline license format remains. No Beag cloud callback is required. |
-| **Runtime independence** | Teams and email are adapters. Disabling them does not disable sessions, workflows, or the Starlings runtime. |
+| **Runtime independence** | Teams and email are adapters. Disabling them does not disable sessions or workflows. |
 | **Sandboxed execution** | Agent code runs only on Linux under Bubblewrap, with network denied. On any other host execution is off, and the daemon reports why rather than falling back to unisolated execution. |
 
 ## Product boundary
@@ -56,10 +56,6 @@ Teams / Email / ACP / A2A / Customer plugins
                   Papyrus daemon
             Entra identity · licensing
            plugin policy · action ledger · audit
-                         │
-                         ▼
-                 Starlings runtime
-        local operators · claims · conflicts
                          │
                          ▼
         Mastra sessions · signals · workflows
@@ -206,7 +202,7 @@ Mastra is now a server dependency. Its storage starts even when no model is conf
 
 `fetchUrlPreview` permits HTTPS by default, follows redirects only after re-validation, limits response size, and rejects credentials, loopback, link-local, metadata, private, and reserved destinations. Reviewed internal hosts can be enumerated with `PAPYRUS_FETCH_ALLOWED_HOSTS`.
 
-The Observation API is an advanced custom-ingestion contract, not the primary production collection workflow. Selecting **Connect** registers a source identity and opens a one-record validation/developer bridge that mints a one-hour source-scoped token. Production telemetry should use native SIEM, EDR, OTEL, email, or OT connectors; unattended custom producers require customer-approved workload identity or mTLS plus durable spooling and batching. Waiting custom sources remain in the catalog rather than appearing as operational. Exchange now has a Microsoft Graph delta-polling and send-mail boundary, but customer deployments must supply the approved vault/workload-identity credential resolver before it performs external calls. Live Teams command handling, additional native security connectors, the customer-vault resolver, and the Starlings process adapter remain implementation slices. Pull integrations cannot activate until their driver is registered, and configuration-only tests leave health unknown rather than pretending that saving a connector performed live network validation.
+The Observation API is an advanced custom-ingestion contract, not the primary production collection workflow. Selecting **Connect** registers a source identity and opens a one-record validation/developer bridge that mints a one-hour source-scoped token. Production telemetry should use native SIEM, EDR, OTEL, email, or OT connectors; unattended custom producers require customer-approved workload identity or mTLS plus durable spooling and batching. Waiting custom sources remain in the catalog rather than appearing as operational. Exchange now has a Microsoft Graph delta-polling and send-mail boundary, but customer deployments must supply the approved vault/workload-identity credential resolver before it performs external calls. Live Teams command handling, additional native security connectors, and the customer-vault resolver remain implementation slices. Pull integrations cannot activate until their driver is registered, and configuration-only tests leave health unknown rather than pretending that saving a connector performed live network validation.
 
 ## Verification
 

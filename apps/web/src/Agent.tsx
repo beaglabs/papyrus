@@ -6,6 +6,8 @@ import { approveProposal, approveSkill, createSessionProposal, denyProposal, ses
 import { ModelGatewayCard } from './Models.js'
 import { Alert, Badge, Button, Card, CommandBlock, Input, Skeleton } from './components/ui/index.js'
 import { MarkdownMessage } from './Markdown.js'
+import { buildCardRegistry, type CardRegistry, type ExtensionUiProvider } from './extensions/extension-sdk.js'
+import { viewer3dUiProvider } from './extensions/viewer-3d.js'
 
 interface AgentFormField {
   name: string
@@ -21,14 +23,6 @@ interface ModelGatewayRequest {
   kind: 'model_gateway_request'
   fields: AgentFormField[]
   note: string
-}
-
-interface Viewer3DCardData {
-  kind: 'viewer_3d'
-  renderer: string
-  title: string
-  scene: Record<string, unknown>
-  source?: { extension?: string; tool?: string }
 }
 
 interface UrlPreview {
@@ -367,23 +361,17 @@ function Welcome() {
   return <div className="agent-welcome"><span className="agent-orbit">✦</span><p className="eyebrow">PAPYRUS RUNTIME</p><h2>What should the agent work on?</h2><p>Start a task, create a durable artifact, expose a session-scoped ingestion Link, or schedule recurring work through the agent. Mastra makes the session durable and event-driven.</p><div className="prompt-chips"><span>Create a PDF briefing</span><span>Build an XLSX risk register</span><span>Create a reusable skill</span></div></div>
 }
 
-// Dynamic viewer cards. The hardened core ships this registry and a placeholder
-// renderer only; real domain renderers (e.g. the GNSS / 3D WebGL viewers) arrive as
-// read-only ExtensionUiProviders from papyrus-extensions. Once that dependency is
-// added and the lockfile regenerated, merge providers in with:
-//   import { buildCardRegistry } from 'papyrus-extension-sdk'
-//   Object.assign(EXTENSION_CARDS, buildCardRegistry([viewer3dUiProvider, gnssUiProvider]))
-const EXTENSION_CARDS: Record<string, (props: { output: Record<string, unknown> }) => ReactElement> = {
-  viewer_3d: ({ output }) => <Viewer3DCard data={output as unknown as Viewer3DCardData} />,
-}
-
-function Viewer3DCard({ data }: { data: Viewer3DCardData }) {
-  return <Card className="viewer-3d-card">
-    <div className="viewer-3d-head"><p className="eyebrow">3D VIEWER</p><h3>{data.title}</h3></div>
-    <p className="viewer-3d-note">Renderer <code>{data.renderer}</code> is supplied by a vetted Papyrus extension. Install its extension UI provider to render this scene interactively. The core never executes extension markup; it only routes typed, read-only scene data to the registered card.</p>
-    <pre className="viewer-3d-scene">{JSON.stringify(data.scene, null, 2).slice(0, 1200)}</pre>
-  </Card>
-}
+// Dynamic viewer cards. Out-of-core extension UI providers are wired into the core
+// through the papyrus-extension-sdk contract (buildCardRegistry) and routed by their
+// tool output `kind`. The core never executes extension markup; it only hands typed,
+// read-only tool output to the registered card. Providers are vendored under
+// ./extensions (papyrus-extension-sdk + papyrus-viewer-3d) until those packs are
+// consumed as workspace dependencies (needs a pnpm-lock.yaml regeneration); swapping
+// to the package imports is then a mechanical change here.
+type ExtensionCardComponent = (props: { output: Record<string, unknown> }) => ReactElement
+const EXTENSION_CARDS: CardRegistry<ExtensionCardComponent> = buildCardRegistry(
+  [viewer3dUiProvider] as unknown as ExtensionUiProvider<ExtensionCardComponent>[],
+)
 
 function Message({ message, sessionId, canApprove, canManageSkills, onChanged }: { message: UIMessage; sessionId: string; canApprove: boolean; canManageSkills: boolean; onChanged: () => Promise<void> }) {
   return <article className={`chat-message ${message.role}`}><div className="message-author">{message.role === 'user' ? 'YOU' : 'PAPYRUS'}</div><div className="message-body">{message.parts.map((part, index) => <MessagePart key={`${part.type}:${index}`} part={part as unknown as Record<string, unknown>} sessionId={sessionId} canApprove={canApprove} canManageSkills={canManageSkills} onChanged={onChanged} />)}</div></article>

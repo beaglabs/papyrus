@@ -119,4 +119,4 @@ Teams is an adapter, not a runtime dependency. GCC High and DoD application depl
 
 ## Current scope
 
-The branch implements deployment configuration, Entra validation, connector governance, customer-managed Observation API source profiles, portal routes, licensing, and audit persistence. Live Teams commands, Exchange polling, source-scoped machine credentials, customer-vault resolution, and the Starlings process adapter are separate runtime slices and are not represented as operational merely because an integration has been saved.
+The branch implements deployment configuration, Entra validation, connector governance, customer-managed Observation API source profiles, portal routes, licensing, and audit persistence. Live Teams commands, Exchange polling, source-scoped machine credentials, and customer-vault resolution are separate runtime slices and are not represented as operational merely because an integration has been saved.

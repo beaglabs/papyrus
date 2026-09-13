@@ -5,7 +5,7 @@ processes, and consequential external actions. These are different authority
 boundaries and are not interchangeable.
 
 ```text
-Agent / Starlings
+Agent runtime
       |
       +-- ordinary file operations ------------> AgentFS SDK
       |

@@ -1,6 +1,6 @@
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport, type UIMessage } from 'ai'
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactElement } from 'react'
 import type { AgentSession, AgentStatus, WorkspaceLibraryFile } from './api.js'
 import { approveProposal, approveSkill, createSessionProposal, denyProposal, sessionMessages, setSessionAttention, uploadWorkspaceAttachment, workspaceFiles } from './api.js'
 import { ModelGatewayCard } from './Models.js'
@@ -21,6 +21,14 @@ interface ModelGatewayRequest {
   kind: 'model_gateway_request'
   fields: AgentFormField[]
   note: string
+}
+
+interface Viewer3DCardData {
+  kind: 'viewer_3d'
+  renderer: string
+  title: string
+  scene: Record<string, unknown>
+  source?: { extension?: string; tool?: string }
 }
 
 interface UrlPreview {
@@ -175,7 +183,7 @@ function Chat({ session, status, initial, input, setInput, historyError, history
   }
 
   return <div className="agent-surface">
-    <div className="agent-session-head"><div><p className="eyebrow">DURABLE SESSION</p><h2>{session.title}</h2></div><div className="agent-badges"><Badge>{status.mode.toUpperCase()}</Badge><Badge className={status.durable ? 'status-good' : ''}>{status.durable ? 'DURABLE' : 'OFFLINE'}</Badge></div></div>
+    <div className="agent-session-head"><div><p className="eyebrow">DURABLE SESSION</p><h2>{session.title}</h2></div><div className="agent-badges"><Badge>{status.runtime.toUpperCase()}</Badge><Badge className={status.durable ? 'status-good' : ''}>{status.durable ? 'DURABLE' : 'OFFLINE'}</Badge></div></div>
     {!status.agentReady && <Alert className="agent-config-alert"><strong>Agent model not configured</strong><span>Open <a href="/portal/models">Models</a> to configure an approved gateway using the first-run form. Chat unlocks after the daemon has a tested model profile.</span></Alert>}
     {historyError && <Alert className="error">{historyError}</Alert>}
     <div
@@ -356,7 +364,25 @@ function MessageSkeleton() {
 }
 
 function Welcome() {
-  return <div className="agent-welcome"><span className="agent-orbit">✦</span><p className="eyebrow">PAPYRUS RUNTIME</p><h2>What should the population work on?</h2><p>Start a task, create a durable artifact, expose a session-scoped ingestion Link, or schedule recurring work through the agent. Starlings handles collective reasoning; Mastra makes the session durable and event-driven.</p><div className="prompt-chips"><span>Create a PDF briefing</span><span>Build an XLSX risk register</span><span>Create a reusable skill</span></div></div>
+  return <div className="agent-welcome"><span className="agent-orbit">✦</span><p className="eyebrow">PAPYRUS RUNTIME</p><h2>What should the agent work on?</h2><p>Start a task, create a durable artifact, expose a session-scoped ingestion Link, or schedule recurring work through the agent. Mastra makes the session durable and event-driven.</p><div className="prompt-chips"><span>Create a PDF briefing</span><span>Build an XLSX risk register</span><span>Create a reusable skill</span></div></div>
+}
+
+// Dynamic viewer cards. The hardened core ships this registry and a placeholder
+// renderer only; real domain renderers (e.g. the GNSS / 3D WebGL viewers) arrive as
+// read-only ExtensionUiProviders from papyrus-extensions. Once that dependency is
+// added and the lockfile regenerated, merge providers in with:
+//   import { buildCardRegistry } from 'papyrus-extension-sdk'
+//   Object.assign(EXTENSION_CARDS, buildCardRegistry([viewer3dUiProvider, gnssUiProvider]))
+const EXTENSION_CARDS: Record<string, (props: { output: Record<string, unknown> }) => ReactElement> = {
+  viewer_3d: ({ output }) => <Viewer3DCard data={output as unknown as Viewer3DCardData} />,
+}
+
+function Viewer3DCard({ data }: { data: Viewer3DCardData }) {
+  return <Card className="viewer-3d-card">
+    <div className="viewer-3d-head"><p className="eyebrow">3D VIEWER</p><h3>{data.title}</h3></div>
+    <p className="viewer-3d-note">Renderer <code>{data.renderer}</code> is supplied by a vetted Papyrus extension. Install its extension UI provider to render this scene interactively. The core never executes extension markup; it only routes typed, read-only scene data to the registered card.</p>
+    <pre className="viewer-3d-scene">{JSON.stringify(data.scene, null, 2).slice(0, 1200)}</pre>
+  </Card>
 }
 
 function Message({ message, sessionId, canApprove, canManageSkills, onChanged }: { message: UIMessage; sessionId: string; canApprove: boolean; canManageSkills: boolean; onChanged: () => Promise<void> }) {
@@ -374,6 +400,9 @@ function MessagePart({ part, sessionId, canApprove, canManageSkills, onChanged }
     if (output?.['kind'] === 'action_suggestion') return <ActionSuggestionCard suggestion={output} sessionId={sessionId} canApprove={canApprove} onChanged={onChanged} />
     if (output?.['kind'] === 'artifact') return <ArtifactCard artifact={output as unknown as ArtifactOutput} />
     if (output?.['kind'] === 'skill_draft') return <SkillDraftCard output={output as unknown as SkillDraftOutput} canManage={canManageSkills} onChanged={onChanged} />
+    const extensionKind = output && typeof output['kind'] === 'string' ? output['kind'] : ''
+    const ExtensionCard = EXTENSION_CARDS[extensionKind]
+    if (ExtensionCard) return <ExtensionCard output={output as Record<string, unknown>} />
     return <ToolActivity part={part} />
   }
   return null

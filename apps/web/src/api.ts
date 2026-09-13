@@ -32,7 +32,7 @@ export interface AgentStatus {
   agentReady: boolean
   durable: boolean
   model: string | null
-  mode: 'starlings' | 'centralized'
+  runtime: 'mastra'
   workspace?: {
     filesystem: 'agentfs-sdk'
     storage: 'local-sqlite'

@@ -102,7 +102,7 @@ export function App() {
           </SidebarGroup>
         </SidebarContent>
         <SidebarFooter>
-          <div className="runtime-panel"><span className="runtime-label">COLLECTIVE RUNTIME</span><strong><span className={`dot ${data.agent.agentReady ? 'good' : 'warning'}`} /><span className="sidebar-copy">{data.agent.agentReady ? 'Starlings + Mastra online' : 'Mastra storage online'}</span></strong><small className="sidebar-copy">{data.agent.model ?? 'Model configuration required'}</small></div>
+          <div className="runtime-panel"><span className="runtime-label">RUNTIME</span><strong><span className={`dot ${data.agent.agentReady ? 'good' : 'warning'}`} /><span className="sidebar-copy">{data.agent.agentReady ? 'Mastra online' : 'Mastra storage online'}</span></strong><small className="sidebar-copy">{data.agent.model ?? 'Model configuration required'}</small></div>
           <DropdownMenu className="account-menu" trigger={<div className="account-trigger-content"><Avatar className="avatar">{initials(data.me.displayName)}</Avatar><span className="account-copy sidebar-copy"><strong>{data.me.displayName}</strong><small>ENTRA · {data.me.roles.length} ROLES</small></span><span className="sidebar-copy">•••</span></div>}>
             <DropdownMenuLabel><strong>{data.me.displayName}</strong><span>{data.me.preferredUsername ?? data.me.oid}</span></DropdownMenuLabel><DropdownMenuSeparator /><DropdownMenuItem disabled>Roles managed in Microsoft Entra</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem className="danger-item" onClick={() => void signOut()}>Sign out</DropdownMenuItem>
           </DropdownMenu>
@@ -162,7 +162,7 @@ export function PrimaryNavigation({ view, onNavigate }: { view: PortalView; onNa
 
 function PortalHeader({ view, data }: { view: PortalView; data: PortalData }) {
   const copy: Record<PortalView, [string, string]> = {
-    agent: ['MASTRA + STARLINGS', 'Agent'], models: ['MODEL GATEWAYS', 'Models'],
+    agent: ['MASTRA RUNTIME', 'Agent'], models: ['MODEL GATEWAYS', 'Models'],
     links: ['AGENT-CREATED PUBLIC BOUNDARIES', 'Links'], library: ['AGENTFS FILE AUTHORITY', 'Library'], governance: ['IDENTITY, LICENSING AND AUDIT', 'Governance'],
   }
   return <header className="portal-header"><div className="portal-header-title"><SidebarTrigger /><div><p className="eyebrow">{copy[view][0]}</p><h1>{copy[view][1]}</h1></div></div><div className="header-status"><span><i className="dot good" />DAEMON HEALTHY</span><small>{data.config.organizationName}</small></div></header>

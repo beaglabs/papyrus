@@ -32,10 +32,10 @@ h2 { margin-bottom: 12px; font-size: 22px; letter-spacing: -.025em; }
 h3 { margin-bottom: 7px; font-size: 16px; }
 p { color: var(--muted); line-height: 1.55; }
 
-.handling-banner { position: fixed; inset: 0 0 auto; z-index: 100; min-height: 32px; display: flex; justify-content: center; align-items: center; gap: 14px; padding: 6px 12px; border-bottom: 3px solid #111; background: var(--rose); font: 800 10px ui-monospace, monospace; letter-spacing: .1em; text-align: center; }
+.handling-banner { position: fixed; inset: 0 0 auto; z-index: 100; min-height: 32px; display: flex; justify-content: center; align-items: center; gap: 14px; padding: 6px 12px; border: 4px solid var(--main); border-bottom: 3px solid #111; background: var(--rose); font: 800 10px ui-monospace, monospace; letter-spacing: .1em; text-align: center; }
 .handling-banner strong { color: #111; }
 .portal-shell { min-height: 100vh; }
-.with-handling-banner { height: 100vh; min-height: 0; overflow: hidden; padding-top: 32px; }
+.with-handling-banner { height: 100vh; min-height: 0; overflow: hidden; padding-top: 32px; border: 4px solid var(--main); }
 
 .nb-sidebar-wrapper { display: flex; width: 100%; min-width: 0; background: var(--background); }
 .nb-sidebar { position: relative; z-index: 30; width: var(--sidebar-width); min-width: var(--sidebar-width); height: 100%; display: flex; flex-direction: column; border-right: 3px solid #111; background: var(--surface); color: var(--foreground); transition: width .16s ease, min-width .16s ease, transform .16s ease; }

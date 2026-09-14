@@ -266,6 +266,12 @@ export async function approveSkill(id: string): Promise<unknown> {
   return api(`/api/skills/${encodeURIComponent(id)}/approve`, { method: 'POST', body: '{}' })
 }
 
+/** Every proposal the daemon holds. Used to read back what already happened to a suggestion. */
+export async function listProposals(): Promise<AgentActionProposal[]> {
+  const result = await api<{ proposals: AgentActionProposal[] }>('/api/proposals')
+  return result.proposals
+}
+
 export interface WorkspaceLibraryPage {
   files: WorkspaceLibraryFile[]
   total: number

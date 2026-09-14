@@ -2,7 +2,8 @@ import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport, type UIMessage } from 'ai'
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactElement } from 'react'
 import type { AgentSession, AgentStatus, WorkspaceLibraryFile } from './api.js'
-import { approveProposal, approveSkill, createSessionProposal, denyProposal, sessionMessages, setSessionAttention, uploadWorkspaceAttachment, workspaceFiles } from './api.js'
+import type { AgentActionProposal } from '@papyrus/contracts'
+import { approveProposal, approveSkill, createSessionProposal, denyProposal, listProposals, sessionMessages, setSessionAttention, uploadWorkspaceAttachment, workspaceFiles } from './api.js'
 import { ModelGatewayCard } from './Models.js'
 import { Alert, Badge, Button, Card, CommandBlock, Input, Skeleton } from './components/ui/index.js'
 import { MarkdownMessage } from './Markdown.js'
@@ -535,16 +536,83 @@ function firstLine(value: string): string {
   return line.length > 160 ? `${line.slice(0, 157)}…` : line
 }
 
+/**
+ * What a suggestion card can show, derived from the proposal the daemon holds rather than
+ * from what happened in this tab. `executed` renders nothing: the action is done and the
+ * record of it is the ledger, not a card left sitting in the transcript.
+ */
+type ProposalCardStatus = 'suggested' | 'saving' | 'proposed' | 'in_flight' | 'denied' | 'failed' | 'executed'
+const PROPOSAL_POLL_MS = 3_000
+/** Roughly two minutes of watching an approved action reach a terminal state. */
+const PROPOSAL_POLL_LIMIT = 40
+const PROPOSAL_BADGE: Record<ProposalCardStatus, string> = {
+  suggested: 'suggested', saving: 'saving', proposed: 'proposed',
+  in_flight: 'executing', denied: 'denied', failed: 'failed', executed: 'executed',
+}
+
+function proposalCardStatus(proposal: AgentActionProposal | undefined): ProposalCardStatus {
+  switch (proposal?.status) {
+    case undefined: return 'suggested'
+    case 'proposed': return 'proposed'
+    case 'executed': return 'executed'
+    case 'denied': case 'expired': return 'denied'
+    case 'failed': return 'failed'
+    default: return 'in_flight'
+  }
+}
+
 function ActionSuggestionCard({ suggestion, sessionId, canApprove, onChanged }: { suggestion: Record<string, unknown>; sessionId: string; canApprove: boolean; onChanged: () => Promise<void> }) {
+  const executorIntegrationId = String(suggestion['executorIntegrationId'] ?? '')
+  const action = String(suggestion['action'] ?? '')
+  const target = String(suggestion['target'] ?? '')
   const [proposalId, setProposalId] = useState<string>()
-  const [status, setStatus] = useState<'suggested' | 'saving' | 'proposed' | 'approved' | 'denied'>('suggested')
+  const [status, setStatus] = useState<ProposalCardStatus>('suggested')
   const [error, setError] = useState<string>()
   useEffect(() => { void setSessionAttention(sessionId, true).then(onChanged).catch(() => undefined) }, [sessionId, onChanged])
+
+  // A card is a transcript part, so every reload rebuilds it with no memory of what was done
+  // to it. It used to come back offering "Submit for approval" for an action that had already
+  // been released, and clicking again filed a duplicate proposal. The proposal is the record,
+  // so the card reads its own state back from the daemon instead of assuming it is new.
+  useEffect(() => {
+    let active = true
+    void listProposals().then((proposals) => {
+      if (!active) return
+      const found = proposals
+        .filter((candidate) => candidate.executorIntegrationId === executorIntegrationId && candidate.action === action && candidate.target === target)
+        .sort((a, b) => String(b.proposedAt ?? '').localeCompare(String(a.proposedAt ?? '')))[0]
+      if (!found) return
+      setProposalId(found.id)
+      setStatus(proposalCardStatus(found))
+    }).catch(() => undefined)
+    return () => { active = false }
+  }, [executorIntegrationId, action, target])
+
+  // Once approved, the operator should not have to reload to learn the outcome. Watch the
+  // proposal until it is terminal, then stop; a card that is already resolved never polls.
+  useEffect(() => {
+    if (status !== 'in_flight') return
+    let active = true
+    let attempts = 0
+    const timer = setInterval(() => {
+      attempts += 1
+      void listProposals().then((proposals) => {
+        if (!active) return
+        const found = proposals.find((candidate) => candidate.id === proposalId)
+        if (!found) return
+        const next = proposalCardStatus(found)
+        setStatus(next)
+        if (next !== 'in_flight' || attempts >= PROPOSAL_POLL_LIMIT) clearInterval(timer)
+      }).catch(() => clearInterval(timer))
+    }, PROPOSAL_POLL_MS)
+    return () => { active = false; clearInterval(timer) }
+  }, [status, proposalId])
+
   const propose = async () => {
     setStatus('saving'); setError(undefined)
     try {
       const proposal = await createSessionProposal(sessionId, {
-        executorIntegrationId: String(suggestion['executorIntegrationId'] ?? ''), action: String(suggestion['action'] ?? ''), target: String(suggestion['target'] ?? ''),
+        executorIntegrationId, action, target,
         rationaleClaimIds: Array.isArray(suggestion['rationaleClaimIds']) ? suggestion['rationaleClaimIds'].filter((value): value is string => typeof value === 'string') : [],
         ...(suggestion['parameters'] && typeof suggestion['parameters'] === 'object' && !Array.isArray(suggestion['parameters']) ? { parameters: suggestion['parameters'] as Record<string, unknown> } : {}),
       })
@@ -554,11 +622,14 @@ function ActionSuggestionCard({ suggestion, sessionId, canApprove, onChanged }: 
   const decide = async (approved: boolean) => {
     if (!proposalId) return
     try {
-      if (approved) { await approveProposal(proposalId); setStatus('approved') } else { await denyProposal(proposalId); setStatus('denied') }
+      if (approved) { await approveProposal(proposalId); setStatus('in_flight') } else { await denyProposal(proposalId); setStatus('denied') }
       await setSessionAttention(sessionId, false); await onChanged()
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to record decision') }
   }
-  return <Card className="action-suggestion"><div className="action-suggestion-head"><span className="attention-icon">!</span><div><p className="eyebrow">ACTION SUGGESTION</p><h3>{String(suggestion['action'] ?? 'Proposed action')}</h3></div><Badge>{status}</Badge></div><dl><div><dt>Target</dt><dd>{String(suggestion['target'] ?? '—')}</dd></div><div><dt>Executor</dt><dd>{String(suggestion['executorIntegrationId'] ?? '—')}</dd></div></dl><p>{String(suggestion['rationale'] ?? '')}</p>{error && <Alert className="error">{error}</Alert>}<div className="proposal-controls">{status === 'suggested' && <Button className="primary" onClick={() => void propose()}>Submit for approval</Button>}{status === 'saving' && <Button disabled>Recording…</Button>}{status === 'proposed' && canApprove && <><Button className="primary" onClick={() => void decide(true)}>Approve and queue</Button><Button variant="ghost" onClick={() => void decide(false)}>Deny</Button></>}{status === 'proposed' && !canApprove && <small>Waiting for a Papyrus.Action.Approve operator.</small>}</div></Card>
+
+  if (status === 'executed') return null
+
+  return <Card className="action-suggestion"><div className="action-suggestion-head"><span className="attention-icon">!</span><div><p className="eyebrow">ACTION SUGGESTION</p><h3>{action || 'Proposed action'}</h3></div><Badge>{PROPOSAL_BADGE[status]}</Badge></div><dl><div><dt>Target</dt><dd>{target || '—'}</dd></div><div><dt>Executor</dt><dd>{executorIntegrationId || '—'}</dd></div></dl><p>{String(suggestion['rationale'] ?? '')}</p>{error && <Alert className="error">{error}</Alert>}<div className="proposal-controls">{status === 'suggested' && <Button className="primary" onClick={() => void propose()}>Submit for approval</Button>}{status === 'saving' && <Button disabled>Recording…</Button>}{status === 'proposed' && canApprove && <><Button className="primary" onClick={() => void decide(true)}>Approve and queue</Button><Button variant="ghost" onClick={() => void decide(false)}>Deny</Button></>}{status === 'proposed' && !canApprove && <small>Waiting for a Papyrus.Action.Approve operator.</small>}{status === 'in_flight' && <small>Approved — running in the action ledger.</small>}{status === 'denied' && <small>Not released.</small>}{status === 'failed' && <small>The release failed; the executor&apos;s reason is on the ledger entry.</small>}</div></Card>
 }
 
 function UrlPreviewCard({ preview }: { preview: UrlPreview }) {

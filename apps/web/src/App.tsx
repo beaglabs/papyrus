@@ -173,17 +173,28 @@ export function backgroundSummary(jobs: NonNullable<AgentStatus['jobs']>): strin
  * only reports what the daemon can observe for the selected session, and says so when it
  * cannot observe the background queue rather than reporting zero.
  */
+/**
+ * How often the footer re-reads session job state. A status strip that only loads once
+ * is wrong the moment a job starts or a schedule fires, and there is no push channel for
+ * either, so it polls. Five seconds is well inside the daemon's own schedule tick and
+ * cheap: the endpoint returns counts, not transcripts.
+ */
+const JOBS_POLL_MS = 5_000
+
 export function RuntimeStatusStrip({ status, sessionId }: { status: AgentStatus; sessionId?: string | undefined }) {
   const [jobs, setJobs] = useState<AgentStatus['jobs']>()
 
   useEffect(() => {
     if (!sessionId) { setJobs(undefined); return }
     let cancelled = false
-    setJobs(undefined)
-    void loadAgentStatus(sessionId)
-      .then((next) => { if (!cancelled) setJobs(next.jobs) })
-      .catch(() => { if (!cancelled) setJobs(undefined) })
-    return () => { cancelled = true }
+    const load = () => {
+      void loadAgentStatus(sessionId)
+        .then((next) => { if (!cancelled) setJobs(next.jobs) })
+        .catch(() => { if (!cancelled) setJobs(undefined) })
+    }
+    load()
+    const timer = setInterval(load, JOBS_POLL_MS)
+    return () => { cancelled = true; clearInterval(timer) }
   }, [sessionId])
 
   return <div className="runtime-panel">

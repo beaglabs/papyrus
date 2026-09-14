@@ -297,12 +297,12 @@ p { color: var(--muted); line-height: 1.55; }
    formatting even though the attachment/Library JSX is present. */
 .attention-icon { flex: 0 0 18px; width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%; background: var(--main); color: #111; font: 900 12px ui-monospace, monospace; }
 .agent-main { height: 100%; padding-bottom: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
-.agent-surface { --composer-clearance: 116px; position: relative; align-self: stretch; min-width: 0; min-height: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr); max-width: 980px; width: 100%; margin: 0 auto; overflow: hidden; }
-.agent-session-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-bottom: 14px; border-bottom: 1px solid #cfc9bc; }
+.agent-surface { --composer-clearance: 116px; position: relative; align-self: stretch; min-width: 0; min-height: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr); max-width: 980px; width: 100%; margin: 0 auto; overflow: hidden; background: var(--surface); border: 3px solid #111; border-radius: var(--radius); box-shadow: var(--shadow); }
+.agent-session-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 20px 14px; border-bottom: 1px solid #cfc9bc; }
 .agent-session-head h2 { margin: 0; }
 .agent-badges { display: flex; gap: 7px; }
 .agent-config-alert { margin-top: 14px; display: grid; grid-template-columns: auto 1fr; gap: 12px; background: var(--yellow); }
-.message-list { position: relative; z-index: 1; grid-row: 3; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 28px 4px calc(var(--composer-clearance) + 30px); scrollbar-gutter: stable; scroll-behavior: auto; }
+.message-list { position: relative; z-index: 1; grid-row: 3; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 28px 20px calc(var(--composer-clearance) + 30px); scrollbar-gutter: stable; scroll-behavior: auto; }
 .agent-welcome { max-width: 650px; margin: 7vh auto 0; text-align: center; }
 .agent-orbit { display: grid; place-items: center; width: 64px; height: 64px; margin: 0 auto 22px; border: 2px solid #111; border-radius: 50%; background: var(--main); box-shadow: var(--shadow); font-size: 28px; }
 .agent-welcome h2 { font-size: clamp(30px, 4vw, 48px); letter-spacing: -.05em; }
@@ -353,8 +353,8 @@ p { color: var(--muted); line-height: 1.55; }
 .agent-thinking span { width: 6px; height: 6px; border-radius: 50%; background: var(--main); animation: pulse 1s infinite alternate; }
 
 .composer-layer { position: absolute; z-index: 80; left: 0; right: 0; bottom: 0; width: 100%; min-width: 0; pointer-events: none; }
-.composer { position: relative; z-index: 81; width: 100%; min-width: 0; min-height: 0; margin: 0; padding: 10px 4px max(14px, env(safe-area-inset-bottom)); overflow: visible; background: var(--background); pointer-events: auto; isolation: isolate; }
-.composer::before { content: ""; position: absolute; z-index: -1; inset: -18px -6px 0; background: linear-gradient(to bottom, transparent, var(--background) 18px, var(--background)); pointer-events: none; }
+.composer { position: relative; z-index: 81; width: 100%; min-width: 0; min-height: 0; margin: 0; padding: 10px 20px max(14px, env(safe-area-inset-bottom)); overflow: visible; background: var(--surface); pointer-events: auto; isolation: isolate; }
+.composer::before { content: ""; position: absolute; z-index: -1; inset: -18px -6px 0; background: linear-gradient(to bottom, transparent, var(--surface) 18px, var(--surface)); pointer-events: none; }
 .composer.drag-active .composer-prompt-input { border-color: var(--main); box-shadow: 4px 4px 0 var(--main); }
 .composer-input-row { position: relative; display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 10px; }
 .composer-prompt-input { height: 48px; min-width: 0; border-radius: 8px; padding: 0 15px; background: var(--surface); font-size: 15px; box-shadow: 3px 3px 0 #111; }

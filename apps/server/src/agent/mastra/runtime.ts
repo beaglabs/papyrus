@@ -1032,7 +1032,13 @@ export class MastraRuntime {
       description: 'Fetch an approved HTTP(S) URL and return a safe title, description, and excerpt preview for the UI.',
       inputSchema: { type: 'object', required: ['url'], properties: { url: { type: 'string', format: 'uri' } }, additionalProperties: false },
       background: { enabled: true, timeoutMs: 15_000, maxRetries: 1, waitTimeoutMs: 15_000 },
-      execute: async (inputData: { url: string }) => fetchUrlPreview(inputData.url),
+      execute: async (inputData: { url: string }) => {
+        try {
+          return await fetchUrlPreview(inputData.url)
+        } catch (cause) {
+          return reportedToolFailure('fetchUrlPreview', cause)
+        }
+      },
     })
     // Device console tools. Reads and proposals are registered separately because
     // they do different things: a read fetches and reports, and a write only
@@ -1051,7 +1057,13 @@ export class MastraRuntime {
         background: descriptor.id === 'renderDeviceConsolePage'
           ? { enabled: true, timeoutMs: 90_000, maxRetries: 0, waitTimeoutMs: 30_000 }
           : { enabled: true, timeoutMs: 20_000, maxRetries: 0, waitTimeoutMs: 20_000 },
-        execute: async (inputData: unknown) => descriptor.execute(inputData as never),
+        execute: async (inputData: unknown) => {
+          try {
+            return await descriptor.execute(inputData as never)
+          } catch (cause) {
+            return reportedToolFailure(descriptor.id, cause)
+          }
+        },
       })
     }
     for (const descriptor of Object.values(this.consoleTools.write)) {
@@ -1747,6 +1759,28 @@ function safeWebhookHeaders(headers: Record<string, string>): Record<string, str
 
 function threadIdFor(investigationId: string): string {
   return `papyrus-investigation-${investigationId}`
+}
+
+/**
+ * A background tool that throws strands the turn that called it.
+ *
+ * Mastra runs these tools inside a task workflow: a thrown error is recorded as a failed
+ * task, completion hooks run, and then the error is deliberately re-thrown out of the
+ * workflow (see `classify-outcome` in @mastra/core). The agent's tool call is left without
+ * a result to continue from, so the turn stops producing output while the operator still
+ * sees a running session — and nothing ever tells them it died. A DNS failure for a
+ * mistyped host is enough to trigger it.
+ *
+ * Reporting the failure as an ordinary result keeps the turn alive and gives the model
+ * something to explain. The cause is still logged, so a genuine defect stays visible
+ * server-side instead of being swallowed into a tool result.
+ */
+function reportedToolFailure(toolId: string, cause: unknown): { ok: false; tool: string; code: string; error: string } {
+  const error = cause instanceof Error ? cause : new Error(String(cause))
+  const declared = (error as { code?: unknown }).code
+  const code = typeof declared === 'string' && declared ? declared : (error.name || 'TOOL_ERROR')
+  console.warn(`[papyrus:tools] ${toolId} failed (${code}): ${error.message}`)
+  return { ok: false, tool: toolId, code, error: error.message.slice(0, 600) }
 }
 
 /**

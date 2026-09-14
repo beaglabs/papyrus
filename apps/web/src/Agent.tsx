@@ -72,6 +72,11 @@ interface SkillDraftOutput {
   }
 }
 
+/** How often to re-read the thread while a reply this tab is not streaming has yet to land. */
+const HISTORY_POLL_MS = 4_000
+/** Roughly ten minutes of looking, so an abandoned turn cannot poll forever. */
+const HISTORY_POLL_LIMIT = 150
+
 export function AgentView({ session, status, initialPrompt, canApprove, canManageSkills, onChanged }: {
   session: AgentSession
   status: AgentStatus
@@ -84,6 +89,9 @@ export function AgentView({ session, status, initialPrompt, canApprove, canManag
   const [input, setInput] = useState(initialPrompt ?? '')
   const [historyError, setHistoryError] = useState<string>()
   const [historyLoading, setHistoryLoading] = useState(true)
+  // True while this tab holds a live stream. The transcript then belongs to useChat and must
+  // not be swapped underneath it.
+  const [streaming, setStreaming] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -99,10 +107,33 @@ export function AgentView({ session, status, initialPrompt, canApprove, canManag
     return () => { active = false }
   }, [session.id])
 
-  return <Chat key={`${session.id}:${initial.length}`} session={session} status={status} initial={initial} input={input} setInput={setInput} historyError={historyError} historyLoading={historyLoading} canApprove={canApprove} canManageSkills={canManageSkills} onChanged={onChanged} />
+  // A turn does not belong to this tab. The daemon finishes it and writes it to the thread
+  // whether or not anyone is watching — that is what durable means — but the transcript here
+  // was read once, at mount, and never again. Coming back mid-turn therefore showed the
+  // question with no answer, and nothing refetched, so completed work read as dropped.
+  // While no stream of ours is live and the transcript still ends on a user turn, keep
+  // looking; this stops the moment the reply lands.
+  const awaitingReply = !historyLoading && !streaming && (initial[initial.length - 1] as { role?: string } | undefined)?.role === 'user'
+  useEffect(() => {
+    if (!awaitingReply) return
+    let active = true
+    let attempts = 0
+    const timer = setInterval(() => {
+      attempts += 1
+      void sessionMessages(session.id).then((messages) => {
+        if (!active) return
+        setInitial(messages)
+        const tail = messages[messages.length - 1] as { role?: string } | undefined
+        if (!tail || tail.role !== 'user' || attempts >= HISTORY_POLL_LIMIT) clearInterval(timer)
+      }).catch(() => clearInterval(timer))
+    }, HISTORY_POLL_MS)
+    return () => { active = false; clearInterval(timer) }
+  }, [session.id, awaitingReply])
+
+  return <Chat key={`${session.id}:${initial.length}`} session={session} status={status} initial={initial} input={input} setInput={setInput} historyError={historyError} historyLoading={historyLoading} canApprove={canApprove} canManageSkills={canManageSkills} onChanged={onChanged} onStreamingChange={setStreaming} />
 }
 
-function Chat({ session, status, initial, input, setInput, historyError, historyLoading, canApprove, canManageSkills, onChanged }: {
+function Chat({ session, status, initial, input, setInput, historyError, historyLoading, canApprove, canManageSkills, onChanged, onStreamingChange }: {
   session: AgentSession
   status: AgentStatus
   initial: UIMessage[]
@@ -113,6 +144,7 @@ function Chat({ session, status, initial, input, setInput, historyError, history
   canApprove: boolean
   canManageSkills: boolean
   onChanged: () => Promise<void>
+  onStreamingChange: (streaming: boolean) => void
 }) {
   const [attachments, setAttachments] = useState<WorkspaceLibraryFile[]>([])
   const attachmentRef = useRef<WorkspaceLibraryFile[]>([])
@@ -133,6 +165,9 @@ function Chat({ session, status, initial, input, setInput, historyError, history
   }), [session.id])
   const { messages, sendMessage, status: chatStatus, error, stop } = useChat({ id: session.id, messages: initial, transport })
   const working = chatStatus === 'submitted' || chatStatus === 'streaming'
+  // Tell the view whether this tab owns a live stream, so it knows when the transcript may
+  // safely be replaced from the thread.
+  useEffect(() => { onStreamingChange(working) }, [working, onStreamingChange])
 
   useEffect(() => {
     if (!followLatestRef.current) return

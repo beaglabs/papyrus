@@ -88,16 +88,16 @@ export function App() {
           </SidebarMenu>
         </SidebarHeader>
         <SidebarContent>
-          <SidebarGroup className="sidebar-history-group">
-            <SidebarGroupLabel>History</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SessionHistory sessions={data.sessions} selectedId={selectedSession?.id} onSelect={(id) => navigate('agent', { session: id })} onDelete={(session) => void removeSession(session)} />
-            </SidebarGroupContent>
-          </SidebarGroup>
           <SidebarGroup>
             <SidebarGroupLabel>Platform</SidebarGroupLabel>
             <SidebarGroupContent>
               <PrimaryNavigation view={view} onNavigate={navigate} />
+            </SidebarGroupContent>
+          </SidebarGroup>
+          <SidebarGroup className="sidebar-history-group">
+            <SidebarGroupLabel>History</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SessionHistory sessions={data.sessions} selectedId={selectedSession?.id} onSelect={(id) => navigate('agent', { session: id })} onDelete={(session) => void removeSession(session)} />
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>

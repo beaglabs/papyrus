@@ -109,7 +109,7 @@ p { color: var(--muted); line-height: 1.55; }
 .nb-sidebar-rail { position: absolute; z-index: 5; inset: 0 -5px 0 auto; width: 9px; border: 0; background: transparent; cursor: ew-resize; }
 .nb-sidebar-rail:hover::after { content: ""; position: absolute; inset: 0 3px; background: var(--main); }
 .nb-sidebar-inset { min-width: 0; min-height: 0; height: 100%; flex: 1; background: var(--background); }
-.nb-sidebar-trigger { width: 36px; height: 36px; flex: none; display: grid; place-items: center; padding: 0; border: 2px solid #111; border-radius: 5px; background: var(--surface); color: #111; box-shadow: 2px 2px 0 #111; cursor: pointer; font: 900 14px/1 ui-monospace, monospace; }
+.nb-sidebar-trigger { width: 30px; height: 30px; flex: none; display: grid; place-items: center; padding: 0; border: 2px solid #111; border-radius: 5px; background: var(--surface); color: #111; box-shadow: 2px 2px 0 #111; cursor: pointer; font: 900 12px/1 ui-monospace, monospace; }
 .nb-sidebar-trigger:hover { background: var(--blue); transform: translate(1px, 1px); box-shadow: 1px 1px 0 #111; }
 .nb-sidebar-backdrop { display: none; }
 .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #999; border: 1px solid currentColor; }
@@ -117,13 +117,17 @@ p { color: var(--muted); line-height: 1.55; }
 
 
 .portal-main { min-width: 0; min-height: 0; overflow: auto; padding: 34px 42px 56px; overscroll-behavior: contain; }
-.portal-header { display: flex; justify-content: space-between; align-items: center; gap: 24px; margin-bottom: 30px; padding-bottom: 18px; border-bottom: 3px solid #111; }
-.portal-header-title { min-width: 0; display: flex; align-items: center; gap: 14px; }
+.portal-header { display: flex; justify-content: space-between; align-items: center; gap: 18px; margin-bottom: 22px; padding-bottom: 12px; border-bottom: 3px solid #111; }
+.portal-header-title { min-width: 0; display: flex; align-items: center; gap: 10px; }
 .portal-header-title > div { min-width: 0; }
+/* The page title is a label for the surface, not a hero. It carries the same h1 element as
+   the signed-out page, whose display type is deliberate, so the cap lives here. */
+.portal-header h1 { font-size: clamp(22px, 2.2vw, 28px); line-height: 1.05; letter-spacing: -.035em; }
+.portal-header .eyebrow { margin-bottom: 3px; font-size: 9px; letter-spacing: .12em; }
 .eyebrow { margin-bottom: 9px; color: #625f59; font: 600 10px ui-monospace, monospace; letter-spacing: .14em; }
-.header-status { display: grid; gap: 6px; justify-items: end; }
-.header-status span { display: flex; align-items: center; gap: 7px; font: 700 10px ui-monospace, monospace; }
-.header-status small { color: #666; }
+.header-status { display: grid; gap: 2px; justify-items: end; }
+.header-status span { display: flex; align-items: center; gap: 6px; font: 700 9px ui-monospace, monospace; }
+.header-status small { color: #666; font-size: 11px; }
 
 .nb-button, .primary, .secondary { border: 3px solid #111; border-radius: var(--radius-sm); background: var(--surface); color: #111; padding: 10px 15px; box-shadow: var(--shadow-sm); font-weight: 800; letter-spacing: .06em; text-transform: uppercase; cursor: pointer; }
 .nb-button:hover:not(:disabled), .primary:hover { transform: translate(2px, 2px); box-shadow: 1px 1px 0 #111; }
@@ -576,7 +580,7 @@ p { color: var(--muted); line-height: 1.55; }
   .nb-sidebar-rail { display: none; }
   .nb-sidebar-inset { width: 100%; height: calc(100vh - 32px); }
   .portal-main { padding: 24px 18px 36px; }
-  .portal-header { align-items: flex-start; margin-bottom: 24px; }
+  .portal-header { align-items: flex-start; margin-bottom: 18px; }
   .portal-header-title { align-items: flex-start; }
   .header-status { display: none; }
   .portal-skeleton { grid-template-columns: 72px minmax(0,1fr); }

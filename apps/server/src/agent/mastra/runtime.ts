@@ -944,7 +944,7 @@ export class MastraRuntime {
       ...(tools ? { tools } : {}),
       ...(memory ? { memory } : {}),
       ...(webhooks ? { signals: [webhooks] } : {}),
-      backgroundTasks: { tools: { fetchUrlPreview: true, readDeviceConsolePage: true, renderDeviceConsolePage: true }, waitTimeoutMs: 15_000 },
+      backgroundTasks: { tools: { readDeviceConsolePage: true, renderDeviceConsolePage: true }, waitTimeoutMs: 15_000 },
       ...(workspace ? { workspace } : {}),
     })
     const durable = await tryImport('@mastra/core/agent/durable')
@@ -1031,7 +1031,12 @@ export class MastraRuntime {
       id: 'fetchUrlPreview',
       description: 'Fetch an approved HTTP(S) URL and return a safe title, description, and excerpt preview for the UI.',
       inputSchema: { type: 'object', required: ['url'], properties: { url: { type: 'string', format: 'uri' } }, additionalProperties: false },
-      background: { enabled: true, timeoutMs: 15_000, maxRetries: 1, waitTimeoutMs: 15_000 },
+      // Deliberately foreground, unlike the console tools below. A preview fetch is short,
+      // and the background path cannot report a fast failure: the agent loop returns an
+      // acknowledgement on its first pass and only waits for the NEXT task to complete on
+      // later passes, so a task that fails before a waiter exists leaves its result
+      // stranded — the model tells the operator it will be notified, and nothing ever
+      // arrives. Called inline, the result or the failure returns in the same turn.
       execute: async (inputData: { url: string }) => {
         try {
           return await fetchUrlPreview(inputData.url)

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { PortalData, PublicConfig } from './api.js'
-import { AuthenticationRequired, createSession, deleteSession, loadPortal, logout, publicConfig, type AgentSession } from './api.js'
+import { AuthenticationRequired, createSession, deleteSession, loadAgentStatus, loadPortal, logout, publicConfig, type AgentSession, type AgentStatus } from './api.js'
 import { AgentView } from './Agent.js'
 import { LibraryView } from './Library.js'
 import { LinksView } from './Links.js'
@@ -102,7 +102,7 @@ export function App() {
           </SidebarGroup>
         </SidebarContent>
         <SidebarFooter>
-          <div className="runtime-panel"><span className="runtime-label">RUNTIME</span><strong><span className={`dot ${data.agent.agentReady ? 'good' : 'warning'}`} /><span className="sidebar-copy">{data.agent.agentReady ? 'Mastra online' : 'Mastra storage online'}</span></strong><small className="sidebar-copy">{data.agent.model ?? 'Model configuration required'}</small></div>
+          <RuntimeStatusStrip status={data.agent} sessionId={selectedSession?.id} />
           <DropdownMenu className="account-menu" trigger={<div className="account-trigger-content"><Avatar className="avatar">{initials(data.me.displayName)}</Avatar><span className="account-copy sidebar-copy"><strong>{data.me.displayName}</strong><small>ENTRA · {data.me.roles.length} ROLES</small></span><span className="sidebar-copy">•••</span></div>}>
             <DropdownMenuLabel><strong>{data.me.displayName}</strong><span>{data.me.preferredUsername ?? data.me.oid}</span></DropdownMenuLabel><DropdownMenuSeparator /><DropdownMenuItem disabled>Roles managed in Microsoft Entra</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem className="danger-item" onClick={() => void signOut()}>Sign out</DropdownMenuItem>
           </DropdownMenu>
@@ -149,6 +149,52 @@ function SignedOut({ config }: { config: PublicConfig }) {
   return <><div className="handling-banner government"><strong>{profileLabel(config.profile)}</strong><span>MICROSOFT ENTRA AUTHORITY</span></div><main className="center login agent-login"><Logo /><p className="eyebrow">CUSTOMER-HOSTED AGENT RUNTIME</p><h1>Your tools.<br />Your authority.</h1><p>Papyrus accepts identity and application roles from your Microsoft Entra tenant. It does not maintain a parallel user directory.</p>{config.entraConfigured
     ? <a className="primary" href={`/api/auth/entra/login?returnTo=${encodeURIComponent(window.location.pathname.startsWith('/portal') ? window.location.pathname : '/portal')}`}>Continue with Microsoft Entra →</a>
     : <Alert className="error">This deployment does not have Microsoft Entra configured.</Alert>}<div className="login-facts"><span>{config.organizationName}</span><span>{profileLabel(config.profile)}</span><span>{config.cloud}</span></div></main></>
+}
+
+export function scheduleSummary(jobs: NonNullable<AgentStatus['jobs']>): string {
+  const { active, paused, nextFireAt } = jobs.schedules
+  const parts = [`${active} active ${active === 1 ? 'schedule' : 'schedules'}`]
+  if (paused > 0) parts.push(`${paused} paused`)
+  if (typeof nextFireAt === 'number' && Number.isFinite(nextFireAt)) {
+    parts.push(`next ${new Date(nextFireAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`)
+  }
+  return parts.join(' · ')
+}
+
+export function backgroundSummary(jobs: NonNullable<AgentStatus['jobs']>): string {
+  if (!jobs.background.observed) return 'job queue unavailable'
+  const { running, queued } = jobs.background
+  if (running === 0 && queued === 0) return 'no jobs running'
+  return [running > 0 ? `${running} running` : null, queued > 0 ? `${queued} queued` : null].filter(Boolean).join(' · ')
+}
+
+/**
+ * Footer runtime status. Recurring work and running jobs are session-scoped: the strip
+ * only reports what the daemon can observe for the selected session, and says so when it
+ * cannot observe the background queue rather than reporting zero.
+ */
+export function RuntimeStatusStrip({ status, sessionId }: { status: AgentStatus; sessionId?: string | undefined }) {
+  const [jobs, setJobs] = useState<AgentStatus['jobs']>()
+
+  useEffect(() => {
+    if (!sessionId) { setJobs(undefined); return }
+    let cancelled = false
+    setJobs(undefined)
+    void loadAgentStatus(sessionId)
+      .then((next) => { if (!cancelled) setJobs(next.jobs) })
+      .catch(() => { if (!cancelled) setJobs(undefined) })
+    return () => { cancelled = true }
+  }, [sessionId])
+
+  return <div className="runtime-panel">
+    <span className="runtime-label">RUNTIME</span>
+    <strong><span className={`dot ${status.agentReady ? 'good' : 'warning'}`} /><span className="sidebar-copy">{status.agentReady ? 'Mastra online' : 'Mastra storage online'}</span></strong>
+    <small className="sidebar-copy">{status.model ?? 'Model configuration required'}</small>
+    {jobs && <div className="runtime-jobs" data-session={jobs.sessionId}>
+      <span><i className={`dot ${jobs.schedules.active > 0 ? 'good' : ''}`} />{scheduleSummary(jobs)}</span>
+      <span><i className={`dot ${jobs.background.running > 0 ? 'good' : ''}`} />{backgroundSummary(jobs)}</span>
+    </div>}
+  </div>
 }
 
 export function PrimaryNavigation({ view, onNavigate }: { view: PortalView; onNavigate: (view: PortalView) => void }) {

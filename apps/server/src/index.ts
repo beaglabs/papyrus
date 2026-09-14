@@ -63,7 +63,7 @@ server.listen(config.port, config.host, () => {
   actionWorker.start()
   console.log(`Papyrus daemon listening at ${config.publicOrigin}`)
   console.log(`Profile: ${config.profile}; Entra cloud: ${config.cloud}; deployment: ${service.license.deploymentId}`)
-  console.log(`Agent runtime: ${mastraRuntime.mode}`)
+  console.log(`Agent runtime: ${mastraRuntime.status.runtime}`)
 })
 
 let stopping = false

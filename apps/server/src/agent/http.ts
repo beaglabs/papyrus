@@ -127,7 +127,10 @@ export function createAgentServer(config: AgentConfig, service: AgentService, au
       if (url.pathname === '/api/portal/overview' && request.method === 'GET') return json(response, 200, service.overview(await principal(request, auth, service)))
       if (url.pathname === '/api/agent/status' && request.method === 'GET') {
         await principal(request, auth, service)
-        return json(response, 200, mastra.status)
+        const sessionId = url.searchParams.get('session')?.trim()
+        if (!sessionId) return json(response, 200, mastra.status)
+        if (sessionId.length > 256) throw new HttpError(400, 'INVALID_SESSION', 'session must be 256 characters or fewer')
+        return json(response, 200, { ...mastra.status, jobs: await mastra.jobsForSession(sessionId) })
       }
       if (url.pathname === '/api/observability/traces' && request.method === 'GET') {
         const actor = await principal(request, auth, service)

@@ -78,6 +78,9 @@ p { color: var(--muted); line-height: 1.55; }
 .runtime-label { color: #888; font: 600 8px ui-monospace, monospace; letter-spacing: .12em; }
 .runtime-panel strong { min-width: 0; display: flex; align-items: center; gap: 7px; font-size: 11px; }
 .runtime-panel small { color: #999; font: 9px ui-monospace, monospace; }
+.runtime-jobs { display: grid; gap: 3px; margin-top: 2px; padding-top: 6px; border-top: 1px solid #3a3a3a; }
+.runtime-jobs span { min-width: 0; display: flex; align-items: center; gap: 6px; overflow: hidden; color: #999; font: 9px ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.runtime-jobs .dot { width: 6px; height: 6px; flex: none; }
 .account-menu { min-width: 0; }
 .account-menu > .nb-dropdown-trigger { width: 100%; padding: 0; border: 0; box-shadow: none; color: #fff; background: transparent; }
 .account-trigger-content { width: 100%; min-width: 0; display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 8px; text-align: left; }
@@ -97,6 +100,7 @@ p { color: var(--muted); line-height: 1.55; }
 .nb-sidebar[data-state="collapsed"] .nb-sidebar-menu-button { justify-content: center; padding-left: 8px; padding-right: 8px; }
 .nb-sidebar[data-state="collapsed"] .runtime-panel { display: flex; justify-content: center; padding: 8px; }
 .nb-sidebar[data-state="collapsed"] .runtime-panel strong { gap: 0; }
+.nb-sidebar[data-state="collapsed"] .runtime-jobs { display: none; }
 .nb-sidebar[data-state="collapsed"] .account-trigger-content { display: flex; justify-content: center; }
 .nb-sidebar-rail { position: absolute; z-index: 5; inset: 0 -5px 0 auto; width: 9px; border: 0; background: transparent; cursor: ew-resize; }
 .nb-sidebar-rail:hover::after { content: ""; position: absolute; inset: 0 3px; background: var(--main); }

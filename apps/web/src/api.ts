@@ -44,6 +44,12 @@ export interface AgentStatus {
   }
   signalBacklog: Record<'pending' | 'delivering' | 'delivered' | 'failed', number>
   links?: { validation: 'local-static' | 'kitesurf' }
+  /** Present only when the status request is scoped to a session. */
+  jobs?: {
+    sessionId: string
+    schedules: { active: number; paused: number; nextFireAt: number | null }
+    background: { running: number; queued: number; failed: number; observed: boolean }
+  }
 }
 
 export interface WorkspaceLibraryFile {
@@ -190,6 +196,11 @@ export async function loadPortal(): Promise<PortalData> {
 }
 
 export async function publicConfig(): Promise<PublicConfig> { return api('/api/config/public') }
+
+/** Runtime status, optionally scoped to one session so the footer can show its recurring work. */
+export async function loadAgentStatus(sessionId?: string): Promise<AgentStatus> {
+  return api<AgentStatus>(sessionId ? `/api/agent/status?session=${encodeURIComponent(sessionId)}` : '/api/agent/status')
+}
 
 export async function observabilityTraces(input: {
   page?: number

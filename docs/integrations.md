@@ -1,12 +1,23 @@
 # Integration lifecycle
 
-`/portal/integrations` is the control surface for human adapters, evidence sources, terrain sources, controlled executors, agent peers, and secret infrastructure.
+> **Current surface status.** The catalog, governed lifecycle, authority model, and sync worker
+> described below are implemented and tested in the daemon (`apps/server/src/agent/catalog.ts`,
+> `service.ts`, `sync-worker.ts`). The **HTTP API and portal page are not exposed**: every
+> `/api/integrations/*` path returns 404 by design, and there is no `/portal/integrations` view.
+> Integration configuration is intended to become conversational through agent tools, which is
+> not implemented yet. See [decisions/0001-portal-surface.md](decisions/0001-portal-surface.md).
+> The `POST`/`GET` paths below therefore describe the daemon's internal contract, not a live
+> network surface.
+
+The integration domain is the control surface for human adapters, evidence sources, terrain
+sources, controlled executors, agent peers, and secret infrastructure. It is currently
+daemon-internal.
 
 Observation API sources are registered active immediately because they grant no outbound or action authority:
 
 `connect → waiting for data → receiving | degraded | disabled`
 
-Selecting **Connect** on the catalog card opens the ingestion terminal immediately. The portal polls the daemon for `lastEvidenceAt`; the source remains out of **Operational integrations** until the first accepted observation, then appears as **RECEIVING**.
+Selecting **Connect** on a catalog card was intended to open the ingestion terminal immediately. That portal surface is not currently exposed. The intended behavior is that the source remains out of **Operational integrations** until the first accepted observation, then appears as **RECEIVING**.
 
 Integrations that establish outbound access, hold external credentials, or execute controlled actions retain the governed lifecycle:
 
@@ -16,7 +27,7 @@ A deterministic test checks manifest compatibility, endpoint policy, scope, and 
 
 ## Observation API sources
 
-The Papyrus daemon exposes one Observation API. Configuring Zeek, Suricata, Sysmon, DNS, Asset Inventory, Microsoft Entra, Defender XDR, or Sentinel registers a source identity, its allowed schemas, and a source-bound route inside that daemon:
+The daemon defines one Observation API. Configuring Zeek, Suricata, Sysmon, DNS, Asset Inventory, Microsoft Entra, Defender XDR, or Sentinel registers a source identity, its allowed schemas, and a source-bound route inside the daemon:
 
 `POST /api/integrations/:id/observations`
 

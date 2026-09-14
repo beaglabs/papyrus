@@ -568,6 +568,58 @@ export class MastraRuntime {
     await schedules.delete(id)
   }
 
+  /**
+   * Session-scoped view of recurring work and in-flight background jobs. This backs
+   * the portal footer status strip. Counts are reported, never fabricated: when the
+   * background task manager is unavailable the block says so rather than reporting 0.
+   */
+  async jobsForSession(threadId: string) {
+    await this.assertOwnedThread(threadId)
+
+    const schedules = await this.listSchedules(threadId).catch(() => [] as unknown[])
+    let active = 0
+    let paused = 0
+    let nextFireAt: number | null = null
+    for (const item of schedules) {
+      if (!item || typeof item !== 'object') continue
+      const record = item as Record<string, unknown>
+      if (record['status'] === 'paused') { paused += 1; continue }
+      active += 1
+      const next = record['nextFireAt']
+      if (typeof next === 'number' && Number.isFinite(next)) nextFireAt = nextFireAt === null ? next : Math.min(nextFireAt, next)
+    }
+
+    return {
+      sessionId: threadId,
+      schedules: { active, paused, nextFireAt },
+      background: await this.backgroundTaskCounts(threadId),
+    }
+  }
+
+  private async backgroundTaskCounts(threadId: string) {
+    const manager = (this.mastra?.instance as {
+      backgroundTaskManager?: { listTasks: (filter?: unknown) => Promise<{ tasks?: unknown[]; total?: number }> }
+    } | undefined)?.backgroundTaskManager
+    if (!manager) return { running: 0, queued: 0, failed: 0, observed: false }
+
+    const count = async (status: string[]): Promise<number> => {
+      try {
+        const result = await manager.listTasks({ agentId: AGENT_ID, threadId, status, perPage: 1 })
+        if (typeof result?.total === 'number') return result.total
+        return Array.isArray(result?.tasks) ? result.tasks.length : 0
+      } catch {
+        return 0
+      }
+    }
+
+    const [running, queued, failed] = await Promise.all([
+      count(['running']),
+      count(['pending']),
+      count(['failed']),
+    ])
+    return { running, queued, failed, observed: true }
+  }
+
   listWorkflows() { return WORKFLOW_CATALOG }
 
   async runWorkflow(id: string, inputData: unknown) {

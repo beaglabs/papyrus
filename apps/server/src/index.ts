@@ -15,8 +15,9 @@ import { ExchangeEmailDriver } from './agent/drivers/exchange-email-driver.js'
 import { HttpMicrosoftGraphClient } from './agent/graph-client.js'
 import { MastraRuntime } from './agent/mastra/runtime.js'
 import { ApplianceConsoleExecutor } from './agent/executors/appliance-console-executor.js'
+import { FirewallExecutor, UnconfiguredConnectorCredentialResolver } from './agent/executors/firewall-executor.js'
 import { UnconfiguredDeviceCredentialResolver } from './agent/browser/credential.js'
-import { APPLIANCE_CONSOLE_CATALOG_ID } from './agent/catalog.js'
+import { APPLIANCE_CONSOLE_CATALOG_ID, FIREWALL_CATALOG_ID } from './agent/catalog.js'
 import { getRenderSource } from './agent/browser/render.js'
 import { resolveBrowserExecutable } from './agent/browser/executable.js'
 
@@ -57,6 +58,12 @@ executorRegistry.register(APPLIANCE_CONSOLE_CATALOG_ID, new ApplianceConsoleExec
   executable: () => resolveBrowserExecutable(integration, config),
   assertAllowedUrl: (url) => { policy.assertAllowed(url) },
 })))
+// The vendor-neutral write executor is registered, but its credential boundary is
+// unconfigured by default, so an approved action reaches a real endpoint only after the
+// customer wires its vault resolver. An integration is never writable because it was
+// merely declared: the executor re-checks the catalog id, the active state, and the
+// stored controlled_actions authority before it sends anything.
+executorRegistry.register(FIREWALL_CATALOG_ID, new FirewallExecutor(database, new UnconfiguredConnectorCredentialResolver()))
 
 server.listen(config.port, config.host, () => {
   worker.start()

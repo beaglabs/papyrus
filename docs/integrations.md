@@ -119,3 +119,36 @@ Operational integrations that genuinely require daemon-managed polling execute t
 The database accepts opaque references using `vault://`, `keyvault://`, `secret://`, `cert://`, or `managed-identity://`. Secret values are resolved at the connector-driver execution boundary and never returned to the browser. A production connector driver must provide the corresponding customer-vault resolver.
 
 Connector manifests also declare supported deployment profiles, evidence types, capabilities, risk, authority, authentication schemes, and license feature. These declarations are policy inputs; they do not substitute for a connector-specific threat model.
+
+## Controlled writes
+
+`firewall-executor` is the vendor-neutral write path for the `controlled_actions` class. It
+performs exactly one bounded, origin-pinned HTTPS request for an action an operator already
+released through the ledger. The executor makes no policy decision beyond the rules below,
+because validation, authorization, queueing, and idempotency belong to the ledger and the
+worker that calls it.
+
+| Rule | Behaviour |
+| --- | --- |
+| Origin | The request can only reach the origin registered on the integration. `ConsolePolicy` is reused deliberately: a firewall lives at `10.x.x.x`, so the guard is the integration, not an address range. A path naming another origin is refused. |
+| Path | Must be relative and inside the operator-configured `writePathPrefix` setting. A setting, not a proposal field — the agent cannot widen it. |
+| Method | `POST`, `PUT`, or `PATCH` only. |
+| Body | A JSON object, at most 256 KiB. |
+| Redirects | Refused. A write is never followed to another location. |
+| Response | Read up to 64 KiB and **digested, not retained**. The action result carries the status and a SHA-256 prefix, never the connector body. |
+| Idempotency | The ledger's `idempotencyKey` travels as the request's `Idempotency-Key`, so a replay the worker considers new work is still recognisably the same write. |
+| Credentials | Resolved at this boundary from the integration's `credentialRef`, never returned, logged, or placed in an action result. A credential header may not displace `host`, `content-length`, `content-type`, or `idempotency-key`. |
+
+Failure semantics are split by whether retrying could help. A malformed or out-of-policy
+proposal completes as `failure` with a message; a 4xx or a redirect is likewise terminal; a
+5xx or a transport fault throws so the worker's lease and backoff apply. Throwing on a
+validation error would replay the identical request until `maxAttempts` for no reason.
+
+The propose-time tool is `proposeNetworkPolicyChange`. It applies the *same* rule set — one
+shared `planFirewallWrite` function — so an operator is never asked to approve a change the
+executor would then refuse, and a proposal the tool accepted cannot be refused later for a
+rule that drifted.
+
+The credential boundary defaults to a resolver that refuses, matching the Graph and device
+console paths: an approved action reaches a real endpoint only after the customer wires its
+own vault resolver.

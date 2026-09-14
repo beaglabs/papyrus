@@ -9,6 +9,9 @@ export const LINK_PUBLISHER_CATALOG_ID = 'papyrus-links'
  * as evidence and every change crosses the approval boundary. */
 export const APPLIANCE_CONSOLE_CATALOG_ID = 'appliance-console'
 
+/** The vendor-neutral write executor: one approved, origin-pinned request per action. */
+export const FIREWALL_CATALOG_ID = 'firewall-executor'
+
 export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
   {
     id: 'observation-api', name: 'Custom Source', vendor: 'Observation API', initials: 'CS', accent: '#ffcf33',
@@ -116,7 +119,7 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
     supportedProfiles: ALL, licenseFeature: 'core',
   },
   {
-    id: 'firewall-executor', name: 'Firewall Control', vendor: 'Customer selected', initials: 'FW', accent: '#ff6b4a',
+    id: FIREWALL_CATALOG_ID, name: 'Firewall Control', vendor: 'Customer selected', initials: 'FW', accent: '#ff6b4a',
     description: 'Vendor-neutral executor for simulated and explicitly approved route or policy changes.',
     integrationClass: 'action_executor', authority: 'controlled_actions', risk: 'critical',
     capabilities: ['block route', 'quarantine segment', 'revoke temporary rule'],

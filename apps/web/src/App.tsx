@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { PortalData, PublicConfig } from './api.js'
 import { AuthenticationRequired, createSession, deleteSession, loadAgentStatus, loadPortal, logout, publicConfig, type AgentSession, type AgentStatus } from './api.js'
 import { AgentView } from './Agent.js'
+import { AccessView } from './Access.js'
 import { LibraryView } from './Library.js'
 import { LinksView } from './Links.js'
 import { ModelsView } from './Models.js'
@@ -9,11 +10,11 @@ import { ObservabilityPanel } from './Observability.js'
 import { Alert, Avatar, Badge, Button, Card, DropdownMenu, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, Skeleton } from './components/ui/index.js'
 import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarRail, SidebarTrigger } from './components/ui/sidebar.js'
 
-export type PortalView = 'agent' | 'models' | 'links' | 'library' | 'governance'
+export type PortalView = 'agent' | 'models' | 'links' | 'library' | 'governance' | 'access'
 type AppState = { phase: 'loading' } | { phase: 'signed-out'; config: PublicConfig } | { phase: 'ready'; data: PortalData } | { phase: 'error'; message: string }
 
 const ROUTES: Record<PortalView, string> = {
-  agent: '/portal', models: '/portal/models', links: '/portal/links', library: '/portal/library', governance: '/portal/governance',
+  agent: '/portal', models: '/portal/models', links: '/portal/links', library: '/portal/library', governance: '/portal/governance', access: '/portal/access',
 }
 
 function viewFromPath(): PortalView {
@@ -117,6 +118,7 @@ export function App() {
         {view === 'links' && <LinksView {...(data.agent.links?.validation ? { validation: data.agent.links.validation } : {})} />}
         {view === 'library' && <LibraryView />}
         {view === 'governance' && <GovernanceView data={data} />}
+        {view === 'access' && <AccessView me={data.me} />}
       </SidebarInset>
     </SidebarProvider>
   </>
@@ -212,7 +214,7 @@ export function PrimaryNavigation({ view, onNavigate }: { view: PortalView; onNa
   const items: Array<{ view: PortalView; icon: string; label: string }> = [
     { view: 'agent', icon: '✦', label: 'Agent' }, { view: 'models', icon: '◎', label: 'Models' },
     { view: 'links', icon: '◎', label: 'Links' }, { view: 'library', icon: '▤', label: 'Library' },
-    { view: 'governance', icon: '◇', label: 'Governance' },
+    { view: 'governance', icon: '◇', label: 'Governance' }, { view: 'access', icon: '◈', label: 'Access' },
   ]
   return <SidebarMenu aria-label="Primary navigation">{items.map((item) => <SidebarMenuItem key={item.view}><SidebarMenuButton isActive={view === item.view} tooltip={item.label} onClick={() => onNavigate(item.view)}><span className="sidebar-icon" aria-hidden="true">{item.icon}</span><span className="sidebar-copy">{item.label}</span></SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu>
 }
@@ -221,6 +223,7 @@ function PortalHeader({ view, data }: { view: PortalView; data: PortalData }) {
   const copy: Record<PortalView, [string, string]> = {
     agent: ['MASTRA RUNTIME', 'Agent'], models: ['MODEL GATEWAYS', 'Models'],
     links: ['AGENT-CREATED PUBLIC BOUNDARIES', 'Links'], library: ['AGENTFS FILE AUTHORITY', 'Library'], governance: ['IDENTITY, LICENSING AND AUDIT', 'Governance'],
+    access: ['IDENTITY AND ENTITLEMENTS', 'Access'],
   }
   // The health claim was literal text with a hardcoded green dot, so it read "DAEMON HEALTHY"
   // even with no model configured and agent chat disabled. A status that cannot be false is

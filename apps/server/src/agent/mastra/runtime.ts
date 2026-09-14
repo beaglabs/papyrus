@@ -663,7 +663,7 @@ export class MastraRuntime {
     link: AgentLink,
     inbound: LinkInbound,
     payload: Record<string, unknown>,
-    headers: Record<string, string>,
+    headers: Record<string, string | string[] | undefined>,
   ): Promise<{ accepted: true; sessionId: string }> {
     if (link.type !== 'webhook') throw new MastraRuntimeError(400, 'LINK_NOT_WEBHOOK', 'Link is not a Webhook Link')
     if (!link.threadId || !link.resourceId) throw new MastraRuntimeError(409, 'WEBHOOK_LINK_UNSCOPED', 'Webhook Link is not scoped to an Agent session')
@@ -689,7 +689,7 @@ export class MastraRuntime {
           receivedAt: inbound.receivedAt,
         },
       },
-      headers: safeWebhookHeaders(headers),
+      headers: linkInboundHeaders(headers),
     })
     return { accepted: true, sessionId: link.threadId }
   }
@@ -1759,8 +1759,28 @@ function memoryPartToUi(value: unknown): Array<Record<string, unknown>> {
   return []
 }
 
-function safeWebhookHeaders(headers: Record<string, string>): Record<string, string> {
-  return Object.fromEntries(Object.entries(headers).filter(([name]) => ['content-type', 'user-agent', 'x-event-type', 'x-delivery-id'].includes(name.toLowerCase())).map(([name, value]) => [name.toLowerCase(), value.slice(0, 1024)]))
+/**
+ * The headers a Link inbound may carry into a session.
+ *
+ * Correlation and event-type headers only — enough for an agent to cite the event and for an
+ * operator to trace it in the sending system — and never credentials. Two lists used to exist
+ * for this, one applied when the envelope was written to AgentFS and another when it was
+ * forwarded to the session, and they had drifted apart: a request id was stored on disk and
+ * silently dropped on the way in, so the session could not be correlated with the sender's
+ * logs even though the evidence was already captured. One list, used by both paths.
+ */
+export const LINK_INBOUND_HEADERS = ['content-type', 'user-agent', 'x-request-id', 'x-event-type', 'x-webhook-id', 'x-delivery-id'] as const
+
+export function linkInboundHeaders(headers: Record<string, string | string[] | undefined>): Record<string, string> {
+  const values: Record<string, string> = {}
+  for (const [name, value] of Object.entries(headers)) {
+    const key = name.toLowerCase()
+    if (!(LINK_INBOUND_HEADERS as readonly string[]).includes(key)) continue
+    const text = Array.isArray(value) ? value.join(', ') : value
+    if (typeof text !== 'string' || !text) continue
+    values[key] = text.slice(0, 1024)
+  }
+  return values
 }
 
 function threadIdFor(investigationId: string): string {

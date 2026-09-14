@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import { posix } from 'node:path'
 import type { AgentLink, LinkInbound } from '@papyrus/contracts'
-import type { MastraRuntime } from './mastra/runtime.js'
+import { linkInboundHeaders, type MastraRuntime } from './mastra/runtime.js'
 
 const MAX_LINK_BODY = 512 * 1024
 const MAX_LINK_RESPONSE = 2 * 1024 * 1024
@@ -174,7 +174,7 @@ async function acceptWebhook(
   if (!allowed.includes(request.method ?? '')) return methodNotAllowed(response, allowed)
   const body = await jsonBody(request)
   const inbound = await persistInbound(request, url, mastra, link, body)
-  const signal = await mastra.acceptLinkWebhook(link, inbound, body, safeInboundHeaders(request.headers))
+  const signal = await mastra.acceptLinkWebhook(link, inbound, body, linkInboundHeaders(request.headers))
 
   let workflowResult: unknown
   if (link.workflowId) {
@@ -218,7 +218,7 @@ async function persistInbound(
     method: request.method ?? 'POST',
     path: url.pathname,
     query: Object.fromEntries(url.searchParams.entries()),
-    headers: safeInboundHeaders(request.headers),
+    headers: linkInboundHeaders(request.headers),
     body,
   }
   const bytes = Buffer.from(JSON.stringify(envelope, null, 2) + '\n')
@@ -250,17 +250,6 @@ async function jsonBody(request: IncomingMessage): Promise<Record<string, unknow
   try { parsed = JSON.parse(Buffer.concat(chunks).toString('utf8')) } catch { throw new Error('Link inbound body must be valid JSON') }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Link inbound body must be a JSON object')
   return parsed as Record<string, unknown>
-}
-
-function safeInboundHeaders(headers: IncomingHttpHeaders): Record<string, string> {
-  const safe = ['content-type', 'user-agent', 'x-request-id', 'x-event-type', 'x-webhook-id']
-  const values: Record<string, string> = {}
-  for (const name of safe) {
-    const value = headers[name]
-    if (typeof value === 'string') values[name] = value.slice(0, 2048)
-    else if (Array.isArray(value)) values[name] = value.join(', ').slice(0, 2048)
-  }
-  return values
 }
 
 function parseByteRange(value: string, size: number): { start: number; end: number } | undefined {

@@ -222,7 +222,11 @@ function PortalHeader({ view, data }: { view: PortalView; data: PortalData }) {
     agent: ['MASTRA RUNTIME', 'Agent'], models: ['MODEL GATEWAYS', 'Models'],
     links: ['AGENT-CREATED PUBLIC BOUNDARIES', 'Links'], library: ['AGENTFS FILE AUTHORITY', 'Library'], governance: ['IDENTITY, LICENSING AND AUDIT', 'Governance'],
   }
-  return <header className="portal-header"><div className="portal-header-title"><SidebarTrigger /><div><p className="eyebrow">{copy[view][0]}</p><h1>{copy[view][1]}</h1></div></div><div className="header-status"><span><i className="dot good" />DAEMON HEALTHY</span><small>{data.config.organizationName}</small></div></header>
+  // The health claim was literal text with a hardcoded green dot, so it read "DAEMON HEALTHY"
+  // even with no model configured and agent chat disabled. A status that cannot be false is
+  // worse than none, so it now follows the daemon's own reported state. The wording in the
+  // healthy case is unchanged.
+  return <header className="portal-header"><div className="portal-header-title"><SidebarTrigger /><div><p className="eyebrow">{copy[view][0]}</p><h1>{copy[view][1]}</h1></div></div><div className="header-status"><span><i className={`dot ${data.agent.ready ? 'good' : 'warning'}`} />{data.agent.ready ? 'DAEMON HEALTHY' : 'DAEMON UNREACHABLE'}</span><small>{data.config.organizationName}</small></div></header>
 }
 
 function GovernanceView({ data }: { data: PortalData }) {

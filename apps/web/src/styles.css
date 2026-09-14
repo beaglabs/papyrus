@@ -114,6 +114,7 @@ p { color: var(--muted); line-height: 1.55; }
 .nb-sidebar-backdrop { display: none; }
 .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #999; border: 1px solid currentColor; }
 .dot.good, .health-dot.healthy { background: var(--green); }
+.dot.warning { background: var(--yellow); }
 
 
 .portal-main { min-width: 0; min-height: 0; overflow: auto; padding: 34px 42px 56px; overscroll-behavior: contain; background: var(--surface); }

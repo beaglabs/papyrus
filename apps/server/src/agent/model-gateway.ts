@@ -10,6 +10,40 @@ import type { ModelProfile } from '@papyrus/contracts'
 import { ModelStore } from './model-store.js'
 
 /**
+ * How long a provider may take to produce response headers before Papyrus gives up.
+ *
+ * The AI SDK's fetch carries no wall-clock bound of its own, so a provider that accepts
+ * the connection and then never answers leaves the turn open indefinitely: no error, no
+ * timeout, nothing persisted, and the operator watching "working" until they stop it by
+ * hand. Observed against a free-tier provider that simply never replied.
+ *
+ * This bounds time-to-first-byte only. Once headers arrive the body streams under the
+ * caller's signal, so a long generation is never cut short — only a provider that has
+ * said nothing at all is abandoned.
+ */
+const RESPONSE_HEADERS_TIMEOUT_MS = 60_000
+
+export function boundedFetch(label: string, timeoutMs = RESPONSE_HEADERS_TIMEOUT_MS): typeof fetch {
+  return async (input, init) => {
+    const controller = new AbortController()
+    const caller = init?.signal ?? undefined
+    const relay = () => controller.abort(caller?.reason)
+    if (caller) {
+      if (caller.aborted) controller.abort(caller.reason)
+      else caller.addEventListener('abort', relay, { once: true })
+    }
+    const timer = setTimeout(() => controller.abort(new Error(`${label} did not respond within ${timeoutMs}ms`)), timeoutMs)
+    timer.unref?.()
+    try {
+      return await fetch(input, { ...init, signal: controller.signal })
+    } finally {
+      clearTimeout(timer)
+      caller?.removeEventListener('abort', relay)
+    }
+  }
+}
+
+/**
  * One stable Mastra gateway fronts all customer-configured model profiles.
  * Profiles are metadata only; resolveAuth is the only place that materializes
  * a credential, and the default resolver supports env:// references so a
@@ -67,6 +101,7 @@ export class PapyrusModelGateway implements MastraModelGatewayInterface {
       ...(apiKey ? { apiKey } : {}),
       ...(headers && Object.keys(headers).length ? { headers } : {}),
       supportsStructuredOutputs: profile.capabilities.includes('structured_outputs'),
+      fetch: boundedFetch(`model ${providerId}`),
     })
     return provider.chatModel(modelId)
   }

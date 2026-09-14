@@ -80,13 +80,42 @@ export interface ListProposalsArgs {
   investigationId?: string | undefined
 }
 
-export function listProposals(context: InvestigationToolContext, args: ListProposalsArgs = {}): AgentActionProposal[] {
+/**
+ * Why a released action failed lives on the job, not the proposal: the worker records the
+ * executor's own message when it fails the job. A proposal on its own therefore read as a bare
+ * `failed` status with no cause, and the operator and the agent were both blind to it — the
+ * agent could only report that it had no tool returning the reason, and the deadlock repeated
+ * on every retry. Carrying the job's outcome here is what makes a failure diagnosable.
+ */
+export type ProposalWithExecution = AgentActionProposal & {
+  execution?: {
+    status: string
+    attempt: number
+    maxAttempts: number
+    error?: string
+  }
+}
+
+export function listProposals(context: InvestigationToolContext, args: ListProposalsArgs = {}): ProposalWithExecution[] {
   const investigationId = typeof args.investigationId === 'string' && args.investigationId.length > 0
     ? args.investigationId
     : undefined
-  return investigationId
+  const proposals = investigationId
     ? context.actionStore.listProposals(investigationId)
     : context.actionStore.listProposals()
+  return proposals.map((proposal) => {
+    const job = context.actionStore.getJobByProposal(proposal.id)
+    if (!job) return proposal
+    return {
+      ...proposal,
+      execution: {
+        status: job.status,
+        attempt: job.attempt,
+        maxAttempts: job.maxAttempts,
+        ...(job.error ? { error: job.error } : {}),
+      },
+    }
+  })
 }
 
 export type InvestigationToolResult = TerrainSnapshot | AgentInvestigation[] | AgentActionProposal[]

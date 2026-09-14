@@ -261,7 +261,7 @@ export class LinkStore {
       id,name,slug,type,state,blob_path,media_type,source_sha256,public_path,workflow_id,schedule_id,
       thread_id,resource_id,logo_path,logo_media_type,logo_text,
       created_by_oid,created_at,updated_at,ping_count,inbound_count
-    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0)`).run(
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0)`).run(
       manifest.draftId,
       manifest.name,
       manifest.slug,

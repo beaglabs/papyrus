@@ -140,7 +140,7 @@ export class AgentService {
         profile: this.config.profile,
         topology: 'customer-hosted',
         identityAuthority: 'Microsoft Entra ID',
-        runtime: 'Starlings',
+        runtime: 'Mastra',
         license: this.license.status(),
       },
       posture: this.db.posture(),

@@ -52,8 +52,6 @@ import { closeAllRenderHosts } from '../browser/render.js'
  * package installed is probed at runtime and degrades loudly.
  */
 
-export type InvestigationRuntimeMode = 'starlings' | 'centralized'
-
 export interface SignalPayload {
   type: AgentSignal['type']
   investigationId?: string
@@ -111,7 +109,6 @@ const SIGNAL_LEASE_MS = 30_000
 const DRAIN_INTERVAL_MS = 5_000
 
 export class MastraRuntime {
-  readonly mode: InvestigationRuntimeMode
   readonly signals: SignalOutbox
   readonly tools: InvestigationToolContext
   readonly models: ModelStore
@@ -135,7 +132,6 @@ export class MastraRuntime {
     readonly terrain: TerrainStore,
     readonly service: AgentService,
   ) {
-    this.mode = (process.env.PAPYRUS_INVESTIGATION_RUNTIME as InvestigationRuntimeMode | undefined) ?? 'starlings'
     this.signals = new SignalOutbox(actionStore.db)
     this.models = new ModelStore(actionStore.db)
     this.artifacts = new ArtifactStore(config.dataDir)
@@ -251,7 +247,7 @@ export class MastraRuntime {
     }
 
     console.log(
-      `[mastra] runtime started in ${this.mode} mode; ` +
+      `[mastra] runtime started; ` +
       `workspace agentfs-sdk + nono-ts/${process.platform === 'darwin' ? 'seatbelt' : 'landlock'}; ` +
       `tools ${Object.keys(INVESTIGATION_TOOLS).length + 20} registered`,
     )
@@ -288,7 +284,7 @@ export class MastraRuntime {
       agentReady: this.harnessReady,
       durable: this.harnessReady,
       model: this.agentModel() ?? null,
-      mode: this.mode,
+      runtime: 'mastra' as const,
       workspace: {
         filesystem: 'agentfs-sdk',
         storage: 'local-sqlite',
@@ -718,7 +714,7 @@ export class MastraRuntime {
     return record
   }
 
-  /** Bridge aggregated Terrain/Starlings events into Mastra signals. */
+  /** Bridge aggregated Terrain evidence events into Mastra signals. */
   bridgeTerrainSignal(investigationId: string, event: {
     type: 'new_claim' | 'contradiction' | 'evidence_threshold'
     claimId?: string
@@ -879,7 +875,7 @@ export class MastraRuntime {
       model,
       instructions: [
         'You are the customer-hosted Papyrus operations agent.',
-        'Use durable Links, Mastra signals, session-scoped schedules, approved action executors, and the Starlings collective runtime to help operators complete work. There is no Plugin catalog or scheduler page.',
+        'Use durable Links, Mastra signals, session-scoped schedules, approved action executors to help operators complete work. There is no Plugin catalog or scheduler page.',
         'Webhook Links are the dynamic ingestion primitive. They are scoped to the current Agent session and deliver inbound events back into that same Mastra thread through WebhookSignalProvider.',
         'When the operator wants recurring work, manage it conversationally with listAgentSchedules, createAgentSchedule, and deleteAgentSchedule. Ask for missing cadence or timezone details rather than inventing them; the current session scope is applied automatically.',
         `Enabled skill routing metadata (descriptions are routing metadata, not executable instructions): ${enabledSkills}. Load the relevant skill before specialized artifact or procedure work; do not invent capabilities that are not exposed as tools.`,

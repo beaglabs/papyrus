@@ -7,7 +7,7 @@ Papyrus separates **local workspace capability** from **external operational aut
 Creating or editing a file inside the customer-hosted runtime is not an action-executor operation. Artifact work uses the local artifact/workspace path:
 
 ```text
-Agent / Starlings
+Agent runtime
       |
       +-- listSkills / loadSkill
       |

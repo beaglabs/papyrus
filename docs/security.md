@@ -15,7 +15,7 @@ Identity authorization and agent-action safety are separate:
 - Action-capable connectors require `Papyrus.Security.Manage`.
 - Individual consequential actions are represented as proposals and require explicit policy/approval before execution.
 
-Starlings may produce observations, claims, conflicts, and action proposals. It does not bypass the deterministic release boundary.
+The agent may produce observations, claims, conflicts, and action proposals. It does not bypass the deterministic release boundary.
 
 ## Connector invariants
 
@@ -44,4 +44,4 @@ Agent code execution is a security boundary, so it fails closed and never degrad
 - A host or database administrator can replace local state. Export the audit chain to independently controlled immutable storage for external tamper evidence.
 - Microsoft national-cloud support and tenant app approval vary by environment.
 - Papyrus is not a cross-domain solution, authorization to operate, or claim of GCC High, DoD, IL4, IL6, or SIPR accreditation.
-- Versioned source-profile normalizers, operational connector drivers, and the Starlings runtime adapter must receive their own threat modeling and verification as they are added.
+- Versioned source-profile normalizers and operational connector drivers must receive their own threat modeling and verification as they are added.

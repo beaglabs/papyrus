@@ -1,17 +1,17 @@
 # Agent twin architecture
 
-Papyrus is the governed customer-hosted envelope around a Starlings agent-resilience population.
+Papyrus is the governed customer-hosted envelope around a durable, event-driven agent runtime.
 
 | Plane | Responsibility | Authority |
 | --- | --- | --- |
 | Human connection | Teams commands, Exchange email, portal | Entra identity and app roles |
 | Machine connection | ACP clients and A2A peers | Connector credentials and scoped manifests |
 | Evidence | Customer-pushed Defender, Sentinel, Zeek, Suricata, Sysmon, DNS, and inventory records | Read-only source scope |
-| Computation | Local observations, claims, contradiction handling, recovery | Starlings population rules |
+| Computation | Local observations, claims, contradiction handling, recovery | Agent runtime rules |
 | Action | Firewall or response proposals and execution | Deterministic policy plus Entra approver |
 | Product | Configuration, licensing, health, audit | Papyrus daemon |
 
-Papyrus deliberately does not turn Teams into the runtime. An adapter translates a Teams command into a typed request and returns a result; loss of Teams does not stop evidence ingestion, Starlings computation, portal access, ACP/A2A traffic, or email.
+Papyrus deliberately does not turn Teams into the runtime. An adapter translates a Teams command into a typed request and returns a result; loss of Teams does not stop evidence ingestion, agent computation, portal access, ACP/A2A traffic, or email.
 
 The portal is initiated either by normal Entra login or a short-lived link created from an authenticated adapter flow. A URL parameter is not itself an identity credential and must not contain a durable bearer token.
 
@@ -20,7 +20,7 @@ The canonical flow is:
 1. Customer-managed collectors and exports push records through the source-bound Observation API.
 2. The daemon validates the envelope and any selected versioned source schema without mutating existing evidence.
 3. An accepted canonical projection is validated directly, or a pinned deterministic source profile projects native fields; the immutable raw observation, schema provenance, and resulting Terrain evidence commit atomically.
-4. Starlings operators consume the durable observation boundary to form claims, request missing evidence, and resolve contradictions.
+4. Agent operators consume the durable observation boundary to form claims, request missing evidence, and resolve contradictions.
 5. The agent twin retains the current terrain and confidence history.
 6. Potentially consequential output becomes an action proposal.
 7. Policy and an appropriately assigned Entra principal decide whether the action is released.

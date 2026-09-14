@@ -133,7 +133,7 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
   },
   {
     id: 'a2a-peer', name: 'A2A Agent Peer', vendor: 'Open protocol', initials: 'A2', accent: '#c4f078',
-    description: 'Capability-advertised peer agents connected at the Papyrus boundary, never as the Starlings substrate.',
+    description: 'Capability-advertised peer agents connected at the Papyrus boundary as scoped protocol peers, never as an in-process runtime substrate.',
     integrationClass: 'agent_peer', authority: 'bidirectional', risk: 'high',
     capabilities: ['agent card discovery', 'typed handoff', 'peer requests'],
     evidenceTypes: ['PeerClaim', 'PeerRequest'], syncMode: 'push', authSchemes: ['mTLS', 'oauth'],

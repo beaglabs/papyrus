@@ -458,7 +458,7 @@ export interface PortalOverview {
     profile: DeploymentProfile
     topology: 'customer-hosted'
     identityAuthority: 'Microsoft Entra ID'
-    runtime: 'Starlings'
+    runtime: 'Mastra'
     license: LicenseStatus
   }
   posture: {
@@ -730,4 +730,27 @@ export interface AgentSignal {
   claimId?: string
   payload: Record<string, unknown>
   emittedAt: string
+}
+
+/**
+ * Dynamically rendered Agent Chat viewer card. Deterministic tools -- including
+ * out-of-core extension tools and STRICT Enclave AgentScript -- emit a
+ * `kind`-tagged output; the web card registry maps the kind to a renderer. The
+ * hardened core ships this contract and a placeholder renderer only. Heavy 3D
+ * engines (WebGL / Cesium / deck.gl) live behind the papyrus-extensions boundary
+ * as read-only ExtensionUiProviders, never in the core.
+ */
+export interface Viewer3DCardData {
+  kind: 'viewer_3d'
+  /** Renderer id an extension UI provider registers against (e.g. 'gnss-orbit'). */
+  renderer: string
+  title: string
+  /**
+   * Deterministic, read-only scene description consumed by the vetted renderer.
+   * The core never interprets this payload; it only routes it to the registered
+   * card, so no markup or executable code is placed in the DOM by the core.
+   */
+  scene: Record<string, unknown>
+  /** Optional audit provenance: which extension/tool produced this view. */
+  source?: { extension?: string; tool?: string }
 }

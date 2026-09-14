@@ -1,11 +1,13 @@
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport, type UIMessage } from 'ai'
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactElement } from 'react'
 import type { AgentSession, AgentStatus, WorkspaceLibraryFile } from './api.js'
 import { approveProposal, approveSkill, createSessionProposal, denyProposal, sessionMessages, setSessionAttention, uploadWorkspaceAttachment, workspaceFiles } from './api.js'
 import { ModelGatewayCard } from './Models.js'
 import { Alert, Badge, Button, Card, CommandBlock, Input, Skeleton } from './components/ui/index.js'
 import { MarkdownMessage } from './Markdown.js'
+import { buildCardRegistry, type CardRegistry, type ExtensionUiProvider } from './extensions/extension-sdk.js'
+import { viewer3dUiProvider } from './extensions/viewer-3d.js'
 
 interface AgentFormField {
   name: string
@@ -175,7 +177,7 @@ function Chat({ session, status, initial, input, setInput, historyError, history
   }
 
   return <div className="agent-surface">
-    <div className="agent-session-head"><div><p className="eyebrow">DURABLE SESSION</p><h2>{session.title}</h2></div><div className="agent-badges"><Badge>{status.mode.toUpperCase()}</Badge><Badge className={status.durable ? 'status-good' : ''}>{status.durable ? 'DURABLE' : 'OFFLINE'}</Badge></div></div>
+    <div className="agent-session-head"><div><p className="eyebrow">DURABLE SESSION</p><h2>{session.title}</h2></div><div className="agent-badges"><Badge>{status.runtime.toUpperCase()}</Badge><Badge className={status.durable ? 'status-good' : ''}>{status.durable ? 'DURABLE' : 'OFFLINE'}</Badge></div></div>
     {!status.agentReady && <Alert className="agent-config-alert"><strong>Agent model not configured</strong><span>Open <a href="/portal/models">Models</a> to configure an approved gateway using the first-run form. Chat unlocks after the daemon has a tested model profile.</span></Alert>}
     {historyError && <Alert className="error">{historyError}</Alert>}
     <div
@@ -356,8 +358,20 @@ function MessageSkeleton() {
 }
 
 function Welcome() {
-  return <div className="agent-welcome"><span className="agent-orbit">✦</span><p className="eyebrow">PAPYRUS RUNTIME</p><h2>What should the population work on?</h2><p>Start a task, create a durable artifact, expose a session-scoped ingestion Link, or schedule recurring work through the agent. Starlings handles collective reasoning; Mastra makes the session durable and event-driven.</p><div className="prompt-chips"><span>Create a PDF briefing</span><span>Build an XLSX risk register</span><span>Create a reusable skill</span></div></div>
+  return <div className="agent-welcome"><span className="agent-orbit">✦</span><p className="eyebrow">PAPYRUS RUNTIME</p><h2>What should the agent work on?</h2><p>Start a task, create a durable artifact, expose a session-scoped ingestion Link, or schedule recurring work through the agent. Mastra makes the session durable and event-driven.</p><div className="prompt-chips"><span>Create a PDF briefing</span><span>Build an XLSX risk register</span><span>Create a reusable skill</span></div></div>
 }
+
+// Dynamic viewer cards. Out-of-core extension UI providers are wired into the core
+// through the papyrus-extension-sdk contract (buildCardRegistry) and routed by their
+// tool output `kind`. The core never executes extension markup; it only hands typed,
+// read-only tool output to the registered card. Providers are vendored under
+// ./extensions (papyrus-extension-sdk + papyrus-viewer-3d) until those packs are
+// consumed as workspace dependencies (needs a pnpm-lock.yaml regeneration); swapping
+// to the package imports is then a mechanical change here.
+type ExtensionCardComponent = (props: { output: Record<string, unknown> }) => ReactElement
+const EXTENSION_CARDS: CardRegistry<ExtensionCardComponent> = buildCardRegistry(
+  [viewer3dUiProvider] as unknown as ExtensionUiProvider<ExtensionCardComponent>[],
+)
 
 function Message({ message, sessionId, canApprove, canManageSkills, onChanged }: { message: UIMessage; sessionId: string; canApprove: boolean; canManageSkills: boolean; onChanged: () => Promise<void> }) {
   return <article className={`chat-message ${message.role}`}><div className="message-author">{message.role === 'user' ? 'YOU' : 'PAPYRUS'}</div><div className="message-body">{message.parts.map((part, index) => <MessagePart key={`${part.type}:${index}`} part={part as unknown as Record<string, unknown>} sessionId={sessionId} canApprove={canApprove} canManageSkills={canManageSkills} onChanged={onChanged} />)}</div></article>
@@ -374,6 +388,9 @@ function MessagePart({ part, sessionId, canApprove, canManageSkills, onChanged }
     if (output?.['kind'] === 'action_suggestion') return <ActionSuggestionCard suggestion={output} sessionId={sessionId} canApprove={canApprove} onChanged={onChanged} />
     if (output?.['kind'] === 'artifact') return <ArtifactCard artifact={output as unknown as ArtifactOutput} />
     if (output?.['kind'] === 'skill_draft') return <SkillDraftCard output={output as unknown as SkillDraftOutput} canManage={canManageSkills} onChanged={onChanged} />
+    const extensionKind = output && typeof output['kind'] === 'string' ? output['kind'] : ''
+    const ExtensionCard = EXTENSION_CARDS[extensionKind]
+    if (ExtensionCard) return <ExtensionCard output={output as Record<string, unknown>} />
     return <ToolActivity part={part} />
   }
   return null

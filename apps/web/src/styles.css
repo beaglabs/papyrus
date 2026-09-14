@@ -300,7 +300,7 @@ p { color: var(--muted); line-height: 1.55; }
    desktop/base rules, which collapses the chat surface and strips message
    formatting even though the attachment/Library JSX is present. */
 .attention-icon { flex: 0 0 18px; width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%; background: var(--main); color: #111; font: 900 12px ui-monospace, monospace; }
-.agent-main { height: 100%; padding-bottom: 16px; display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; width: 100%; max-width: 1040px; margin: 0 auto; background: var(--surface); border: 3px solid #111; border-radius: var(--radius); box-shadow: var(--shadow); }
+.agent-main { height: 100%; padding-bottom: 16px; display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; width: 100%; background: var(--surface); }
 .agent-surface { --composer-clearance: 116px; position: relative; align-self: stretch; min-width: 0; min-height: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr); max-width: 980px; width: 100%; margin: 0 auto; overflow: hidden; }
 .agent-session-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 20px 14px; border-bottom: 1px solid #cfc9bc; }
 .agent-session-head h2 { margin: 0; }

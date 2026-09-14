@@ -74,9 +74,14 @@ p { color: var(--muted); line-height: 1.55; }
 .session-row .nb-sidebar-menu-button[data-active="true"] { color: #111; background: transparent; box-shadow: none; }
 .session-row .nb-sidebar-menu-button[data-active="true"] .sidebar-session-mark { color: #111; }
 .session-title { font-size: 11px; }
-.session-delete { visibility: hidden; width: 24px; height: 24px; padding: 0; border: 0; background: transparent; box-shadow: none; color: var(--muted); }
-.session-row:hover .session-delete, .session-row:focus-within .session-delete { visibility: visible; }
-.session-delete:hover { color: #b4322d; transform: none; }
+/* The delete control used to appear on row hover only, drawn in muted grey at 24px with no
+   border, so it was easy to miss and unreachable on a touch device. It is now always visible,
+   sized as a real target, and turns unmistakably destructive on hover and keyboard focus.
+   These selectors carry enough specificity to beat the ghost button variant it renders as. */
+.session-row .session-delete.nb-button { width: 26px; height: 26px; min-width: 26px; display: grid; place-items: center; padding: 0; border: 2px solid transparent; border-radius: var(--radius-sm); background: transparent; box-shadow: none; color: #3b3833; font: 900 16px/1 ui-monospace, monospace; }
+.session-row .session-delete.nb-button:hover,
+.session-row .session-delete.nb-button:focus-visible { border-color: #111; background: var(--rose); color: #111; transform: none; box-shadow: none; }
+.session-row .session-delete.nb-button:active { transform: translate(1px, 1px); }
 .sidebar-empty { display: block; padding: 8px; color: var(--muted); font: 10px ui-monospace, monospace; }
 .runtime-panel { margin: 0; padding: 11px; border: 2px solid #111; border-radius: var(--radius-sm); display: grid; gap: 6px; background: var(--background); box-shadow: var(--shadow-sm); }
 .runtime-label { color: var(--muted); font: 800 8px ui-monospace, monospace; letter-spacing: .12em; }
@@ -97,11 +102,15 @@ p { color: var(--muted); line-height: 1.55; }
 .nb-sidebar[data-state="collapsed"] .sidebar-history-group,
 .nb-sidebar[data-state="collapsed"] .runtime-label { display: none; }
 .nb-sidebar[data-state="collapsed"] .nb-sidebar-header,
-.nb-sidebar[data-state="collapsed"] .nb-sidebar-footer { padding-left: 9px; padding-right: 9px; }
+.nb-sidebar[data-state="collapsed"] .nb-sidebar-footer { padding-left: 6px; padding-right: 6px; }
+.nb-sidebar[data-state="collapsed"] .nb-sidebar-content { padding: 6px; }
 .nb-sidebar[data-state="collapsed"] .brand > span:last-child { display: none; }
 .nb-sidebar[data-state="collapsed"] .brand { justify-content: center; }
-.nb-sidebar[data-state="collapsed"] .brand-mark { width: 38px; min-width: 38px; }
-.nb-sidebar[data-state="collapsed"] .nb-sidebar-menu-button { justify-content: center; padding-left: 8px; padding-right: 8px; }
+.nb-sidebar[data-state="collapsed"] .brand-mark { width: 32px; height: 32px; min-width: 32px; }
+/* The icon rail is 48px wide. At 6px of side padding that leaves a 36px content box, so a
+   collapsed row must fit inside 36px: a 22px icon, 4px of padding each side, and its 2px
+   border come to 34px. The previous 8-9px paddings needed 42px and overflowed the rail. */
+.nb-sidebar[data-state="collapsed"] .nb-sidebar-menu-button { justify-content: center; padding-left: 4px; padding-right: 4px; }
 .nb-sidebar[data-state="collapsed"] .runtime-panel { display: flex; justify-content: center; padding: 8px; }
 .nb-sidebar[data-state="collapsed"] .runtime-panel strong { gap: 0; }
 .nb-sidebar[data-state="collapsed"] .runtime-jobs { display: none; }

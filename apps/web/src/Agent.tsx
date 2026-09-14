@@ -7,8 +7,9 @@ import { approveProposal, approveSkill, createSessionProposal, denyProposal, lis
 import { ModelGatewayCard } from './Models.js'
 import { Alert, Badge, Button, Card, CommandBlock, Input, Skeleton } from './components/ui/index.js'
 import { MarkdownMessage } from './Markdown.js'
-import { buildCardRegistry, type CardRegistry, type ExtensionUiProvider } from './extensions/extension-sdk.js'
-import { viewer3dUiProvider } from './extensions/viewer-3d.js'
+import { buildCardRegistry, type CardRegistry, type ExtensionUiProvider } from 'papyrus-extension-sdk'
+import { viewer3dUiProvider } from 'papyrus-viewer-3d/ui'
+import { gnssUiProvider } from 'papyrus-gnss/ui'
 
 interface AgentFormField {
   name: string
@@ -400,13 +401,12 @@ function Welcome() {
 // Dynamic viewer cards. Out-of-core extension UI providers are wired into the core
 // through the papyrus-extension-sdk contract (buildCardRegistry) and routed by their
 // tool output `kind`. The core never executes extension markup; it only hands typed,
-// read-only tool output to the registered card. Providers are vendored under
-// ./extensions (papyrus-extension-sdk + papyrus-viewer-3d) until those packs are
-// consumed as workspace dependencies (needs a pnpm-lock.yaml regeneration); swapping
-// to the package imports is then a mechanical change here.
+// read-only tool output to the registered card. The providers come from the
+// papyrus-extensions packages as workspace dependencies, so there is one copy of the
+// contract rather than a vendored one that could drift from it.
 type ExtensionCardComponent = (props: { output: Record<string, unknown> }) => ReactElement
 const EXTENSION_CARDS: CardRegistry<ExtensionCardComponent> = buildCardRegistry(
-  [viewer3dUiProvider] as unknown as ExtensionUiProvider<ExtensionCardComponent>[],
+  [viewer3dUiProvider, gnssUiProvider] as unknown as ExtensionUiProvider<ExtensionCardComponent>[],
 )
 
 function Message({ message, sessionId, canApprove, canManageSkills, onChanged }: { message: UIMessage; sessionId: string; canApprove: boolean; canManageSkills: boolean; onChanged: () => Promise<void> }) {

@@ -8,11 +8,14 @@ import type { AgentService } from '../service.js'
 import type { TerrainStore } from '../terrain-store.js'
 import { SignalOutbox, type SignalRecord } from './signal-outbox.js'
 import {
+  assertAgentSafeTool,
   INVESTIGATION_TOOLS,
   runInvestigationTool,
   type InvestigationToolContext,
   type InvestigationToolName,
 } from './tools.js'
+import { collectExtensionTools } from 'papyrus-extension-sdk'
+import { gnssToolProvider } from 'papyrus-gnss/tools'
 import { LINK_EXECUTOR_INTEGRATION_ID, LinkStore, type LinkDraftAssetInput } from '../link-store.js'
 import { modelGatewayRequest } from './agent-ui-tools.js'
 import { fetchUrlPreview } from './fetch-preview.js'
@@ -125,6 +128,8 @@ export class MastraRuntime {
   readonly consoles: ConsoleStore
   private readonly consoleTools: ReturnType<typeof buildConsoleTools>
   private mastra: MastraHandle | undefined
+  /** How many tools the agent was actually given. Reported at startup. */
+  private registeredToolCount = 0
   private started = false
   private timer: ReturnType<typeof setInterval> | undefined
 
@@ -251,7 +256,7 @@ export class MastraRuntime {
     console.log(
       `[mastra] runtime started; ` +
       `workspace agentfs-sdk + nono-ts/${process.platform === 'darwin' ? 'seatbelt' : 'landlock'}; ` +
-      `tools ${Object.keys(INVESTIGATION_TOOLS).length + 20} registered`,
+      `tools ${this.registeredToolCount} registered`,
     )
   }
 
@@ -1081,6 +1086,19 @@ export class MastraRuntime {
       })
     }
     for (const warning of this.consoleTools.drainWarnings()) console.warn(`[papyrus:console] ${warning}`)
+    // Extension tools (papyrus-extensions). Providers from the extension packs contribute
+    // read-only tools that return kind-tagged UI objects, which the matching card renders.
+    // Every id passes through assertAgentSafeTool — the same gate the built-in tools use — so
+    // an extension can never register a forbidden, authority-bearing tool, and
+    // collectExtensionTools refuses a provider declaring anything but read_only authority.
+    for (const tool of collectExtensionTools([gnssToolProvider], { assertSafe: assertAgentSafeTool })) {
+      registered[tool.id] = createTool({
+        id: tool.id,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+        execute: async (inputData: Record<string, unknown>) => tool.execute(inputData),
+      })
+    }
     registered['runAgentScript'] = createTool({
       id: 'runAgentScript',
       description: 'Execute bounded AI-generated AgentScript in the STRICT Enclave runtime for multi-step local workspace logic. Enclave has no Node built-ins, no direct network or host filesystem access, and may call only Papyrus-brokered workspace and constrained process tools.',
@@ -1425,6 +1443,7 @@ export class MastraRuntime {
         }
       },
     })
+    this.registeredToolCount = Object.keys(registered).length
     return registered
   }
 

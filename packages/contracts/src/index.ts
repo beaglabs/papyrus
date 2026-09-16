@@ -754,3 +754,73 @@ export interface Viewer3DCardData {
   /** Optional audit provenance: which extension/tool produced this view. */
   source?: { extension?: string; tool?: string }
 }
+
+/**
+ * Connector channels.
+ *
+ * A connector is not a configuration row: it is a typed, bidirectional channel
+ * bound to an agent session. Every direction is declared as versioned schemas, so
+ * a producer, the daemon, and the agent cannot disagree about a payload's shape —
+ * and an agent can never propose a command the executor would refuse.
+ *
+ * `inbound` events become live agent context. `state` is the lane a run reads at
+ * each step and can keep across history compaction. `outbound` commands are
+ * writes, and every one of them crosses the action ledger: a declaration here is
+ * a shape, never an authority.
+ *
+ * Schema declarations are authored in zod inside the daemon and projected into the
+ * `jsonSchema` fields below, which keeps this package dependency-free while still
+ * giving non-TypeScript producers a real contract to validate against.
+ */
+export type ChannelDirection = 'inbound' | 'state' | 'outbound'
+
+/** A versioned inbound event, for example `github.push@1`. */
+export interface ChannelEventDeclaration {
+  /** Versioned identifier: `<name>@<integer>`. The version is part of the identity. */
+  id: string
+  label: string
+  description: string
+  jsonSchema: Record<string, unknown>
+  example: Record<string, unknown>
+  /** Terrain evidence type this event also projects to, when it carries evidence. */
+  evidenceType?: string
+}
+
+/**
+ * The connector's current view of the world. This is the lane a live run reads at
+ * each step, so it stays small: it is context, not an inventory.
+ */
+export interface ChannelStateDeclaration {
+  id: string
+  label: string
+  description: string
+  jsonSchema: Record<string, unknown>
+  /** Age at which a cached snapshot is reported stale rather than served as current. */
+  maxAgeSeconds: number
+}
+
+/** A typed external write. `approval` is fixed to the ledger by construction. */
+export interface ChannelCommandDeclaration {
+  id: string
+  label: string
+  description: string
+  jsonSchema: Record<string, unknown>
+  example: Record<string, unknown>
+  approval: 'ledger'
+  risk: IntegrationRisk
+}
+
+export interface ConnectorChannel {
+  catalogId: string
+  /** Version of the channel declaration as a whole, not of any single schema. */
+  version: number
+  events: ChannelEventDeclaration[]
+  state?: ChannelStateDeclaration
+  commands: ChannelCommandDeclaration[]
+}
+
+/** Outcome of validating a producer payload against a declared event or command. */
+export type ChannelValidation =
+  | { ok: true; id: string; value: Record<string, unknown> }
+  | { ok: false; id: string; reason: string }
+

@@ -546,6 +546,18 @@ p { color: var(--muted); line-height: 1.55; }
 .link-card-foot { min-width: 0; display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr) auto; align-items: center; gap: 8px; margin-top: 9px; color: var(--muted); font-size: 9px; }
 .link-card-foot > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .link-card-foot .nb-button { padding: 5px 7px; font-size: 9px; }
+.link-card-foot-actions { display: flex; align-items: center; gap: 6px; justify-content: flex-end; overflow: visible !important; }
+.link-inbound-toggle { padding: 0; border: 0; background: none; color: var(--muted); cursor: pointer; font: inherit; text-decoration: underline dotted; text-underline-offset: 2px; }
+.link-inbound-toggle:hover { color: var(--foreground); }
+.link-inbounds { display: grid; gap: 4px; margin: 8px 0 0; padding: 6px 8px; border: 1px solid var(--border); background: var(--surface); list-style: none; }
+.link-inbounds li { min-width: 0; display: grid; grid-template-columns: auto minmax(0,1fr) auto auto; align-items: center; gap: 8px; font: 9px ui-monospace, monospace; color: var(--muted); }
+.link-inbounds-method { padding: 1px 4px; border: 1px solid var(--border); background: var(--background); color: var(--foreground); font-weight: 700; }
+.link-inbounds-when { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.link-inbounds-actions { display: flex; gap: 6px; }
+.link-inbounds-actions a { color: var(--foreground); font-weight: 700; }
+.link-snapshot { color: var(--foreground); font-weight: 700; text-decoration: none; white-space: nowrap; }
+.link-snapshot:hover { text-decoration: underline; }
+.link-inbounds-empty { margin: 8px 0 0; color: var(--muted); font-size: 9px; }
 .link-card-skeleton { aspect-ratio: 1.25 / 1; border: 2px solid var(--border); border-radius: var(--radius); background: #e8e2d7; box-shadow: var(--shadow); }
 .links-empty { grid-column: 1 / -1; min-height: 330px; display: grid; place-items: center; align-content: center; gap: 8px; padding: 28px; border: 2px dashed var(--border); background: var(--surface); text-align: center; }
 .links-empty > span { font-size: 38px; color: var(--muted); }

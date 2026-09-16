@@ -3,7 +3,6 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { join, posix, resolve, sep } from 'node:path'
-import { isSupported, supportInfo } from 'nono-ts'
 import {
   MastraSandbox,
   ProcessHandle,
@@ -20,6 +19,12 @@ export interface NonoWorkspaceSandboxOptions {
   filesystem: PapyrusAgentFSFilesystem
   dataDir: string
   platform?: NodeJS.Platform
+  /**
+   * Read-only roots the daemon provisioned for the local toolchain, such as `<data-dir>/python`.
+   * The sandbox grants no authority over the data directory itself; these are narrow, explicit
+   * exceptions for interpreters and libraries the agent is meant to use.
+   */
+  readOnlyToolchainPaths?: string[] | undefined
 }
 
 const MAX_COMMAND_BYTES = 64 * 1024
@@ -29,7 +34,7 @@ const WORKER_TS_PATH = fileURLToPath(new URL('./workspace-nono-worker.ts', impor
 export class NonoWorkspaceSandbox extends MastraSandbox {
   readonly id = 'papyrus-nono'
   readonly name = 'Papyrus Nono Sandbox'
-  readonly provider = 'nono-ts'
+  readonly provider = 'landstrip'
   readonly supportsCheckpoints = false
   readonly workingDirectory = '/'
   status: ProviderStatus = 'pending'
@@ -37,25 +42,24 @@ export class NonoWorkspaceSandbox extends MastraSandbox {
   readonly filesystem: PapyrusAgentFSFilesystem
   readonly dataDir: string
   readonly platform: NodeJS.Platform
+  readonly readOnlyToolchainPaths: string[]
 
   constructor(options: NonoWorkspaceSandboxOptions) {
     const manager = new NonoProcessManager({
       filesystem: options.filesystem,
       dataDir: options.dataDir,
+      readOnlyToolchainPaths: options.readOnlyToolchainPaths,
     })
     super({ name: 'Papyrus Nono Sandbox', processes: manager })
     this.filesystem = options.filesystem
     this.dataDir = resolve(options.dataDir)
     this.platform = options.platform ?? process.platform
+    this.readOnlyToolchainPaths = (options.readOnlyToolchainPaths ?? []).map((path) => resolve(path))
   }
 
   async start(): Promise<void> {
     if (!['linux', 'darwin'].includes(this.platform)) {
       throw new Error(`nono-ts workspace sandbox requires Linux or macOS; ${this.platform} is unsupported`)
-    }
-    if (!isSupported()) {
-      const info = supportInfo()
-      throw new Error(`nono-ts sandbox is unavailable on ${info.platform}: ${info.details}`)
     }
     mkdirSync(join(this.dataDir, '.workspace-control'), { recursive: true, mode: 0o700 })
     mkdirSync(join(this.dataDir, '.workspace-exec'), { recursive: true, mode: 0o700 })
@@ -92,7 +96,7 @@ export class NonoWorkspaceSandbox extends MastraSandbox {
       status: this.status,
       createdAt: new Date(),
       metadata: {
-        isolation: this.platform === 'darwin' ? 'seatbelt-via-nono-ts' : 'landlock-via-nono-ts',
+        isolation: this.platform === 'darwin' ? 'seatbelt-via-landstrip' : 'landlock-via-landstrip',
         filesystem: 'agentfs-sdk',
         storage: 'local-sqlite',
         execution: 'materialize-sandbox-reconcile',
@@ -105,12 +109,14 @@ export class NonoWorkspaceSandbox extends MastraSandbox {
 class NonoProcessManager extends SandboxProcessManager<NonoWorkspaceSandbox> {
   private readonly filesystem: PapyrusAgentFSFilesystem
   private readonly dataDir: string
+  private readonly readOnlyToolchainPaths: string[]
   private executionTail: Promise<void> = Promise.resolve()
 
-  constructor(options: { filesystem: PapyrusAgentFSFilesystem; dataDir: string }) {
+  constructor(options: { filesystem: PapyrusAgentFSFilesystem; dataDir: string; readOnlyToolchainPaths?: string[] | undefined }) {
     super()
     this.filesystem = options.filesystem
     this.dataDir = resolve(options.dataDir)
+    this.readOnlyToolchainPaths = (options.readOnlyToolchainPaths ?? []).map((path) => resolve(path))
   }
 
   async spawn(command: string, options: SpawnProcessOptions = {}): Promise<ProcessHandle> {
@@ -139,7 +145,9 @@ class NonoProcessManager extends SandboxProcessManager<NonoWorkspaceSandbox> {
         workspaceRoot: materialized.root,
         cwd,
         command,
+        dataDir: this.dataDir,
         env: workspaceEnvironment(materialized.root, options.env),
+        ...(this.readOnlyToolchainPaths.length ? { readPaths: this.readOnlyToolchainPaths } : {}),
       }), { mode: 0o600, flag: 'wx' })
 
       const startedAt = Date.now()

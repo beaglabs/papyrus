@@ -3,7 +3,7 @@ import { createServer as createHttpServer, type IncomingMessage, type Server, ty
 import { createServer as createHttpsServer } from 'node:https'
 import { extname, join, normalize } from 'node:path'
 import { MODEL_AUTH_SCHEMES, MODEL_GATEWAY_KINDS, OBSERVABILITY_APP_ROLES, type EntraAppRole, type ModelAuthScheme, type ModelGatewayKind, type PortalPrincipal, type SignedLicense } from '@papyrus/contracts'
-import type { AgentConfig } from './config.js'
+import { deriveOrigin, type AgentConfig } from './config.js'
 import { EntraAuthError, EntraAuthService, hasAppRole } from './entra-auth.js'
 import { AgentService, AgentServiceError } from './service.js'
 import { MastraRuntime, MastraRuntimeError } from './mastra/runtime.js'
@@ -37,13 +37,23 @@ function json(response: ServerResponse, status: number, value: unknown, headers:
   response.end(JSON.stringify(value))
 }
 
-async function body(request: IncomingMessage, maximumBytes = 1_048_576): Promise<Record<string, unknown>> {
+/**
+ * Read and parse a JSON request body under a byte ceiling.
+ *
+ * `remedy` is appended to the refusal so a 413 tells the operator what to do about
+ * it. "Request body exceeds 1 MiB" is accurate and useless: the usual cause is a
+ * large paste or a growing conversation, and neither is obvious from the number.
+ */
+async function body(request: IncomingMessage, maximumBytes = 1_048_576, remedy = ''): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = []
   let size = 0
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
     size += buffer.length
-    if (size > maximumBytes) throw new HttpError(413, 'BODY_TOO_LARGE', `Request body exceeds ${Math.ceil(maximumBytes / 1_048_576)} MiB`)
+    if (size > maximumBytes) {
+      const limit = `${Math.ceil(maximumBytes / 1_048_576)} MiB`
+      throw new HttpError(413, 'BODY_TOO_LARGE', `Request body exceeds ${limit}${remedy ? `. ${remedy}` : ''}`)
+    }
     chunks.push(buffer)
   }
   if (!chunks.length) return {}
@@ -83,7 +93,7 @@ export function createAgentServer(config: AgentConfig, service: AgentService, au
   const handler = async (request: IncomingMessage, response: ServerResponse) => {
     const requestId = crypto.randomUUID()
     response.setHeader('x-request-id', requestId)
-    const url = new URL(request.url ?? '/', config.publicOrigin)
+    const url = new URL(request.url ?? '/', deriveOrigin(request.headers, config.publicOrigin))
     try {
       if (await handlePublicLink(request, response, url, mastra)) return
       if (url.pathname === '/api/health' && request.method === 'GET') {
@@ -94,6 +104,7 @@ export function createAgentServer(config: AgentConfig, service: AgentService, au
       }
       if (url.pathname === '/api/config/public' && request.method === 'GET') {
         return json(response, 200, {
+          bootstrap: false,
           organizationName: config.organizationName,
           profile: config.profile,
           cloud: config.cloud,
@@ -105,12 +116,12 @@ export function createAgentServer(config: AgentConfig, service: AgentService, au
       if (url.pathname === '/api/license/request' && request.method === 'GET') return json(response, 200, service.license.activationRequest())
       if (url.pathname === '/api/license/status' && request.method === 'GET') return json(response, 200, service.license.status())
       if (url.pathname === '/api/auth/entra/login' && request.method === 'GET') {
-        const location = await auth.startLogin(url.searchParams.get('returnTo') ?? '/portal')
+        const location = await auth.startLogin(url.searchParams.get('returnTo') ?? '/portal', url.origin)
         securityHeaders(response); response.writeHead(302, { location }); return response.end()
       }
       if (url.pathname === '/api/auth/entra/callback' && request.method === 'GET') {
         if (url.searchParams.has('error')) throw new HttpError(401, 'ENTRA_LOGIN_DENIED', 'Microsoft Entra denied portal authentication')
-        const result = await auth.completeLogin(requiredString(url.searchParams.get('code'), 'code'), requiredString(url.searchParams.get('state'), 'state'))
+        const result = await auth.completeLogin(requiredString(url.searchParams.get('code'), 'code'), requiredString(url.searchParams.get('state'), 'state'), url.origin)
         securityHeaders(response)
         response.writeHead(302, { location: result.returnTo, 'set-cookie': result.cookie })
         return response.end()
@@ -121,7 +132,7 @@ export function createAgentServer(config: AgentConfig, service: AgentService, au
         service.requirePortalAccess(teamsPrincipal)
         return json(response, 200, teamsPrincipal, { 'set-cookie': auth.portalCookie(teamsPrincipal) })
       }
-      if (url.pathname === '/api/auth/logout' && request.method === 'POST') return json(response, 200, { signedOut: true }, { 'set-cookie': auth.clearCookie() })
+      if (url.pathname === '/api/auth/logout' && request.method === 'POST') return json(response, 200, { signedOut: true }, { 'set-cookie': auth.clearCookie(url.origin) })
 
       if (url.pathname === '/api/me' && request.method === 'GET') return json(response, 200, await principal(request, auth, service))
       if (url.pathname === '/api/portal/overview' && request.method === 'GET') return json(response, 200, service.overview(await principal(request, auth, service)))
@@ -239,6 +250,38 @@ export function createAgentServer(config: AgentConfig, service: AgentService, au
         if (!mastra.links.get(id)) throw new HttpError(404, 'LINK_NOT_FOUND', 'Link not found')
         return json(response, 200, { inbounds: mastra.links.listInbounds(id) })
       }
+      // One stored inbound, addressed by its own id. The linkId is part of the lookup rather than
+      // a check beside it, so holding one Link's inbound id cannot read another Link's traffic.
+      const linkInboundRecord = url.pathname.match(/^\/api\/links\/([^/]+)\/inbounds\/([^/]+)$/)
+      if (linkInboundRecord && request.method === 'GET') {
+        await principal(request, auth, service)
+        const linkId = decodeURIComponent(linkInboundRecord[1] as string)
+        // Checked here as well as inside the store lookup so an unknown Link answers 404 rather
+        // than surfacing the store's own "Link not found" error as a 500.
+        if (!mastra.links.get(linkId)) throw new HttpError(404, 'LINK_NOT_FOUND', 'Link not found')
+        const inbound = mastra.links.getInbound(linkId, decodeURIComponent(linkInboundRecord[2] as string))
+        if (!inbound) throw new HttpError(404, 'INBOUND_NOT_FOUND', 'No such inbound record for this Link')
+        const stored = await mastra.workspaceFilesystem.readFile(inbound.blobPath)
+        return serveBytes(response, stored, {
+          mediaType: inbound.contentType ?? 'application/json',
+          name: `inbound-${inbound.id}.json`,
+          download: url.searchParams.get('download') === '1',
+        })
+      }
+      // The pinned snapshot itself. A workflow-bound API Link answers GET by running the workflow,
+      // so without this the reviewed snapshot could never be read back through the Link.
+      const linkContent = url.pathname.match(/^\/api\/links\/([^/]+)\/content$/)
+      if (linkContent && request.method === 'GET') {
+        await principal(request, auth, service)
+        const link = mastra.links.get(decodeURIComponent(linkContent[1] as string))
+        if (!link) throw new HttpError(404, 'LINK_NOT_FOUND', 'Link not found')
+        const stored = await mastra.workspaceFilesystem.readFile(link.blobPath)
+        return serveBytes(response, stored, {
+          mediaType: link.mediaType,
+          name: `${link.slug}-${link.type}.json`,
+          download: url.searchParams.get('download') === '1',
+        })
+      }
       const linkResource = url.pathname.match(/^\/api\/links\/([^/]+)$/)
       if (linkResource && request.method === 'GET') {
         await principal(request, auth, service)
@@ -269,31 +312,15 @@ export function createAgentServer(config: AgentConfig, service: AgentService, au
         const file = await mastra.workspaceFilesystem.describeLibraryFile(path)
         const value = await mastra.workspaceFilesystem.readFile(file.path)
         const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value)
-        const inlineSafe = [
-          'application/pdf',
-          'text/plain',
-          'text/markdown',
-          'image/png',
-          'image/jpeg',
-          'image/gif',
-          'image/webp',
-          'video/mp4',
-          'video/webm',
-        ].includes(file.mediaType)
-        securityHeaders(response)
-        const download = url.searchParams.get('download') === '1' || !inlineSafe
-        const name = file.name.replace(/[\r\n"]/g, '_')
-        response.writeHead(200, {
-          'content-type': inlineSafe ? file.mediaType : 'application/octet-stream',
-          'content-length': String(bytes.byteLength),
-          'content-disposition': `${download ? 'attachment' : 'inline'}; filename="${name}"`,
-        })
-        response.end(bytes)
-        return
+        return serveBytes(response, bytes, { mediaType: file.mediaType, name: file.name, download: url.searchParams.get('download') === '1' })
       }
       if (url.pathname === '/api/agent/chat' && request.method === 'POST') {
         await principal(request, auth, service)
-        const input = await body(request)
+        // One message per turn. The daemon takes conversation history from the
+        // durable thread, so a client that sends the whole transcript is sending
+        // what this handler discards — and a long document session eventually
+        // exceeds this ceiling and fails every subsequent turn.
+        const input = await body(request, 1_048_576, 'Send one message per turn; history comes from the thread. Attach large content as a file instead, which is uploaded separately and has its own limit.')
         const streamed = await mastra.chat(requiredString(input.threadId, 'threadId', 256), input)
         await pipeWebResponse(response, streamed)
         return
@@ -387,6 +414,78 @@ export function createAgentServer(config: AgentConfig, service: AgentService, au
         return json(response, 200, service.license.activate(await body(request) as unknown as SignedLicense))
       }
 
+      // ─── Integrations ─────────────────────────────────────────────
+      //
+      // The daemon owns the integration domain; this is the portal adapter over
+      // AgentService, which enforces authority itself. Keeping the role checks in
+      // the service means the portal, the agent, and any future machine client
+      // cannot disagree about who may activate an action-capable connector.
+      //
+      // `/catalog` is matched before the `:id` pattern so "catalog" is never read
+      // as an integration identifier.
+      if (url.pathname === '/api/integrations/catalog' && request.method === 'GET') {
+        return json(response, 200, { catalog: service.catalog(await principal(request, auth, service)) })
+      }
+      if (url.pathname === '/api/integrations' && request.method === 'GET') {
+        return json(response, 200, { integrations: service.integrations(await principal(request, auth, service)) })
+      }
+      if (url.pathname === '/api/integrations' && request.method === 'POST') {
+        const actor = await principal(request, auth, service)
+        const input = await body(request)
+        return json(response, 201, service.createIntegration(actor, input.catalogId, input))
+      }
+
+      const integrationResource = url.pathname.match(/^\/api\/integrations\/([^/]+)$/)
+      if (integrationResource) {
+        const id = decodeURIComponent(integrationResource[1] as string)
+        const actor = await principal(request, auth, service)
+        if (request.method === 'GET') return json(response, 200, service.getIntegration(actor, id))
+        if (request.method === 'DELETE') {
+          service.deleteIntegration(actor, id)
+          securityHeaders(response); response.writeHead(204); return response.end()
+        }
+      }
+
+      const integrationAction = url.pathname.match(/^\/api\/integrations\/([^/]+)\/([a-z][a-z-]*)$/)
+      if (integrationAction) {
+        const id = decodeURIComponent(integrationAction[1] as string)
+        const action = integrationAction[2] as string
+
+        // Observation ingest accepts either an operator session holding
+        // Papyrus.Integration.Manage, or a one-hour token scoped to this exact
+        // integration, so a customer producer never carries a user token. Sending
+        // an Authorization header selects the token path, and an invalid token is
+        // refused rather than falling back to the session.
+        if (action === 'observations' && request.method === 'POST') {
+          const input = await body(request)
+          if (request.headers.authorization) {
+            if (!auth.verifyIngestionRequest(request, id)) {
+              throw new HttpError(401, 'INVALID_INGESTION_TOKEN', 'Ingestion token is missing or not valid for this source')
+            }
+            return json(response, 202, service.ingestObservationWithScopedCredential(id, input))
+          }
+          return json(response, 202, service.ingestObservation(await principal(request, auth, service), id, input))
+        }
+
+        const actor = await principal(request, auth, service)
+        if (action === 'test' && request.method === 'POST') return json(response, 200, await service.testIntegration(actor, id))
+        if (action === 'submit' && request.method === 'POST') return json(response, 200, service.submitIntegration(actor, id))
+        if (action === 'activate' && request.method === 'POST') return json(response, 200, service.activateIntegration(actor, id))
+        if (action === 'disable' && request.method === 'POST') {
+          const input = await body(request)
+          return json(response, 200, service.disableIntegration(actor, id, input.reason))
+        }
+        if (action === 'sync' && request.method === 'POST') return json(response, 202, service.requestSync(actor, id))
+        if (action === 'sync-jobs' && request.method === 'GET') return json(response, 200, { jobs: service.syncJobs(actor, id) })
+        if (action === 'events' && request.method === 'GET') return json(response, 200, { events: service.events(actor, id) })
+        if (action === 'ingestion-token' && request.method === 'POST') {
+          service.authorizeIngestionToken(actor, id)
+          const issued = auth.issueIngestionToken(id, actor.oid)
+          service.recordIngestionTokenIssued(actor, id, issued.expiresAt)
+          return json(response, 201, issued)
+        }
+      }
+
       // ─── Investigations ────────────────────────────────────────────
       if (url.pathname === '/api/investigations' && request.method === 'GET') {
         return json(response, 200, { investigations: service.listInvestigations(await principal(request, auth, service)) })
@@ -464,6 +563,42 @@ export function createAgentServer(config: AgentConfig, service: AgentService, au
     ...(config.tls.caPath ? { ca: readFileSync(config.tls.caPath) } : {}),
     minVersion: 'TLSv1.2',
   }, handler)
+}
+
+/**
+ * Types a browser may render in place. Everything else is sent as an attachment, so a stored
+ * file cannot be interpreted as active content by the browser that opens it. JSON is included
+ * because a browser displays it as text; HTML and SVG deliberately are not.
+ */
+const INLINE_MEDIA_TYPES = new Set([
+  'application/pdf',
+  'application/json',
+  'text/plain',
+  'text/markdown',
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'video/mp4',
+  'video/webm',
+])
+
+/**
+ * Serve stored bytes as either a view or a download. One helper so the workspace file route and
+ * the Link routes cannot disagree about what is safe to render inline.
+ */
+function serveBytes(response: ServerResponse, bytes: Buffer | string, options: { mediaType?: string | undefined; name: string; download?: boolean | undefined }): void {
+  const buffer = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes)
+  const mediaType = options.mediaType ?? 'application/octet-stream'
+  const inlineSafe = INLINE_MEDIA_TYPES.has(mediaType)
+  const download = options.download === true || !inlineSafe
+  securityHeaders(response)
+  response.writeHead(200, {
+    'content-type': inlineSafe ? mediaType : 'application/octet-stream',
+    'content-length': String(buffer.byteLength),
+    'content-disposition': `${download ? 'attachment' : 'inline'}; filename="${options.name.replace(/[\r\n"]/g, '_')}"`,
+  })
+  response.end(buffer)
 }
 
 async function pipeWebResponse(response: ServerResponse, source: Response): Promise<void> {

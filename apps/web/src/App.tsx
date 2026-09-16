@@ -7,11 +7,12 @@ import { LibraryView } from './Library.js'
 import { LinksView } from './Links.js'
 import { ModelsView } from './Models.js'
 import { ObservabilityPanel } from './Observability.js'
+import { Onboarding } from './Onboarding.js'
 import { Alert, Avatar, Badge, Button, Card, DropdownMenu, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, Skeleton } from './components/ui/index.js'
 import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarRail, SidebarTrigger } from './components/ui/sidebar.js'
 
 export type PortalView = 'agent' | 'models' | 'links' | 'library' | 'governance' | 'access'
-type AppState = { phase: 'loading' } | { phase: 'signed-out'; config: PublicConfig } | { phase: 'ready'; data: PortalData } | { phase: 'error'; message: string }
+type AppState = { phase: 'loading' } | { phase: 'bootstrap' } | { phase: 'signed-out'; config: PublicConfig } | { phase: 'ready'; data: PortalData } | { phase: 'error'; message: string }
 
 const ROUTES: Record<PortalView, string> = {
   agent: '/portal', models: '/portal/models', links: '/portal/links', library: '/portal/library', governance: '/portal/governance', access: '/portal/access',
@@ -32,7 +33,11 @@ export function App() {
   const [initialPrompt, setInitialPrompt] = useState(() => new URLSearchParams(window.location.search).get('prompt') ?? undefined)
 
   const refresh = useCallback(async () => {
-    try { setState({ phase: 'ready', data: await loadPortal() }) }
+    try {
+      const config = await publicConfig()
+      if (config.bootstrap) { setState({ phase: 'bootstrap' }); return }
+      setState({ phase: 'ready', data: await loadPortal() })
+    }
     catch (cause) {
       if (cause instanceof AuthenticationRequired) {
         try { setState({ phase: 'signed-out', config: await publicConfig() }) }
@@ -57,6 +62,7 @@ export function App() {
   }
 
   if (state.phase === 'loading') return <PortalSkeleton />
+  if (state.phase === 'bootstrap') return <Onboarding />
   if (state.phase === 'error') return <main className="center login"><Logo /><p className="eyebrow">DAEMON UNAVAILABLE</p><h1>Unable to open<br />Papyrus.</h1><Alert className="error">{state.message}</Alert><Button className="primary" onClick={() => { setState({ phase: 'loading' }); void refresh() }}>Try again →</Button></main>
   if (state.phase === 'signed-out') return <SignedOut config={state.config} />
 
@@ -171,6 +177,18 @@ export function backgroundSummary(jobs: NonNullable<AgentStatus['jobs']>): strin
 }
 
 /**
+ * The durable objective, if this session has one. Undefined rather than a placeholder, so a
+ * session with no goal renders exactly the strip it rendered before goals existed and an
+ * operator never sees a goal line that means nothing.
+ */
+export function goalSummary(jobs: NonNullable<AgentStatus['jobs']>): string | undefined {
+  const goal = jobs.goal
+  if (!goal) return undefined
+  const budget = typeof goal.maxRuns === 'number' && goal.maxRuns > 0 ? ` · ${goal.runsUsed}/${goal.maxRuns} judged` : ''
+  return `goal ${goal.status}${budget}`
+}
+
+/**
  * Footer runtime status. Recurring work and running jobs are session-scoped: the strip
  * only reports what the daemon can observe for the selected session, and says so when it
  * cannot observe the background queue rather than reporting zero.
@@ -204,6 +222,7 @@ export function RuntimeStatusStrip({ status, sessionId }: { status: AgentStatus;
     <strong><span className={`dot ${status.agentReady ? 'good' : 'warning'}`} /><span className="sidebar-copy">{status.agentReady ? 'Mastra online' : 'Mastra storage online'}</span></strong>
     <small className="sidebar-copy">{status.model ?? 'Model configuration required'}</small>
     {jobs && <div className="runtime-jobs" data-session={jobs.sessionId}>
+      {goalSummary(jobs) && <span title={jobs.goal?.objective}><i className={`dot ${jobs.goal?.status === 'active' ? 'good' : ''}`} />{goalSummary(jobs)}</span>}
       <span><i className={`dot ${jobs.schedules.active > 0 ? 'good' : ''}`} />{scheduleSummary(jobs)}</span>
       <span><i className={`dot ${jobs.background.running > 0 ? 'good' : ''}`} />{backgroundSummary(jobs)}</span>
     </div>}

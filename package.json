@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Customer-hosted durable agent runtime powered by Mastra.",
   "license": "UNLICENSED",
-  "packageManager": "pnpm@11.22.0+sha1.c824bce7ddda0454998313c86fcb3d613d3f18bc",
+  "packageManager": "pnpm@11.26.0+sha1.386c3566e670f8d963c1bc5fb07d8fed00627706",
   "engines": {
     "node": ">=24"
   },

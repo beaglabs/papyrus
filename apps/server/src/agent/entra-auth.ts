@@ -3,7 +3,7 @@ import type { IncomingMessage } from 'node:http'
 import type { EntraAppRole, PortalPrincipal } from '@papyrus/contracts'
 import { ENTRA_APP_ROLES } from '@papyrus/contracts'
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose'
-import type { AgentConfig } from './config.js'
+import { deriveOrigin, type AgentConfig } from './config.js'
 
 interface OidcDiscovery {
   authorization_endpoint: string
@@ -70,7 +70,8 @@ export class EntraAuthService {
     if (this.config.developmentPrincipal) return this.config.developmentPrincipal
     const authorization = request.headers.authorization
     if (authorization?.startsWith('Bearer ')) return this.verifyEntraToken(authorization.slice(7), 'entra')
-    const cookie = this.cookie(request, this.cookieName())
+    const origin = deriveOrigin(request.headers, this.config.publicOrigin)
+    const cookie = this.cookie(request, this.cookieName(origin))
     return cookie ? this.verifyPortalCookie(cookie) : undefined
   }
 
@@ -112,7 +113,7 @@ export class EntraAuthService {
     return true
   }
 
-  async startLogin(returnTo = '/portal'): Promise<string> {
+  async startLogin(returnTo = '/portal', origin = this.config.publicOrigin): Promise<string> {
     if (!this.config.entra) throw new EntraAuthError('ENTRA_NOT_CONFIGURED', 'Microsoft Entra ID is not configured')
     this.prune()
     if (this.pending.size >= 256) throw new EntraAuthError('TOO_MANY_LOGINS', 'Too many pending Entra login requests')
@@ -126,7 +127,7 @@ export class EntraAuthService {
     const url = new URL(discovery.authorization_endpoint)
     url.search = new URLSearchParams({
       client_id: this.config.entra.clientId,
-      redirect_uri: new URL('/api/auth/entra/callback', this.config.publicOrigin).toString(),
+      redirect_uri: new URL('/api/auth/entra/callback', origin).toString(),
       response_type: 'code',
       response_mode: 'query',
       scope: `openid profile email ${this.config.entra.scope}`,
@@ -138,7 +139,7 @@ export class EntraAuthService {
     return url.toString()
   }
 
-  async completeLogin(code: string, state: string): Promise<{ principal: PortalPrincipal; returnTo: string; cookie: string }> {
+  async completeLogin(code: string, state: string, origin = this.config.publicOrigin): Promise<{ principal: PortalPrincipal; returnTo: string; cookie: string }> {
     if (!this.config.entra) throw new EntraAuthError('ENTRA_NOT_CONFIGURED', 'Microsoft Entra ID is not configured')
     this.prune()
     const pending = this.pending.get(state)
@@ -153,7 +154,7 @@ export class EntraAuthService {
         grant_type: 'authorization_code',
         code,
         client_id: this.config.entra.clientId,
-        redirect_uri: new URL('/api/auth/entra/callback', this.config.publicOrigin).toString(),
+        redirect_uri: new URL('/api/auth/entra/callback', origin).toString(),
         code_verifier: pending.verifier,
         ...(this.config.entra.clientSecret ? { client_secret: this.config.entra.clientSecret } : {}),
       }),
@@ -163,20 +164,20 @@ export class EntraAuthService {
     const tokens = await response.json() as { id_token?: string }
     if (!tokens.id_token) throw new EntraAuthError('OIDC_ID_TOKEN_MISSING', 'Entra response did not include an ID token')
     const principal = await this.verifyEntraToken(tokens.id_token, 'entra', pending.nonce)
-    return { principal, returnTo: pending.returnTo, cookie: this.portalCookie(principal) }
+    return { principal, returnTo: pending.returnTo, cookie: this.portalCookie(principal, origin) }
   }
 
-  portalCookie(principal: PortalPrincipal): string {
+  portalCookie(principal: PortalPrincipal, origin = this.config.publicOrigin): string {
     const expiresAt = Date.now() + 60 * 60 * 1000
     const body = encoded(JSON.stringify({ principal, exp: expiresAt }))
     const signature = createHmac('sha256', this.config.portalSecret).update(body).digest('base64url')
-    const secure = this.config.publicOrigin.startsWith('https://')
-    return `${this.cookieName()}=${encodeURIComponent(`${body}.${signature}`)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=3600; Priority=High${secure ? '; Secure' : ''}`
+    const secure = origin.startsWith('https://')
+    return `${this.cookieName(origin)}=${encodeURIComponent(`${body}.${signature}`)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=3600; Priority=High${secure ? '; Secure' : ''}`
   }
 
-  clearCookie(): string {
-    const secure = this.config.publicOrigin.startsWith('https://')
-    return `${this.cookieName()}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0; Priority=High${secure ? '; Secure' : ''}`
+  clearCookie(origin = this.config.publicOrigin): string {
+    const secure = origin.startsWith('https://')
+    return `${this.cookieName(origin)}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0; Priority=High${secure ? '; Secure' : ''}`
   }
 
   private async verifyEntraToken(token: string, source: PortalPrincipal['source'], nonce?: string): Promise<PortalPrincipal> {
@@ -214,7 +215,7 @@ export class EntraAuthService {
     } catch { return undefined }
   }
 
-  private cookieName(): string { return this.config.publicOrigin.startsWith('https://') ? '__Host-papyrus_portal' : 'papyrus_portal' }
+  private cookieName(origin = this.config.publicOrigin): string { return origin.startsWith('https://') ? '__Host-papyrus_portal' : 'papyrus_portal' }
 
   private cookie(request: IncomingMessage, name: string): string | undefined {
     for (const pair of (request.headers.cookie ?? '').split(';')) {

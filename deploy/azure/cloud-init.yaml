@@ -1,0 +1,188 @@
+#cloud-config
+# ---------------------------------------------------------------------------
+# Papyrus appliance bootstrap.
+#
+# Runs on a stock Ubuntu 24.04 image. The appliance is the container we build
+# from the repo Dockerfile — this file only prepares the host, wires the image
+# pull, and supervises the container.
+#
+# Two properties matter more than tidiness here:
+#
+#   * Idempotent. cloud-init can re-run and the appliance must survive reboots
+#     without a human. Every step below is safe on a second pass.
+#   * Explicit about credentials. Registry credentials are written to a
+#     root-only file, and the pull retries so a transient registry or RBAC
+#     delay does not leave the appliance dead until someone logs in.
+#
+# Placeholders wrapped in __DOUBLE_UNDERSCORES__ are substituted by main.bicep.
+# ---------------------------------------------------------------------------
+
+package_update: true
+packages:
+  - docker.io
+  - jq
+  - ca-certificates
+
+write_files:
+  - path: /etc/papyrus/appliance.env
+    owner: root:root
+    permissions: '0644'
+    content: |
+      PAPYRUS_IMAGE=__IMAGE__
+      PAPYRUS_ACR=__ACR_LOGIN_SERVER__
+      PAPYRUS_PUBLIC_REGISTRY=__PUBLIC_REGISTRY__
+      PAPYRUS_PORT=__PORT__
+      PAPYRUS_DATA_DIR=/var/lib/papyrus
+      PAPYRUS_DATA_DISK_LUN=__DATA_DISK_LUN__
+
+  # Kept separate from appliance.env so it can stay 0600 while the rest is
+  # world-readable. Use a pull-only registry credential here: this file is
+  # readable by root on the appliance, and docker itself persists the same
+  # credential in /root/.docker/config.json after the first successful login.
+  - path: /etc/papyrus/registry.env
+    owner: root:root
+    permissions: '0600'
+    content: |
+      REGISTRY_USERNAME=__REGISTRY_USERNAME__
+      REGISTRY_PASSWORD=__REGISTRY_PASSWORD__
+
+  # Resolve and mount the data disk that backs /var/lib/papyrus, so appliance
+  # state outlives the VM. The blkid guard means a re-run never formats a disk
+  # that already holds data.
+  #
+  # Device naming is not uniform across Azure VM sizes: SCSI-attached disks
+  # appear under /dev/disk/azure/scsi1/, while NVMe-attached disks (the newer
+  # sizes, including the D2as_v7 this was validated on) expose the same disk as
+  # /dev/disk/azure/data/by-lun/<lun>. Assuming only the SCSI path silently left
+  # the data disk unattached, so all candidates are tried.
+  - path: /usr/local/bin/papyrus-data-disk.sh
+    owner: root:root
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      . /etc/papyrus/appliance.env
+
+      mkdir -p "$PAPYRUS_DATA_DIR"
+      LUN="$PAPYRUS_DATA_DISK_LUN"
+
+      DEV="$(readlink -f "/dev/disk/azure/data/by-lun/${LUN}" 2>/dev/null || true)"
+      [ -b "${DEV:-}" ] || DEV="$(readlink -f "/dev/disk/azure/scsi1/lun${LUN}" 2>/dev/null || true)"
+
+      if [ ! -b "${DEV:-}" ]; then
+        # Last resort: the one whole disk that is neither mounted nor
+        # partitioned. On a single-data-disk appliance that is unambiguous.
+        for candidate in /dev/nvme?n? /dev/sd?; do
+          [ -b "$candidate" ] || continue
+          if [ "$(lsblk -no NAME "$candidate" | wc -l)" -eq 1 ] \
+             && [ -z "$(lsblk -no MOUNTPOINT "$candidate" | tr -d '[:space:]')" ]; then
+            DEV="$candidate"
+            break
+          fi
+        done
+      fi
+
+      if [ ! -b "${DEV:-}" ]; then
+        echo "papyrus: no unattached data disk found; keeping state on the OS disk"
+        chown 65532:65532 "$PAPYRUS_DATA_DIR"
+        exit 0
+      fi
+
+      echo "papyrus: data disk is $DEV"
+      if ! blkid "$DEV" >/dev/null 2>&1; then
+        echo "papyrus: formatting $DEV"
+        mkfs.ext4 -F -L papyrus "$DEV"
+      fi
+
+      DISK_UUID="$(blkid -s UUID -o value "$DEV")"
+      grep -q "$DISK_UUID" /etc/fstab \
+        || echo "UUID=$DISK_UUID $PAPYRUS_DATA_DIR ext4 defaults,nofail 0 2" >> /etc/fstab
+
+      mountpoint -q "$PAPYRUS_DATA_DIR" || mount "$PAPYRUS_DATA_DIR"
+
+      # The image runs as the nonroot uid baked into the Dockerfile (65532).
+      chown 65532:65532 "$PAPYRUS_DATA_DIR"
+
+  # Pull and (re)start the container. Kept separate from the unit so it can be
+  # re-run by hand to upgrade the image without touching the VM.
+  - path: /usr/local/bin/papyrus-run.sh
+    owner: root:root
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      . /etc/papyrus/appliance.env
+
+      /usr/local/bin/papyrus-data-disk.sh
+
+      login_and_pull() {
+        if [ "$PAPYRUS_PUBLIC_REGISTRY" != "true" ]; then
+          # shellcheck disable=SC1091
+          . /etc/papyrus/registry.env
+          if [ -z "${REGISTRY_USERNAME:-}" ] || [ -z "${REGISTRY_PASSWORD:-}" ]; then
+            echo "papyrus: registry is private but no credentials were supplied" >&2
+            return 1
+          fi
+          printf '%s' "$REGISTRY_PASSWORD" \
+            | docker login "$PAPYRUS_ACR" -u "$REGISTRY_USERNAME" --password-stdin
+        fi
+        docker pull "$PAPYRUS_IMAGE"
+      }
+
+      # Retries cover two ordinary conditions: a registry that is briefly
+      # unavailable, and a credential whose permission has not yet propagated.
+      ATTEMPT=1
+      until login_and_pull; do
+        if [ "$ATTEMPT" -ge 5 ]; then
+          echo "papyrus: could not pull $PAPYRUS_IMAGE after $ATTEMPT attempts" >&2
+          exit 1
+        fi
+        SLEEP=$((ATTEMPT * 15))
+        echo "papyrus: pull attempt $ATTEMPT failed, retrying in ${SLEEP}s" >&2
+        sleep "$SLEEP"
+        ATTEMPT=$((ATTEMPT + 1))
+      done
+
+      # Recreate rather than `docker start`, so a new tag actually takes effect.
+      docker rm -f papyrus >/dev/null 2>&1 || true
+
+      # Deliberately no extra hardening flags. This exact configuration is the
+      # one validated on amd64: the landstrip sandbox needs Landlock syscalls
+      # and works under Docker's default seccomp profile. Changing seccomp or
+      # capability options here invalidates that validation — re-test first.
+      docker run -d \
+        --name papyrus \
+        --restart unless-stopped \
+        -p "${PAPYRUS_PORT}:${PAPYRUS_PORT}" \
+        -v "${PAPYRUS_DATA_DIR}:${PAPYRUS_DATA_DIR}" \
+        "$PAPYRUS_IMAGE"
+
+  - path: /etc/systemd/system/papyrus.service
+    owner: root:root
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Papyrus appliance
+      Documentation=https://github.com/beaglabs/papyrus
+      Requires=docker.service
+      After=docker.service network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/usr/local/bin/papyrus-run.sh
+      ExecStop=/usr/bin/docker stop papyrus
+      TimeoutStartSec=1200
+      Restart=on-failure
+      RestartSec=30
+
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  - [ systemctl, daemon-reload ]
+  - [ systemctl, enable, --now, papyrus.service ]
+  - [ systemctl, --no-pager, status, papyrus.service, --lines=20 ]
+
+final_message: "Papyrus appliance bootstrap finished in $UPTIME seconds"

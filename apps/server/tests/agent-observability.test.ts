@@ -82,7 +82,7 @@ describe('governance observability access', () => {
       const traces = await fetch(`${portal.origin}/api/observability/traces`)
       expect(traces.status).toBe(200)
       expect(await traces.json()).toMatchObject({
-        storage: { provider: 'libsql', database: 'mastra.db' },
+        storage: { provider: 'libsql', database: 'observability.db' },
         pagination: expect.objectContaining({ page: 0, perPage: 50 }),
         traces: expect.any(Array),
       })
@@ -90,7 +90,7 @@ describe('governance observability access', () => {
       const logs = await fetch(`${portal.origin}/api/observability/logs`)
       expect(logs.status).toBe(200)
       expect(await logs.json()).toMatchObject({
-        storage: { provider: 'libsql', database: 'mastra.db' },
+        storage: { provider: 'libsql', database: 'observability.db' },
         pagination: expect.objectContaining({ page: 0, perPage: 50 }),
         logs: expect.any(Array),
       })

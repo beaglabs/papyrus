@@ -157,6 +157,11 @@ export class AgentService {
     return this.db.listIntegrations()
   }
 
+  getIntegration(principal: PortalPrincipal, id: string): IntegrationConfiguration {
+    this.requirePortalAccess(principal)
+    return this.integration(id)
+  }
+
   createIntegration(principal: PortalPrincipal, catalogId: unknown, input: Record<string, unknown>): IntegrationConfiguration {
     requireRole(principal, 'Papyrus.Integration.Manage')
     const entry = catalogEntry(cleanText(catalogId, 'catalogId', 128))

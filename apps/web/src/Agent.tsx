@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactElement
 import type { AgentSession, AgentStatus, WorkspaceLibraryFile } from './api.js'
 import type { AgentActionProposal } from '@papyrus/contracts'
 import { approveProposal, approveSkill, createSessionProposal, denyProposal, listProposals, sessionMessages, setSessionAttention, uploadWorkspaceAttachment, workspaceFiles } from './api.js'
+import { chatRequestBody } from './chat-request.js'
 import { ModelGatewayCard } from './Models.js'
 import { Alert, Badge, Button, Card, CommandBlock, Input, Skeleton } from './components/ui/index.js'
 import { MarkdownMessage } from './Markdown.js'
@@ -157,12 +158,15 @@ function Chat({ session, status, initial, input, setInput, historyError, history
     api: '/api/agent/chat',
     credentials: 'same-origin',
     prepareSendMessagesRequest: ({ messages, trigger }) => ({
-      body: {
+      // Only the newest user message goes on the wire: the daemon reads that one
+      // and takes history from the durable thread. Sending the whole transcript
+      // grows every turn until the request cap rejects it. See chat-request.ts.
+      body: chatRequestBody({
         threadId: session.id,
         messages,
         trigger,
         attachments: attachmentRef.current.map((file) => ({ path: file.path })),
-      },
+      }),
     }),
   }), [session.id])
   const { messages, sendMessage, status: chatStatus, error, stop } = useChat({ id: session.id, messages: initial, transport })

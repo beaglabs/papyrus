@@ -28,19 +28,19 @@ Papyrus is a customer-hosted durable agent runtime. The repository boundary incl
 
 | Evidence source | Git blob |
 | --- | --- |
-| `apps/server/src/agent/config.ts` | `552fb9bf10069fdfa8a9874de2323c7e2fbb5a5c` |
-| `apps/server/src/agent/http.ts` | `11380975fef4168fec0ee9518510f13911be1a6a` |
+| `apps/server/src/agent/config.ts` | `061bb55db27f9155e7ca5f7489050a650ee117b7` |
+| `apps/server/src/agent/http.ts` | `dd54a48515cbd24dddba0a45d13839bfc9852bb8` |
 | `apps/server/src/agent/action-worker.ts` | `edee5c81e503ea46f5596c806c73b39884e0383f` |
-| `apps/server/src/agent/catalog.ts` | `4a5ab8fef6784d5bfa32ebdba1d72e53f9144f83` |
-| `apps/server/src/agent/link-store.ts` | `5e6743f4948e89ca527ca9bb1ab9702fb4c72c1d` |
+| `apps/server/src/agent/catalog.ts` | `961c8baa2e9e925042fd875556998099eb73ac07` |
+| `apps/server/src/agent/link-store.ts` | `75cb2a0dd381bc622ad9c3b79e76083ccc944ddb` |
 | `apps/server/src/agent/link-http.ts` | `d6a0eee9c661f64a9258ee0858074c9a5f5dfbbf` |
 | `apps/server/src/agent/link-preview.ts` | `fc30c91eea30af9999019d6bc0c565240e13ace7` |
 | `apps/server/src/agent/executors/link-publisher-executor.ts` | `7f31a74af751f8d7009d1667f835b35890663cbd` |
-| `apps/server/src/agent/mastra/runtime.ts` | `b905ff352960a7d94878076dbdf3f2a29fe1cfc3` |
+| `apps/server/src/agent/mastra/runtime.ts` | `1ab29e831905e156c9763d0c66a472a70e414137` |
 | `apps/server/src/agent/mastra/workspace-agentfs.ts` | `c2b86023b6a6e33270fc07c745afc63c2fff55b3` |
-| `apps/server/src/agent/mastra/workspace-nono.ts` | `80f6ff30dc91cb10fe4b5370b1e93831fb4d09ef` |
-| `apps/server/src/agent/mastra/workspace-nono-worker.ts` | `0dcadce525f5f77664a580ceb444382ace17c0d1` |
-| `apps/server/src/agent/mastra/workspace-enclave.ts` | `18527b84887f2937733fb88c65d127e9e52164ee` |
+| `apps/server/src/agent/mastra/workspace-nono.ts` | `a9e50594c17b07afc03e14d50b76b4dfc2c8da77` |
+| `apps/server/src/agent/mastra/workspace-nono-worker.ts` | `98ab23dc87241b7149f4e1a58348d627ca75bfb3` |
+| `apps/server/src/agent/mastra/workspace-enclave.ts` | `b0aa5ca567e243cdb6fc930cdd294b52311c12aa` |
 
 ## Regeneration
 

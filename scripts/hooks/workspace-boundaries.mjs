@@ -18,10 +18,25 @@ function requireTokens(path, requirements) {
   for (const [label, token] of requirements) if (!text.includes(token)) errors.push(`${path}: missing invariant: ${label}`)
 }
 
+// This worker moved from the nono-ts capability set to landstrip. The three
+// invariants that mattered before are unchanged — write confined to the workspace,
+// network blocked, kernel policy actually applied — but they are now expressed as a
+// policy document plus runtime proof that the *resolved* policy is the intended one.
+// Assert both halves. The declaration alone would not catch a landstrip schema change
+// that silently widened the sandbox, which is the exact failure the preflight exists
+// to convert into a refusal.
+//
+// Read confinement is weaker here than it was under nono-ts and that is deliberate:
+// nono defaulted to no filesystem authority, whereas landstrip's Linux read model is a
+// denylist. The data-directory entry is therefore load-bearing rather than incidental,
+// and is asserted so it cannot be dropped without the boundary check objecting.
 requireTokens('apps/server/src/agent/mastra/workspace-nono-worker.ts', [
-  ['workspace-only read/write capability', 'caps.allowPath(workspaceRoot, AccessMode.ReadWrite)'],
-  ['network blocking', 'caps.blockNetwork()'],
-  ['kernel capability application', 'apply(caps)'],
+  ['workspace-only write capability', 'allowWrite: [workspaceRoot]'],
+  ['network blocking', 'allowNetwork: false'],
+  ['kernel capability application', "'run', '-p', policyPath"],
+  ['resolved write-root proof', 'resolved.writeRoots.includes(workspaceRoot)'],
+  ['resolved network-restriction proof', "mode !== 'restricted'"],
+  ['data-directory read denial', 'denyRead: [control.dataDir'],
 ])
 requireTokens('apps/server/src/agent/mastra/workspace-nono.ts', [
   ['bounded materialization', 'materializeForExecution()'],

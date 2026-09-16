@@ -39,6 +39,14 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
     supportedProfiles: ALL, licenseFeature: 'email',
   },
   {
+    id: 'github', name: 'GitHub', vendor: 'GitHub', initials: 'GH', accent: '#c9d1d9',
+    description: 'Repository state, pushes, pull requests, and Actions runs as live context, plus branch, commit, pull request, and workflow-dispatch commands released through the action ledger. The endpoint may be github.com or a customer-hosted GitHub Enterprise Server for restricted environments.',
+    integrationClass: 'action_executor', authority: 'bidirectional', risk: 'high',
+    capabilities: ['repository state', 'push and pull request events', 'workflow dispatch', 'pull request lifecycle', 'long-running workflow status'],
+    evidenceTypes: ['CodeChange'], syncMode: 'hybrid', authSchemes: ['vault_reference', 'certificate', 'oauth', 'managed_identity'],
+    supportedProfiles: ALL, licenseFeature: 'core',
+  },
+  {
     id: 'microsoft-entra', name: 'Microsoft Entra ID', vendor: 'Microsoft', initials: 'ID', accent: '#ffae73',
     description: 'Customer-pushed identity, group, role, application, and privilege terrain exported from Microsoft Entra.',
     integrationClass: 'terrain_source', authority: 'read_only', risk: 'high',

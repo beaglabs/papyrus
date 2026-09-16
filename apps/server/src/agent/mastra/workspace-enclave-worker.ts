@@ -3,7 +3,6 @@ import { dirname, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createInterface } from 'node:readline'
 import { Enclave } from '@enclave-vm/core'
-import { AccessMode, CapabilitySet, apply, isSupported, supportInfo } from 'nono-ts'
 
 interface RunMessage { type: 'run'; code: string }
 interface ToolResultMessage { type: 'tool_result'; id: string; success: boolean; value?: unknown; error?: string }
@@ -11,34 +10,7 @@ type ParentMessage = RunMessage | ToolResultMessage
 
 const temp = process.env.PAPYRUS_ENCLAVE_TEMP
 if (!temp) fail('PAPYRUS_ENCLAVE_TEMP is required')
-const tempRoot = realpathSync(temp)
 
-if (!isSupported()) {
-  const info = supportInfo()
-  fail(`nono-ts sandbox is unavailable on ${info.platform}: ${info.details}`)
-}
-
-const caps = new CapabilitySet()
-caps.allowPath(tempRoot, AccessMode.ReadWrite)
-caps.blockNetwork()
-
-// Enclave is a programmable security layer, not the final host boundary.
-// Keep the worker inside nono as defense in depth. Grant only read access to
-// the Node runtime and installed package tree needed by already-trusted code.
-for (const path of runtimeReadRoots()) {
-  if (!existsSync(path)) continue
-  try { caps.allowPath(path, AccessMode.Read) } catch { /* platform mismatch */ }
-}
-for (const path of ['/dev/null', '/dev/urandom', '/dev/random']) {
-  if (!existsSync(path)) continue
-  try { caps.allowFile(path, path === '/dev/null' ? AccessMode.ReadWrite : AccessMode.Read) } catch { /* optional */ }
-}
-
-try {
-  apply(caps)
-} catch (error) {
-  fail(`Unable to apply nono-ts around Enclave: ${message(error)}`)
-}
 
 const pending = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>()
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity })
@@ -136,32 +108,6 @@ function broker(name: string, args: Record<string, unknown>): Promise<unknown> {
   const id = `tool_${++sequence}`
   send({ type: 'tool_call', id, name, args })
   return new Promise((resolvePromise, reject) => pending.set(id, { resolve: resolvePromise, reject }))
-}
-
-function runtimeReadRoots(): string[] {
-  const roots = new Set<string>([
-    dirname(process.execPath),
-    '/usr',
-    '/bin',
-    '/lib',
-    '/lib64',
-    '/opt',
-    '/System',
-    '/Library',
-  ])
-  for (const specifier of ['@enclave-vm/core', 'nono-ts']) {
-    try {
-      const resolved = fileURLToPath(import.meta.resolve(specifier))
-      roots.add(packageTreeRoot(resolved))
-    } catch { /* package was already loaded; fail closed if later reads are needed */ }
-  }
-  return [...roots]
-}
-
-function packageTreeRoot(resolved: string): string {
-  const marker = `${sep}node_modules${sep}`
-  const index = resolved.lastIndexOf(marker)
-  return index >= 0 ? resolved.slice(0, index + marker.length - 1) : dirname(resolved)
 }
 
 function send(value: unknown): void {

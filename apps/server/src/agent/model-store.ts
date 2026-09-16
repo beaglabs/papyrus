@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { MODEL_AUTH_SCHEMES, MODEL_GATEWAY_KINDS } from '@papyrus/contracts'
 import type {
+  DeploymentProfile,
   ModelAuthScheme,
   ModelGatewayKind,
   ModelProfile,
@@ -106,15 +107,38 @@ export class ModelStore {
     return this.get(id) as ModelProfile
   }
 
-  /** Import the legacy selector once, without importing any secret value. */
-  bootstrapLegacy(env: NodeJS.ProcessEnv = process.env): ModelProfile | undefined {
+  /**
+   * Import the legacy selector once, without importing any secret value.
+   *
+   * The deployment profile is required rather than optional because the endpoint
+   * must not be guessed: see `PROFILES_REQUIRING_EXPLICIT_ENDPOINT`.
+   */
+  bootstrapLegacy(env: NodeJS.ProcessEnv = process.env, options: { profile: DeploymentProfile }): ModelProfile | undefined {
     if (this.getDefault()) return this.getDefault()
     const selector = env.PAPYRUS_AGENT_MODEL?.trim() ?? env.PAPYRUS_INVESTIGATION_MODEL?.trim()
     if (!selector) return undefined
+    const profile = options.profile
     const parts = selector.split('/').filter(Boolean)
     const provider = parts.shift() ?? 'openai-compatible'
     const model = parts.join('/') || provider
-    const baseUrl = env.PAPYRUS_MODEL_BASE_URL?.trim() || env.OPENAI_BASE_URL?.trim() || defaultBaseUrl(provider)
+    const configured = env.PAPYRUS_MODEL_BASE_URL?.trim() || env.OPENAI_BASE_URL?.trim()
+    const baseUrl = configured || defaultBaseUrl(provider, profile)
+    if (!baseUrl) {
+      console.warn(
+        `[papyrus] ${profile} profile: PAPYRUS_AGENT_MODEL is set but no PAPYRUS_MODEL_BASE_URL is configured. ` +
+        'Papyrus will not fall back to a commercial provider endpoint on this profile, so the agent is not registered. ' +
+        'Configure the approved endpoint for this environment, such as Azure OpenAI in Azure Government ' +
+        '(https://<resource>.openai.azure.us/v1). Nothing is dropped while unconfigured.',
+      )
+      return undefined
+    }
+    const configuredHost = hostOf(configured)
+    if (configuredHost && isCommercialModelHost(configuredHost) && requiresExplicitEndpoint(profile)) {
+      console.warn(
+        `[papyrus] ${profile} profile: PAPYRUS_MODEL_BASE_URL points at ${configuredHost}, a commercial endpoint. ` +
+        'Confirm this is the approved deployment endpoint for this environment.',
+      )
+    }
     const credentialRef = env.PAPYRUS_MODEL_CREDENTIAL_REF?.trim() || (env.OPENAI_API_KEY ? 'env://OPENAI_API_KEY' : undefined)
     return this.create({
       name: `Imported ${selector}`,
@@ -210,7 +234,40 @@ function clean(value: string, field: string, max: number): string {
   return value.trim()
 }
 
-function defaultBaseUrl(provider: string): string {
+/**
+ * Profiles whose deployments must not inherit a commercial provider endpoint.
+ *
+ * `gcch`, `dod`, `government-il4`, and `government-il6` run against national
+ * clouds where a commercial endpoint is unreachable or unapproved, and
+ * `restricted` and `disconnected` deployments cannot reach a hosted provider at
+ * all. On these profiles the operator names the endpoint; Papyrus does not invent
+ * one. `commercial` and `gcc` map to Entra Public and keep the default.
+ */
+const PROFILES_REQUIRING_EXPLICIT_ENDPOINT: readonly DeploymentProfile[] =
+  ['gcch', 'dod', 'government-il4', 'government-il6', 'restricted', 'disconnected']
+
+/** Hosts that are never the approved model endpoint for a national-cloud deployment. */
+const COMMERCIAL_MODEL_HOSTS = ['api.openai.com', 'openai.azure.com']
+
+function requiresExplicitEndpoint(profile: DeploymentProfile): boolean {
+  return PROFILES_REQUIRING_EXPLICIT_ENDPOINT.includes(profile)
+}
+
+function hostOf(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  try {
+    return new URL(value).host.toLowerCase()
+  } catch {
+    return undefined
+  }
+}
+
+function isCommercialModelHost(host: string): boolean {
+  return COMMERCIAL_MODEL_HOSTS.some((commercial) => host === commercial || host.endsWith(`.${commercial}`))
+}
+
+function defaultBaseUrl(provider: string, profile: DeploymentProfile): string | undefined {
   if (provider === 'ollama') return 'http://127.0.0.1:11434/v1'
+  if (requiresExplicitEndpoint(profile)) return undefined
   return 'https://api.openai.com/v1'
 }

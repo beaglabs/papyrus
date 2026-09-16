@@ -2,20 +2,40 @@ import type {
   AgentActionProposal,
   AgentActionReceipt,
   AgentLink,
+  LicenseStatus,
   LinkInbound,
   PortalOverview,
   PortalPrincipal,
   ModelProfile,
+  SignedLicense,
 } from '@papyrus/contracts'
 import type { UIMessage } from 'ai'
 
 export interface PublicConfig {
+  bootstrap: boolean
   organizationName: string
   profile: string
   cloud: 'Public' | 'USGov' | 'USGovDoD'
-  entraConfigured: boolean
-  developmentIdentity: boolean
-  loginUrl: string
+  /** Full-mode fields. */
+  entraConfigured?: boolean
+  developmentIdentity?: boolean
+  loginUrl?: string
+  /** Bootstrap-mode fields. */
+  deploymentId?: string
+  license?: LicenseStatus
+  portalSecretSet?: boolean
+  entraSet?: boolean
+}
+
+export interface BootstrapStatus {
+  bootstrap: true
+  organizationName: string
+  profile: string
+  cloud: string
+  deploymentId: string
+  license: LicenseStatus
+  portalSecretSet: boolean
+  entraSet: boolean
 }
 
 export interface PortalData {
@@ -44,6 +64,14 @@ export interface AgentStatus {
   }
   signalBacklog: Record<'pending' | 'delivering' | 'delivered' | 'failed', number>
   links?: { validation: 'local-static' | 'kitesurf' }
+  /** Present only when the status request is scoped to a session. */
+  jobs?: {
+    sessionId: string
+    schedules: { active: number; paused: number; nextFireAt: number | null }
+    /** The durable objective this session is working toward, when one is set. */
+    goal?: { objective: string; status: string; runsUsed: number; maxRuns?: number; pausedReason?: string } | null
+    background: { running: number; queued: number; failed: number; observed: boolean }
+  }
 }
 
 export interface WorkspaceLibraryFile {
@@ -191,6 +219,34 @@ export async function loadPortal(): Promise<PortalData> {
 
 export async function publicConfig(): Promise<PublicConfig> { return api('/api/config/public') }
 
+/** Bootstrap (first-run) onboarding API. */
+let bootstrapToken: string | undefined
+export function setBootstrapToken(token: string): void { bootstrapToken = token }
+const bootstrapHeaders = () => (bootstrapToken ? { 'x-bootstrap-token': bootstrapToken } : {})
+
+export async function bootstrapStatus(): Promise<BootstrapStatus> { return api('/api/bootstrap/status') }
+
+export async function verifyBootstrapToken(token: string): Promise<{ valid: true }> {
+  return api('/api/bootstrap/token', { method: 'POST', body: JSON.stringify({ token }) })
+}
+
+export async function activateLicense(document: SignedLicense): Promise<LicenseStatus> {
+  return api('/api/license/activate', { method: 'POST', body: JSON.stringify(document), headers: bootstrapHeaders() })
+}
+
+export async function saveBootstrapConfig(input: { portalSecret: string; entra: { tenantId: string; clientId: string; clientSecret?: string } }): Promise<{ saved: true } & BootstrapStatus> {
+  return api('/api/bootstrap/config', { method: 'POST', body: JSON.stringify(input), headers: bootstrapHeaders() })
+}
+
+export async function completeBootstrap(): Promise<{ complete: boolean }> {
+  return api('/api/bootstrap/complete', { method: 'POST', body: '{}', headers: bootstrapHeaders() })
+}
+
+/** Runtime status, optionally scoped to one session so the footer can show its recurring work. */
+export async function loadAgentStatus(sessionId?: string): Promise<AgentStatus> {
+  return api<AgentStatus>(sessionId ? `/api/agent/status?session=${encodeURIComponent(sessionId)}` : '/api/agent/status')
+}
+
 export async function observabilityTraces(input: {
   page?: number
   perPage?: number
@@ -255,6 +311,12 @@ export async function approveSkill(id: string): Promise<unknown> {
   return api(`/api/skills/${encodeURIComponent(id)}/approve`, { method: 'POST', body: '{}' })
 }
 
+/** Every proposal the daemon holds. Used to read back what already happened to a suggestion. */
+export async function listProposals(): Promise<AgentActionProposal[]> {
+  const result = await api<{ proposals: AgentActionProposal[] }>('/api/proposals')
+  return result.proposals
+}
+
 export interface WorkspaceLibraryPage {
   files: WorkspaceLibraryFile[]
   total: number
@@ -273,6 +335,19 @@ export async function linkInbounds(id: string): Promise<LinkInbound[]> {
 
 export function publicLinkUrl(link: Pick<AgentLink, 'publicPath'>): string {
   return new URL(link.publicPath, window.location.origin).toString()
+}
+
+/**
+ * URLs the browser opens directly, so a stored record can be read inline or saved. Both are
+ * authenticated portal routes, not the public Link surface — inbound traffic is customer data
+ * and the Link URL is reachable by anyone holding it.
+ */
+export function linkContentUrl(id: string, download = false): string {
+  return `/api/links/${encodeURIComponent(id)}/content${download ? '?download=1' : ''}`
+}
+
+export function linkInboundUrl(linkId: string, inboundId: string, download = false): string {
+  return `/api/links/${encodeURIComponent(linkId)}/inbounds/${encodeURIComponent(inboundId)}${download ? '?download=1' : ''}`
 }
 
 export async function workspaceFilesPage(query = '', offset = 0, limit = 100): Promise<WorkspaceLibraryPage> {

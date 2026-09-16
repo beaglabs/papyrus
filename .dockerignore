@@ -7,3 +7,23 @@
 coverage
 docs
 upload
+
+# scratch / local-only
+.dtn
+.azure
+.azure-tmp
+.pnpm-store
+.cache
+.cloudflared
+.tmp-webpage
+.sandbox-profiles
+.DS_Store
+
+# secrets
+.env
+
+# dev-only assets not needed for the server image
+certs
+# apps/video is a separate Remotion app, not part of the server — exclude it
+# wholesale so the image doesn't pull its ~350 MB dependency tree.
+apps/video

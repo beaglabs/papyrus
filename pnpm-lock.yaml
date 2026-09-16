@@ -42,6 +42,9 @@ importers:
       '@enclave-vm/core':
         specifier: 2.15.2
         version: 2.15.2
+      '@landstrip/landstrip':
+        specifier: ^0.18.38
+        version: 0.18.38
       '@mastra/ai-sdk':
         specifier: 1.10.0
         version: 1.10.0(@mastra/core@1.63.2(ai@7.0.89(zod@4.5.4))(rxjs@7.8.2)(supports-color@8.1.1)(zod@4.5.4))(zod@4.5.4)
@@ -75,9 +78,12 @@ importers:
       libsql:
         specifier: ^0.5.29
         version: 0.5.29
-      nono-ts:
-        specifier: 0.3.0
-        version: 0.3.0
+      papyrus-extension-sdk:
+        specifier: workspace:*
+        version: link:../../vendor/papyrus-extensions/packages/extension-sdk
+      papyrus-gnss:
+        specifier: workspace:*
+        version: link:../../vendor/papyrus-extensions/packages/gnss
       zod:
         specifier: 4.5.4
         version: 4.5.4
@@ -134,6 +140,15 @@ importers:
       ai:
         specifier: ^7.0.89
         version: 7.0.89(zod@4.5.4)
+      papyrus-extension-sdk:
+        specifier: workspace:*
+        version: link:../../vendor/papyrus-extensions/packages/extension-sdk
+      papyrus-gnss:
+        specifier: workspace:*
+        version: link:../../vendor/papyrus-extensions/packages/gnss
+      papyrus-viewer-3d:
+        specifier: workspace:*
+        version: link:../../vendor/papyrus-extensions/packages/viewer-3d
       react:
         specifier: 19.2.3
         version: 19.2.3
@@ -171,6 +186,65 @@ importers:
       typescript:
         specifier: 5.9.3
         version: 5.9.3
+
+  vendor/papyrus-extensions/packages/extension-sdk:
+    devDependencies:
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 4.1.10
+        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@25.9.6)(vite@8.2.1(@types/node@25.9.6)(esbuild@0.28.2)(terser@5.51.2)(tsx@4.23.12)(yaml@2.9.0))
+
+  vendor/papyrus-extensions/packages/gnss:
+    dependencies:
+      papyrus-extension-sdk:
+        specifier: workspace:*
+        version: link:../extension-sdk
+      papyrus-viewer-3d:
+        specifier: workspace:*
+        version: link:../viewer-3d
+      satellite.js:
+        specifier: 5.0.0
+        version: 5.0.0
+    devDependencies:
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.2.9
+      react:
+        specifier: ^19.0.0
+        version: 19.2.3
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 4.1.10
+        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@25.9.6)(vite@8.2.1(@types/node@25.9.6)(esbuild@0.28.2)(terser@5.51.2)(tsx@4.23.12)(yaml@2.9.0))
+
+  vendor/papyrus-extensions/packages/viewer-3d:
+    dependencies:
+      papyrus-extension-sdk:
+        specifier: workspace:*
+        version: link:../extension-sdk
+      three:
+        specifier: ^0.180.0
+        version: 0.180.0
+    devDependencies:
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.2.9
+      '@types/three':
+        specifier: ^0.180.0
+        version: 0.180.0
+      react:
+        specifier: ^19.0.0
+        version: 19.2.3
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 4.1.10
+        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@25.9.6)(vite@8.2.1(@types/node@25.9.6)(esbuild@0.28.2)(terser@5.51.2)(tsx@4.23.12)(yaml@2.9.0))
 
 packages:
 
@@ -362,6 +436,9 @@ packages:
   '@babel/types@7.29.8':
     resolution: {integrity: sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg==}
     engines: {node: '>=6.9.0'}
+
+  '@dimforge/rapier3d-compat@0.12.0':
+    resolution: {integrity: sha512-uekIGetywIgopfD97oDL5PfeezkFpNhwlzlaEYNOA0N6ghdsOvh/HYjSMek5Q2O1PYvRSDFcqFVJl4r4ZBwOow==}
 
   '@emnapi/core@1.11.3':
     resolution: {integrity: sha512-zLpS5asjEb7lq8jYLq37N6XKaE41DIexlY1rF/z4/tIl3wo13Sqm28fRyfIsKZD+NZ8mM5RoKkpW/rBcuoSZSg==}
@@ -723,6 +800,41 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@landstrip/landstrip-darwin-arm64@0.18.38':
+    resolution: {integrity: sha512-ASFGpwIKlqdF6F28em4XvAnQ8Q0709++sLqlih8kCqzhb9l50ny+z7i21km3V1CSdpAAlvHjbY/iDM4g9VFLfA==}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@landstrip/landstrip-darwin-x64@0.18.38':
+    resolution: {integrity: sha512-dlBkN6Wci5cYTxR/t5t/I/fsURSxlmVhRcuKmrNWlfyPsxP0jH0E6d5JNfap1Cq1bZte/PwRsBkpH/1lkdSGTQ==}
+    cpu: [x64]
+    os: [darwin]
+
+  '@landstrip/landstrip-linux-arm64@0.18.38':
+    resolution: {integrity: sha512-YXAlvr0/aUA3KhCUD/+qJSlVcSaoXofGjpL6mf0WK4fyMeFDi8sReWXOPJlp7nl2nnwRDPE8c1++YPNE9nc8WA==}
+    cpu: [arm64]
+    os: [linux]
+
+  '@landstrip/landstrip-linux-x64@0.18.38':
+    resolution: {integrity: sha512-sMItgyEh9Tyd4RrNHfuykLMExlsqCWsavqGfTxDCqG+mVHdb88orzLFe7KNZOKfMcnLat9EEDbmEWJUZh2m08g==}
+    cpu: [x64]
+    os: [linux]
+
+  '@landstrip/landstrip-win32-arm64@0.18.38':
+    resolution: {integrity: sha512-zpy0WTYqjFLBEbESf3HX2HCKIM0RIBDrqkt7HCyWbQ/4IHMXHzS7Xj4bbFTN/jy5P3TU0bZjx5ZRwQblcBnT6g==}
+    cpu: [arm64]
+    os: [win32]
+
+  '@landstrip/landstrip-win32-x64@0.18.38':
+    resolution: {integrity: sha512-WAYJxpSaUAcCVK3lJFuAOtqzhgw++9stn9HKsem0lucY7LLSQWNwp6kSOdZY8QXrn070L0NT9oOSLrxDyhUAcw==}
+    cpu: [x64]
+    os: [win32]
+
+  '@landstrip/landstrip@0.18.38':
+    resolution: {integrity: sha512-H84ThlZ85IGO2FupXT4h89wte+lyIOggvQ8r8msp+OlSUeMcaf9P4vMUMMSs4pb+i1R9PbzqMCWEfAnnWQ3jMg==}
+    engines: {node: '>=18'}
+    hasBin: true
 
   '@libsql/client@0.17.4':
     resolution: {integrity: sha512-lYayFWasDV78A+TjlEhr6ubb3odBV6OHjb+wdp8VQcyWWAEIjuwbCHaraEUS4m4yWoo0BvZo96It4VdzZRmRWw==}
@@ -1314,6 +1426,9 @@ packages:
   '@tursodatabase/database@0.4.4':
     resolution: {integrity: sha512-QkQ0qLp0AY8dC9BOrIMyeyUXoFCvhlRaH+wcg013OvzYufSmDnnzg44U0tQkmnXYfUZEIp+IpADO/UeGNL0M2Q==}
 
+  '@tweenjs/tween.js@23.1.3':
+    resolution: {integrity: sha512-vJmvvwFxYuGnF2axRtPYocag6Clbb5YS7kLL+SO/TeVFzHqDIWrNKYtcsPMibjDx9O+bu+psAy9NKfWklassUA==}
+
   '@tybys/wasm-util@0.10.3':
     resolution: {integrity: sha512-F3fo1MYrRJYL3zER0OUOmkutjr1Vp23m7OsSgp7nq4SP6OqX6C/56XFIPAl5bt3zaBRjmW7SGz3u/6LwFpYcOg==}
 
@@ -1370,8 +1485,17 @@ packages:
   '@types/react@19.2.9':
     resolution: {integrity: sha512-Lpo8kgb/igvMIPeNV2rsYKTgaORYdO1XGVZ4Qz3akwOj0ySGYMPlQWa8BaLn0G63D1aSaAQ5ldR06wCpChQCjA==}
 
+  '@types/stats.js@0.17.4':
+    resolution: {integrity: sha512-jIBvWWShCvlBqBNIZt0KAshWpvSjhkwkEu4ZUcASoAvhmrgAUI2t1dXrjSL4xXVLB4FznPrIsX3nKXFl/Dt4vA==}
+
+  '@types/three@0.180.0':
+    resolution: {integrity: sha512-ykFtgCqNnY0IPvDro7h+9ZeLY+qjgUWv+qEvUt84grhenO60Hqd4hScHE7VTB9nOQ/3QM8lkbNE+4vKjEpUxKg==}
+
   '@types/unist@3.0.3':
     resolution: {integrity: sha512-ko/gIFJRv177XgZsZcBwnqJN5x/Gien8qNOn0D5bQU/zAzVf9Zt3BlcUiLqhV9y4ARk0GbT3tnUiPNgnTXzc/Q==}
+
+  '@types/webxr@0.5.24':
+    resolution: {integrity: sha512-h8fgEd/DpoS9CBrjEQXR+dIDraopAEfu4wYVNY2tEPwk60stPWhvZMf4Foo5FakuQ7HFZoa8WceaWFervK2Ovg==}
 
   '@types/ws@8.18.1':
     resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
@@ -1466,6 +1590,9 @@ packages:
 
   '@webassemblyjs/wast-printer@1.14.1':
     resolution: {integrity: sha512-kPSSXE6De1XOR820C90RIo2ogvZG+c3KiHzqUoO/F34Y2shGzesfqv7o57xrxovZJH/MetF5UjroJ/R/3isoiw==}
+
+  '@webgpu/types@0.1.72':
+    resolution: {integrity: sha512-0cF7RFM2edNoiIS1ODJp0/Gzv4/xSXhwoR0YCza+OWpJWtn4wmo9DvK91aLlH9+uUnwIriP7ZiC3WitmyhuzBw==}
 
   '@workflow/serde@4.1.0':
     resolution: {integrity: sha512-pav4F2BoirECWR7Nf1TKt+2eETcBj7jj4cBefQ8VXQCA6NPkaKeLfj/zMgi+3zYV5ZIBT4GuUiphsj0/b9hPQQ==}
@@ -1833,6 +1960,9 @@ packages:
       picomatch:
         optional: true
 
+  fflate@0.8.3:
+    resolution: {integrity: sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA==}
+
   figures@6.1.0:
     resolution: {integrity: sha512-d+l3qxjSesT4V7v2fh+QnmFnUWv9lSpjarhShNTgBOfA0ttejbQUAlHLitbjkoRiDulW0OPoQPYIGhIC8ohejg==}
     engines: {node: '>=18'}
@@ -2174,6 +2304,9 @@ packages:
   merge-stream@2.0.0:
     resolution: {integrity: sha512-abv/qOcuPfk3URPfDzmZU1LKmuw8kT+0nIHvKrKgFrwifol/doWcdA4ZqsWQ8ENrFKkd67Mfpo/LovbIUsbt3w==}
 
+  meshoptimizer@0.22.0:
+    resolution: {integrity: sha512-IebiK79sqIy+E4EgOr+CAw+Ke8hAspXKzBd0JdgEmPHiAwmvEj2S4h1rfvo+o/BnfEYd/jAOg5IeeIjzlzSnDg==}
+
   micromark-core-commonmark@2.0.3:
     resolution: {integrity: sha512-RDBrHEMSxVFLg6xvnXmb1Ayr2WzLAWjeSATAoxwKYJV94TeNavgoIdA0a9ytzDSVzBy2YKFK+emCPOEibLeCrg==}
 
@@ -2306,10 +2439,6 @@ packages:
   node-releases@2.0.54:
     resolution: {integrity: sha512-YHs7BmmcsdAI5Ozuf8JZo6PT0mv2GIWC9vMfvUC3dp65M8hn7Ux8CPL+2oBI7juNuj9d0ndhTcznq2ODBps9cQ==}
     engines: {node: '>=18'}
-
-  nono-ts@0.3.0:
-    resolution: {integrity: sha512-KMv05ucezwFbxfIGTlcqElmCAkPS2rHjhsPV0Bg04pfXKNoeR7dcC0opHnoeNADHESwS/BjoPHjUkWf7JbxCkQ==}
-    engines: {node: '>= 18'}
 
   npm-run-path@4.0.1:
     resolution: {integrity: sha512-S48WzZW777zhNIrn7gxOlISNAqi9ZC/uQFnRdbeIHhZhCA6UqpkOT8T1G7BvfdgP4Er8gF4sUbaS0i7QvIfCWw==}
@@ -2515,6 +2644,9 @@ packages:
   safer-buffer@2.1.2:
     resolution: {integrity: sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg==}
 
+  satellite.js@5.0.0:
+    resolution: {integrity: sha512-ie3yiJ2LJAJIhVUKdYhgp7V0btXKAMImDjRnuaNfJGl8rjwP2HwVIh4HLFcpiXYEiYwXc5fqh5+yZqCe6KIwWw==}
+
   sax@1.6.1:
     resolution: {integrity: sha512-42tBVwLWnaQvW5zc4HbZrTuWccECCZfBi92FDuwtqxasH+JbPB3/FOKb1m222K42R4WxuxzzMsTswfzgtSu64Q==}
     engines: {node: '>=11.0.0'}
@@ -2686,6 +2818,9 @@ packages:
     resolution: {integrity: sha512-bWnjSNscmuI+GJze6ZupnHP8G/cTcsJF+bXCeQknk2SHQsgbNJnLrqiH9jZ2W4STPVXH2mDKKRX3iwPhc9Cn/Q==}
     engines: {node: '>=10'}
     hasBin: true
+
+  three@0.180.0:
+    resolution: {integrity: sha512-o+qycAMZrh+TsE01GqWUxUIKR1AL0S8pq7zDkYOQw8GqfX8b8VoCKYUoHbhiX5j+7hr8XsuHDVU6+gkQJQKg9w==}
 
   throttleit@2.1.0:
     resolution: {integrity: sha512-nt6AMGKW1p/70DF/hGBdJB57B8Tspmbp5gfJ8ilhLnt7kkr2ye7hzD6NVG8GGErk2HWF34igrL2CXmNIkzKqKw==}
@@ -3181,6 +3316,8 @@ snapshots:
       '@babel/helper-string-parser': 7.29.7
       '@babel/helper-validator-identifier': 7.29.7
 
+  '@dimforge/rapier3d-compat@0.12.0': {}
+
   '@emnapi/core@1.11.3':
     dependencies:
       '@emnapi/wasi-threads': 1.2.3
@@ -3400,6 +3537,33 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
+
+  '@landstrip/landstrip-darwin-arm64@0.18.38':
+    optional: true
+
+  '@landstrip/landstrip-darwin-x64@0.18.38':
+    optional: true
+
+  '@landstrip/landstrip-linux-arm64@0.18.38':
+    optional: true
+
+  '@landstrip/landstrip-linux-x64@0.18.38':
+    optional: true
+
+  '@landstrip/landstrip-win32-arm64@0.18.38':
+    optional: true
+
+  '@landstrip/landstrip-win32-x64@0.18.38':
+    optional: true
+
+  '@landstrip/landstrip@0.18.38':
+    optionalDependencies:
+      '@landstrip/landstrip-darwin-arm64': 0.18.38
+      '@landstrip/landstrip-darwin-x64': 0.18.38
+      '@landstrip/landstrip-linux-arm64': 0.18.38
+      '@landstrip/landstrip-linux-x64': 0.18.38
+      '@landstrip/landstrip-win32-arm64': 0.18.38
+      '@landstrip/landstrip-win32-x64': 0.18.38
 
   '@libsql/client@0.17.4':
     dependencies:
@@ -4123,6 +4287,8 @@ snapshots:
       '@tursodatabase/database-linux-x64-gnu': 0.4.4
       '@tursodatabase/database-win32-x64-msvc': 0.4.4
 
+  '@tweenjs/tween.js@23.1.3': {}
+
   '@tybys/wasm-util@0.10.3':
     dependencies:
       tslib: 2.8.1
@@ -4187,7 +4353,21 @@ snapshots:
     dependencies:
       csstype: 3.2.3
 
+  '@types/stats.js@0.17.4': {}
+
+  '@types/three@0.180.0':
+    dependencies:
+      '@dimforge/rapier3d-compat': 0.12.0
+      '@tweenjs/tween.js': 23.1.3
+      '@types/stats.js': 0.17.4
+      '@types/webxr': 0.5.24
+      '@webgpu/types': 0.1.72
+      fflate: 0.8.3
+      meshoptimizer: 0.22.0
+
   '@types/unist@3.0.3': {}
+
+  '@types/webxr@0.5.24': {}
 
   '@types/ws@8.18.1':
     dependencies:
@@ -4216,6 +4396,14 @@ snapshots:
       magic-string: 0.30.21
     optionalDependencies:
       vite: 8.2.1(@types/node@24.10.1)(esbuild@0.28.2)(terser@5.51.2)(tsx@4.23.12)(yaml@2.9.0)
+
+  '@vitest/mocker@4.1.10(vite@8.2.1(@types/node@25.9.6)(esbuild@0.28.2)(terser@5.51.2)(tsx@4.23.12)(yaml@2.9.0))':
+    dependencies:
+      '@vitest/spy': 4.1.10
+      estree-walker: 3.0.3
+      magic-string: 0.30.21
+    optionalDependencies:
+      vite: 8.2.1(@types/node@25.9.6)(esbuild@0.28.2)(terser@5.51.2)(tsx@4.23.12)(yaml@2.9.0)
 
   '@vitest/pretty-format@4.1.10':
     dependencies:
@@ -4316,6 +4504,8 @@ snapshots:
     dependencies:
       '@webassemblyjs/ast': 1.14.1
       '@xtuc/long': 4.2.2
+
+  '@webgpu/types@0.1.72': {}
 
   '@workflow/serde@4.1.0': {}
 
@@ -4682,6 +4872,8 @@ snapshots:
     optionalDependencies:
       picomatch: 4.0.5
 
+  fflate@0.8.3: {}
+
   figures@6.1.0:
     dependencies:
       is-unicode-supported: 2.1.0
@@ -5026,6 +5218,8 @@ snapshots:
 
   merge-stream@2.0.0: {}
 
+  meshoptimizer@0.22.0: {}
+
   micromark-core-commonmark@2.0.3:
     dependencies:
       decode-named-character-reference: 1.3.0
@@ -5254,8 +5448,6 @@ snapshots:
 
   node-releases@2.0.54: {}
 
-  nono-ts@0.3.0: {}
-
   npm-run-path@4.0.1:
     dependencies:
       path-key: 3.1.1
@@ -5472,6 +5664,8 @@ snapshots:
 
   safer-buffer@2.1.2: {}
 
+  satellite.js@5.0.0: {}
+
   sax@1.6.1: {}
 
   scheduler@0.27.0: {}
@@ -5589,6 +5783,8 @@ snapshots:
       commander: 2.20.3
       source-map-support: 0.5.21
 
+  three@0.180.0: {}
+
   throttleit@2.1.0: {}
 
   tiny-invariant@1.3.3: {}
@@ -5700,6 +5896,21 @@ snapshots:
       tsx: 4.23.12
       yaml: 2.9.0
 
+  vite@8.2.1(@types/node@25.9.6)(esbuild@0.28.2)(terser@5.51.2)(tsx@4.23.12)(yaml@2.9.0):
+    dependencies:
+      lightningcss: 1.33.0
+      picomatch: 4.0.5
+      postcss: 8.5.26
+      rolldown: 1.2.4
+      tinyglobby: 0.2.17
+    optionalDependencies:
+      '@types/node': 25.9.6
+      esbuild: 0.28.2
+      fsevents: 2.3.3
+      terser: 5.51.2
+      tsx: 4.23.12
+      yaml: 2.9.0
+
   vitest@4.1.10(@opentelemetry/api@1.9.1)(@types/node@24.10.1)(vite@8.2.1(@types/node@24.10.1)(esbuild@0.28.2)(terser@5.51.2)(tsx@4.23.12)(yaml@2.9.0)):
     dependencies:
       '@vitest/expect': 4.1.10
@@ -5725,6 +5936,34 @@ snapshots:
     optionalDependencies:
       '@opentelemetry/api': 1.9.1
       '@types/node': 24.10.1
+    transitivePeerDependencies:
+      - msw
+
+  vitest@4.1.10(@opentelemetry/api@1.9.1)(@types/node@25.9.6)(vite@8.2.1(@types/node@25.9.6)(esbuild@0.28.2)(terser@5.51.2)(tsx@4.23.12)(yaml@2.9.0)):
+    dependencies:
+      '@vitest/expect': 4.1.10
+      '@vitest/mocker': 4.1.10(vite@8.2.1(@types/node@25.9.6)(esbuild@0.28.2)(terser@5.51.2)(tsx@4.23.12)(yaml@2.9.0))
+      '@vitest/pretty-format': 4.1.10
+      '@vitest/runner': 4.1.10
+      '@vitest/snapshot': 4.1.10
+      '@vitest/spy': 4.1.10
+      '@vitest/utils': 4.1.10
+      es-module-lexer: 2.3.1
+      expect-type: 1.4.0
+      magic-string: 0.30.21
+      obug: 2.1.4
+      pathe: 2.0.3
+      picomatch: 4.0.5
+      std-env: 4.2.0
+      tinybench: 2.9.0
+      tinyexec: 1.3.0
+      tinyglobby: 0.2.17
+      tinyrainbow: 3.1.1
+      vite: 8.2.1(@types/node@25.9.6)(esbuild@0.28.2)(terser@5.51.2)(tsx@4.23.12)(yaml@2.9.0)
+      why-is-node-running: 2.3.0
+    optionalDependencies:
+      '@opentelemetry/api': 1.9.1
+      '@types/node': 25.9.6
     transitivePeerDependencies:
       - msw
 

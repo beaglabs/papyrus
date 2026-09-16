@@ -21,32 +21,22 @@ The mapping is a deployment default, not an accreditation claim. The operator re
 Papyrus's agent workspace is local-first and has two deliberately separate
 providers:
 
-- **AgentFS** is the durable `WorkspaceFilesystem`. Its SQLite database lives
-  under `PAPYRUS_DATA_DIR/.agentfs`; cloud sync is not enabled or required.
-- **nono** is the `WorkspaceSandbox` and process boundary. Commands are launched
-  with only the AgentFS workspace writable and outbound network blocked.
+- **AgentFS** is the durable `WorkspaceFilesystem`, backed by `agentfs-sdk` over
+  a local SQLite database under `PAPYRUS_DATA_DIR/.agentfs`. Cloud sync is not
+  enabled or required.
+- **nono** is the `WorkspaceSandbox` and process boundary, applied in process by
+  the `nono-ts` native addon. Commands see only the materialized workspace, and
+  outbound network is never granted.
 
-Papyrus drives AgentFS's local transient mount backend according to the host:
+No filesystem is mounted. AgentFS materializes the workspace into a real
+directory for the lifetime of a command, `nono-ts` confines the process to it,
+and the result is reconciled back into AgentFS:
 
-| Host | AgentFS command view | nono isolation | Workspace execution |
-| --- | --- | --- | --- |
-| Linux | FUSE | Landlock | Supported |
-| macOS | NFS | Seatbelt | Supported |
-| Windows | — | — | Disabled |
-
-Both `agentfs` and `nono` must be present in the deployment image or on the
-customer-controlled host before Papyrus starts an agent with workspace tools.
-Disconnected deployments should vendor the binaries into their approved image;
-the daemon never downloads a sandbox or filesystem runtime at execution time.
-
-The default executable names can be overridden when the binaries are staged in
-a fixed approved location:
-
-```bash
-export PAPYRUS_AGENTFS_BINARY=/opt/papyrus/bin/agentfs
-export PAPYRUS_NONO_BINARY=/opt/papyrus/bin/nono
-export PAPYRUS_AGENTFS_ID=papyrus-workspace
-```
+| Host | nono isolation | Workspace execution |
+| --- | --- | --- |
+| Linux | Landlock | Supported |
+| macOS | Seatbelt | Supported |
+| Windows | — | Disabled |
 
 The workspace process chain is:
 
@@ -54,36 +44,52 @@ The workspace process chain is:
 Mastra Workspace tool
        |
        v
-Papyrus SandboxProcessManager
+NonoProcessManager.spawn
        |
        v
-agentfs exec --backend fuse|nfs <local-db>
+AgentFS materializeForExecution()  ->  real workspace directory
        |
        v
-nono run --allow-cwd --block-net
+node workspace-nono-worker.js <control.json>
        |
        v
-requested command
+nono-ts CapabilitySet.apply()      (Landlock on Linux, Seatbelt on macOS)
+       |
+       v
+/bin/sh -c <command>
+       |
+       v
+AgentFS reconcileExecution()       ->  cleanupExecution()
 ```
 
-AgentFS remains the filesystem source of truth across sessions. The transient
-FUSE/NFS mount exists only for the lifetime of a command. nono then constrains
-the command to that mounted workspace and blocks network access. Papyrus also
-removes credential-like environment variables before spawning workspace
-processes.
+Only the materialized workspace is writable, along with the explicit read-only
+toolchain paths Papyrus provisioned, such as `<data-dir>/python`. AgentFS remains
+the filesystem source of truth across sessions: the materialized directory exists
+only for the lifetime of a command, and its changes are reconciled back into the
+database. Papyrus also removes credential-like environment variables before
+spawning workspace processes.
+
+`nono-ts` is a platform-specific native addon. Linux deployments need the glibc
+(`gnu`) build present in the image, together with the `@tursodatabase/database`
+and `libsql` native drivers. The daemon never downloads a sandbox, database
+driver, or filesystem runtime at execution time, so all three must be vendored
+into the approved image. The image contents and deployment shape are specified in
+[deployment-vhd.md](deployment-vhd.md).
+
+There is no AgentFS CLI and no mount daemon to stage, so `agentfs`, `nono`, and
+the `PAPYRUS_AGENTFS_BINARY` / `PAPYRUS_NONO_BINARY` overrides are not part of
+this path.
 
 The older `PAPYRUS_SANDBOX_RUNTIME=bwrap|seatbelt` selector is retained for
-configuration compatibility, but the Mastra workspace path no longer uses
-`LocalSandbox`; new workspace execution uses nono.
+configuration compatibility only; the Mastra workspace path does not use
+`LocalSandbox`, and Bubblewrap is not required on a Linux deployment.
 
-### Container note
+### Deployment shape
 
-AgentFS FUSE/NFS mounts need the corresponding host/container mount support.
-The hardened Kubernetes manifest intentionally does not add broad privileges
-just to make workspace execution function. A deployment that enables workspace
-commands must explicitly provide the approved mount capability/device for its
-platform, or run the daemon on a host where AgentFS can mount normally. The
-daemon must not be given `privileged: true` as a shortcut.
+Because nothing is mounted, workspace execution needs no mount capability, no
+`/dev/fuse`, and no elevated capabilities. A deployment requires a writable
+`PAPYRUS_DATA_DIR` and its listening ports, and nothing else. The daemon must
+never be given `privileged: true`, and no deployment needs it.
 
 ## Agent configuration
 
@@ -98,14 +104,27 @@ export PAPYRUS_MODEL_CREDENTIAL_REF='env://OPENAI_API_KEY'
 
 Without it the agent is not registered. Mastra storage, session history, workflows, and plugin configuration still start normally, while signals accumulate durably in `agent_signal_outbox`. Nothing is dropped while unconfigured. The Models tab stores only gateway metadata and a customer-owned credential reference; it never stores raw key material.
 
-Storage for durable threads is LibSQL at `<data-dir>/mastra.db`, created alongside the main database.
+Storage is LibSQL, split by lifecycle rather than kept in one file: `<data-dir>/mastra.db` holds session threads and messages, `<data-dir>/jobs.db` holds schedules and background jobs, and `<data-dir>/observability.db` holds trace spans and logs. All three are created alongside the main database, and all three belong in a backup — a session export alone does not carry the recurring work that outlives it.
 
 The Mastra API surface this depends on, and the version it was verified against, is recorded in [mastra-integration.md](mastra-integration.md). Check it before upgrading Mastra.
+
+## Document toolchain
+
+Agent code execution runs the host's programs, and a host Python with no libraries makes document work pathological: an agent asked to read a PDF has no reader, so it writes one, and spends its step budget debugging its own parser instead of producing the deliverable.
+
+Provision the environment once per appliance:
+
+```bash
+PAPYRUS_DATA_DIR=/var/lib/papyrus scripts/provision-python.sh
+```
+
+That creates `<data-dir>/python` with `pypdf` (PDF text, layout, and embedded images), `reportlab` (styled PDF output with fonts, colours, geometry, and placed images), and `pillow` (image inspection and conversion). The daemon detects it automatically and the sandbox grants read-only access to that directory — nothing else under the data directory becomes readable to workspace commands, and outbound network stays blocked at agent time. Set `PAPYRUS_PYTHON_BIN` to override the interpreter, and `PAPYRUS_LIBREOFFICE_BIN` when LibreOffice is installed somewhere the PATH lookup does not cover (the daemon tries `libreoffice`, then macOS `soffice`). Without the provisioned environment everything still runs; the agent just has the host's bare interpreter.
+
 
 ## Runtime modes
 
 - `local`: loopback evaluation. It may use `PAPYRUS_DEV_ENTRA_PRINCIPAL`.
-- `persistent`: durable customer deployment. It requires real Entra configuration, TLS, a portal signing secret, durable storage, and normally a signed offline license. On Linux with Bubblewrap present it also enables sandboxed agent code execution.
+- `persistent`: durable customer deployment. It requires real Entra configuration, TLS, a portal signing secret, durable storage, and normally a signed offline license. On Linux it enables sandboxed agent code execution through `nono-ts` and Landlock, and requires the vendored native drivers described above. The supported appliance image is specified in [deployment-vhd.md](deployment-vhd.md).
 
 Persistent mode uses SQLite in WAL mode and is intended for a supervised single-node deployment. Back up the database and connector configuration, store keys and connector credentials in customer-controlled secret infrastructure, and export audit events to independently controlled storage.
 

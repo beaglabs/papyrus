@@ -1,5 +1,6 @@
 import type { IntegrationConfiguration } from '@papyrus/contracts'
 import type { AgentConfig } from './config.js'
+import { graphOrigin } from './national-cloud.js'
 
 /**
  * Deliberately small Microsoft Graph boundary.
@@ -89,10 +90,6 @@ export function exchangeMailbox(integration: IntegrationConfiguration): string {
     throw new Error('Exchange integration requires settings.mailbox')
   }
   return mailbox.trim()
-}
-
-function graphOrigin(cloud: AgentConfig['cloud']): string {
-  return cloud === 'Public' ? 'https://graph.microsoft.com' : 'https://graph.microsoft.us'
 }
 
 function graphError(response: Response, body: string): Error {

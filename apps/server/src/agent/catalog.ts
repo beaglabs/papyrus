@@ -9,6 +9,9 @@ export const LINK_PUBLISHER_CATALOG_ID = 'papyrus-links'
  * as evidence and every change crosses the approval boundary. */
 export const APPLIANCE_CONSOLE_CATALOG_ID = 'appliance-console'
 
+/** The vendor-neutral write executor: one approved, origin-pinned request per action. */
+export const FIREWALL_CATALOG_ID = 'firewall-executor'
+
 export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
   {
     id: 'observation-api', name: 'Custom Source', vendor: 'Observation API', initials: 'CS', accent: '#ffcf33',
@@ -34,6 +37,14 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
     capabilities: ['mailbox polling', 'incident notifications', 'human context'],
     evidenceTypes: ['HumanContext', 'OperatorRequest'], syncMode: 'pull', authSchemes: ['entra', 'certificate', 'managed_identity'],
     supportedProfiles: ALL, licenseFeature: 'email',
+  },
+  {
+    id: 'github', name: 'GitHub', vendor: 'GitHub', initials: 'GH', accent: '#c9d1d9',
+    description: 'Repository state, pushes, pull requests, and Actions runs as live context, plus branch, commit, pull request, and workflow-dispatch commands released through the action ledger. The endpoint may be github.com or a customer-hosted GitHub Enterprise Server for restricted environments.',
+    integrationClass: 'action_executor', authority: 'bidirectional', risk: 'high',
+    capabilities: ['repository state', 'push and pull request events', 'workflow dispatch', 'pull request lifecycle', 'long-running workflow status'],
+    evidenceTypes: ['CodeChange'], syncMode: 'hybrid', authSchemes: ['vault_reference', 'certificate', 'oauth', 'managed_identity'],
+    supportedProfiles: ALL, licenseFeature: 'core',
   },
   {
     id: 'microsoft-entra', name: 'Microsoft Entra ID', vendor: 'Microsoft', initials: 'ID', accent: '#ffae73',
@@ -116,7 +127,7 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
     supportedProfiles: ALL, licenseFeature: 'core',
   },
   {
-    id: 'firewall-executor', name: 'Firewall Control', vendor: 'Customer selected', initials: 'FW', accent: '#ff6b4a',
+    id: FIREWALL_CATALOG_ID, name: 'Firewall Control', vendor: 'Customer selected', initials: 'FW', accent: '#ff6b4a',
     description: 'Vendor-neutral executor for simulated and explicitly approved route or policy changes.',
     integrationClass: 'action_executor', authority: 'controlled_actions', risk: 'critical',
     capabilities: ['block route', 'quarantine segment', 'revoke temporary rule'],

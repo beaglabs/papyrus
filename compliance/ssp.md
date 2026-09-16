@@ -28,19 +28,19 @@ Papyrus is a customer-hosted durable agent runtime. The repository boundary incl
 
 | Evidence source | Git blob |
 | --- | --- |
-| `apps/server/src/agent/config.ts` | `552fb9bf10069fdfa8a9874de2323c7e2fbb5a5c` |
-| `apps/server/src/agent/http.ts` | `80b5919eafa105959ad1813c5551a022bd89b6a5` |
+| `apps/server/src/agent/config.ts` | `061bb55db27f9155e7ca5f7489050a650ee117b7` |
+| `apps/server/src/agent/http.ts` | `dd54a48515cbd24dddba0a45d13839bfc9852bb8` |
 | `apps/server/src/agent/action-worker.ts` | `edee5c81e503ea46f5596c806c73b39884e0383f` |
-| `apps/server/src/agent/catalog.ts` | `a819d585df10584ed256158060af9d1b8e03d25d` |
-| `apps/server/src/agent/link-store.ts` | `774cef0cce09023d636a0c654ea2a3e5d3a58ee2` |
-| `apps/server/src/agent/link-http.ts` | `528c4307baf755403d62219869318dc3935922ec` |
+| `apps/server/src/agent/catalog.ts` | `961c8baa2e9e925042fd875556998099eb73ac07` |
+| `apps/server/src/agent/link-store.ts` | `75cb2a0dd381bc622ad9c3b79e76083ccc944ddb` |
+| `apps/server/src/agent/link-http.ts` | `d6a0eee9c661f64a9258ee0858074c9a5f5dfbbf` |
 | `apps/server/src/agent/link-preview.ts` | `fc30c91eea30af9999019d6bc0c565240e13ace7` |
 | `apps/server/src/agent/executors/link-publisher-executor.ts` | `7f31a74af751f8d7009d1667f835b35890663cbd` |
-| `apps/server/src/agent/mastra/runtime.ts` | `e8bd53a1e01ecf8fc2b558b7c51c4c860a47d420` |
+| `apps/server/src/agent/mastra/runtime.ts` | `1ab29e831905e156c9763d0c66a472a70e414137` |
 | `apps/server/src/agent/mastra/workspace-agentfs.ts` | `c2b86023b6a6e33270fc07c745afc63c2fff55b3` |
-| `apps/server/src/agent/mastra/workspace-nono.ts` | `80f6ff30dc91cb10fe4b5370b1e93831fb4d09ef` |
-| `apps/server/src/agent/mastra/workspace-nono-worker.ts` | `0dcadce525f5f77664a580ceb444382ace17c0d1` |
-| `apps/server/src/agent/mastra/workspace-enclave.ts` | `18527b84887f2937733fb88c65d127e9e52164ee` |
+| `apps/server/src/agent/mastra/workspace-nono.ts` | `a9e50594c17b07afc03e14d50b76b4dfc2c8da77` |
+| `apps/server/src/agent/mastra/workspace-nono-worker.ts` | `98ab23dc87241b7149f4e1a58348d627ca75bfb3` |
+| `apps/server/src/agent/mastra/workspace-enclave.ts` | `b0aa5ca567e243cdb6fc930cdd294b52311c12aa` |
 
 ## Regeneration
 

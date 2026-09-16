@@ -129,7 +129,7 @@ export function ObservabilityPanel({ roles }: { roles: EntraAppRole[] }) {
       </div>
       <div className="obs-storage" title="Observability storage backend">
         <span className={`dot ${error ? 'warning' : 'good'}`} />
-        <span><strong>LibSQL</strong><small>{storage?.database ?? 'mastra.db'} · local</small></span>
+        <span><strong>LibSQL</strong><small>{storage?.database ?? 'observability.db'} · local</small></span>
       </div>
     </div>
 

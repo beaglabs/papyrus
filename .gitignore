@@ -7,6 +7,9 @@ dist/
 build/
 *.tsbuildinfo
 
+# License scripts
+/scripts/licensing/*
+
 # Coverage and testing
 coverage/
 .smoke/
@@ -15,6 +18,7 @@ coverage/
 .env
 .env.*
 !.env.example
+certs/
 
 # Logs
 *.log
@@ -52,3 +56,16 @@ compliance/sbom.spdx.json
 
 # Runtime state written by test and dev runs; never a source tree artifact.
 papyrus-agent-data/
+
+# Extension packs, consumed as workspace dependencies from a checkout of
+# beaglabs/papyrus-extensions. It carries its own .git, so it is a clone rather than
+# source here — populate it before installing:
+#   git clone https://github.com/beaglabs/papyrus-extensions.git vendor/papyrus-extensions
+#   pnpm --filter papyrus-extension-sdk --filter papyrus-gnss --filter papyrus-viewer-3d run build
+vendor/papyrus-extensions/
+
+# Local Azure CLI state, created when validating bicep templates.
+.azure-tmp/
+
+# Daytona SDK used to drive the Linux build host.
+.dtn/

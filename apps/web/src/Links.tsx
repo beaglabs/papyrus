@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { AgentLink, LinkType } from '@papyrus/contracts'
-import { listLinks, publicLinkUrl, workspaceFileContentUrl } from './api.js'
+import type { AgentLink, LinkInbound, LinkType } from '@papyrus/contracts'
+import { linkContentUrl, linkInboundUrl, linkInbounds, listLinks, publicLinkUrl, workspaceFileContentUrl } from './api.js'
 import { Alert, Badge, Button, Input, Skeleton } from './components/ui/index.js'
 
 type LinkFilter = 'all' | LinkType
@@ -67,6 +67,7 @@ function LinkTab({ active, onClick, icon, children }: { active: boolean; onClick
 function LinkCard({ link }: { link: AgentLink }) {
   const url = publicLinkUrl(link)
   const [copied, setCopied] = useState(false)
+  const [showInbounds, setShowInbounds] = useState(false)
   const copy = async () => {
     await navigator.clipboard.writeText(url)
     setCopied(true)
@@ -82,10 +83,53 @@ function LinkCard({ link }: { link: AgentLink }) {
     </div>
     <div className="link-card-body">
       <div className="link-card-title"><a href={url} target="_blank" rel="noreferrer">{link.name}</a><Badge>{link.state.toUpperCase()}</Badge></div>
-      <div className="link-meta"><span className="link-live-dot" />Live<span>·</span><span>{link.pingCount} pings</span><span>·</span><span>{link.inboundCount} inbounds</span></div>
-      <div className="link-card-foot"><span>{link.type === 'webhook' && link.threadId ? `Session · ${shortId(link.threadId)}` : link.workflowId ? `Workflow · ${link.workflowId}` : link.scheduleId ? `Schedule · ${link.scheduleId}` : 'General'}</span><span>{link.type === 'webhook' ? 'Mastra Webhook Signal' : link.validationProvider ? `Validated · ${link.validationProvider}` : 'Approved snapshot'}</span><Button variant="ghost" onClick={() => void copy()} aria-label={`Copy ${link.name} Link`}>{copied ? 'Copied ✓' : 'Copy link'}</Button></div>
+      <div className="link-meta">
+        <span className="link-live-dot" />Live<span>·</span><span>{link.pingCount} pings</span><span>·</span>
+        <button type="button" className="link-inbound-toggle" aria-expanded={showInbounds} onClick={() => setShowInbounds((open) => !open)}>
+          {link.inboundCount} inbounds {showInbounds ? '▴' : '▾'}
+        </button>
+      </div>
+      {showInbounds && <LinkInbounds link={link} />}
+      <div className="link-card-foot"><span>{link.type === 'webhook' && link.threadId ? `Session · ${shortId(link.threadId)}` : link.workflowId ? `Workflow · ${link.workflowId}` : link.scheduleId ? `Schedule · ${link.scheduleId}` : 'General'}</span><span>{link.type === 'webhook' ? 'Mastra Webhook Signal' : link.validationProvider ? `Validated · ${link.validationProvider}` : 'Approved snapshot'}</span><span className="link-card-foot-actions"><a className="link-snapshot" href={linkContentUrl(link.id, true)} title="Download the approved snapshot this Link serves">Snapshot ↓</a><Button variant="ghost" onClick={() => void copy()} aria-label={`Copy ${link.name} Link`}>{copied ? 'Copied ✓' : 'Copy link'}</Button></span></div>
     </div>
   </article>
+}
+
+/**
+ * What actually arrived on a Link, and the only place it can be read back.
+ *
+ * A workflow-bound API Link answers GET by running its workflow, so the pinned snapshot is not
+ * retrievable through the Link itself, and inbound records were previously only reachable by
+ * listing metadata, copying a blob path out of it, and reading that path as a workspace file.
+ * Both are served from authenticated portal routes here; the Link URL is a public boundary and
+ * inbound traffic is customer data, so none of this is exposed there.
+ */
+function LinkInbounds({ link }: { link: AgentLink }) {
+  const [inbounds, setInbounds] = useState<LinkInbound[]>()
+  const [error, setError] = useState<string>()
+
+  useEffect(() => {
+    let active = true
+    linkInbounds(link.id).then((records) => { if (active) setInbounds(records) })
+      .catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : 'Unable to load inbound records') })
+    return () => { active = false }
+  }, [link.id])
+
+  if (error) return <p className="link-inbounds-empty">{error}</p>
+  if (!inbounds) return <p className="link-inbounds-empty">Loading received records…</p>
+  if (!inbounds.length) return <p className="link-inbounds-empty">Nothing has arrived on this Link yet.</p>
+
+  return <ul className="link-inbounds">
+    {inbounds.map((record) => <li key={record.id}>
+      <span className="link-inbounds-method">{record.method}</span>
+      <span className="link-inbounds-when">{new Date(record.receivedAt).toLocaleString()}</span>
+      <span className="link-inbounds-size">{record.size} B</span>
+      <span className="link-inbounds-actions">
+        <a href={linkInboundUrl(link.id, record.id)} target="_blank" rel="noreferrer">View</a>
+        <a href={linkInboundUrl(link.id, record.id, true)} download>Download</a>
+      </span>
+    </li>)}
+  </ul>
 }
 
 function WebhookPreview({ link }: { link: AgentLink }) {

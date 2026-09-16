@@ -1,19 +1,21 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { PortalData, PublicConfig } from './api.js'
-import { AuthenticationRequired, createSession, deleteSession, loadPortal, logout, publicConfig, type AgentSession } from './api.js'
+import { AuthenticationRequired, createSession, deleteSession, loadAgentStatus, loadPortal, logout, publicConfig, type AgentSession, type AgentStatus } from './api.js'
 import { AgentView } from './Agent.js'
+import { AccessView } from './Access.js'
 import { LibraryView } from './Library.js'
 import { LinksView } from './Links.js'
 import { ModelsView } from './Models.js'
 import { ObservabilityPanel } from './Observability.js'
+import { Onboarding } from './Onboarding.js'
 import { Alert, Avatar, Badge, Button, Card, DropdownMenu, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, Skeleton } from './components/ui/index.js'
 import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarRail, SidebarTrigger } from './components/ui/sidebar.js'
 
-export type PortalView = 'agent' | 'models' | 'links' | 'library' | 'governance'
-type AppState = { phase: 'loading' } | { phase: 'signed-out'; config: PublicConfig } | { phase: 'ready'; data: PortalData } | { phase: 'error'; message: string }
+export type PortalView = 'agent' | 'models' | 'links' | 'library' | 'governance' | 'access'
+type AppState = { phase: 'loading' } | { phase: 'bootstrap' } | { phase: 'signed-out'; config: PublicConfig } | { phase: 'ready'; data: PortalData } | { phase: 'error'; message: string }
 
 const ROUTES: Record<PortalView, string> = {
-  agent: '/portal', models: '/portal/models', links: '/portal/links', library: '/portal/library', governance: '/portal/governance',
+  agent: '/portal', models: '/portal/models', links: '/portal/links', library: '/portal/library', governance: '/portal/governance', access: '/portal/access',
 }
 
 function viewFromPath(): PortalView {
@@ -31,7 +33,11 @@ export function App() {
   const [initialPrompt, setInitialPrompt] = useState(() => new URLSearchParams(window.location.search).get('prompt') ?? undefined)
 
   const refresh = useCallback(async () => {
-    try { setState({ phase: 'ready', data: await loadPortal() }) }
+    try {
+      const config = await publicConfig()
+      if (config.bootstrap) { setState({ phase: 'bootstrap' }); return }
+      setState({ phase: 'ready', data: await loadPortal() })
+    }
     catch (cause) {
       if (cause instanceof AuthenticationRequired) {
         try { setState({ phase: 'signed-out', config: await publicConfig() }) }
@@ -56,6 +62,7 @@ export function App() {
   }
 
   if (state.phase === 'loading') return <PortalSkeleton />
+  if (state.phase === 'bootstrap') return <Onboarding />
   if (state.phase === 'error') return <main className="center login"><Logo /><p className="eyebrow">DAEMON UNAVAILABLE</p><h1>Unable to open<br />Papyrus.</h1><Alert className="error">{state.message}</Alert><Button className="primary" onClick={() => { setState({ phase: 'loading' }); void refresh() }}>Try again →</Button></main>
   if (state.phase === 'signed-out') return <SignedOut config={state.config} />
 
@@ -88,21 +95,21 @@ export function App() {
           </SidebarMenu>
         </SidebarHeader>
         <SidebarContent>
-          <SidebarGroup className="sidebar-history-group">
-            <SidebarGroupLabel>History</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SessionHistory sessions={data.sessions} selectedId={selectedSession?.id} onSelect={(id) => navigate('agent', { session: id })} onDelete={(session) => void removeSession(session)} />
-            </SidebarGroupContent>
-          </SidebarGroup>
           <SidebarGroup>
             <SidebarGroupLabel>Platform</SidebarGroupLabel>
             <SidebarGroupContent>
               <PrimaryNavigation view={view} onNavigate={navigate} />
             </SidebarGroupContent>
           </SidebarGroup>
+          <SidebarGroup className="sidebar-history-group">
+            <SidebarGroupLabel>History</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SessionHistory sessions={data.sessions} selectedId={selectedSession?.id} onSelect={(id) => navigate('agent', { session: id })} onDelete={(session) => void removeSession(session)} />
+            </SidebarGroupContent>
+          </SidebarGroup>
         </SidebarContent>
         <SidebarFooter>
-          <div className="runtime-panel"><span className="runtime-label">RUNTIME</span><strong><span className={`dot ${data.agent.agentReady ? 'good' : 'warning'}`} /><span className="sidebar-copy">{data.agent.agentReady ? 'Mastra online' : 'Mastra storage online'}</span></strong><small className="sidebar-copy">{data.agent.model ?? 'Model configuration required'}</small></div>
+          <RuntimeStatusStrip status={data.agent} sessionId={selectedSession?.id} />
           <DropdownMenu className="account-menu" trigger={<div className="account-trigger-content"><Avatar className="avatar">{initials(data.me.displayName)}</Avatar><span className="account-copy sidebar-copy"><strong>{data.me.displayName}</strong><small>ENTRA · {data.me.roles.length} ROLES</small></span><span className="sidebar-copy">•••</span></div>}>
             <DropdownMenuLabel><strong>{data.me.displayName}</strong><span>{data.me.preferredUsername ?? data.me.oid}</span></DropdownMenuLabel><DropdownMenuSeparator /><DropdownMenuItem disabled>Roles managed in Microsoft Entra</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem className="danger-item" onClick={() => void signOut()}>Sign out</DropdownMenuItem>
           </DropdownMenu>
@@ -117,6 +124,7 @@ export function App() {
         {view === 'links' && <LinksView {...(data.agent.links?.validation ? { validation: data.agent.links.validation } : {})} />}
         {view === 'library' && <LibraryView />}
         {view === 'governance' && <GovernanceView data={data} />}
+        {view === 'access' && <AccessView me={data.me} />}
       </SidebarInset>
     </SidebarProvider>
   </>
@@ -151,11 +159,81 @@ function SignedOut({ config }: { config: PublicConfig }) {
     : <Alert className="error">This deployment does not have Microsoft Entra configured.</Alert>}<div className="login-facts"><span>{config.organizationName}</span><span>{profileLabel(config.profile)}</span><span>{config.cloud}</span></div></main></>
 }
 
+export function scheduleSummary(jobs: NonNullable<AgentStatus['jobs']>): string {
+  const { active, paused, nextFireAt } = jobs.schedules
+  const parts = [`${active} active ${active === 1 ? 'schedule' : 'schedules'}`]
+  if (paused > 0) parts.push(`${paused} paused`)
+  if (typeof nextFireAt === 'number' && Number.isFinite(nextFireAt)) {
+    parts.push(`next ${new Date(nextFireAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`)
+  }
+  return parts.join(' · ')
+}
+
+export function backgroundSummary(jobs: NonNullable<AgentStatus['jobs']>): string {
+  if (!jobs.background.observed) return 'job queue unavailable'
+  const { running, queued } = jobs.background
+  if (running === 0 && queued === 0) return 'no jobs running'
+  return [running > 0 ? `${running} running` : null, queued > 0 ? `${queued} queued` : null].filter(Boolean).join(' · ')
+}
+
+/**
+ * The durable objective, if this session has one. Undefined rather than a placeholder, so a
+ * session with no goal renders exactly the strip it rendered before goals existed and an
+ * operator never sees a goal line that means nothing.
+ */
+export function goalSummary(jobs: NonNullable<AgentStatus['jobs']>): string | undefined {
+  const goal = jobs.goal
+  if (!goal) return undefined
+  const budget = typeof goal.maxRuns === 'number' && goal.maxRuns > 0 ? ` · ${goal.runsUsed}/${goal.maxRuns} judged` : ''
+  return `goal ${goal.status}${budget}`
+}
+
+/**
+ * Footer runtime status. Recurring work and running jobs are session-scoped: the strip
+ * only reports what the daemon can observe for the selected session, and says so when it
+ * cannot observe the background queue rather than reporting zero.
+ */
+/**
+ * How often the footer re-reads session job state. A status strip that only loads once
+ * is wrong the moment a job starts or a schedule fires, and there is no push channel for
+ * either, so it polls. Five seconds is well inside the daemon's own schedule tick and
+ * cheap: the endpoint returns counts, not transcripts.
+ */
+const JOBS_POLL_MS = 5_000
+
+export function RuntimeStatusStrip({ status, sessionId }: { status: AgentStatus; sessionId?: string | undefined }) {
+  const [jobs, setJobs] = useState<AgentStatus['jobs']>()
+
+  useEffect(() => {
+    if (!sessionId) { setJobs(undefined); return }
+    let cancelled = false
+    const load = () => {
+      void loadAgentStatus(sessionId)
+        .then((next) => { if (!cancelled) setJobs(next.jobs) })
+        .catch(() => { if (!cancelled) setJobs(undefined) })
+    }
+    load()
+    const timer = setInterval(load, JOBS_POLL_MS)
+    return () => { cancelled = true; clearInterval(timer) }
+  }, [sessionId])
+
+  return <div className="runtime-panel">
+    <span className="runtime-label">RUNTIME</span>
+    <strong><span className={`dot ${status.agentReady ? 'good' : 'warning'}`} /><span className="sidebar-copy">{status.agentReady ? 'Mastra online' : 'Mastra storage online'}</span></strong>
+    <small className="sidebar-copy">{status.model ?? 'Model configuration required'}</small>
+    {jobs && <div className="runtime-jobs" data-session={jobs.sessionId}>
+      {goalSummary(jobs) && <span title={jobs.goal?.objective}><i className={`dot ${jobs.goal?.status === 'active' ? 'good' : ''}`} />{goalSummary(jobs)}</span>}
+      <span><i className={`dot ${jobs.schedules.active > 0 ? 'good' : ''}`} />{scheduleSummary(jobs)}</span>
+      <span><i className={`dot ${jobs.background.running > 0 ? 'good' : ''}`} />{backgroundSummary(jobs)}</span>
+    </div>}
+  </div>
+}
+
 export function PrimaryNavigation({ view, onNavigate }: { view: PortalView; onNavigate: (view: PortalView) => void }) {
   const items: Array<{ view: PortalView; icon: string; label: string }> = [
     { view: 'agent', icon: '✦', label: 'Agent' }, { view: 'models', icon: '◎', label: 'Models' },
     { view: 'links', icon: '◎', label: 'Links' }, { view: 'library', icon: '▤', label: 'Library' },
-    { view: 'governance', icon: '◇', label: 'Governance' },
+    { view: 'governance', icon: '◇', label: 'Governance' }, { view: 'access', icon: '◈', label: 'Access' },
   ]
   return <SidebarMenu aria-label="Primary navigation">{items.map((item) => <SidebarMenuItem key={item.view}><SidebarMenuButton isActive={view === item.view} tooltip={item.label} onClick={() => onNavigate(item.view)}><span className="sidebar-icon" aria-hidden="true">{item.icon}</span><span className="sidebar-copy">{item.label}</span></SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu>
 }
@@ -164,8 +242,13 @@ function PortalHeader({ view, data }: { view: PortalView; data: PortalData }) {
   const copy: Record<PortalView, [string, string]> = {
     agent: ['MASTRA RUNTIME', 'Agent'], models: ['MODEL GATEWAYS', 'Models'],
     links: ['AGENT-CREATED PUBLIC BOUNDARIES', 'Links'], library: ['AGENTFS FILE AUTHORITY', 'Library'], governance: ['IDENTITY, LICENSING AND AUDIT', 'Governance'],
+    access: ['IDENTITY AND ENTITLEMENTS', 'Access'],
   }
-  return <header className="portal-header"><div className="portal-header-title"><SidebarTrigger /><div><p className="eyebrow">{copy[view][0]}</p><h1>{copy[view][1]}</h1></div></div><div className="header-status"><span><i className="dot good" />DAEMON HEALTHY</span><small>{data.config.organizationName}</small></div></header>
+  // The health claim was literal text with a hardcoded green dot, so it read "DAEMON HEALTHY"
+  // even with no model configured and agent chat disabled. A status that cannot be false is
+  // worse than none, so it now follows the daemon's own reported state. The wording in the
+  // healthy case is unchanged.
+  return <header className="portal-header"><div className="portal-header-title"><SidebarTrigger /><div><p className="eyebrow">{copy[view][0]}</p><h1>{copy[view][1]}</h1></div></div><div className="header-status"><span><i className={`dot ${data.agent.ready ? 'good' : 'warning'}`} />{data.agent.ready ? 'DAEMON HEALTHY' : 'DAEMON UNREACHABLE'}</span><small>{data.config.organizationName}</small></div></header>
 }
 
 function GovernanceView({ data }: { data: PortalData }) {

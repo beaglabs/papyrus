@@ -69,12 +69,18 @@ The web product is rooted at `/portal`:
 | --- | --- |
 | `/portal` | Durable agent sessions and AI SDK UI tool cards |
 | `/portal/models` | Customer model gateways and the agent-guided model configuration form |
-| `/portal/plugins` | Installed plugins and the agent-visible tool catalog |
-| `/portal/scheduled` | Persistent Mastra agent schedules |
-| `/portal/workflows` | Durable, inspectable Mastra workflows |
+| `/portal/links` | Agent-created public boundaries and their validation state |
+| `/portal/library` | AgentFS file authority |
 | `/portal/governance` | Entra roles, licensing, and action boundary |
 
-Plugin configuration happens inside agent messages. A generated tool exists for every catalog entry and returns a typed secure-configuration card. Credential values are never placed in model context; the card sends credential references directly to the daemon. The governed lifecycle remains:
+There are no catalog pages for plugins, integrations, schedules, or workflows. Recurring work
+and running jobs surface as session-scoped status; connector configuration is conversational.
+See [docs/decisions/0001-portal-surface.md](docs/decisions/0001-portal-surface.md).
+
+Integration configuration is designed to happen inside agent messages: credential values never
+enter model context and resolve at the connector-driver execution boundary. That conversational
+configuration tool is **not implemented yet** — the catalog and its governed lifecycle currently
+exist server-side only. The governed lifecycle is:
 
 ```text
 Draft → Tested → Awaiting Approval → Active → Degraded / Disabled
@@ -165,29 +171,17 @@ Authenticated portal clients use:
 - `GET|POST /api/model-profiles`
 - `POST|DELETE /api/model-profiles/:id` — test, select, disable, or remove a durable model profile
 
-**Plugins, schedules, workflows, and signals**
+**Workflows and signals**
 
-- `GET /api/plugins`
-- `POST /api/plugins/connect`
-- `GET|POST /api/schedules`
 - `GET /api/workflows`
 - `POST /api/workflows/:id/runs`
 - `POST /api/signals/:sourceId/webhook` — source-scoped token required
 
-**Integrations**
+**Terrain**
 
-- `GET /api/integrations/catalog`
-- `GET /api/integrations`
-- `POST /api/integrations`
-- `POST /api/integrations/:id/test`
-- `POST /api/integrations/:id/submit`
-- `POST /api/integrations/:id/activate`
-- `POST /api/integrations/:id/disable`
-- `GET /api/integrations/:id/events`
-- `POST /api/integrations/:id/observations`
-- `POST /api/integrations/:id/sync`
-- `GET /api/integrations/:id/sync-jobs`
-- `GET /api/terrain`
+- `GET /api/terrain` — read-only entity/relationship snapshot
+
+There is no portal HTTP API for plugins, schedules, or integrations; those paths return 404.
 
 Teams SSO tokens can be exchanged at `POST /api/auth/teams`; standard portal login uses Entra authorization code + PKCE through `/api/auth/entra/login`.
 
@@ -196,7 +190,7 @@ Teams SSO tokens can be exchanged at `POST /api/auth/teams`; standard portal log
 > [!IMPORTANT]
 > Papyrus was deemed **Awardable** on the DoW CDAO [Tradewinds Solutions Marketplace](https://www.tradewindai.com/tw-marketplace) — a post-competition status that lets DoW organizations view, select, and award the solution without running a fresh competition.
 
-This branch implements the Entra-native daemon, offline licensing, governed plugin lifecycle, action ledger and leased executor worker, Mastra LibSQL memory, durable evented agent registration, session history, native schedules, a signal-intake workflow, WebhookSignalProvider delivery backed by a database-leased outbox, agent-rendered plugin configuration cards, and guarded URL previews.
+This branch implements the Entra-native daemon, offline licensing, the governed connector catalog and lifecycle, the action ledger and leased executor worker, Mastra LibSQL memory, durable evented agent registration, session history, native session-scoped schedules, a signal-intake workflow, WebhookSignalProvider delivery backed by a database-leased outbox, and guarded URL previews.
 
 Mastra is now a server dependency. Its storage starts even when no model is configured, so session and workflow state remain available. When `PAPYRUS_AGENT_MODEL` is absent, the daemon refuses chat and keeps incoming signals in `agent_signal_outbox`; it does not invent a default provider or discard events.
 

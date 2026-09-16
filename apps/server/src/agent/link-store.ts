@@ -261,7 +261,7 @@ export class LinkStore {
       id,name,slug,type,state,blob_path,media_type,source_sha256,public_path,workflow_id,schedule_id,
       thread_id,resource_id,logo_path,logo_media_type,logo_text,
       created_by_oid,created_at,updated_at,ping_count,inbound_count
-    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0)`).run(
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0)`).run(
       manifest.draftId,
       manifest.name,
       manifest.slug,
@@ -357,20 +357,37 @@ export class LinkStore {
     return { id, ...input }
   }
 
+  /**
+   * One stored inbound, addressed by its own id.
+   *
+   * Callers must confirm it belongs to the link they are serving from: an inbound id is not a
+   * capability, and someone holding one link's id must not be able to read another link's
+   * traffic. The linkId is therefore part of the lookup, not a check the caller might forget.
+   */
+  getInbound(linkId: string, inboundId: string): LinkInbound | undefined {
+    this.require(linkId)
+    const row = this.db.sqlite.prepare('SELECT * FROM agent_link_inbounds WHERE id=? AND link_id=?').get(inboundId, linkId) as Row | undefined
+    return row ? this.inbound(row) : undefined
+  }
+
   listInbounds(linkId: string, limit = 100): LinkInbound[] {
     this.require(linkId)
     const bounded = Math.min(500, Math.max(1, Math.floor(limit)))
     return (this.db.sqlite.prepare('SELECT * FROM agent_link_inbounds WHERE link_id=? ORDER BY received_at DESC LIMIT ?').all(linkId, bounded) as Row[])
-      .map((row) => ({
-        id: String(row.id),
-        linkId: String(row.link_id),
-        blobPath: String(row.blob_path),
-        method: String(row.method),
-        ...(row.content_type ? { contentType: String(row.content_type) } : {}),
-        receivedAt: String(row.received_at),
-        size: Number(row.size),
-        sha256: String(row.sha256),
-      }))
+      .map((row) => this.inbound(row))
+  }
+
+  private inbound(row: Row): LinkInbound {
+    return {
+      id: String(row.id),
+      linkId: String(row.link_id),
+      blobPath: String(row.blob_path),
+      method: String(row.method),
+      ...(row.content_type ? { contentType: String(row.content_type) } : {}),
+      receivedAt: String(row.received_at),
+      size: Number(row.size),
+      sha256: String(row.sha256),
+    }
   }
 
   private require(id: string): AgentLink {

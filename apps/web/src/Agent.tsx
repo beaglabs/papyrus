@@ -2,12 +2,15 @@ import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport, type UIMessage } from 'ai'
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactElement } from 'react'
 import type { AgentSession, AgentStatus, WorkspaceLibraryFile } from './api.js'
-import { approveProposal, approveSkill, createSessionProposal, denyProposal, sessionMessages, setSessionAttention, uploadWorkspaceAttachment, workspaceFiles } from './api.js'
+import type { AgentActionProposal } from '@papyrus/contracts'
+import { approveProposal, approveSkill, createSessionProposal, denyProposal, listProposals, sessionMessages, setSessionAttention, uploadWorkspaceAttachment, workspaceFiles } from './api.js'
+import { chatRequestBody } from './chat-request.js'
 import { ModelGatewayCard } from './Models.js'
 import { Alert, Badge, Button, Card, CommandBlock, Input, Skeleton } from './components/ui/index.js'
 import { MarkdownMessage } from './Markdown.js'
-import { buildCardRegistry, type CardRegistry, type ExtensionUiProvider } from './extensions/extension-sdk.js'
-import { viewer3dUiProvider } from './extensions/viewer-3d.js'
+import { buildCardRegistry, type CardRegistry, type ExtensionUiProvider } from 'papyrus-extension-sdk'
+import { viewer3dUiProvider } from 'papyrus-viewer-3d/ui'
+import { gnssUiProvider } from 'papyrus-gnss/ui'
 
 interface AgentFormField {
   name: string
@@ -72,6 +75,11 @@ interface SkillDraftOutput {
   }
 }
 
+/** How often to re-read the thread while a reply this tab is not streaming has yet to land. */
+const HISTORY_POLL_MS = 4_000
+/** Roughly ten minutes of looking, so an abandoned turn cannot poll forever. */
+const HISTORY_POLL_LIMIT = 150
+
 export function AgentView({ session, status, initialPrompt, canApprove, canManageSkills, onChanged }: {
   session: AgentSession
   status: AgentStatus
@@ -84,6 +92,9 @@ export function AgentView({ session, status, initialPrompt, canApprove, canManag
   const [input, setInput] = useState(initialPrompt ?? '')
   const [historyError, setHistoryError] = useState<string>()
   const [historyLoading, setHistoryLoading] = useState(true)
+  // True while this tab holds a live stream. The transcript then belongs to useChat and must
+  // not be swapped underneath it.
+  const [streaming, setStreaming] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -99,10 +110,33 @@ export function AgentView({ session, status, initialPrompt, canApprove, canManag
     return () => { active = false }
   }, [session.id])
 
-  return <Chat key={`${session.id}:${initial.length}`} session={session} status={status} initial={initial} input={input} setInput={setInput} historyError={historyError} historyLoading={historyLoading} canApprove={canApprove} canManageSkills={canManageSkills} onChanged={onChanged} />
+  // A turn does not belong to this tab. The daemon finishes it and writes it to the thread
+  // whether or not anyone is watching — that is what durable means — but the transcript here
+  // was read once, at mount, and never again. Coming back mid-turn therefore showed the
+  // question with no answer, and nothing refetched, so completed work read as dropped.
+  // While no stream of ours is live and the transcript still ends on a user turn, keep
+  // looking; this stops the moment the reply lands.
+  const awaitingReply = !historyLoading && !streaming && (initial[initial.length - 1] as { role?: string } | undefined)?.role === 'user'
+  useEffect(() => {
+    if (!awaitingReply) return
+    let active = true
+    let attempts = 0
+    const timer = setInterval(() => {
+      attempts += 1
+      void sessionMessages(session.id).then((messages) => {
+        if (!active) return
+        setInitial(messages)
+        const tail = messages[messages.length - 1] as { role?: string } | undefined
+        if (!tail || tail.role !== 'user' || attempts >= HISTORY_POLL_LIMIT) clearInterval(timer)
+      }).catch(() => clearInterval(timer))
+    }, HISTORY_POLL_MS)
+    return () => { active = false; clearInterval(timer) }
+  }, [session.id, awaitingReply])
+
+  return <Chat key={`${session.id}:${initial.length}`} session={session} status={status} initial={initial} input={input} setInput={setInput} historyError={historyError} historyLoading={historyLoading} canApprove={canApprove} canManageSkills={canManageSkills} onChanged={onChanged} onStreamingChange={setStreaming} />
 }
 
-function Chat({ session, status, initial, input, setInput, historyError, historyLoading, canApprove, canManageSkills, onChanged }: {
+function Chat({ session, status, initial, input, setInput, historyError, historyLoading, canApprove, canManageSkills, onChanged, onStreamingChange }: {
   session: AgentSession
   status: AgentStatus
   initial: UIMessage[]
@@ -113,6 +147,7 @@ function Chat({ session, status, initial, input, setInput, historyError, history
   canApprove: boolean
   canManageSkills: boolean
   onChanged: () => Promise<void>
+  onStreamingChange: (streaming: boolean) => void
 }) {
   const [attachments, setAttachments] = useState<WorkspaceLibraryFile[]>([])
   const attachmentRef = useRef<WorkspaceLibraryFile[]>([])
@@ -123,16 +158,22 @@ function Chat({ session, status, initial, input, setInput, historyError, history
     api: '/api/agent/chat',
     credentials: 'same-origin',
     prepareSendMessagesRequest: ({ messages, trigger }) => ({
-      body: {
+      // Only the newest user message goes on the wire: the daemon reads that one
+      // and takes history from the durable thread. Sending the whole transcript
+      // grows every turn until the request cap rejects it. See chat-request.ts.
+      body: chatRequestBody({
         threadId: session.id,
         messages,
         trigger,
         attachments: attachmentRef.current.map((file) => ({ path: file.path })),
-      },
+      }),
     }),
   }), [session.id])
   const { messages, sendMessage, status: chatStatus, error, stop } = useChat({ id: session.id, messages: initial, transport })
   const working = chatStatus === 'submitted' || chatStatus === 'streaming'
+  // Tell the view whether this tab owns a live stream, so it knows when the transcript may
+  // safely be replaced from the thread.
+  useEffect(() => { onStreamingChange(working) }, [working, onStreamingChange])
 
   useEffect(() => {
     if (!followLatestRef.current) return
@@ -364,13 +405,12 @@ function Welcome() {
 // Dynamic viewer cards. Out-of-core extension UI providers are wired into the core
 // through the papyrus-extension-sdk contract (buildCardRegistry) and routed by their
 // tool output `kind`. The core never executes extension markup; it only hands typed,
-// read-only tool output to the registered card. Providers are vendored under
-// ./extensions (papyrus-extension-sdk + papyrus-viewer-3d) until those packs are
-// consumed as workspace dependencies (needs a pnpm-lock.yaml regeneration); swapping
-// to the package imports is then a mechanical change here.
+// read-only tool output to the registered card. The providers come from the
+// papyrus-extensions packages as workspace dependencies, so there is one copy of the
+// contract rather than a vendored one that could drift from it.
 type ExtensionCardComponent = (props: { output: Record<string, unknown> }) => ReactElement
 const EXTENSION_CARDS: CardRegistry<ExtensionCardComponent> = buildCardRegistry(
-  [viewer3dUiProvider] as unknown as ExtensionUiProvider<ExtensionCardComponent>[],
+  [viewer3dUiProvider, gnssUiProvider] as unknown as ExtensionUiProvider<ExtensionCardComponent>[],
 )
 
 function Message({ message, sessionId, canApprove, canManageSkills, onChanged }: { message: UIMessage; sessionId: string; canApprove: boolean; canManageSkills: boolean; onChanged: () => Promise<void> }) {
@@ -500,16 +540,83 @@ function firstLine(value: string): string {
   return line.length > 160 ? `${line.slice(0, 157)}…` : line
 }
 
+/**
+ * What a suggestion card can show, derived from the proposal the daemon holds rather than
+ * from what happened in this tab. `executed` renders nothing: the action is done and the
+ * record of it is the ledger, not a card left sitting in the transcript.
+ */
+type ProposalCardStatus = 'suggested' | 'saving' | 'proposed' | 'in_flight' | 'denied' | 'failed' | 'executed'
+const PROPOSAL_POLL_MS = 3_000
+/** Roughly two minutes of watching an approved action reach a terminal state. */
+const PROPOSAL_POLL_LIMIT = 40
+const PROPOSAL_BADGE: Record<ProposalCardStatus, string> = {
+  suggested: 'suggested', saving: 'saving', proposed: 'proposed',
+  in_flight: 'executing', denied: 'denied', failed: 'failed', executed: 'executed',
+}
+
+function proposalCardStatus(proposal: AgentActionProposal | undefined): ProposalCardStatus {
+  switch (proposal?.status) {
+    case undefined: return 'suggested'
+    case 'proposed': return 'proposed'
+    case 'executed': return 'executed'
+    case 'denied': case 'expired': return 'denied'
+    case 'failed': return 'failed'
+    default: return 'in_flight'
+  }
+}
+
 function ActionSuggestionCard({ suggestion, sessionId, canApprove, onChanged }: { suggestion: Record<string, unknown>; sessionId: string; canApprove: boolean; onChanged: () => Promise<void> }) {
+  const executorIntegrationId = String(suggestion['executorIntegrationId'] ?? '')
+  const action = String(suggestion['action'] ?? '')
+  const target = String(suggestion['target'] ?? '')
   const [proposalId, setProposalId] = useState<string>()
-  const [status, setStatus] = useState<'suggested' | 'saving' | 'proposed' | 'approved' | 'denied'>('suggested')
+  const [status, setStatus] = useState<ProposalCardStatus>('suggested')
   const [error, setError] = useState<string>()
   useEffect(() => { void setSessionAttention(sessionId, true).then(onChanged).catch(() => undefined) }, [sessionId, onChanged])
+
+  // A card is a transcript part, so every reload rebuilds it with no memory of what was done
+  // to it. It used to come back offering "Submit for approval" for an action that had already
+  // been released, and clicking again filed a duplicate proposal. The proposal is the record,
+  // so the card reads its own state back from the daemon instead of assuming it is new.
+  useEffect(() => {
+    let active = true
+    void listProposals().then((proposals) => {
+      if (!active) return
+      const found = proposals
+        .filter((candidate) => candidate.executorIntegrationId === executorIntegrationId && candidate.action === action && candidate.target === target)
+        .sort((a, b) => String(b.proposedAt ?? '').localeCompare(String(a.proposedAt ?? '')))[0]
+      if (!found) return
+      setProposalId(found.id)
+      setStatus(proposalCardStatus(found))
+    }).catch(() => undefined)
+    return () => { active = false }
+  }, [executorIntegrationId, action, target])
+
+  // Once approved, the operator should not have to reload to learn the outcome. Watch the
+  // proposal until it is terminal, then stop; a card that is already resolved never polls.
+  useEffect(() => {
+    if (status !== 'in_flight') return
+    let active = true
+    let attempts = 0
+    const timer = setInterval(() => {
+      attempts += 1
+      void listProposals().then((proposals) => {
+        if (!active) return
+        const found = proposals.find((candidate) => candidate.id === proposalId)
+        if (!found) return
+        const next = proposalCardStatus(found)
+        setStatus(next)
+        if (next !== 'in_flight' || attempts >= PROPOSAL_POLL_LIMIT) clearInterval(timer)
+      }).catch(() => clearInterval(timer))
+    }, PROPOSAL_POLL_MS)
+    return () => { active = false; clearInterval(timer) }
+  }, [status, proposalId])
+
   const propose = async () => {
     setStatus('saving'); setError(undefined)
     try {
       const proposal = await createSessionProposal(sessionId, {
-        executorIntegrationId: String(suggestion['executorIntegrationId'] ?? ''), action: String(suggestion['action'] ?? ''), target: String(suggestion['target'] ?? ''),
+        executorIntegrationId, action, target,
         rationaleClaimIds: Array.isArray(suggestion['rationaleClaimIds']) ? suggestion['rationaleClaimIds'].filter((value): value is string => typeof value === 'string') : [],
         ...(suggestion['parameters'] && typeof suggestion['parameters'] === 'object' && !Array.isArray(suggestion['parameters']) ? { parameters: suggestion['parameters'] as Record<string, unknown> } : {}),
       })
@@ -519,11 +626,14 @@ function ActionSuggestionCard({ suggestion, sessionId, canApprove, onChanged }: 
   const decide = async (approved: boolean) => {
     if (!proposalId) return
     try {
-      if (approved) { await approveProposal(proposalId); setStatus('approved') } else { await denyProposal(proposalId); setStatus('denied') }
+      if (approved) { await approveProposal(proposalId); setStatus('in_flight') } else { await denyProposal(proposalId); setStatus('denied') }
       await setSessionAttention(sessionId, false); await onChanged()
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to record decision') }
   }
-  return <Card className="action-suggestion"><div className="action-suggestion-head"><span className="attention-icon">!</span><div><p className="eyebrow">ACTION SUGGESTION</p><h3>{String(suggestion['action'] ?? 'Proposed action')}</h3></div><Badge>{status}</Badge></div><dl><div><dt>Target</dt><dd>{String(suggestion['target'] ?? '—')}</dd></div><div><dt>Executor</dt><dd>{String(suggestion['executorIntegrationId'] ?? '—')}</dd></div></dl><p>{String(suggestion['rationale'] ?? '')}</p>{error && <Alert className="error">{error}</Alert>}<div className="proposal-controls">{status === 'suggested' && <Button className="primary" onClick={() => void propose()}>Submit for approval</Button>}{status === 'saving' && <Button disabled>Recording…</Button>}{status === 'proposed' && canApprove && <><Button className="primary" onClick={() => void decide(true)}>Approve and queue</Button><Button variant="ghost" onClick={() => void decide(false)}>Deny</Button></>}{status === 'proposed' && !canApprove && <small>Waiting for a Papyrus.Action.Approve operator.</small>}</div></Card>
+
+  if (status === 'executed') return null
+
+  return <Card className="action-suggestion"><div className="action-suggestion-head"><span className="attention-icon">!</span><div><p className="eyebrow">ACTION SUGGESTION</p><h3>{action || 'Proposed action'}</h3></div><Badge>{PROPOSAL_BADGE[status]}</Badge></div><dl><div><dt>Target</dt><dd>{target || '—'}</dd></div><div><dt>Executor</dt><dd>{executorIntegrationId || '—'}</dd></div></dl><p>{String(suggestion['rationale'] ?? '')}</p>{error && <Alert className="error">{error}</Alert>}<div className="proposal-controls">{status === 'suggested' && <Button className="primary" onClick={() => void propose()}>Submit for approval</Button>}{status === 'saving' && <Button disabled>Recording…</Button>}{status === 'proposed' && canApprove && <><Button className="primary" onClick={() => void decide(true)}>Approve and queue</Button><Button variant="ghost" onClick={() => void decide(false)}>Deny</Button></>}{status === 'proposed' && !canApprove && <small>Waiting for a Papyrus.Action.Approve operator.</small>}{status === 'in_flight' && <small>Approved — running in the action ledger.</small>}{status === 'denied' && <small>Not released.</small>}{status === 'failed' && <small>The release failed; the executor&apos;s reason is on the ledger entry.</small>}</div></Card>
 }
 
 function UrlPreviewCard({ preview }: { preview: UrlPreview }) {

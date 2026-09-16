@@ -15,12 +15,15 @@
     "@papyrus/contracts": "workspace:*",
     "@vitejs/plugin-react": "6.0.5",
     "ai": "^7.0.89",
+    "papyrus-extension-sdk": "workspace:*",
+    "papyrus-gnss": "workspace:*",
+    "papyrus-viewer-3d": "workspace:*",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "vite": "8.2.1",
     "remark-gfm": "4.0.1",
     "remark-parse": "11.0.0",
-    "unified": "11.0.5"
+    "unified": "11.0.5",
+    "vite": "8.2.1"
   },
   "devDependencies": {
     "@types/react": "19.2.9",

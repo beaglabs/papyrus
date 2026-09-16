@@ -1,6 +1,6 @@
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -73,7 +73,34 @@ export class PapyrusEnclaveRuntime {
 
   private executeWorker(code: string, runRoot: string): Promise<AgentScriptResult> {
     return new Promise((resolvePromise, reject) => {
-      const child = spawn(process.execPath, workerArguments(), {
+      // The Enclave worker no longer applies its own sandbox: the parent launches
+      // it through landstrip, which is a launcher and cannot sandbox a process that
+      // is already running. The policy is validated and resolved first, and the
+      // child is not spawned unless the effective policy is the one intended.
+      const policyPath = join(runRoot, 'policy.json')
+      writeFileSync(policyPath, JSON.stringify({
+        filesystem: { allowWrite: [runRoot], allowRead: [runRoot, dirname(process.execPath), '/usr', '/bin', '/lib', '/lib64', '/opt'], denyRead: [this.dataDir, '/root', '/home'] },
+        network: { allowNetwork: false, allowLocalBinding: false },
+      }))
+      const landstrip = process.env.PAPYRUS_LANDSTRIP_BIN?.trim() || 'landstrip'
+      const resolved = spawnSync(landstrip, ['policy', 'resolve', '-p', policyPath], { encoding: 'utf8' })
+      if (resolved.status !== 0) {
+        reject(new Error(`landstrip policy resolve failed: ${(resolved.stderr ?? '').slice(0, 200)}`))
+        return
+      }
+      let effective: { writeRoots?: unknown; networkAccess?: { mode?: unknown } }
+      try { effective = JSON.parse(resolved.stdout ?? '') as typeof effective }
+      catch { reject(new Error('landstrip returned a malformed policy resolution')); return }
+      if (!Array.isArray(effective.writeRoots) || !effective.writeRoots.includes(runRoot)) {
+        reject(new Error('enclave policy did not grant its run root'))
+        return
+      }
+      if ((effective.networkAccess as { mode?: unknown } | undefined)?.mode !== 'restricted') {
+        reject(new Error('enclave policy did not restrict network access'))
+        return
+      }
+
+      const child = spawn(landstrip, ['run', '-p', policyPath, '--', process.execPath, ...workerArguments()], {
         cwd: dirname(workerSourcePath()),
         env: {
           PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin',

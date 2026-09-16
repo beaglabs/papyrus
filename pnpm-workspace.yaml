@@ -1,6 +1,11 @@
 packages:
   - "apps/*"
   - "packages/*"
+  # The extension packs (papyrus-extension-sdk, papyrus-gnss, papyrus-viewer-3d) come from
+  # beaglabs/papyrus-extensions, vendored under vendor/ rather than published to a registry.
+  # Making them workspace members is what lets the apps consume them as dependencies and lets
+  # papyrus-gnss resolve its own `workspace:*` reference to the SDK.
+  - "vendor/papyrus-extensions/packages/*"
 allowBuilds:
   '@mongodb-js/zstd': true
   esbuild: true
@@ -9,3 +14,17 @@ allowBuilds:
 
 overrides:
   'nono-ts@0.3.0>mintlify': '-'
+
+# pnpm records optional platform dependencies in the lockfile only for the
+# architectures listed here, and the default is the current platform. Generated on
+# darwin-arm64, the lockfile contained no linux binding for nono-ts at all, and a
+# linux install with --frozen-lockfile then omitted it silently — a missing
+# optionalDependency is not an error. The result was an appliance that installs
+# cleanly and cannot start its own sandbox.
+#
+# Listing both platforms makes one committed lockfile serve macOS development and
+# linux builds.
+supportedArchitectures:
+  os: [linux, darwin]
+  cpu: [x64, arm64]
+  libc: [glibc, musl]

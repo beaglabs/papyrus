@@ -774,3 +774,18 @@ p { color: var(--muted); line-height: 1.55; }
   .obs-list-head span:last-child { display: none; }
   .obs-correlation { align-items: stretch; flex-direction: column; }
 }
+
+/* First-run onboarding. App renders this in place of the portal shell, so unlike the
+   agent view it has no sidebar providing a definite height — and .agent-main sets
+   height:100%, which resolves to auto without one. Everything else is the agent chat's
+   own layout (`agent-main`, `agent-surface`, `message-list`, `composer-layer`,
+   `chat-message`) so the setup flow cannot drift away from the surface it introduces.
+   Tokens only: there is no local palette here, because a borrowed one would be invisible
+   to the styles test, which reads this file and not the components. */
+.onboarding-page { height: 100vh; height: 100dvh; overflow: hidden; background: var(--surface); }
+.onboarding-page .agent-main { height: 100%; }
+.onboarding-id { margin: 7px 0 0; color: var(--muted); font: 700 10px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .04em; overflow-wrap: anywhere; }
+.onboarding-form { display: grid; gap: 10px; }
+.onboarding-form .nb-button, .onboarding-form .primary { justify-self: start; }
+.onboarding-form .nb-textarea { min-height: 150px; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+.onboarding-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }

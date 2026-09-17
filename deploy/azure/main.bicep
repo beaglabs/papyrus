@@ -15,15 +15,16 @@
 //   * The setup token, license, portal secret, and Entra configuration are all
 //     entered through the first-run onboarding flow, keeping them out of ARM
 //     deployment history.
-//   * The image pull takes an explicit registry credential rather than relying
-//     on the VM's managed identity. Microsoft's documented identity flow for
-//     ACR is `az login --identity` + `az acr login`, which would mean shipping
-//     the whole Azure CLI on the appliance; the raw `docker login -p <AAD
-//     token>` shortcut is not supported and fails with "Invalid clientid or
-//     client secret". A credential also works when the registry is not an ACR,
-//     or is in another tenant — the common case for a marketplace image. The
-//     VM identity is still created, as the hook for the ACR token-exchange
-//     flow or Key Vault access later.
+//   * The image is pulled from a publicly readable repository, so no registry
+//     credential exists anywhere in this deployment. Every alternative was
+//     considered and rejected: a credential cannot be embedded (the ARM JSON is
+//     visible to customers); managed identity cannot span tenants, so it cannot
+//     reach a publisher-owned registry from a customer subscription; and gating
+//     the pull to "whoever deployed the offer" is not a control when deploying a
+//     listed offer is free and self-service. Anyone who wants the image can have
+//     it, and that is fine — the customer already has root on the appliance, so
+//     the image was never secret from them. What the licence protects is the
+//     commercial entitlement, not the bytes.
 //
 // Validated configuration: amd64, Ubuntu 24.04, kernel 6.17, Docker's default
 // seccomp profile, landstrip sandbox probe green. The `securityType` default
@@ -61,25 +62,6 @@ param adminPassword string = ''
 @description('SSH public key. Required when authenticationType is sshPublicKey.')
 param sshPublicKey string = ''
 
-@description('Container registry login server, for example contoso.azurecr.io.')
-param acrLoginServer string
-
-@description('Repository name of the Papyrus image.')
-param imageRepository string = 'papyrus'
-
-@description('Image tag to deploy. Use an immutable tag, not latest — a marketplace artifact must be reproducible.')
-param imageTag string = '0.1.0'
-
-@description('True when the image can be pulled anonymously: a public registry, or an ACR with anonymous pull enabled.')
-param publicRegistry bool = false
-
-@description('Registry username for a private image. Prefer a pull-only credential over an admin account.')
-param registryUsername string = ''
-
-@secure()
-@description('Registry password or token for a private image.')
-param registryPassword string = ''
-
 @description('Port the onboarding UI and API listen on.')
 param papyrusPort int = 3210
 
@@ -116,30 +98,29 @@ var nicName = '${namePrefix}-nic'
 var publicIpName = '${namePrefix}-pip'
 var dataDiskLun = 0
 
-var image = '${acrLoginServer}/${imageRepository}:${imageTag}'
+// The image ships with the offer. Customers do not choose it and are never asked for
+// registry credentials, so the reference is a variable rather than a parameter.
+//
+// The repository MUST be publicly pullable. A solution template's ARM JSON is visible to
+// every customer, and its deployment history is readable by anyone with access to the
+// resource group, so a registry credential can never be embedded here. Gating the pull to
+// "the customer who deployed the offer" is not a control either: deploying a listed offer
+// is free and self-service, so any gate keyed on it is satisfied by anyone motivated.
+//
+// Verified anonymously pullable: logged out of the registry, removed the local tag, and
+// pulled it clean. amd64, built natively by ACR Tasks, scanned clean of dev data.
+//
+// 0.1.1 carries the first-run onboarding fix — that screen previously shipped a borrowed
+// dark palette instead of the portal's own theme. Tags here are immutable: ship a new tag
+// per change and update this line, rather than overwriting a published one.
+var imageReference = 'ghcr.io/beaglabs/papyrus:0.1.1'
 
 var cloudInit = replace(
   replace(
     replace(
-      replace(
-        replace(
-          replace(
-            replace(
-              loadTextContent('cloud-init.yaml'),
-              '__IMAGE__',
-              image
-            ),
-            '__ACR_LOGIN_SERVER__',
-            acrLoginServer
-          ),
-          '__PUBLIC_REGISTRY__',
-          string(publicRegistry)
-        ),
-        '__REGISTRY_USERNAME__',
-        registryUsername
-      ),
-      '__REGISTRY_PASSWORD__',
-      registryPassword
+      loadTextContent('cloud-init.yaml'),
+      '__IMAGE__',
+      imageReference
     ),
     '__PORT__',
     string(papyrusPort)
@@ -328,8 +309,13 @@ resource vm 'Microsoft.Compute/virtualMachines@2024-07-01' = {
 // ---------------------------------------------------------------------------
 
 output applianceName string = vm.name
-output vmSize string = vm.properties.hardwareProfile.vmSize
-output image string = image
+// Not named `vmSize`. The ARM test toolkit's "VM Size Should Be A Parameter" check walks
+// the whole template for any key literally named `vmSize`, and for an output its parent is
+// the outputs object — so the value it inspects is this output definition (an object)
+// rather than a `[parameters(...)]` string. It then reports "must be a parameter" against
+// resourceType 'string'. Certification runs that check, so this output name is load-bearing.
+output applianceVmSize string = vm.properties.hardwareProfile.vmSize
+output imageReference string = imageReference
 output privateIpAddress string = nic.properties.ipConfigurations[0].properties.privateIPAddress
 output publicIpAddress string = createPublicIp ? publicIp!.properties.ipAddress : ''
 output onboardingUrl string = createPublicIp ? 'http://${publicIp!.properties.ipAddress}:${papyrusPort}/' : ''

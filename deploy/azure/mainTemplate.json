@@ -1,0 +1,326 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.47.16.16243",
+      "templateHash": "13474093351568024689"
+    }
+  },
+  "parameters": {
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Azure region for the appliance."
+      }
+    },
+    "namePrefix": {
+      "type": "string",
+      "defaultValue": "papyrus",
+      "minLength": 3,
+      "maxLength": 20,
+      "metadata": {
+        "description": "Name prefix for every resource this deployment creates."
+      }
+    },
+    "vmSize": {
+      "type": "string",
+      "defaultValue": "Standard_D2as_v7",
+      "metadata": {
+        "description": "VM size. The default is an amd64 general-purpose size. Avoid Standard_B2s: it was capacity-restricted in eastus when this was written, and the Bsv2 family carried zero quota."
+      }
+    },
+    "authenticationType": {
+      "type": "string",
+      "defaultValue": "sshPublicKey",
+      "allowedValues": [
+        "password",
+        "sshPublicKey"
+      ],
+      "metadata": {
+        "description": "Authentication method for the VM: password or sshPublicKey."
+      }
+    },
+    "adminUsername": {
+      "type": "string",
+      "defaultValue": "papyrusadmin",
+      "metadata": {
+        "description": "Admin username for the appliance VM."
+      }
+    },
+    "adminPassword": {
+      "type": "securestring",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Admin password. Required when authenticationType is password."
+      }
+    },
+    "sshPublicKey": {
+      "type": "securestring",
+      "defaultValue": "",
+      "metadata": {
+        "description": "SSH public key. Required when authenticationType is sshPublicKey."
+      }
+    },
+    "papyrusPort": {
+      "type": "int",
+      "defaultValue": 3210,
+      "metadata": {
+        "description": "Port the onboarding UI and API listen on."
+      }
+    },
+    "createPublicIp": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Attach a public IP. Required if the onboarding UI must be reachable from outside the virtual network."
+      }
+    },
+    "dnsLabelPrefix": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "DNS label for the public IP, giving <label>.<region>.cloudapp.azure.com."
+      }
+    },
+    "dataDiskSizeGb": {
+      "type": "int",
+      "defaultValue": 32,
+      "minValue": 16,
+      "maxValue": 1024,
+      "metadata": {
+        "description": "Size of the dedicated data disk backing /var/lib/papyrus."
+      }
+    },
+    "allowedSourceAddressPrefix": {
+      "type": "string",
+      "defaultValue": "*",
+      "metadata": {
+        "description": "Source address prefix allowed to reach SSH and the onboarding port. Narrow this to the operator network; * exposes it to the internet."
+      }
+    },
+    "securityType": {
+      "type": "string",
+      "defaultValue": "Standard",
+      "allowedValues": [
+        "Standard",
+        "TrustedLaunch"
+      ],
+      "metadata": {
+        "description": "VM security type. Defaults to Standard because that is the configuration validated end to end. TrustedLaunch is the better production posture but changes the boot chain, so validate it before relying on it."
+      }
+    }
+  },
+  "variables": {
+    "$fxv#0": "#cloud-config\n# ---------------------------------------------------------------------------\n# Papyrus appliance bootstrap.\n#\n# Runs on a stock Ubuntu 24.04 image. The appliance is the container we build\n# from the repo Dockerfile — this file only prepares the host, wires the image\n# pull, and supervises the container.\n#\n# Two properties matter more than tidiness here:\n#\n#   * Idempotent. cloud-init can re-run and the appliance must survive reboots\n#     without a human. Every step below is safe on a second pass.\n#   * Explicit about credentials. Registry credentials are written to a\n#     root-only file, and the pull retries so a transient registry or RBAC\n#     delay does not leave the appliance dead until someone logs in.\n#\n# Placeholders wrapped in __DOUBLE_UNDERSCORES__ are substituted by main.bicep.\n# ---------------------------------------------------------------------------\n\npackage_update: true\npackages:\n  - docker.io\n  - jq\n  - ca-certificates\n\nwrite_files:\n  - path: /etc/papyrus/appliance.env\n    owner: root:root\n    permissions: '0644'\n    content: |\n      PAPYRUS_IMAGE=__IMAGE__\n      PAPYRUS_PORT=__PORT__\n      PAPYRUS_DATA_DIR=/var/lib/papyrus\n      PAPYRUS_DATA_DISK_LUN=__DATA_DISK_LUN__\n\n  # Resolve and mount the data disk that backs /var/lib/papyrus, so appliance\n  # state outlives the VM. The blkid guard means a re-run never formats a disk\n  # that already holds data.\n  #\n  # Device naming is not uniform across Azure VM sizes: SCSI-attached disks\n  # appear under /dev/disk/azure/scsi1/, while NVMe-attached disks (the newer\n  # sizes, including the D2as_v7 this was validated on) expose the same disk as\n  # /dev/disk/azure/data/by-lun/<lun>. Assuming only the SCSI path silently left\n  # the data disk unattached, so all candidates are tried.\n  - path: /usr/local/bin/papyrus-data-disk.sh\n    owner: root:root\n    permissions: '0755'\n    content: |\n      #!/bin/bash\n      set -euo pipefail\n      . /etc/papyrus/appliance.env\n\n      mkdir -p \"$PAPYRUS_DATA_DIR\"\n      LUN=\"$PAPYRUS_DATA_DISK_LUN\"\n\n      DEV=\"$(readlink -f \"/dev/disk/azure/data/by-lun/${LUN}\" 2>/dev/null || true)\"\n      [ -b \"${DEV:-}\" ] || DEV=\"$(readlink -f \"/dev/disk/azure/scsi1/lun${LUN}\" 2>/dev/null || true)\"\n\n      if [ ! -b \"${DEV:-}\" ]; then\n        # Last resort: the one whole disk that is neither mounted nor\n        # partitioned. On a single-data-disk appliance that is unambiguous.\n        for candidate in /dev/nvme?n? /dev/sd?; do\n          [ -b \"$candidate\" ] || continue\n          if [ \"$(lsblk -no NAME \"$candidate\" | wc -l)\" -eq 1 ] \\\n             && [ -z \"$(lsblk -no MOUNTPOINT \"$candidate\" | tr -d '[:space:]')\" ]; then\n            DEV=\"$candidate\"\n            break\n          fi\n        done\n      fi\n\n      if [ ! -b \"${DEV:-}\" ]; then\n        echo \"papyrus: no unattached data disk found; keeping state on the OS disk\"\n        chown 65532:65532 \"$PAPYRUS_DATA_DIR\"\n        exit 0\n      fi\n\n      echo \"papyrus: data disk is $DEV\"\n      if ! blkid \"$DEV\" >/dev/null 2>&1; then\n        echo \"papyrus: formatting $DEV\"\n        mkfs.ext4 -F -L papyrus \"$DEV\"\n      fi\n\n      DISK_UUID=\"$(blkid -s UUID -o value \"$DEV\")\"\n      grep -q \"$DISK_UUID\" /etc/fstab \\\n        || echo \"UUID=$DISK_UUID $PAPYRUS_DATA_DIR ext4 defaults,nofail 0 2\" >> /etc/fstab\n\n      mountpoint -q \"$PAPYRUS_DATA_DIR\" || mount \"$PAPYRUS_DATA_DIR\"\n\n      # The image runs as the nonroot uid baked into the Dockerfile (65532).\n      chown 65532:65532 \"$PAPYRUS_DATA_DIR\"\n\n  # Pull and (re)start the container. Kept separate from the unit so it can be\n  # re-run by hand to upgrade the image without touching the VM.\n  - path: /usr/local/bin/papyrus-run.sh\n    owner: root:root\n    permissions: '0755'\n    content: |\n      #!/bin/bash\n      set -euo pipefail\n      . /etc/papyrus/appliance.env\n\n      /usr/local/bin/papyrus-data-disk.sh\n\n      # The image is publicly pullable by design, so there is no registry credential to\n      # manage, rotate, or leak. Retries cover a registry that is briefly unavailable.\n      ATTEMPT=1\n      until docker pull \"$PAPYRUS_IMAGE\"; do\n        if [ \"$ATTEMPT\" -ge 5 ]; then\n          echo \"papyrus: could not pull $PAPYRUS_IMAGE after $ATTEMPT attempts\" >&2\n          exit 1\n        fi\n        SLEEP=$((ATTEMPT * 15))\n        echo \"papyrus: pull attempt $ATTEMPT failed, retrying in ${SLEEP}s\" >&2\n        sleep \"$SLEEP\"\n        ATTEMPT=$((ATTEMPT + 1))\n      done\n\n      # Recreate rather than `docker start`, so a new tag actually takes effect.\n      docker rm -f papyrus >/dev/null 2>&1 || true\n\n      # Deliberately no extra hardening flags. This exact configuration is the\n      # one validated on amd64: the landstrip sandbox needs Landlock syscalls\n      # and works under Docker's default seccomp profile. Changing seccomp or\n      # capability options here invalidates that validation — re-test first.\n      docker run -d \\\n        --name papyrus \\\n        --restart unless-stopped \\\n        -p \"${PAPYRUS_PORT}:${PAPYRUS_PORT}\" \\\n        -v \"${PAPYRUS_DATA_DIR}:${PAPYRUS_DATA_DIR}\" \\\n        \"$PAPYRUS_IMAGE\"\n\n  - path: /etc/systemd/system/papyrus.service\n    owner: root:root\n    permissions: '0644'\n    content: |\n      [Unit]\n      Description=Papyrus appliance\n      Documentation=https://github.com/beaglabs/papyrus\n      Requires=docker.service\n      After=docker.service network-online.target\n      Wants=network-online.target\n\n      [Service]\n      Type=oneshot\n      RemainAfterExit=yes\n      ExecStart=/usr/local/bin/papyrus-run.sh\n      ExecStop=/usr/bin/docker stop papyrus\n      TimeoutStartSec=1200\n      Restart=on-failure\n      RestartSec=30\n\n      [Install]\n      WantedBy=multi-user.target\n\nruncmd:\n  - [ systemctl, daemon-reload ]\n  - [ systemctl, enable, --now, papyrus.service ]\n  - [ systemctl, --no-pager, status, papyrus.service, --lines=20 ]\n\nfinal_message: \"Papyrus appliance bootstrap finished in $UPTIME seconds\"\n",
+    "vmName": "[format('{0}-appliance', parameters('namePrefix'))]",
+    "vnetName": "[format('{0}-vnet', parameters('namePrefix'))]",
+    "subnetName": "[format('{0}-subnet', parameters('namePrefix'))]",
+    "nsgName": "[format('{0}-nsg', parameters('namePrefix'))]",
+    "nicName": "[format('{0}-nic', parameters('namePrefix'))]",
+    "publicIpName": "[format('{0}-pip', parameters('namePrefix'))]",
+    "dataDiskLun": 0,
+    "imageReference": "ghcr.io/beaglabs/papyrus:0.1.1",
+    "cloudInit": "[replace(replace(replace(variables('$fxv#0'), '__IMAGE__', variables('imageReference')), '__PORT__', string(parameters('papyrusPort'))), '__DATA_DISK_LUN__', string(variables('dataDiskLun')))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "apiVersion": "2023-11-01",
+      "name": "[variables('nsgName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "securityRules": [
+          {
+            "name": "allow-ssh",
+            "properties": {
+              "description": "Operator access.",
+              "priority": 1000,
+              "direction": "Inbound",
+              "access": "Allow",
+              "protocol": "Tcp",
+              "sourceAddressPrefix": "[parameters('allowedSourceAddressPrefix')]",
+              "sourcePortRange": "*",
+              "destinationAddressPrefix": "*",
+              "destinationPortRange": "22"
+            }
+          },
+          {
+            "name": "allow-papyrus",
+            "properties": {
+              "description": "Onboarding UI and API. Terminate TLS in front of this in production.",
+              "priority": 1010,
+              "direction": "Inbound",
+              "access": "Allow",
+              "protocol": "Tcp",
+              "sourceAddressPrefix": "[parameters('allowedSourceAddressPrefix')]",
+              "sourcePortRange": "*",
+              "destinationAddressPrefix": "*",
+              "destinationPortRange": "[string(parameters('papyrusPort'))]"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Network/virtualNetworks",
+      "apiVersion": "2023-11-01",
+      "name": "[variables('vnetName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "addressSpace": {
+          "addressPrefixes": [
+            "10.20.0.0/16"
+          ]
+        },
+        "subnets": [
+          {
+            "name": "[variables('subnetName')]",
+            "properties": {
+              "addressPrefix": "10.20.1.0/24",
+              "networkSecurityGroup": {
+                "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
+              }
+            }
+          }
+        ]
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
+      ]
+    },
+    {
+      "condition": "[parameters('createPublicIp')]",
+      "type": "Microsoft.Network/publicIPAddresses",
+      "apiVersion": "2023-11-01",
+      "name": "[variables('publicIpName')]",
+      "location": "[parameters('location')]",
+      "sku": {
+        "name": "Standard"
+      },
+      "properties": {
+        "publicIPAllocationMethod": "Static",
+        "dnsSettings": "[if(empty(parameters('dnsLabelPrefix')), null(), createObject('domainNameLabel', parameters('dnsLabelPrefix')))]"
+      }
+    },
+    {
+      "type": "Microsoft.Network/networkInterfaces",
+      "apiVersion": "2023-11-01",
+      "name": "[variables('nicName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "ipconfig1",
+            "properties": {
+              "subnet": {
+                "id": "[reference(resourceId('Microsoft.Network/virtualNetworks', variables('vnetName')), '2023-11-01').subnets[0].id]"
+              },
+              "publicIPAddress": "[if(parameters('createPublicIp'), createObject('id', resourceId('Microsoft.Network/publicIPAddresses', variables('publicIpName'))), null())]"
+            }
+          }
+        ]
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/publicIPAddresses', variables('publicIpName'))]",
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Compute/virtualMachines",
+      "apiVersion": "2024-07-01",
+      "name": "[variables('vmName')]",
+      "location": "[parameters('location')]",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "properties": {
+        "hardwareProfile": {
+          "vmSize": "[parameters('vmSize')]"
+        },
+        "securityProfile": "[if(equals(parameters('securityType'), 'TrustedLaunch'), createObject('securityType', 'TrustedLaunch', 'uefiSettings', createObject('secureBootEnabled', true(), 'vTpmEnabled', true())), null())]",
+        "osProfile": {
+          "computerName": "[variables('vmName')]",
+          "adminUsername": "[parameters('adminUsername')]",
+          "adminPassword": "[if(equals(parameters('authenticationType'), 'password'), parameters('adminPassword'), null())]",
+          "linuxConfiguration": "[if(equals(parameters('authenticationType'), 'sshPublicKey'), createObject('disablePasswordAuthentication', true(), 'ssh', createObject('publicKeys', createArray(createObject('path', format('/home/{0}/.ssh/authorized_keys', parameters('adminUsername')), 'keyData', parameters('sshPublicKey'))))), null())]",
+          "customData": "[base64(variables('cloudInit'))]"
+        },
+        "storageProfile": {
+          "imageReference": {
+            "publisher": "Canonical",
+            "offer": "ubuntu-24_04-lts",
+            "sku": "server",
+            "version": "latest"
+          },
+          "osDisk": {
+            "name": "[format('{0}-osdisk', variables('vmName'))]",
+            "createOption": "FromImage",
+            "deleteOption": "Delete",
+            "managedDisk": {
+              "storageAccountType": "Premium_LRS"
+            }
+          },
+          "dataDisks": [
+            {
+              "lun": "[variables('dataDiskLun')]",
+              "name": "[format('{0}-data', variables('vmName'))]",
+              "createOption": "Empty",
+              "diskSizeGB": "[parameters('dataDiskSizeGb')]",
+              "deleteOption": "Detach",
+              "managedDisk": {
+                "storageAccountType": "Premium_LRS"
+              }
+            }
+          ]
+        },
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('nicName'))]"
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/networkInterfaces', variables('nicName'))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "applianceName": {
+      "type": "string",
+      "value": "[variables('vmName')]"
+    },
+    "applianceVmSize": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Compute/virtualMachines', variables('vmName')), '2024-07-01').hardwareProfile.vmSize]"
+    },
+    "imageReference": {
+      "type": "string",
+      "value": "[variables('imageReference')]"
+    },
+    "privateIpAddress": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Network/networkInterfaces', variables('nicName')), '2023-11-01').ipConfigurations[0].properties.privateIPAddress]"
+    },
+    "publicIpAddress": {
+      "type": "string",
+      "value": "[if(parameters('createPublicIp'), reference(resourceId('Microsoft.Network/publicIPAddresses', variables('publicIpName')), '2023-11-01').ipAddress, '')]"
+    },
+    "onboardingUrl": {
+      "type": "string",
+      "value": "[if(parameters('createPublicIp'), format('http://{0}:{1}/', reference(resourceId('Microsoft.Network/publicIPAddresses', variables('publicIpName')), '2023-11-01').ipAddress, parameters('papyrusPort')), '')]"
+    },
+    "sshCommand": {
+      "type": "string",
+      "value": "[if(parameters('createPublicIp'), format('ssh {0}@{1}', parameters('adminUsername'), reference(resourceId('Microsoft.Network/publicIPAddresses', variables('publicIpName')), '2023-11-01').ipAddress), '')]"
+    },
+    "dataDiskName": {
+      "type": "string",
+      "value": "[format('{0}-data', variables('vmName'))]"
+    }
+  }
+}

@@ -8,6 +8,12 @@
     "vmSize": {
       "value": "Standard_D2as_v7"
     },
+    "securityType": {
+      "value": "Standard"
+    },
+    "dataDiskSizeGb": {
+      "value": 32
+    },
     "authenticationType": {
       "value": "sshPublicKey"
     },
@@ -17,38 +23,14 @@
     "sshPublicKey": {
       "value": "ssh-ed25519 AAAA... replace with your own public key ..."
     },
-    "acrLoginServer": {
-      "value": "yourregistry.azurecr.io"
-    },
-    "imageRepository": {
-      "value": "papyrus"
-    },
-    "imageTag": {
-      "value": "0.1.0"
-    },
-    "publicRegistry": {
-      "value": false
-    },
-    "registryUsername": {
-      "value": "replace-with-a-pull-only-credential"
-    },
-    "registryPassword": {
-      "value": "replace-with-a-pull-only-token"
-    },
-    "allowedSourceAddressPrefix": {
-      "value": "203.0.113.10/32"
-    },
     "createPublicIp": {
       "value": true
     },
     "dnsLabelPrefix": {
       "value": "papyrus-appliance"
     },
-    "dataDiskSizeGb": {
-      "value": 32
-    },
-    "securityType": {
-      "value": "Standard"
+    "allowedSourceAddressPrefix": {
+      "value": "203.0.113.10/32"
     }
   }
 }

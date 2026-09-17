@@ -22,6 +22,15 @@ upload
 # secrets
 .env
 
+# Runtime data directories. These are created by running the server locally, and they
+# hold a deployment identity keypair (private key included), the agent and Mastra
+# SQLite databases, and the AgentFS workspace database. They are not part of the
+# product. Leaving them in shipped a 1.9 MB dev data directory in the published
+# image, including a private key — caught by scanning the built image, not by any
+# check in the build. Any new data directory added under apps/ belongs here too.
+apps/server/papyrus-agent-data
+**/papyrus-agent-data
+
 # dev-only assets not needed for the server image
 certs
 # apps/video is a separate Remotion app, not part of the server — exclude it

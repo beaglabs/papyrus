@@ -45,7 +45,7 @@ Papyrus is a licensed daemon for durable, event-driven agent work. Mastra owns s
 | **Secrets** | Connector configuration accepts customer-vault, certificate, or managed-identity references. Inline tokens, passwords, client secrets, and private keys are rejected. |
 | **Licensing** | The existing deployment-bound, signed, offline license format remains. No Beag cloud callback is required. |
 | **Runtime independence** | Teams and email are adapters. Disabling them does not disable sessions or workflows. |
-| **Sandboxed execution** | Agent code runs only on Linux under Bubblewrap, with network denied. On any other host execution is off, and the daemon reports why rather than falling back to unisolated execution. |
+| **Sandboxed execution** | Agent code runs only on Linux, inside a `landstrip` worker — Landlock for filesystem confinement plus seccomp for syscalls — with network denied. The effective policy is resolved and validated at startup, so a change in the sandbox becomes a refusal to start rather than a silent loss of isolation. On an unsupported host execution is off, and the daemon reports why rather than falling back to unisolated execution. |
 
 ## Product boundary
 
@@ -105,7 +105,7 @@ Entra is authoritative. Roles are read from validated token claims and are not c
 
 ## Local development
 
-Node.js 24 and pnpm 11 are required. macOS and Windows are fine for development — the daemon, portal, connectors, and action ledger all run there. Agent code execution does not: it is Linux-only and enforced with Bubblewrap, and it turns itself off with an explicit log line anywhere else. See [docs/deployment.md](docs/deployment.md#platform-requirements).
+Node.js 24 and pnpm 11 are required. macOS and Windows are fine for development — the daemon, portal, connectors, and action ledger all run there. Agent code execution does not: it is Linux-only and enforced with `landstrip` (Landlock + seccomp), and it turns itself off with an explicit log line anywhere else. See [docs/deployment.md](docs/deployment.md#platform-requirements).
 
 ```bash
 pnpm install --frozen-lockfile

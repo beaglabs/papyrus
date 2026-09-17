@@ -29,22 +29,9 @@ write_files:
     permissions: '0644'
     content: |
       PAPYRUS_IMAGE=__IMAGE__
-      PAPYRUS_ACR=__ACR_LOGIN_SERVER__
-      PAPYRUS_PUBLIC_REGISTRY=__PUBLIC_REGISTRY__
       PAPYRUS_PORT=__PORT__
       PAPYRUS_DATA_DIR=/var/lib/papyrus
       PAPYRUS_DATA_DISK_LUN=__DATA_DISK_LUN__
-
-  # Kept separate from appliance.env so it can stay 0600 while the rest is
-  # world-readable. Use a pull-only registry credential here: this file is
-  # readable by root on the appliance, and docker itself persists the same
-  # credential in /root/.docker/config.json after the first successful login.
-  - path: /etc/papyrus/registry.env
-    owner: root:root
-    permissions: '0600'
-    content: |
-      REGISTRY_USERNAME=__REGISTRY_USERNAME__
-      REGISTRY_PASSWORD=__REGISTRY_PASSWORD__
 
   # Resolve and mount the data disk that backs /var/lib/papyrus, so appliance
   # state outlives the VM. The blkid guard means a re-run never formats a disk
@@ -115,24 +102,10 @@ write_files:
 
       /usr/local/bin/papyrus-data-disk.sh
 
-      login_and_pull() {
-        if [ "$PAPYRUS_PUBLIC_REGISTRY" != "true" ]; then
-          # shellcheck disable=SC1091
-          . /etc/papyrus/registry.env
-          if [ -z "${REGISTRY_USERNAME:-}" ] || [ -z "${REGISTRY_PASSWORD:-}" ]; then
-            echo "papyrus: registry is private but no credentials were supplied" >&2
-            return 1
-          fi
-          printf '%s' "$REGISTRY_PASSWORD" \
-            | docker login "$PAPYRUS_ACR" -u "$REGISTRY_USERNAME" --password-stdin
-        fi
-        docker pull "$PAPYRUS_IMAGE"
-      }
-
-      # Retries cover two ordinary conditions: a registry that is briefly
-      # unavailable, and a credential whose permission has not yet propagated.
+      # The image is publicly pullable by design, so there is no registry credential to
+      # manage, rotate, or leak. Retries cover a registry that is briefly unavailable.
       ATTEMPT=1
-      until login_and_pull; do
+      until docker pull "$PAPYRUS_IMAGE"; do
         if [ "$ATTEMPT" -ge 5 ]; then
           echo "papyrus: could not pull $PAPYRUS_IMAGE after $ATTEMPT attempts" >&2
           exit 1

@@ -18,7 +18,7 @@ Papyrus is a customer-hosted durable agent runtime. The repository boundary incl
 - Webhook Links are the public dynamic-ingestion primitive; legacy Plugin connection and integration-scoped signal webhook routes are not exposed by the portal API.
 - Recurring work is managed through session-scoped Agent tools; the public scheduler CRUD/page surface is not exposed.
 - Webhook logo identity is snapshotted with the approved Link rather than loaded from an untrusted mutable URL.
-- Kitesurf is optional validation only; it is not the hosting authority and is not configurable for government, restricted, or disconnected profiles.
+- Kitesurf is optional validation only; it is not the hosting authority and is not configurable for government or disconnected profiles.
 - nono applies kernel-backed filesystem authority and blocks network access for workspace command execution.
 - AgentScript runs in Enclave STRICT and receives only Papyrus-brokered capabilities.
 - Credential-like environment variables are stripped before workspace commands execute.
@@ -28,10 +28,10 @@ Papyrus is a customer-hosted durable agent runtime. The repository boundary incl
 
 | Evidence source | Git blob |
 | --- | --- |
-| `apps/server/src/agent/config.ts` | `061bb55db27f9155e7ca5f7489050a650ee117b7` |
+| `apps/server/src/agent/config.ts` | `9577a8ecd5f3cefd6d72f99f94db86a23610aff3` |
 | `apps/server/src/agent/http.ts` | `a489dd950477b09eab269bb6fa0ac700bd3af409` |
 | `apps/server/src/agent/action-worker.ts` | `edee5c81e503ea46f5596c806c73b39884e0383f` |
-| `apps/server/src/agent/catalog.ts` | `961c8baa2e9e925042fd875556998099eb73ac07` |
+| `apps/server/src/agent/catalog.ts` | `f57c95522643997327121ca926e1637058ea32fd` |
 | `apps/server/src/agent/link-store.ts` | `75cb2a0dd381bc622ad9c3b79e76083ccc944ddb` |
 | `apps/server/src/agent/link-http.ts` | `d6a0eee9c661f64a9258ee0858074c9a5f5dfbbf` |
 | `apps/server/src/agent/link-preview.ts` | `fc30c91eea30af9999019d6bc0c565240e13ace7` |

@@ -163,7 +163,7 @@ export function App() {
           </SidebarGroup>
         </SidebarContent>
         <SidebarFooter>
-          <RuntimeStatusStrip status={data.agent} sessionId={selectedSession?.id} />
+          <AgencyAuthStrip data={data} />
           <DropdownMenu className="account-menu" trigger={<div className="account-trigger-content"><UserAvatar principal={data.me} /><span className="account-copy sidebar-copy"><strong>{data.me.displayName}</strong><small>ENTRA · {data.me.roles.length} ROLES</small></span><span className="sidebar-copy">•••</span></div>}>
             <DropdownMenuLabel><strong>{data.me.displayName}</strong><span>{data.me.preferredUsername ?? data.me.oid}</span></DropdownMenuLabel><DropdownMenuSeparator /><DropdownMenuItem disabled>Roles managed in Microsoft Entra</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem className="danger-item" onClick={() => void signOut()}>Sign out</DropdownMenuItem>
           </DropdownMenu>
@@ -242,16 +242,18 @@ export function goalSummary(jobs: NonNullable<AgentStatus['jobs']>): string | un
   return `goal ${goal.status}${budget}`
 }
 
-/**
- * Footer runtime status is deliberately limited to runtime/model health. Session goals,
- * schedules, and background job counters belong on their own surfaces rather than becoming
- * a second task dashboard in the sidebar footer.
- */
-export function RuntimeStatusStrip({ status }: { status: AgentStatus; sessionId?: string | undefined }) {
-  return <div className="runtime-panel">
-    <span className="runtime-label">RUNTIME</span>
-    <strong><span className={`dot ${status.agentReady ? 'good' : 'warning'}`} /><span className="sidebar-copy">{status.agentReady ? 'Mastra online' : 'Mastra storage online'}</span></strong>
-    <small className="sidebar-copy">{status.model ?? 'Model configuration required'}</small>
+/** The footer shows the authority boundary the operator is actually signed into, not runtime plumbing. */
+export function AgencyAuthStrip({ data }: { data: PortalData }) {
+  const authenticated = data.me.source === 'entra' || data.me.source === 'teams-sso'
+  const state = authenticated ? 'Entra authenticated' : 'Development identity'
+  return <div className="agency-auth-card">
+    <span className="agency-auth-logo" aria-label="Papyrus Microsoft Entra app registration logo"><img src={papyrusLogo} alt="" /></span>
+    <span className="agency-auth-copy sidebar-copy">
+      <span className="agency-auth-label">AGENCY / ENTRA ORG</span>
+      <strong title={data.config.organizationName}>{data.config.organizationName}</strong>
+      <small><i className={`dot ${authenticated ? 'good' : 'warning'}`} />{state}</small>
+      <small className="agency-auth-meta">PAPYRUS APP · {data.config.cloud.toUpperCase()}</small>
+    </span>
   </div>
 }
 

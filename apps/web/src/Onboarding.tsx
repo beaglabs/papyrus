@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { activateLicense, bootstrapStatus, completeBootstrap, saveBootstrapConfig, setBootstrapToken, verifyBootstrapToken, type BootstrapStatus } from './api.js'
-import { Button } from './components/ui/index.js'
+import { Alert, Button, Input, Textarea } from './components/ui/index.js'
 
 type Step = 'token' | 'license' | 'secret' | 'entra' | 'finalize'
 interface Message { role: 'agent' | 'user'; text: string }
@@ -16,6 +16,13 @@ function generateSecret(): string {
  * three things the daemon cannot start without: a signed license, a portal secret,
  * and an Entra ID connection. It looks like the agent chat but is a fixed flow —
  * at this point no model is configured, so there is nothing to run an agent on.
+ *
+ * It reuses the agent chat's own layout and message classes on purpose. This page is the
+ * operator's first impression of the product, so it has to look like the surface it is
+ * introducing rather than a separate thing that happens to precede it. Everything here
+ * comes from `styles.css` tokens; there is deliberately no local palette, because a
+ * borrowed theme in this file is invisible to the styles test, which only reads the
+ * stylesheet.
  */
 export function Onboarding() {
   const [status, setStatus] = useState<BootstrapStatus>()
@@ -89,7 +96,7 @@ export function Onboarding() {
 
   const submitSecret = () => {
     if (secret.length < 32) { push('agent', 'That secret is too short \u2014 give me 32+ characters, or let me generate one.'); return }
-    push('user', '•'.repeat(secret.length) + ' (portal secret set)')
+    push('user', '\u2022'.repeat(Math.min(secret.length, 44)) + ' (portal secret set)')
     push('agent', 'Got it. Finally, connect your Microsoft Entra ID tenant. I need your tenant ID, the application (client) ID, and its client secret.')
     setStep('entra')
   }
@@ -132,32 +139,39 @@ export function Onboarding() {
   useEffect(() => { if (step === 'finalize') void finalize() }, [step]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (fatal) {
-    return <main className="onboarding"><div className="onboarding-banner">PAPYRUS SETUP</div><div className="onboarding-shell"><p className="onboarding-fatal">Unable to reach the onboarding service. Is the daemon running?</p><pre>{fatal}</pre></div></main>
+    return (
+      <main className="center login">
+        <p className="eyebrow">PAPYRUS · FIRST-RUN SETUP</p>
+        <h1>Unable to<br />open setup.</h1>
+        <Alert className="error">{fatal}</Alert>
+        <Button className="primary" onClick={() => window.location.reload()}>Try again →</Button>
+      </main>
+    )
   }
 
   const composer = step === 'token' ? (
     <div className="onboarding-form">
-      <input value={token} onChange={(event) => setToken(event.target.value)} placeholder="Setup token from daemon logs" autoFocus spellCheck={false} />
+      <Input value={token} onChange={(event) => setToken(event.target.value)} placeholder="Setup token from daemon logs" autoFocus spellCheck={false} />
       <Button className="primary" disabled={busy || !token.trim()} onClick={() => void submitToken()}>Continue →</Button>
     </div>
   ) : step === 'license' ? (
     <div className="onboarding-form">
-      <textarea value={licenseJson} onChange={(event) => setLicenseJson(event.target.value)} placeholder={'{"licenseId": "...", "licensee": "...", "deploymentId": "' + (status?.deploymentId ?? '') + '", "profiles": ["gcc"], "features": [], "keyId": "...", "signature": "..."}'} rows={8} spellCheck={false} />
+      <Textarea value={licenseJson} onChange={(event) => setLicenseJson(event.target.value)} placeholder={'{"licenseId": "...", "licensee": "...", "deploymentId": "' + (status?.deploymentId ?? '') + '", "profiles": ["gcc"], "features": [], "keyId": "...", "signature": "..."}'} rows={8} spellCheck={false} />
       <Button className="primary" disabled={busy || !licenseJson.trim()} onClick={() => void submitLicense()}>Activate license →</Button>
     </div>
   ) : step === 'secret' ? (
     <div className="onboarding-form">
-      <input value={secret} onChange={(event) => setSecret(event.target.value)} placeholder="Paste a secret, or generate one" />
-      <div className="onboarding-row">
+      <Input value={secret} onChange={(event) => setSecret(event.target.value)} placeholder="Paste a secret, or generate one" />
+      <div className="onboarding-actions">
         <Button variant="ghost" disabled={busy} onClick={() => setSecret(generateSecret())}>Generate a strong secret</Button>
         <Button className="primary" disabled={busy || secret.length < 32} onClick={submitSecret}>Continue →</Button>
       </div>
     </div>
   ) : step === 'entra' ? (
     <div className="onboarding-form">
-      <input value={entra.tenantId} onChange={(event) => setEntra({ ...entra, tenantId: event.target.value })} placeholder="Tenant (directory) ID" />
-      <input value={entra.clientId} onChange={(event) => setEntra({ ...entra, clientId: event.target.value })} placeholder="Application (client) ID" />
-      <input type="password" value={entra.clientSecret} onChange={(event) => setEntra({ ...entra, clientSecret: event.target.value })} placeholder="Client secret (optional)" />
+      <Input value={entra.tenantId} onChange={(event) => setEntra({ ...entra, tenantId: event.target.value })} placeholder="Tenant (directory) ID" />
+      <Input value={entra.clientId} onChange={(event) => setEntra({ ...entra, clientId: event.target.value })} placeholder="Application (client) ID" />
+      <Input type="password" value={entra.clientSecret} onChange={(event) => setEntra({ ...entra, clientSecret: event.target.value })} placeholder="Client secret (optional)" />
       <Button className="primary" disabled={busy || !entra.tenantId.trim() || !entra.clientId.trim()} onClick={() => void submitEntra()}>Save configuration →</Button>
     </div>
   ) : (
@@ -167,38 +181,32 @@ export function Onboarding() {
   )
 
   return (
-    <main className="onboarding">
-      <div className="onboarding-banner">PAPYRUS · FIRST-RUN SETUP</div>
-      <div className="onboarding-shell">
-        <div className="onboarding-transcript" ref={transcriptRef}>
-          {messages.map((message, index) => (
-            <div key={index} className={`onboarding-message ${message.role}`}>
-              <span className="onboarding-speaker">{message.role === 'agent' ? '✦' : 'You'}</span>
-              <div className="onboarding-bubble">{message.text}</div>
-            </div>
-          ))}
-          {busy && <div className="onboarding-message agent"><span className="onboarding-speaker">✦</span><div className="onboarding-bubble">\u2026</div></div>}
+    <main className="onboarding-page">
+      <div className="agent-main">
+        <header className="agent-session-head">
+          <div>
+            <p className="eyebrow">PAPYRUS · FIRST-RUN SETUP</p>
+            <h2>Finish setting up this deployment</h2>
+            {status && <p className="onboarding-id">Deployment ID {status.deploymentId}</p>}
+          </div>
+        </header>
+        <div className="agent-surface">
+          <div className="message-list" ref={transcriptRef}>
+            {messages.map((message, index) => (
+              <article key={index} className={`chat-message ${message.role === 'agent' ? 'assistant' : 'user'}`}>
+                <div className="message-author">{message.role === 'agent' ? 'PAPYRUS' : 'YOU'}</div>
+                <div className="message-body">
+                  <div className="message-markdown"><p>{message.text}</p></div>
+                </div>
+              </article>
+            ))}
+            {busy && <div className="agent-thinking"><span /><span /><span /> Papyrus is working</div>}
+          </div>
+          <div className="composer-layer">
+            <div className="composer">{composer}</div>
+          </div>
         </div>
-        <div className="onboarding-composer">{composer}</div>
       </div>
-      <style>{`
-        .onboarding { min-height: 100vh; background: #0d1117; color: #e6edf3; display: flex; flex-direction: column; }
-        .onboarding-banner { padding: 10px 16px; font-size: 12px; letter-spacing: .12em; background: #161b22; color: #8b949e; border-bottom: 1px solid #21262d; }
-        .onboarding-shell { flex: 1; display: flex; flex-direction: column; max-width: 820px; width: 100%; margin: 0 auto; }
-        .onboarding-transcript { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 14px; }
-        .onboarding-message { display: flex; gap: 10px; align-items: flex-start; }
-        .onboarding-message.user { flex-direction: row-reverse; }
-        .onboarding-speaker { flex: 0 0 auto; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; background: #21262d; color: #8b949e; }
-        .onboarding-message.agent .onboarding-speaker { color: #58a6ff; }
-        .onboarding-bubble { padding: 12px 14px; border-radius: 12px; background: #161b22; border: 1px solid #21262d; white-space: pre-wrap; line-height: 1.5; font-size: 14px; max-width: 78%; }
-        .onboarding-message.user .onboarding-bubble { background: #1f6feb22; border-color: #1f6feb44; }
-        .onboarding-composer { padding: 16px 24px 24px; border-top: 1px solid #21262d; background: #0d1117; }
-        .onboarding-form { display: flex; flex-direction: column; gap: 10px; }
-        .onboarding-form textarea, .onboarding-form input { background: #161b22; border: 1px solid #30363d; color: #e6edf3; border-radius: 8px; padding: 10px 12px; font-size: 14px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-        .onboarding-form textarea:focus, .onboarding-form input:focus { outline: none; border-color: #58a6ff; }
-        .onboarding-row { display: flex; gap: 10px; }
-        .onboarding-fatal { color: #f85149; }
-      `}</style>
     </main>
   )
 }

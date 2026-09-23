@@ -38,10 +38,31 @@ Papyrus's own secrets — the setup token, license, portal secret, and Entra
 configuration — are entered through the first-run onboarding flow and are never
 template parameters. That keeps them out of ARM deployment history.
 
-Registry credentials *are* parameters, because the appliance has to pull its
-image before any onboarding can happen. Use a **pull-only** credential: it is
-written to `/etc/papyrus/registry.env` (mode 0600) on the appliance, and Docker
-persists an equivalent copy in `/root/.docker/config.json` after the first login.
+**Neither is the container image.** The repository is publicly pullable, so the
+deployment carries no registry credential at all. The image reference is a single
+variable in `main.bicep` (`imageReference`) rather than a parameter: customers do
+not choose the image, and asking them for a pull credential would put a secret in
+a field they have no business holding.
+
+That is the only option that works. Every alternative was considered and rejected:
+
+- **Embedding a credential** — impossible. A solution template's ARM JSON is
+  visible to every customer, and its deployment history is readable by anyone
+  with access to the resource group.
+- **Managed identity with an AcrPull grant** — the customer's VM identity lives in
+  their tenant and the publisher's registry in ours. Azure RBAC does not span
+  tenants, so this cannot reach a publisher-owned registry.
+- **Gating the pull to "whoever deployed the offer"** — not a control. Deploying a
+  listed offer is free and self-service, so any gate keyed on it is satisfied by
+  anyone motivated to get past it.
+
+The consequence to accept deliberately: the image is inspectable by anyone. For
+this product that is acceptable. The customer already has root on the appliance,
+so the image was never secret from them, and what the licence protects is the
+commercial entitlement rather than the bytes. It does mean **no dev data may ever
+be baked into the image** — see the runtime data directories excluded in
+`.dockerignore`, which were added after a scan of the built image found a private
+key and the local development databases inside it.
 
 ## Validated configuration
 
@@ -74,15 +95,47 @@ the SCSI path silently leaves the data disk unattached. `papyrus-data-disk.sh`
 tries both and falls back to the one whole disk that is neither mounted nor
 partitioned.
 
-**There is no credential-free ACR pull without the Azure CLI.** Microsoft's
-documented managed-identity flow is `az login --identity` followed by
-`az acr login`, which would mean shipping the Azure CLI on the appliance. The
-raw `docker login -p <AAD token>` shortcut is not supported and fails with
-`unauthorized: Invalid clientid or client secret` — verified against both the
-`containerregistry.azure.net` and `management.azure.com` audiences. Two ways to
-avoid a stored credential instead: enable anonymous pull on a Premium registry
-(Basic does not support it), or implement ACR's `/oauth2/exchange` token
-exchange, which is what `az acr login` does under the hood.
+**The image must be publicly pullable, and this was not the first choice.** The
+obvious approach — the appliance using the VM's managed identity to pull from an
+Azure Container Registry — does not work, and it is worth recording why so nobody
+retries it:
+
+- Microsoft's documented managed-identity flow is `az login --identity` followed
+  by `az acr login`, which would mean shipping the entire Azure CLI on the
+  appliance.
+- The raw `docker login -p <AAD token>` shortcut is not a supported flow. It fails
+  with `unauthorized: Invalid clientid or client secret`, verified against both
+  the `containerregistry.azure.net` and `management.azure.com` audiences.
+- Even had it worked, the grant cannot span tenants, so it could not have reached
+  a publisher-owned registry from a customer subscription anyway.
+
+So the image is published publicly to GHCR:
+
+```
+ghcr.io/beaglabs/papyrus:0.1.1
+```
+
+Verified anonymously pullable — logged out of the registry, removed the local tag, and
+pulled it clean at digest `sha256:a1cd6990d2a9…`. It is **amd64**, built natively by ACR
+Tasks with no emulation, and scanned clean of the development data described above.
+
+Tags are immutable here: ship a new tag per change and update `imageReference`, rather than
+overwriting a published one. `0.1.0` remains pullable but predates the onboarding fix.
+
+Two things that cost time and are worth not rediscovering:
+
+- **The build must be amd64.** Building locally on an Apple Silicon machine produces
+  `linux/arm64`, which an amd64 appliance VM cannot run — it fails with `exec format
+  error` after a successful push. Build with `az acr build` so it is native, then promote
+  the result.
+- **GitHub disables public packages by default.** Until it is enabled at **Organization
+  settings → Packages**, package visibility cannot be changed through the UI or the API,
+  and the anonymous pull fails with `unauthorized`. Note that the REST endpoint for org
+  package settings returns a flat 404 for both "no permission" and "not allowed", so it
+  cannot distinguish them — the organisation settings page is the only place that says
+  which it is.
+
+The outbound-internet requirement below is unchanged either way.
 
 ## Known gaps
 

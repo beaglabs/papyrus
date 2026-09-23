@@ -1,0 +1,246 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/0.1.2-preview/CreateUIDefinition.MultiVm.json#",
+  "handler": "Microsoft.Azure.CreateUIDef",
+  "version": "0.1.2-preview",
+  "parameters": {
+    "config": {
+      "isWizard": false,
+      "basics": {
+        "description": "Deploys the Papyrus appliance into your Azure subscription. Papyrus is a customer-hosted runtime for durable, event-driven agent work. Nothing about your workloads leaves your environment."
+      }
+    },
+    "basics": [],
+    "steps": [
+      {
+        "name": "appliance",
+        "label": "Appliance",
+        "subLabel": {
+          "preValidation": "Choose the size and identity of the appliance.",
+          "postValidation": "Done"
+        },
+        "bladeTitle": "Appliance",
+        "elements": [
+          {
+            "name": "applianceIntro",
+            "type": "Microsoft.Common.InfoBox",
+            "options": {
+              "icon": "Info",
+              "text": "This deploys a single Ubuntu 24.04 virtual machine running Papyrus as one container, plus a dedicated data disk for appliance state. Deployment takes 5-10 minutes, most of which is the container image pull."
+            }
+          },
+          {
+            "name": "namePrefix",
+            "type": "Microsoft.Common.TextBox",
+            "label": "Name prefix",
+            "defaultValue": "papyrus",
+            "toolTip": "Used to name every resource this deployment creates, for example papyrus-appliance.",
+            "constraints": {
+              "required": true,
+              "validations": [
+                {
+                  "regex": "^[a-z0-9][a-z0-9-]{1,18}[a-z0-9]$",
+                  "message": "Use 3-20 characters: lowercase letters, digits and hyphens, starting and ending with a letter or digit."
+                }
+              ]
+            }
+          },
+          {
+            "name": "vmSize",
+            "type": "Microsoft.Common.DropDown",
+            "label": "Virtual machine size",
+            "defaultValue": "Standard_D2as_v7",
+            "toolTip": "Two vCPU and 8 GB is sufficient for the runtime. Choose a larger size only if you expect heavy concurrent use. The size must be available in your chosen region.",
+            "constraints": {
+              "allowedValues": [
+                {
+                  "label": "Standard_D2as_v7 (2 vCPU, 8 GB)",
+                  "value": "Standard_D2as_v7"
+                },
+                {
+                  "label": "Standard_D2s_v5 (2 vCPU, 8 GB)",
+                  "value": "Standard_D2s_v5"
+                },
+                {
+                  "label": "Standard_E2as_v7 (2 vCPU, 16 GB)",
+                  "value": "Standard_E2as_v7"
+                },
+                {
+                  "label": "Standard_D4as_v7 (4 vCPU, 16 GB)",
+                  "value": "Standard_D4as_v7"
+                },
+                {
+                  "label": "Standard_D8as_v7 (8 vCPU, 32 GB)",
+                  "value": "Standard_D8as_v7"
+                }
+              ],
+              "required": true
+            }
+          },
+          {
+            "name": "securityType",
+            "type": "Microsoft.Common.DropDown",
+            "label": "Security type",
+            "defaultValue": "Standard",
+            "toolTip": "TrustedLaunch adds secure boot and a virtual TPM. It is the stronger posture, but it changes the boot chain, so use it only if your environment already standardises on it.",
+            "constraints": {
+              "allowedValues": [
+                {
+                  "label": "Standard",
+                  "value": "Standard"
+                },
+                {
+                  "label": "Trusted launch (secure boot + vTPM)",
+                  "value": "TrustedLaunch"
+                }
+              ],
+              "required": true
+            }
+          },
+          {
+            "name": "dataDiskSizeGb",
+            "type": "Microsoft.Common.Slider",
+            "label": "Data disk size (GB)",
+            "defaultValue": 32,
+            "min": 16,
+            "max": 1024,
+            "step": 16,
+            "showStepMarkers": false,
+            "toolTip": "A dedicated disk holds appliance state, so it survives a rebuild of the virtual machine."
+          }
+        ]
+      },
+      {
+        "name": "access",
+        "label": "Access",
+        "subLabel": {
+          "preValidation": "Administrator access and how the appliance is reached.",
+          "postValidation": "Done"
+        },
+        "bladeTitle": "Access",
+        "elements": [
+          {
+            "name": "authenticationType",
+            "type": "Microsoft.Common.DropDown",
+            "label": "Administrator authentication",
+            "defaultValue": "sshPublicKey",
+            "toolTip": "Used only for administrative access to the virtual machine. The appliance itself is administered through its onboarding flow in a browser.",
+            "constraints": {
+              "allowedValues": [
+                {
+                  "label": "SSH public key",
+                  "value": "sshPublicKey"
+                },
+                {
+                  "label": "Password",
+                  "value": "password"
+                }
+              ],
+              "required": true
+            }
+          },
+          {
+            "name": "adminUsername",
+            "type": "Microsoft.Common.TextBox",
+            "label": "Administrator username",
+            "defaultValue": "papyrusadmin",
+            "toolTip": "The local administrator account on the virtual machine. This is not an application account: Papyrus uses Microsoft Entra ID for identity, and creates no accounts of its own.",
+            "constraints": {
+              "required": true,
+              "validations": [
+                {
+                  "regex": "^[a-z_][a-z0-9_-]{0,63}$",
+                  "message": "Use lowercase letters, digits, underscores and hyphens, starting with a letter or underscore."
+                }
+              ]
+            }
+          },
+          {
+            "name": "sshPublicKey",
+            "type": "Microsoft.Common.TextBox",
+            "label": "SSH public key",
+            "toolTip": "Paste the contents of your public key file, for example ~/.ssh/id_ed25519.pub. Do not paste a private key.",
+            "visible": "[equals(steps('access').authenticationType, 'sshPublicKey')]",
+            "constraints": {
+              "required": true,
+              "validations": [
+                {
+                  "regex": "^(ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp256) AAAA[A-Za-z0-9+/=]+",
+                  "message": "This does not look like an SSH public key. It should begin with ssh-ed25519, ssh-rsa or ecdsa-sha2-nistp256."
+                }
+              ]
+            }
+          },
+          {
+            "name": "adminPassword",
+            "type": "Microsoft.Common.PasswordBox",
+            "label": "Administrator password",
+            "toolTip": "12-123 characters, with at least three of: lowercase, uppercase, digit, symbol.",
+            "visible": "[equals(steps('access').authenticationType, 'password')]",
+            "constraints": {
+              "required": true,
+              "validations": [
+                {
+                  "regex": "^.{12,123}$",
+                  "message": "The password must be between 12 and 123 characters."
+                }
+              ]
+            }
+          },
+          {
+            "name": "createPublicIp",
+            "type": "Microsoft.Common.CheckBox",
+            "label": "Assign a public IP address",
+            "defaultValue": true,
+            "toolTip": "Required if the onboarding flow must be reachable from outside the virtual network. Turn this off for a restricted environment and reach the appliance over a private network."
+          },
+          {
+            "name": "dnsLabelPrefix",
+            "type": "Microsoft.Common.TextBox",
+            "label": "DNS name label (optional)",
+            "toolTip": "Gives the appliance a name of the form <label>.<region>.cloudapp.azure.com instead of a bare IP address.",
+            "visible": "[steps('access').createPublicIp]",
+            "constraints": {
+              "required": false,
+              "validations": [
+                {
+                  "regex": "^$|^[a-z][a-z0-9-]{1,61}[a-z0-9]$",
+                  "message": "Use 3-63 characters: lowercase letters, digits and hyphens, starting with a letter."
+                }
+              ]
+            }
+          },
+          {
+            "name": "allowedSourceAddressPrefix",
+            "type": "Microsoft.Common.TextBox",
+            "label": "Allowed source address",
+            "defaultValue": "*",
+            "toolTip": "Which addresses may reach the administrator port and the onboarding port. A specific CIDR range is strongly recommended; * allows any address.",
+            "constraints": {
+              "required": true,
+              "validations": [
+                {
+                  "regex": "^\\*$|^([0-9]{1,3}\\.){3}[0-9]{1,3}(/[0-9]{1,2})?$",
+                  "message": "Enter * or a CIDR range such as 203.0.113.10/32."
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ],
+    "outputs": {
+      "location": "[location()]",
+      "namePrefix": "[steps('appliance').namePrefix]",
+      "vmSize": "[steps('appliance').vmSize]",
+      "securityType": "[steps('appliance').securityType]",
+      "dataDiskSizeGb": "[steps('appliance').dataDiskSizeGb]",
+      "authenticationType": "[steps('access').authenticationType]",
+      "adminUsername": "[steps('access').adminUsername]",
+      "sshPublicKey": "[if(equals(steps('access').authenticationType, 'sshPublicKey'), steps('access').sshPublicKey, '')]",
+      "adminPassword": "[if(equals(steps('access').authenticationType, 'password'), steps('access').adminPassword, '')]",
+      "createPublicIp": "[steps('access').createPublicIp]",
+      "dnsLabelPrefix": "[steps('access').dnsLabelPrefix]",
+      "allowedSourceAddressPrefix": "[steps('access').allowedSourceAddressPrefix]"
+    }
+  }
+}

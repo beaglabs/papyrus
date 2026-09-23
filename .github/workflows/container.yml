@@ -47,7 +47,7 @@ jobs:
           format: cyclonedx-json
           output-file: papyrus.cdx.json
       - name: Scan image
-        uses: aquasecurity/trivy-action@v0.30.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: papyrus:${{ github.sha }}
           format: sarif

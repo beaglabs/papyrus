@@ -47,8 +47,8 @@ export class ConsolePolicy {
    * firewall was supposed to protect. The correct fix is to import the appliance
    * CA (PAPYRUS_TLS_CA or the `tlsCaFile` integration setting); `tlsVerify=false`
    * trades the confidentiality and integrity of every action for convenience, so
-   * it is refused outright on the government and restricted profiles, where the
-   * network is the control.
+   * it is refused outright on government and disconnected profiles, where the
+   * network is part of the control boundary.
    */
   static forIntegration(integration: IntegrationConfiguration, config: AgentConfig): ConsolePolicy {
     const endpoint = integration.endpoint?.trim()
@@ -62,13 +62,8 @@ export class ConsolePolicy {
     if (url.protocol !== 'https:' && url.protocol !== 'http:') {
       throw new ConsoleTransportError('UNSUPPORTED_SCHEME', `A device console endpoint must be http or https, not ${url.protocol}`)
     }
-    if (url.protocol === 'http:') {
-      // Not a hard refusal: some appliances only speak http on an isolated
-      // management VLAN. It is reported because credentials cross that link in
-      // clear text the moment a session logs in.
-      if (config.profile === 'government-il4' || config.profile === 'government-il6' || config.profile === 'restricted' || config.profile === 'disconnected') {
-        throw new ConsoleTransportError('PLAINTEXT_REFUSED', `Plain http device endpoints are not permitted on the ${config.profile} profile`)
-      }
+    if (url.protocol === 'http:' && (config.profile === 'government' || config.profile === 'disconnected')) {
+      throw new ConsoleTransportError('PLAINTEXT_REFUSED', `Plain http device endpoints are not permitted on the ${config.profile} profile`)
     }
     if (url.username || url.password) {
       throw new ConsoleTransportError('CREDENTIAL_IN_URL', 'A device console endpoint must not carry credentials in its URL')
@@ -76,7 +71,7 @@ export class ConsolePolicy {
 
     const declared = integration.settings[TLS_VERIFY_SETTING]
     const verifyTls = typeof declared === 'boolean' ? declared : declared !== 'false'
-    if (!verifyTls && (config.profile.startsWith('government') || config.profile === 'restricted' || config.profile === 'disconnected')) {
+    if (!verifyTls && (config.profile === 'government' || config.profile === 'disconnected')) {
       throw new ConsoleTransportError('TLS_VERIFY_REQUIRED', `tlsVerify=false is not permitted on the ${config.profile} profile; import the appliance CA instead`)
     }
 

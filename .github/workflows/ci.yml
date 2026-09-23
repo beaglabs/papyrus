@@ -23,9 +23,12 @@ jobs:
       PAPYRUS_REQUIRE_SANDBOX_TESTS: '1'
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - name: Hydrate extension workspace
+        uses: actions/checkout@v4
         with:
-          version: 11.22.0
+          repository: beaglabs/papyrus-extensions
+          path: vendor/papyrus-extensions
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24

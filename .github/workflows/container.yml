@@ -13,7 +13,7 @@ permissions:
   security-events: write
 
 env:
-  IMAGE: ghcr.io/${{ github.repository }}/papyrus
+  IMAGE: ghcr.io/${{ github.repository }}/papyrus/papyrus
 
 jobs:
   build:
@@ -34,8 +34,8 @@ jobs:
           context: .
           load: true
           tags: papyrus:${{ github.sha }}
-          provenance: mode=max
-          sbom: true
+          provenance: false
+          sbom: false
       - name: Verify FIPS and non-root runtime
         run: |
           test "$(docker run --rm --entrypoint node papyrus:${GITHUB_SHA} -p 'require("node:crypto").getFips()')" = "1"

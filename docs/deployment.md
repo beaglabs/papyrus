@@ -2,140 +2,102 @@
 
 Papyrus runs as a customer-hosted, single-deployment daemon. Teams, Exchange, ACP, A2A peers, and security products connect to the daemon; none is required for the runtime to remain available.
 
+## Deployment profile
+
+Papyrus has exactly three deployment profiles:
+
+| Profile | Purpose |
+| --- | --- |
+| `commercial` | Connected commercial/enterprise deployment. |
+| `government` | Connected government deployment with hardened network/model defaults. |
+| `disconnected` | Disconnected or air-gapped deployment with no assumption of external service reachability. |
+
+GCC, GCC High, DoD, IL4, IL6, SIPR, and classification levels are **not Papyrus deployment profiles**. National cloud selection, customer authorization boundaries, and information classification are separate concerns.
+
 ## Identity boundary
 
-Persistent deployments require one customer-owned Microsoft Entra application registration. Configure application roles from the root README and assign them in Entra. Papyrus validates Microsoft-issued tokens and derives a one-hour, HTTP-only portal cookie from those claims. It does not create a user, invitation, password, group, or local role record.
+Persistent deployments require one customer-owned Microsoft Entra application registration when Entra is used. Configure application roles from the root README and assign them in Entra. Papyrus validates Microsoft-issued tokens and derives a one-hour, HTTP-only portal cookie from those claims. It does not create a user, invitation, password, group, or local role record.
 
-Use the Entra cloud matching the tenant:
+Select the Entra national cloud independently of `PAPYRUS_PROFILE`:
 
-| Profile | Typical Entra cloud |
+| `PAPYRUS_ENTRA_CLOUD` | Microsoft environment |
 | --- | --- |
-| Commercial, GCC | `Public` |
-| GCC High, IL4 | `USGov` |
-| DoD, IL6 | `USGovDoD` |
+| `Public` | Microsoft commercial/public cloud |
+| `USGov` | Azure Government / Microsoft US Government endpoints |
+| `USGovDoD` | Microsoft DoD national-cloud endpoints |
 
-The mapping is a deployment default, not an accreditation claim. The operator remains responsible for selecting the correct national-cloud endpoints and approving application deployment.
+Papyrus does not infer accreditation or impact level from that setting. The operator remains responsible for selecting the correct national-cloud endpoints and deploying within the customer-approved boundary.
+
+## Classification marking capability
+
+Papyrus does not show a classification banner merely because a deployment uses the `government` or `disconnected` profile. Classification marking is a separately licensed capability.
+
+A signed license must contain both:
+
+```text
+classification-banners
+classification:<level>
+```
+
+Supported levels are:
+
+- `unclassified`
+- `cui`
+- `confidential`
+- `secret`
+- `top-secret`
+- `top-secret-sci`
+
+The portal derives the banner exclusively from the locally verified signed license. There is no `PAPYRUS_CLASSIFICATION` environment-variable override. A deployment without the capability renders no classification banner.
 
 ## Platform requirements
 
-Papyrus's agent workspace is local-first and has two deliberately separate
-providers:
+Papyrus's agent workspace is local-first. AgentFS is the durable workspace filesystem, backed by local SQLite under `PAPYRUS_DATA_DIR`; cloud sync is not required. Native workspace execution is isolated through the packaged Landlock/seccomp boundary on supported Linux hosts and is disabled rather than silently run unconfined when the required isolation cannot be provided.
 
-- **AgentFS** is the durable `WorkspaceFilesystem`, backed by `agentfs-sdk` over
-  a local SQLite database under `PAPYRUS_DATA_DIR/.agentfs`. Cloud sync is not
-  enabled or required.
-- **nono** is the `WorkspaceSandbox` and process boundary, applied in process by
-  the `nono-ts` native addon. Commands see only the materialized workspace, and
-  outbound network is never granted.
+The workspace process chain materializes a bounded AgentFS view, executes inside the configured sandbox, reconciles approved filesystem changes back into AgentFS, and removes the materialized workspace. Credential-like environment variables are stripped before workspace child processes are spawned.
 
-No filesystem is mounted. AgentFS materializes the workspace into a real
-directory for the lifetime of a command, `nono-ts` confines the process to it,
-and the result is reconciled back into AgentFS:
-
-| Host | nono isolation | Workspace execution |
-| --- | --- | --- |
-| Linux | Landlock | Supported |
-| macOS | Seatbelt | Supported |
-| Windows | — | Disabled |
-
-The workspace process chain is:
-
-```text
-Mastra Workspace tool
-       |
-       v
-NonoProcessManager.spawn
-       |
-       v
-AgentFS materializeForExecution()  ->  real workspace directory
-       |
-       v
-node workspace-nono-worker.js <control.json>
-       |
-       v
-nono-ts CapabilitySet.apply()      (Landlock on Linux, Seatbelt on macOS)
-       |
-       v
-/bin/sh -c <command>
-       |
-       v
-AgentFS reconcileExecution()       ->  cleanupExecution()
-```
-
-Only the materialized workspace is writable, along with the explicit read-only
-toolchain paths Papyrus provisioned, such as `<data-dir>/python`. AgentFS remains
-the filesystem source of truth across sessions: the materialized directory exists
-only for the lifetime of a command, and its changes are reconciled back into the
-database. Papyrus also removes credential-like environment variables before
-spawning workspace processes.
-
-`nono-ts` is a platform-specific native addon. Linux deployments need the glibc
-(`gnu`) build present in the image, together with the `@tursodatabase/database`
-and `libsql` native drivers. The daemon never downloads a sandbox, database
-driver, or filesystem runtime at execution time, so all three must be vendored
-into the approved image. The image contents and deployment shape are specified in
-[deployment-vhd.md](deployment-vhd.md).
-
-There is no AgentFS CLI and no mount daemon to stage, so `agentfs`, `nono`, and
-the `PAPYRUS_AGENTFS_BINARY` / `PAPYRUS_NONO_BINARY` overrides are not part of
-this path.
-
-The older `PAPYRUS_SANDBOX_RUNTIME=bwrap|seatbelt` selector is retained for
-configuration compatibility only; the Mastra workspace path does not use
-`LocalSandbox`, and Bubblewrap is not required on a Linux deployment.
+The supported appliance image and vendored runtime dependencies are described in [deployment-vhd.md](deployment-vhd.md).
 
 ### Deployment shape
 
-Because nothing is mounted, workspace execution needs no mount capability, no
-`/dev/fuse`, and no elevated capabilities. A deployment requires a writable
-`PAPYRUS_DATA_DIR` and its listening ports, and nothing else. The daemon must
-never be given `privileged: true`, and no deployment needs it.
+A deployment requires a writable `PAPYRUS_DATA_DIR` and its configured listening ports. The daemon must never be given `privileged: true`; Papyrus does not require an all-powerful container merely to execute governed workspace commands.
 
 ## Agent configuration
 
-The agent needs a model, and choosing one is the customer's decision — `disconnected` and `restricted` profiles cannot reach a hosted provider at all. Papyrus will not guess a default.
+The agent needs a model, and choosing one is the customer's decision. Government and disconnected profiles do not inherit a public commercial model endpoint. Papyrus requires an explicitly approved endpoint for those profiles, except for a local loopback provider such as Ollama.
 
 ```bash
-# Optional one-time bootstrap; durable profiles can be configured at /portal/models.
+# Optional one-time bootstrap; durable model profiles can be configured at /portal/models.
 export PAPYRUS_AGENT_MODEL='openai/gpt-5'
-export PAPYRUS_MODEL_BASE_URL='https://api.openai.com/v1'
+export PAPYRUS_MODEL_BASE_URL='https://approved-model-endpoint.example/v1'
 export PAPYRUS_MODEL_CREDENTIAL_REF='env://OPENAI_API_KEY'
 ```
 
-Without it the agent is not registered. Mastra storage, session history, workflows, and plugin configuration still start normally, while signals accumulate durably in `agent_signal_outbox`. Nothing is dropped while unconfigured. The Models tab stores only gateway metadata and a customer-owned credential reference; it never stores raw key material.
+Without a model, Mastra storage, session history, workflows, and connector state can still start while work that requires a model remains unavailable. The Models surface stores gateway metadata and customer-owned credential references; it does not require Papyrus to persist raw model secrets.
 
-Storage is LibSQL, split by lifecycle rather than kept in one file: `<data-dir>/mastra.db` holds session threads and messages, `<data-dir>/jobs.db` holds schedules and background jobs, and `<data-dir>/observability.db` holds trace spans and logs. All three are created alongside the main database, and all three belong in a backup — a session export alone does not carry the recurring work that outlives it.
-
-The Mastra API surface this depends on, and the version it was verified against, is recorded in [mastra-integration.md](mastra-integration.md). Check it before upgrading Mastra.
+Storage is LibSQL, split by lifecycle rather than kept in one file: `<data-dir>/mastra.db` holds session threads and messages, `<data-dir>/jobs.db` holds schedules and background jobs, and `<data-dir>/observability.db` holds trace spans and logs. All belong in the deployment backup plan.
 
 ## Document toolchain
 
-Agent code execution runs the host's programs, and a host Python with no libraries makes document work pathological: an agent asked to read a PDF has no reader, so it writes one, and spends its step budget debugging its own parser instead of producing the deliverable.
-
-Provision the environment once per appliance:
-
-```bash
-PAPYRUS_DATA_DIR=/var/lib/papyrus scripts/provision-python.sh
-```
-
-That creates `<data-dir>/python` with `pypdf` (PDF text, layout, and embedded images), `reportlab` (styled PDF output with fonts, colours, geometry, and placed images), and `pillow` (image inspection and conversion). The daemon detects it automatically and the sandbox grants read-only access to that directory — nothing else under the data directory becomes readable to workspace commands, and outbound network stays blocked at agent time. Set `PAPYRUS_PYTHON_BIN` to override the interpreter, and `PAPYRUS_LIBREOFFICE_BIN` when LibreOffice is installed somewhere the PATH lookup does not cover (the daemon tries `libreoffice`, then macOS `soffice`). Without the provisioned environment everything still runs; the agent just has the host's bare interpreter.
-
+Provision the approved document/tooling environment once per appliance rather than asking agents to download or invent parsers at runtime. The sandbox may receive read-only access to those explicitly provisioned toolchain paths while outbound network access remains governed separately.
 
 ## Runtime modes
 
 - `local`: loopback evaluation. It may use `PAPYRUS_DEV_ENTRA_PRINCIPAL`.
-- `persistent`: durable customer deployment. It requires real Entra configuration, TLS, a portal signing secret, durable storage, and normally a signed offline license. On Linux it enables sandboxed agent code execution through `nono-ts` and Landlock, and requires the vendored native drivers described above. The supported appliance image is specified in [deployment-vhd.md](deployment-vhd.md).
+- `persistent`: durable customer deployment. It requires production identity configuration, a portal signing secret, durable storage, and normally a signed offline license.
 
-Persistent mode uses SQLite in WAL mode and is intended for a supervised single-node deployment. Back up the database and connector configuration, store keys and connector credentials in customer-controlled secret infrastructure, and export audit events to independently controlled storage.
+Persistent mode is intended for a supervised customer-hosted deployment. Back up runtime databases and connector configuration, store keys and connector credentials in customer-controlled secret infrastructure, and export audit evidence to independently controlled storage where required.
 
 ## Interface availability
 
-Teams is an adapter, not a runtime dependency. GCC High and DoD application deployment must follow the customer's approved national-cloud process. Email and the authenticated portal can operate without Teams. Disconnected deployments can omit Microsoft adapters and use locally reachable portal, ACP, A2A, and security connectors.
+Teams and Exchange are adapters, not runtime dependencies. GCC High or DoD tenants use the appropriate `PAPYRUS_ENTRA_CLOUD` value while the Papyrus deployment profile remains `government`. Disconnected deployments can omit Microsoft adapters and use locally reachable portal, ACP, A2A, and approved security connectors.
 
 ## Licensing
 
-`GET /api/license/request` returns the deployment identity. A licensing authority signs a license containing that deployment ID, profiles, features, issue time, and optional expiry. Papyrus verifies the signature locally. Licensing determines product entitlement; Entra roles determine human authority.
+`GET /api/license/request` returns the deployment identity and selected Papyrus profile. A Beag licensing authority signs a license containing the deployment ID, permitted profiles, product features, issue time, and optional expiry. Papyrus verifies the signature locally; no Beag cloud callback is required during normal disconnected operation.
+
+Licensing determines product entitlement. Deployment profile determines runtime posture. Entra/national-cloud configuration determines identity endpoints. Customer authorization determines what environment the deployment is approved to operate in. Those are deliberately separate concepts.
 
 ## Current scope
 
-The branch implements deployment configuration, Entra validation, connector governance, customer-managed Observation API source profiles, portal routes, licensing, and audit persistence. Live Teams commands, Exchange polling, source-scoped machine credentials, and customer-vault resolution are separate runtime slices and are not represented as operational merely because an integration has been saved.
+The branch implements deployment configuration, Entra validation, connector governance, customer-managed source profiles, portal routes, offline licensing, and audit persistence. Saving a connector or selecting a profile is not itself an accreditation, authorization, or classification decision.

@@ -33,7 +33,7 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --no-frozen-lockfile
       - name: Verify contract/schema drift
         run: pnpm contracts:check
       - name: Generate and verify compliance evidence

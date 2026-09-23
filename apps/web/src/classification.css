@@ -1,0 +1,27 @@
+.classification-banner {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 120;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 14px;
+  border-bottom: 3px solid #111;
+  text-align: center;
+  font: 900 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  letter-spacing: .14em;
+}
+
+.classification-banner strong { color: inherit; }
+.login-with-classification { padding-top: 92px; }
+
+/* The legacy layout assumed a permanent 32px handling strip. The strip is now a
+   licensed capability, so mobile chrome starts at the viewport edge unless the
+   portal shell actually carries a classification banner. */
+@media (max-width: 760px) {
+  .portal-shell:not(.with-handling-banner) .nb-sidebar[data-mobile="true"],
+  .portal-shell:not(.with-handling-banner) .nb-sidebar[data-mobile="true"][data-collapsible="icon"] { top: 0; }
+  .portal-shell:not(.with-handling-banner) .nb-sidebar-backdrop { inset: 0; }
+  .portal-shell:not(.with-handling-banner) .nb-sidebar-inset { height: 100vh; }
+}

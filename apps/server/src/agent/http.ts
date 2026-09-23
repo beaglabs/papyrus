@@ -111,6 +111,7 @@ export function createAgentServer(config: AgentConfig, service: AgentService, au
           cloud: config.cloud,
           entraConfigured: Boolean(config.entra),
           developmentIdentity: Boolean(config.developmentPrincipal),
+          microsoftAppLogoUrl: process.env.PAPYRUS_ENTRA_APP_LOGO_URL?.trim() || undefined,
           loginUrl: '/api/auth/entra/login?returnTo=/portal',
         })
       }

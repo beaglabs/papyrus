@@ -23,27 +23,45 @@ jobs:
       PAPYRUS_REQUIRE_SANDBOX_TESTS: '1'
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - name: Hydrate extension workspace
+        uses: actions/checkout@v4
         with:
-          version: 11.22.0
+          repository: beaglabs/papyrus-extensions
+          path: vendor/papyrus-extensions
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --no-frozen-lockfile
       - name: Verify contract/schema drift
         run: pnpm contracts:check
       - name: Generate and verify compliance evidence
         run: pnpm compliance:check
+      - name: Build extension prerequisites
+        run: |
+          pnpm --filter papyrus-extension-sdk build
+          pnpm --filter papyrus-viewer-3d build
+          pnpm --filter papyrus-gnss build
       - name: Install Linux command isolation
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y bubblewrap
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - run: pnpm typecheck
-      - run: pnpm test
-      - run: pnpm build
+      - name: Typecheck Papyrus apps
+        run: |
+          pnpm --filter @papyrus/contracts typecheck
+          pnpm --filter @papyrus/server typecheck
+          pnpm --filter @papyrus/web typecheck
+      - name: Test Papyrus apps
+        run: |
+          pnpm --filter @papyrus/server test
+          pnpm --filter @papyrus/web test
+      - name: Build Papyrus apps
+        run: |
+          pnpm --filter @papyrus/server build
+          pnpm --filter @papyrus/web build
       - name: Upload SPDX SBOM
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4

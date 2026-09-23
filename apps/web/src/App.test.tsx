@@ -27,12 +27,24 @@ describe('primary navigation', () => {
 })
 
 describe('footer runtime status', () => {
-  it('renders the runtime line and no jobs block until a session is scoped', () => {
-    const html = renderToStaticMarkup(<RuntimeStatusStrip status={status} />)
+  it('renders runtime/model health without session goal, schedule, or job counters', () => {
+    const withSessionJobs: AgentStatus = {
+      ...status,
+      jobs: jobs({
+        goal: { status: 'active', objective: 'Finish the work', runsUsed: 0, maxRuns: 5 },
+        schedules: { active: 2, paused: 1, nextFireAt: Date.UTC(2026, 8, 23, 18, 0) },
+        background: { running: 1, queued: 2, failed: 0, observed: true },
+      }),
+    }
+    const html = renderToStaticMarkup(<RuntimeStatusStrip status={withSessionJobs} sessionId="session-1" />)
     expect(html).toContain('RUNTIME')
     expect(html).toContain('Mastra online')
     expect(html).toContain('llama-3.3-70b')
     expect(html).not.toContain('runtime-jobs')
+    expect(html).not.toContain('goal active')
+    expect(html).not.toContain('active schedule')
+    expect(html).not.toContain('running')
+    expect(html).not.toContain('queued')
   })
 
   it('reports a session with no recurring work and no running jobs plainly', () => {

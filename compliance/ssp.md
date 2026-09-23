@@ -29,7 +29,7 @@ Papyrus is a customer-hosted durable agent runtime. The repository boundary incl
 | Evidence source | Git blob |
 | --- | --- |
 | `apps/server/src/agent/config.ts` | `061bb55db27f9155e7ca5f7489050a650ee117b7` |
-| `apps/server/src/agent/http.ts` | `dd54a48515cbd24dddba0a45d13839bfc9852bb8` |
+| `apps/server/src/agent/http.ts` | `a489dd950477b09eab269bb6fa0ac700bd3af409` |
 | `apps/server/src/agent/action-worker.ts` | `edee5c81e503ea46f5596c806c73b39884e0383f` |
 | `apps/server/src/agent/catalog.ts` | `961c8baa2e9e925042fd875556998099eb73ac07` |
 | `apps/server/src/agent/link-store.ts` | `75cb2a0dd381bc622ad9c3b79e76083ccc944ddb` |

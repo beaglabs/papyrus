@@ -10,6 +10,7 @@ import { MastraRuntime, MastraRuntimeError } from './mastra/runtime.js'
 import { fetchUrlPreviewImage, UnsafeFetchTargetError } from './mastra/fetch-preview.js'
 import { ModelProfileError } from './model-store.js'
 import { handlePublicLink } from './link-http.js'
+import { getScheduleLink, listScheduleLinks, updateScheduleLink } from './schedule-links.js'
 
 class HttpError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message) }
@@ -243,6 +244,31 @@ export function createAgentServer(config: AgentConfig, service: AgentService, au
         await principal(request, auth, service)
         return json(response, 200, { links: mastra.links.list() })
       }
+      if (url.pathname === '/api/links/schedules' && request.method === 'GET') {
+        await principal(request, auth, service)
+        return json(response, 200, { schedules: await listScheduleLinks(mastra) })
+      }
+      const scheduleLinkResource = url.pathname.match(/^\/api\/links\/schedules\/([^/]+)$/)
+      if (scheduleLinkResource) {
+        const id = decodeURIComponent(scheduleLinkResource[1] as string)
+        if (request.method === 'GET') {
+          await principal(request, auth, service)
+          return json(response, 200, { schedule: await getScheduleLink(mastra, id) })
+        }
+        if (request.method === 'PATCH') {
+          const actor = await principal(request, auth, service)
+          requireRole(actor, 'Papyrus.Integration.Manage')
+          const input = await body(request)
+          const timezone = typeof input.timezone === 'string' ? input.timezone.trim().slice(0, 128) : undefined
+          const schedule = await updateScheduleLink(mastra, id, {
+            name: requiredString(input.name, 'name', 120),
+            cron: requiredString(input.cron, 'cron', 128),
+            prompt: requiredString(input.prompt, 'prompt', 8_000),
+            ...(timezone ? { timezone } : {}),
+          })
+          return json(response, 200, { schedule, replacedId: id })
+        }
+      }
       const linkInbounds = url.pathname.match(/^\/api\/links\/([^/]+)\/inbounds$/)
       if (linkInbounds && request.method === 'GET') {
         await principal(request, auth, service)
@@ -268,7 +294,7 @@ export function createAgentServer(config: AgentConfig, service: AgentService, au
           download: url.searchParams.get('download') === '1',
         })
       }
-      // The pinned snapshot itself. A workflow-bound API Link answers GET by running the workflow,
+      // The pinned snapshot itself. A workflow-bound API Link answers GET by running its workflow,
       // so without this the reviewed snapshot could never be read back through the Link.
       const linkContent = url.pathname.match(/^\/api\/links\/([^/]+)\/content$/)
       if (linkContent && request.method === 'GET') {

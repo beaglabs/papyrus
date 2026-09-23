@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { PortalData, PublicConfig } from './api.js'
-import { AuthenticationRequired, createSession, deleteSession, loadAgentStatus, loadPortal, logout, publicConfig, type AgentSession, type AgentStatus } from './api.js'
+import { AuthenticationRequired, createSession, deleteSession, loadPortal, logout, publicConfig, type AgentSession, type AgentStatus } from './api.js'
 import { AgentView } from './Agent.js'
 import { AccessView } from './Access.js'
 import { LibraryView } from './Library.js'
@@ -10,6 +10,7 @@ import { ObservabilityPanel } from './Observability.js'
 import { Onboarding } from './Onboarding.js'
 import { Alert, Avatar, Badge, Button, Card, DropdownMenu, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, Skeleton } from './components/ui/index.js'
 import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarRail, SidebarTrigger } from './components/ui/sidebar.js'
+import papyrusLogo from '../../../deploy/marketplace/logos/papyrus-small-48x48.png'
 
 export type PortalView = 'agent' | 'models' | 'links' | 'library' | 'governance' | 'access'
 type AppState = { phase: 'loading' } | { phase: 'bootstrap' } | { phase: 'signed-out'; config: PublicConfig } | { phase: 'ready'; data: PortalData } | { phase: 'error'; message: string }
@@ -22,9 +23,38 @@ function viewFromPath(): PortalView {
   return (Object.entries(ROUTES).find(([, route]) => window.location.pathname === route)?.[0] as PortalView | undefined) ?? 'agent'
 }
 
-function Logo() { return <div className="brand"><span className="brand-mark" aria-hidden="true">P</span><span>PAPYRUS</span></div> }
+function Logo() {
+  return <div className="brand"><span className="brand-mark" aria-hidden="true"><img src={papyrusLogo} alt="" width="39" height="39" style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} /></span><span>PAPYRUS</span></div>
+}
 function initials(name: string) { return name.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') }
 function profileLabel(profile: string) { return ({ gcc: 'GCC', gcch: 'GCC HIGH', dod: 'DOD', restricted: 'RESTRICTED', disconnected: 'DISCONNECTED' } as Record<string, string>)[profile] ?? profile.toUpperCase() }
+
+/**
+ * Keep the identity mark stable even when an upstream identity response temporarily omits
+ * its picture URL. The initials are always rendered underneath the image, so a failed image
+ * can never turn into an empty/generic avatar; when an identity provider does supply a
+ * picture URL, the last good URL is retained locally for this exact tenant + object id.
+ */
+function UserAvatar({ principal }: { principal: PortalData['me'] }) {
+  const identity = principal as PortalData['me'] & { pictureUrl?: string }
+  const cacheKey = `papyrus:user-avatar:${principal.tenantId}:${principal.oid}`
+  const [pictureUrl, setPictureUrl] = useState<string | undefined>(() => {
+    if (identity.pictureUrl) return identity.pictureUrl
+    try { return window.localStorage.getItem(cacheKey) ?? undefined } catch { return undefined }
+  })
+
+  useEffect(() => {
+    if (!identity.pictureUrl) return
+    setPictureUrl(identity.pictureUrl)
+    try { window.localStorage.setItem(cacheKey, identity.pictureUrl) } catch { /* storage can be disabled by policy */ }
+  }, [cacheKey, identity.pictureUrl])
+
+  const fallback = initials(principal.displayName) || initials(principal.preferredUsername ?? '') || 'U'
+  return <Avatar className="avatar" style={{ position: 'relative', overflow: 'hidden' }}>
+    <span aria-hidden="true">{fallback}</span>
+    {pictureUrl && <img src={pictureUrl} alt="" referrerPolicy="no-referrer" onError={() => setPictureUrl(undefined)} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />}
+  </Avatar>
+}
 
 export function App() {
   const [state, setState] = useState<AppState>({ phase: 'loading' })
@@ -110,7 +140,7 @@ export function App() {
         </SidebarContent>
         <SidebarFooter>
           <RuntimeStatusStrip status={data.agent} sessionId={selectedSession?.id} />
-          <DropdownMenu className="account-menu" trigger={<div className="account-trigger-content"><Avatar className="avatar">{initials(data.me.displayName)}</Avatar><span className="account-copy sidebar-copy"><strong>{data.me.displayName}</strong><small>ENTRA · {data.me.roles.length} ROLES</small></span><span className="sidebar-copy">•••</span></div>}>
+          <DropdownMenu className="account-menu" trigger={<div className="account-trigger-content"><UserAvatar principal={data.me} /><span className="account-copy sidebar-copy"><strong>{data.me.displayName}</strong><small>ENTRA · {data.me.roles.length} ROLES</small></span><span className="sidebar-copy">•••</span></div>}>
             <DropdownMenuLabel><strong>{data.me.displayName}</strong><span>{data.me.preferredUsername ?? data.me.oid}</span></DropdownMenuLabel><DropdownMenuSeparator /><DropdownMenuItem disabled>Roles managed in Microsoft Entra</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem className="danger-item" onClick={() => void signOut()}>Sign out</DropdownMenuItem>
           </DropdownMenu>
         </SidebarFooter>
@@ -121,7 +151,7 @@ export function App() {
           ? <AgentView key={selectedSession.id} session={selectedSession} status={data.agent} initialPrompt={initialPrompt} canApprove={data.me.roles.includes('Papyrus.System.Owner') || data.me.roles.includes('Papyrus.Action.Approve')} canManageSkills={data.me.roles.includes('Papyrus.System.Owner')} onChanged={refresh} />
           : <EmptyAgent onCreate={() => void newSession()} />)}
         {view === 'models' && <ModelsView profiles={data.models} onAskAgent={(prompt) => navigate('agent', { prompt, session: selectedSession?.id })} onChanged={refresh} canManage={data.me.roles.includes('Papyrus.System.Owner') || data.me.roles.includes('Papyrus.Integration.Manage')} />}
-        {view === 'links' && <LinksView {...(data.agent.links?.validation ? { validation: data.agent.links.validation } : {})} />}
+        {view === 'links' && <LinksView {...(data.agent.links?.validation ? { validation: data.agent.links.validation } : {})} canManageSchedules={data.me.roles.includes('Papyrus.System.Owner') || data.me.roles.includes('Papyrus.Integration.Manage')} />}
         {view === 'library' && <LibraryView />}
         {view === 'governance' && <GovernanceView data={data} />}
         {view === 'access' && <AccessView me={data.me} />}
@@ -189,43 +219,15 @@ export function goalSummary(jobs: NonNullable<AgentStatus['jobs']>): string | un
 }
 
 /**
- * Footer runtime status. Recurring work and running jobs are session-scoped: the strip
- * only reports what the daemon can observe for the selected session, and says so when it
- * cannot observe the background queue rather than reporting zero.
+ * Footer runtime status is deliberately limited to runtime/model health. Session goals,
+ * schedules, and background job counters belong on their own surfaces rather than becoming
+ * a second task dashboard in the sidebar footer.
  */
-/**
- * How often the footer re-reads session job state. A status strip that only loads once
- * is wrong the moment a job starts or a schedule fires, and there is no push channel for
- * either, so it polls. Five seconds is well inside the daemon's own schedule tick and
- * cheap: the endpoint returns counts, not transcripts.
- */
-const JOBS_POLL_MS = 5_000
-
-export function RuntimeStatusStrip({ status, sessionId }: { status: AgentStatus; sessionId?: string | undefined }) {
-  const [jobs, setJobs] = useState<AgentStatus['jobs']>()
-
-  useEffect(() => {
-    if (!sessionId) { setJobs(undefined); return }
-    let cancelled = false
-    const load = () => {
-      void loadAgentStatus(sessionId)
-        .then((next) => { if (!cancelled) setJobs(next.jobs) })
-        .catch(() => { if (!cancelled) setJobs(undefined) })
-    }
-    load()
-    const timer = setInterval(load, JOBS_POLL_MS)
-    return () => { cancelled = true; clearInterval(timer) }
-  }, [sessionId])
-
+export function RuntimeStatusStrip({ status }: { status: AgentStatus; sessionId?: string | undefined }) {
   return <div className="runtime-panel">
     <span className="runtime-label">RUNTIME</span>
     <strong><span className={`dot ${status.agentReady ? 'good' : 'warning'}`} /><span className="sidebar-copy">{status.agentReady ? 'Mastra online' : 'Mastra storage online'}</span></strong>
     <small className="sidebar-copy">{status.model ?? 'Model configuration required'}</small>
-    {jobs && <div className="runtime-jobs" data-session={jobs.sessionId}>
-      {goalSummary(jobs) && <span title={jobs.goal?.objective}><i className={`dot ${jobs.goal?.status === 'active' ? 'good' : ''}`} />{goalSummary(jobs)}</span>}
-      <span><i className={`dot ${jobs.schedules.active > 0 ? 'good' : ''}`} />{scheduleSummary(jobs)}</span>
-      <span><i className={`dot ${jobs.background.running > 0 ? 'good' : ''}`} />{backgroundSummary(jobs)}</span>
-    </div>}
   </div>
 }
 

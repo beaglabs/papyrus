@@ -76,6 +76,11 @@ export class LicenseService {
     return this.validate(JSON.parse(row.document_json) as SignedLicense)
   }
 
+  has(feature: string): boolean {
+    const status = this.status()
+    return Boolean(status.valid && status.license?.features.includes(feature))
+  }
+
   require(feature: string): void {
     const status = this.status()
     if (!status.valid) throw new Error(status.reason ?? 'License invalid')

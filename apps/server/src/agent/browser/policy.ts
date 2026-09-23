@@ -16,6 +16,11 @@ import type { AgentConfig } from '../config.js'
 export const TLS_VERIFY_SETTING = 'tlsVerify'
 export const CA_FILE_SETTING = 'tlsCaFile'
 
+const LEGACY_HARDENED_PROFILES = new Set(['government-il4', 'government-il6', 'gcch', 'dod', 'restricted'])
+function isHardenedProfile(profile: string): boolean {
+  return profile === 'government' || profile === 'disconnected' || LEGACY_HARDENED_PROFILES.has(profile)
+}
+
 export class ConsoleTransportError extends Error {
   constructor(readonly code: string, message: string) {
     super(message)
@@ -48,7 +53,9 @@ export class ConsolePolicy {
    * CA (PAPYRUS_TLS_CA or the `tlsCaFile` integration setting); `tlsVerify=false`
    * trades the confidentiality and integrity of every action for convenience, so
    * it is refused outright on government and disconnected profiles, where the
-   * network is part of the control boundary.
+   * network is part of the control boundary. Legacy profile strings remain
+   * hardened internally for upgrade compatibility, but they are no longer valid
+   * deployment-profile configuration values.
    */
   static forIntegration(integration: IntegrationConfiguration, config: AgentConfig): ConsolePolicy {
     const endpoint = integration.endpoint?.trim()
@@ -62,7 +69,7 @@ export class ConsolePolicy {
     if (url.protocol !== 'https:' && url.protocol !== 'http:') {
       throw new ConsoleTransportError('UNSUPPORTED_SCHEME', `A device console endpoint must be http or https, not ${url.protocol}`)
     }
-    if (url.protocol === 'http:' && (config.profile === 'government' || config.profile === 'disconnected')) {
+    if (url.protocol === 'http:' && isHardenedProfile(String(config.profile))) {
       throw new ConsoleTransportError('PLAINTEXT_REFUSED', `Plain http device endpoints are not permitted on the ${config.profile} profile`)
     }
     if (url.username || url.password) {
@@ -71,7 +78,7 @@ export class ConsolePolicy {
 
     const declared = integration.settings[TLS_VERIFY_SETTING]
     const verifyTls = typeof declared === 'boolean' ? declared : declared !== 'false'
-    if (!verifyTls && (config.profile === 'government' || config.profile === 'disconnected')) {
+    if (!verifyTls && isHardenedProfile(String(config.profile))) {
       throw new ConsoleTransportError('TLS_VERIFY_REQUIRED', `tlsVerify=false is not permitted on the ${config.profile} profile; import the appliance CA instead`)
     }
 

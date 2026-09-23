@@ -89,6 +89,42 @@ async function principal(request: IncomingMessage, auth: EntraAuthService, servi
   return value
 }
 
+interface HostedScheduleLink {
+  id: string
+  name: string
+  cron: string
+  prompt: string
+  threadId: string
+  timezone?: string
+  status?: string
+  nextFireAt?: number | null
+}
+
+/**
+ * Schedules are presented in the portal as Link-like hosted resources, but their authority
+ * remains Mastra's scheduler rather than LinkStore. Keep the browser contract deliberately
+ * small and never leak scheduler-internal metadata that the editor does not need.
+ */
+function hostedScheduleLink(value: unknown): HostedScheduleLink | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const record = value as Record<string, unknown>
+  const id = typeof record['id'] === 'string' ? record['id'] : undefined
+  const name = typeof record['name'] === 'string' ? record['name'] : undefined
+  const cron = typeof record['cron'] === 'string' ? record['cron'] : undefined
+  const prompt = typeof record['prompt'] === 'string' ? record['prompt'] : undefined
+  const threadId = typeof record['threadId'] === 'string' ? record['threadId'] : undefined
+  if (!id || !name || !cron || !prompt || !threadId) return undefined
+  const timezone = typeof record['timezone'] === 'string' && record['timezone'].trim() ? record['timezone'] : undefined
+  const status = typeof record['status'] === 'string' ? record['status'] : undefined
+  const nextFireAt = typeof record['nextFireAt'] === 'number' && Number.isFinite(record['nextFireAt']) ? record['nextFireAt'] : null
+  return {
+    id, name, cron, prompt, threadId,
+    ...(timezone ? { timezone } : {}),
+    ...(status ? { status } : {}),
+    nextFireAt,
+  }
+}
+
 export function createAgentServer(config: AgentConfig, service: AgentService, auth: EntraAuthService, mastra: MastraRuntime): Server {
   const handler = async (request: IncomingMessage, response: ServerResponse) => {
     const requestId = crypto.randomUUID()
@@ -243,6 +279,55 @@ export function createAgentServer(config: AgentConfig, service: AgentService, au
         await principal(request, auth, service)
         return json(response, 200, { links: mastra.links.list() })
       }
+
+      // Schedules are first-class entries on the Links surface. They remain authenticated
+      // portal resources (not public /l/* endpoints) because editing a recurring prompt is an
+      // execution-authority change. Listing is available to portal readers; mutation requires
+      // Integration.Manage (System Owner satisfies it through hasAppRole()).
+      if (url.pathname === '/api/links/schedules' && request.method === 'GET') {
+        await principal(request, auth, service)
+        const schedules = (await mastra.listSchedules())
+          .map(hostedScheduleLink)
+          .filter((value): value is HostedScheduleLink => Boolean(value))
+        return json(response, 200, { schedules })
+      }
+      const scheduleLinkResource = url.pathname.match(/^\/api\/links\/schedules\/([^/]+)$/)
+      if (scheduleLinkResource && (request.method === 'GET' || request.method === 'PATCH' || request.method === 'PUT')) {
+        const actor = await principal(request, auth, service)
+        const id = decodeURIComponent(scheduleLinkResource[1] as string)
+        const current = (await mastra.listSchedules())
+          .map(hostedScheduleLink)
+          .find((schedule): schedule is HostedScheduleLink => Boolean(schedule && schedule.id === id))
+        if (!current) throw new HttpError(404, 'SCHEDULE_NOT_FOUND', 'Schedule not found in this Papyrus deployment')
+        if (request.method === 'GET') return json(response, 200, { schedule: current })
+
+        requireRole(actor, 'Papyrus.Integration.Manage')
+        const input = await body(request)
+        const name = input.name === undefined ? current.name : requiredString(input.name, 'name', 120)
+        const cron = input.cron === undefined ? current.cron : requiredString(input.cron, 'cron', 256)
+        const prompt = input.prompt === undefined ? current.prompt : requiredString(input.prompt, 'prompt', 32_768)
+        const timezone = input.timezone === undefined
+          ? current.timezone
+          : typeof input.timezone === 'string' && input.timezone.trim()
+            ? input.timezone.trim().slice(0, 128)
+            : undefined
+
+        // Mastra's schedule API intentionally exposes create/delete rather than an in-place
+        // parameter update. Create the validated replacement first; only after that succeeds do
+        // we remove the old schedule. If removal fails, roll the replacement back so editing
+        // cannot silently leave two recurring prompts running.
+        const created = await mastra.createSchedule({ name, cron, prompt, ...(timezone ? { timezone } : {}), threadId: current.threadId })
+        const replacement = hostedScheduleLink(created)
+        if (!replacement) throw new HttpError(500, 'SCHEDULE_REPLACEMENT_INVALID', 'Mastra created a schedule that could not be represented in the Links surface')
+        try {
+          await mastra.deleteSchedule(id, current.threadId)
+        } catch (cause) {
+          await mastra.deleteSchedule(replacement.id, current.threadId).catch(() => undefined)
+          throw cause
+        }
+        return json(response, 200, { schedule: replacement, replacedId: id })
+      }
+
       const linkInbounds = url.pathname.match(/^\/api\/links\/([^/]+)\/inbounds$/)
       if (linkInbounds && request.method === 'GET') {
         await principal(request, auth, service)

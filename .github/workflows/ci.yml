@@ -38,15 +38,30 @@ jobs:
         run: pnpm contracts:check
       - name: Generate and verify compliance evidence
         run: pnpm compliance:check
+      - name: Build extension prerequisites
+        run: |
+          pnpm --filter papyrus-extension-sdk build
+          pnpm --filter papyrus-viewer-3d build
+          pnpm --filter papyrus-gnss build
       - name: Install Linux command isolation
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y bubblewrap
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - run: pnpm typecheck
-      - run: pnpm test
-      - run: pnpm build
+      - name: Typecheck Papyrus apps
+        run: |
+          pnpm --filter @papyrus/contracts typecheck
+          pnpm --filter @papyrus/server typecheck
+          pnpm --filter @papyrus/web typecheck
+      - name: Test Papyrus apps
+        run: |
+          pnpm --filter @papyrus/server test
+          pnpm --filter @papyrus/web test
+      - name: Build Papyrus apps
+        run: |
+          pnpm --filter @papyrus/server build
+          pnpm --filter @papyrus/web build
       - name: Upload SPDX SBOM
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4

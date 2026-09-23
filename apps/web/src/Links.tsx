@@ -218,11 +218,11 @@ function ScheduleEditor({ id, canManage, onBack, onReplaced }: { id: string; can
       <div>
         <p className="eyebrow">HOSTED SCHEDULE LINK</p>
         <h2>Edit recurring agent work</h2>
-        <p>This page edits the Mastra schedule bound to session <code>{schedule.threadId}</code>. Saving keeps the same session authority and replaces the underlying schedule atomically.</p>
+        <p>This page edits the Mastra schedule bound to session <code>{schedule.threadId}</code>. Saving updates the schedule in place, preserving its ID, session binding, and resource authority.</p>
       </div>
       <Label>Name<Input value={name} disabled={!canManage || busy} onChange={(event) => setName(event.target.value)} maxLength={120} /></Label>
       <Label>Timing (cron)<Input value={cron} disabled={!canManage || busy} onChange={(event) => setCron(event.target.value)} placeholder="0 8 * * 1-5" spellCheck={false} /><small>Five-field cron expression interpreted by the customer-hosted Mastra scheduler.</small></Label>
-      <Label>Timezone<Input value={timezone} disabled={!canManage || busy} onChange={(event) => setTimezone(event.target.value)} placeholder="UTC (leave blank for daemon timezone)" spellCheck={false} /></Label>
+      <Label>Timezone<Input value={timezone} disabled={!canManage || busy} onChange={(event) => setTimezone(event.target.value)} placeholder="Optional timezone, for example UTC" spellCheck={false} /></Label>
       <Label>Prompt<Textarea value={prompt} disabled={!canManage || busy} onChange={(event) => setPrompt(event.target.value)} rows={10} /><small>This prompt is delivered to the same durable Agent session every time the schedule fires.</small></Label>
       <div className="link-card-foot">
         <span>{schedule.nextFireAt ? `Next run · ${new Date(schedule.nextFireAt).toLocaleString()}` : 'No next run reported'}</span>

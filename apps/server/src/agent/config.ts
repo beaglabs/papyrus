@@ -1,6 +1,6 @@
 import { resolve } from 'node:path'
-import type { ClassificationLevel, DeploymentProfile, EntraAppRole, PortalPrincipal, ServerMode } from '@papyrus/contracts'
-import { CLASSIFICATION_LEVELS, ENTRA_APP_ROLES, PROFILES } from '@papyrus/contracts'
+import type { DeploymentProfile, EntraAppRole, PortalPrincipal, ServerMode } from '@papyrus/contracts'
+import { ENTRA_APP_ROLES, PROFILES } from '@papyrus/contracts'
 import { authorityHost, isEntraCloud, type EntraCloud } from './national-cloud.js'
 import { readBootstrapConfig, type BootstrapContext } from './bootstrap.js'
 
@@ -10,7 +10,6 @@ export type SandboxRuntime = 'bwrap' | 'seatbelt'
 export interface AgentConfig {
   mode: ServerMode
   profile: DeploymentProfile
-  classification: ClassificationLevel
   host: string
   port: number
   publicOrigin: string
@@ -71,7 +70,7 @@ export function deriveOrigin(headers: Record<string, string | string[] | undefin
     if (Array.isArray(value)) return value[0]?.trim() || undefined
     return value?.trim() || undefined
   }
-  const host = first(headers['x-forwarded-host']) ?? first(headers['host'])
+  const host = first(headers['x-forwarded-host']) ?? first(headers.host)
   const proto = first(headers['x-forwarded-proto']) ?? (fallback.startsWith('https://') ? 'https' : 'http')
   if (!host) return fallback
   return `${proto}://${host}`
@@ -88,18 +87,6 @@ function cloud(value: string | undefined): EntraCloud {
   const selected = value ?? 'Public'
   if (!isEntraCloud(selected)) throw new Error(`Unsupported PAPYRUS_ENTRA_CLOUD ${selected}`)
   return selected
-}
-
-/**
- * Local system marking. It never enables the classification UI by itself: the
- * signed license must separately contain the `classification-banners` feature.
- */
-function classification(value: string | undefined): ClassificationLevel {
-  const selected = value?.trim().toLowerCase() || 'unclassified'
-  if (!CLASSIFICATION_LEVELS.includes(selected as ClassificationLevel)) {
-    throw new Error(`Unsupported PAPYRUS_CLASSIFICATION ${selected}`)
-  }
-  return selected as ClassificationLevel
 }
 
 function parseAuthorities(value: string | undefined): Record<string, string> {
@@ -198,7 +185,6 @@ export function loadAgentConfig(env: NodeJS.ProcessEnv = process.env, resolved: 
   const mode = (env.PAPYRUS_MODE ?? 'local') as ServerMode
   if (!['local', 'persistent'].includes(mode)) throw new Error(`Unsupported PAPYRUS_MODE ${mode}`)
   const selectedProfile = profile(env.PAPYRUS_PROFILE)
-  const selectedClassification = classification(env.PAPYRUS_CLASSIFICATION)
   const host = env.PAPYRUS_HOST ?? '127.0.0.1'
   const port = Number(env.PAPYRUS_PORT ?? 3210)
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PAPYRUS_PORT must be a valid TCP port')
@@ -241,7 +227,6 @@ export function loadAgentConfig(env: NodeJS.ProcessEnv = process.env, resolved: 
   return {
     mode,
     profile: selectedProfile,
-    classification: selectedClassification,
     host,
     port,
     publicOrigin,

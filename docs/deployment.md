@@ -32,14 +32,19 @@ Papyrus does not infer accreditation or impact level from that setting. The oper
 
 Papyrus does not show a classification banner merely because a deployment uses the `government` or `disconnected` profile. Classification marking is a separately licensed capability.
 
-A signed license must contain both:
+The signed license must contain:
 
 ```text
 classification-banners
-classification:<level>
 ```
 
-Supported levels are:
+The deployment then selects its actual displayed marking with:
+
+```bash
+PAPYRUS_CLASSIFICATION=secret
+```
+
+Supported values are:
 
 - `unclassified`
 - `cui`
@@ -48,7 +53,9 @@ Supported levels are:
 - `top-secret`
 - `top-secret-sci`
 
-The portal derives the banner exclusively from the locally verified signed license. There is no `PAPYRUS_CLASSIFICATION` environment-variable override. A deployment without the capability renders no classification banner.
+Both conditions are required. `PAPYRUS_CLASSIFICATION` cannot create a banner unless the locally verified signed license grants `classification-banners`, and a licensed deployment renders no banner when `PAPYRUS_CLASSIFICATION` is unset or empty. Invalid values are rejected rather than silently mapped to another marking.
+
+Any legacy `classification:<level>` feature present in an already-issued signed license is not used to choose the displayed marking. The customer-owned deployment configuration is authoritative for the actual system banner while the signed capability remains authoritative for whether Papyrus is entitled to render classification markings at all.
 
 ## Platform requirements
 

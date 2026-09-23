@@ -1,6 +1,6 @@
 import { resolve } from 'node:path'
-import type { DeploymentProfile, EntraAppRole, PortalPrincipal, ServerMode } from '@papyrus/contracts'
-import { ENTRA_APP_ROLES, PROFILES } from '@papyrus/contracts'
+import type { ClassificationLevel, DeploymentProfile, EntraAppRole, PortalPrincipal, ServerMode } from '@papyrus/contracts'
+import { CLASSIFICATION_LEVELS, ENTRA_APP_ROLES, PROFILES } from '@papyrus/contracts'
 import { authorityHost, isEntraCloud, type EntraCloud } from './national-cloud.js'
 import { readBootstrapConfig, type BootstrapContext } from './bootstrap.js'
 
@@ -10,6 +10,7 @@ export type SandboxRuntime = 'bwrap' | 'seatbelt'
 export interface AgentConfig {
   mode: ServerMode
   profile: DeploymentProfile
+  classification: ClassificationLevel
   host: string
   port: number
   publicOrigin: string
@@ -77,16 +78,28 @@ export function deriveOrigin(headers: Record<string, string | string[] | undefin
 }
 
 function profile(value: string | undefined): DeploymentProfile {
-  const selected = value ?? 'gcc'
+  const selected = value ?? 'commercial'
   if (!PROFILES.includes(selected as DeploymentProfile)) throw new Error(`Unsupported PAPYRUS_PROFILE ${selected}`)
   return selected as DeploymentProfile
 }
 
-function cloudForProfile(selected: DeploymentProfile, value: string | undefined): EntraCloud {
-  const inferred: EntraCloud = selected === 'gcch' || selected === 'government-il4' ? 'USGov' : selected === 'dod' || selected === 'government-il6' ? 'USGovDoD' : 'Public'
-  const cloud = value ?? inferred
-  if (!isEntraCloud(cloud)) throw new Error(`Unsupported PAPYRUS_ENTRA_CLOUD ${cloud}`)
-  return cloud
+/** National cloud is an identity/network setting, not a deployment profile. */
+function cloud(value: string | undefined): EntraCloud {
+  const selected = value ?? 'Public'
+  if (!isEntraCloud(selected)) throw new Error(`Unsupported PAPYRUS_ENTRA_CLOUD ${selected}`)
+  return selected
+}
+
+/**
+ * Local system marking. It never enables the classification UI by itself: the
+ * signed license must separately contain the `classification-banners` feature.
+ */
+function classification(value: string | undefined): ClassificationLevel {
+  const selected = value?.trim().toLowerCase() || 'unclassified'
+  if (!CLASSIFICATION_LEVELS.includes(selected as ClassificationLevel)) {
+    throw new Error(`Unsupported PAPYRUS_CLASSIFICATION ${selected}`)
+  }
+  return selected as ClassificationLevel
 }
 
 function parseAuthorities(value: string | undefined): Record<string, string> {
@@ -128,13 +141,13 @@ export function bootstrapContext(env: NodeJS.ProcessEnv = process.env): Bootstra
   const selectedProfile = profile(env.PAPYRUS_PROFILE)
   const host = env.PAPYRUS_HOST ?? '127.0.0.1'
   const port = Number(env.PAPYRUS_PORT ?? 3210)
-  const cloud = cloudForProfile(selectedProfile, env.PAPYRUS_ENTRA_CLOUD)
+  const selectedCloud = cloud(env.PAPYRUS_ENTRA_CLOUD)
   const dataDir = resolve(env.PAPYRUS_DATA_DIR ?? './papyrus-agent-data')
   const databasePath = resolve(env.PAPYRUS_DATABASE_PATH ?? `${dataDir}/agent.db`)
   return {
     mode,
     profile: selectedProfile,
-    cloud,
+    cloud: selectedCloud,
     organizationName: env.PAPYRUS_ORGANIZATION_NAME?.trim() || 'Customer Agent Operations',
     host,
     port,
@@ -185,6 +198,7 @@ export function loadAgentConfig(env: NodeJS.ProcessEnv = process.env, resolved: 
   const mode = (env.PAPYRUS_MODE ?? 'local') as ServerMode
   if (!['local', 'persistent'].includes(mode)) throw new Error(`Unsupported PAPYRUS_MODE ${mode}`)
   const selectedProfile = profile(env.PAPYRUS_PROFILE)
+  const selectedClassification = classification(env.PAPYRUS_CLASSIFICATION)
   const host = env.PAPYRUS_HOST ?? '127.0.0.1'
   const port = Number(env.PAPYRUS_PORT ?? 3210)
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PAPYRUS_PORT must be a valid TCP port')
@@ -195,7 +209,7 @@ export function loadAgentConfig(env: NodeJS.ProcessEnv = process.env, resolved: 
   // operator does not have to hardcode it when a TLS-terminating proxy is in front.
   if (mode === 'persistent' && configuredOrigin && !publicOrigin.startsWith('https://')) throw new Error('Persistent deployments require an HTTPS PAPYRUS_PUBLIC_ORIGIN')
 
-  const cloud = cloudForProfile(selectedProfile, env.PAPYRUS_ENTRA_CLOUD)
+  const selectedCloud = cloud(env.PAPYRUS_ENTRA_CLOUD)
   const sandboxRuntimeValue = env.PAPYRUS_SANDBOX_RUNTIME?.trim()
   if (sandboxRuntimeValue && sandboxRuntimeValue !== 'bwrap' && sandboxRuntimeValue !== 'seatbelt') {
     throw new Error('PAPYRUS_SANDBOX_RUNTIME must be bwrap or seatbelt')
@@ -212,13 +226,13 @@ export function loadAgentConfig(env: NodeJS.ProcessEnv = process.env, resolved: 
   if (mode === 'local' && !development && (!tenantId || !clientId)) {
     throw new Error('Local development requires Entra configuration or PAPYRUS_DEV_ENTRA_PRINCIPAL')
   }
-  const authority = tenantId ? `${authorityHost(cloud)}/${encodeURIComponent(tenantId)}/v2.0` : undefined
+  const authority = tenantId ? `${authorityHost(selectedCloud)}/${encodeURIComponent(tenantId)}/v2.0` : undefined
   const dataDir = resolve(env.PAPYRUS_DATA_DIR ?? './papyrus-agent-data')
   const databasePath = mode === 'local' && env.PAPYRUS_DATABASE_PATH === ':memory:' ? ':memory:' : resolve(env.PAPYRUS_DATABASE_PATH ?? `${dataDir}/agent.db`)
   const kitesurfAccountId = env.PAPYRUS_KITESURF_ACCOUNT_ID?.trim()
   const kitesurfTokenEnv = env.PAPYRUS_KITESURF_API_TOKEN_ENV?.trim()
   if (Boolean(kitesurfAccountId) !== Boolean(kitesurfTokenEnv)) throw new Error('PAPYRUS_KITESURF_ACCOUNT_ID and PAPYRUS_KITESURF_API_TOKEN_ENV must be configured together')
-  if (kitesurfAccountId && selectedProfile !== 'commercial') throw new Error('Kitesurf validation is available only in the commercial profile; government, restricted, and disconnected profiles remain external-browser deny-by-default')
+  if (kitesurfAccountId && selectedProfile !== 'commercial') throw new Error('Kitesurf validation is available only in the commercial profile; government and disconnected profiles remain external-browser deny-by-default')
 
   const certPath = env.PAPYRUS_TLS_CERT?.trim()
   const keyPath = env.PAPYRUS_TLS_KEY?.trim()
@@ -227,6 +241,7 @@ export function loadAgentConfig(env: NodeJS.ProcessEnv = process.env, resolved: 
   return {
     mode,
     profile: selectedProfile,
+    classification: selectedClassification,
     host,
     port,
     publicOrigin,
@@ -234,7 +249,7 @@ export function loadAgentConfig(env: NodeJS.ProcessEnv = process.env, resolved: 
     databasePath,
     portalSecret: required('PAPYRUS_PORTAL_SECRET', env.PAPYRUS_PORTAL_SECRET?.trim() || resolved.portalSecret),
     organizationName: env.PAPYRUS_ORGANIZATION_NAME?.trim() || 'Customer Agent Operations',
-    cloud,
+    cloud: selectedCloud,
     ...(sandboxRuntime ? { sandboxRuntime } : {}),
     agentfsId,
     // Ships in the appliance image. An absent directory is harmless — the sandbox

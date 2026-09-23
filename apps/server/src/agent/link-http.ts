@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { posix } from 'node:path'
 import type { AgentLink, LinkInbound } from '@papyrus/contracts'
+import { fetchUrlPreviewImage } from './mastra/fetch-preview.js'
 import { linkInboundHeaders, type MastraRuntime } from './mastra/runtime.js'
 
 const MAX_LINK_BODY = 512 * 1024
@@ -14,6 +15,30 @@ export async function handlePublicLink(
   url: URL,
   mastra: MastraRuntime,
 ): Promise<boolean> {
+  // Branding is intentionally handled before Link routing because the main daemon
+  // dispatches this boundary first. The source is the exact read-only logoUrl from
+  // the Microsoft Entra App Registration. Proxying it keeps portal CSP same-origin
+  // and reuses the SSRF/size/content checks already used for URL preview images.
+  if (url.pathname === '/api/branding/entra-app-logo') {
+    if (!['GET', 'HEAD'].includes(request.method ?? '')) return methodNotAllowed(response, ['GET', 'HEAD'])
+    const logoUrl = process.env.PAPYRUS_ENTRA_APP_LOGO_URL?.trim()
+    if (!logoUrl) return publicError(response, 404, 'ENTRA_APP_LOGO_NOT_CONFIGURED', 'Microsoft Entra App Registration logo is not configured')
+    try {
+      const image = await fetchUrlPreviewImage(logoUrl)
+      const bytes = Buffer.from(image.bytes)
+      publicHeaders(response)
+      response.setHeader('cache-control', 'private, max-age=3600')
+      response.setHeader('content-type', image.contentType)
+      response.setHeader('content-length', String(bytes.byteLength))
+      response.setHeader('content-disposition', 'inline; filename="entra-app-logo"')
+      response.writeHead(200)
+      response.end(request.method === 'HEAD' ? undefined : bytes)
+      return true
+    } catch {
+      return publicError(response, 502, 'ENTRA_APP_LOGO_UNAVAILABLE', 'Microsoft Entra App Registration logo could not be loaded')
+    }
+  }
+
   const assetMatch = url.pathname.match(/^\/l\/([^/]+)\/assets\/([^/]+)$/)
   const match = url.pathname.match(/^\/l\/([^/]+)$/)
   if (!assetMatch && !match) return false

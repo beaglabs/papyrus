@@ -1,0 +1,115 @@
+/* Entra application identity belongs in the existing sidebar footer geometry.
+   Keep this file deliberately narrow: do not restyle the account-menu trigger. */
+.agency-auth-card {
+  margin: 0;
+  padding: 11px;
+  border: 2px solid #111;
+  border-radius: var(--radius-sm);
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  background: var(--background);
+  box-shadow: var(--shadow-sm);
+}
+
+.agency-auth-logo {
+  box-sizing: border-box;
+  width: 34px;
+  height: 34px;
+  overflow: hidden;
+  border: 2px solid var(--border);
+  border-radius: 7px;
+  background-color: #fff;
+  background-image: var(--entra-app-logo-image, none), url('/icons/identity.svg');
+  background-position: center, center;
+  background-repeat: no-repeat, no-repeat;
+  background-size: cover, 70%;
+}
+
+/* App.tsx used to put the Papyrus product mark here. The actual Entra App
+   Registration branding is painted above from the configured Entra logo URL. */
+.agency-auth-logo > img {
+  display: none;
+}
+
+.agency-auth-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.agency-auth-label {
+  overflow: hidden;
+  color: var(--muted);
+  font: 800 8px ui-monospace, monospace;
+  letter-spacing: .1em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agency-auth-copy strong,
+.agency-auth-copy small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agency-auth-copy strong {
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.agency-auth-copy small {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font: 8px ui-monospace, monospace;
+}
+
+.agency-auth-copy small .dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+}
+
+.agency-auth-meta {
+  letter-spacing: .04em;
+}
+
+/* Give the user's photo a proper account-row presence without changing the
+   trigger's background, radius, padding, or grid that styles.css already owns. */
+.account-trigger-content .avatar {
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+}
+
+.nb-sidebar[data-state="collapsed"] .agency-auth-card {
+  display: flex;
+  justify-content: center;
+  padding: 6px;
+  box-shadow: none;
+}
+
+.nb-sidebar[data-state="collapsed"] .agency-auth-copy {
+  display: none;
+}
+
+.nb-sidebar[data-state="collapsed"] .agency-auth-logo {
+  width: 22px;
+  height: 22px;
+  border-width: 1px;
+  border-radius: 5px;
+}
+
+.nb-sidebar[data-state="collapsed"] .account-trigger-content .avatar {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+}

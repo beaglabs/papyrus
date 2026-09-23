@@ -1,12 +1,61 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { AgentLink, LinkInbound, LinkType } from '@papyrus/contracts'
 import { linkContentUrl, linkInboundUrl, linkInbounds, listLinks, publicLinkUrl, workspaceFileContentUrl } from './api.js'
-import { Alert, Badge, Button, Input, Skeleton } from './components/ui/index.js'
+import { Alert, Badge, Button, Input, Label, Skeleton, Textarea } from './components/ui/index.js'
 
-type LinkFilter = 'all' | LinkType
+type LinkFilter = 'all' | LinkType | 'schedule'
 
-export function LinksView({ validation }: { validation?: 'local-static' | 'kitesurf' }) {
+interface ScheduleLink {
+  id: string
+  name: string
+  cron: string
+  prompt: string
+  timezone?: string
+  threadId: string
+  status?: string
+  nextFireAt?: number | null
+  createdAt?: string
+  updatedAt?: string
+}
+
+async function scheduleRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(path, {
+    ...init,
+    headers: { accept: 'application/json', ...(init?.body ? { 'content-type': 'application/json' } : {}), ...init?.headers },
+  })
+  const text = await response.text()
+  let value: unknown
+  try { value = text ? JSON.parse(text) : {} } catch { value = { error: text || `Request failed (${response.status})` } }
+  if (!response.ok) {
+    const record = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+    throw new Error(typeof record['error'] === 'string' ? record['error'] : typeof record['message'] === 'string' ? record['message'] : `Request failed (${response.status})`)
+  }
+  return value as T
+}
+
+async function listScheduleLinks(): Promise<ScheduleLink[]> {
+  return (await scheduleRequest<{ schedules: ScheduleLink[] }>('/api/links/schedules')).schedules
+}
+
+async function getScheduleLink(id: string): Promise<ScheduleLink> {
+  return (await scheduleRequest<{ schedule: ScheduleLink }>(`/api/links/schedules/${encodeURIComponent(id)}`)).schedule
+}
+
+async function saveScheduleLink(id: string, value: Pick<ScheduleLink, 'name' | 'cron' | 'prompt'> & { timezone?: string }): Promise<{ schedule: ScheduleLink; replacedId: string }> {
+  return scheduleRequest(`/api/links/schedules/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(value),
+  })
+}
+
+function scheduleFromLocation(): string | undefined {
+  return new URLSearchParams(window.location.search).get('schedule') ?? undefined
+}
+
+export function LinksView({ validation, canManageSchedules = false }: { validation?: 'local-static' | 'kitesurf'; canManageSchedules?: boolean }) {
   const [links, setLinks] = useState<AgentLink[]>([])
+  const [schedules, setSchedules] = useState<ScheduleLink[]>([])
+  const [selectedScheduleId, setSelectedScheduleId] = useState<string | undefined>(scheduleFromLocation)
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<LinkFilter>('all')
   const [loading, setLoading] = useState(true)
@@ -15,7 +64,9 @@ export function LinksView({ validation }: { validation?: 'local-static' | 'kites
   const refresh = async () => {
     try {
       setError(undefined)
-      setLinks(await listLinks())
+      const [nextLinks, nextSchedules] = await Promise.all([listLinks(), listScheduleLinks()])
+      setLinks(nextLinks)
+      setSchedules(nextSchedules)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to load Links')
     } finally {
@@ -29,16 +80,50 @@ export function LinksView({ validation }: { validation?: 'local-static' | 'kites
     return () => window.clearInterval(timer)
   }, [])
 
-  const visible = useMemo(() => {
+  useEffect(() => {
+    const onPopState = () => setSelectedScheduleId(scheduleFromLocation())
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
+
+  const visibleLinks = useMemo(() => {
     const needle = query.trim().toLowerCase()
     return links.filter((link) =>
       (filter === 'all' || link.type === filter) &&
       (!needle || link.name.toLowerCase().includes(needle) || link.slug.includes(needle) || link.type.includes(needle)))
   }, [links, query, filter])
 
+  const visibleSchedules = useMemo(() => {
+    if (filter !== 'all' && filter !== 'schedule') return []
+    const needle = query.trim().toLowerCase()
+    return schedules.filter((schedule) => !needle || [schedule.name, schedule.cron, schedule.prompt, schedule.timezone ?? '', 'schedule'].some((value) => value.toLowerCase().includes(needle)))
+  }, [schedules, query, filter])
+
+  const openSchedule = (id: string) => {
+    const next = `/portal/links?schedule=${encodeURIComponent(id)}`
+    window.history.pushState({}, '', next)
+    setSelectedScheduleId(id)
+  }
+  const closeSchedule = () => {
+    window.history.pushState({}, '', '/portal/links')
+    setSelectedScheduleId(undefined)
+    void refresh()
+  }
+
+  if (selectedScheduleId) {
+    return <ScheduleEditor id={selectedScheduleId} canManage={canManageSchedules} onBack={closeSchedule} onReplaced={(id) => {
+      window.history.replaceState({}, '', `/portal/links?schedule=${encodeURIComponent(id)}`)
+      setSelectedScheduleId(id)
+      void refresh()
+    }} />
+  }
+
+  const visibleCount = visibleLinks.length + visibleSchedules.length
+  const total = links.length + schedules.length
+
   return <div className="links-view">
     <header className="links-head">
-      <div className="links-title"><h2>Links</h2><span>{links.length}</span></div>
+      <div className="links-title"><h2>Links</h2><span>{total}</span></div>
       <Input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search links…" aria-label="Search Links" />
     </header>
 
@@ -47,21 +132,105 @@ export function LinksView({ validation }: { validation?: 'local-static' | 'kites
       <LinkTab active={filter === 'webpage'} onClick={() => setFilter('webpage')} icon="◉">Webpage</LinkTab>
       <LinkTab active={filter === 'api'} onClick={() => setFilter('api')} icon="〈〉">API</LinkTab>
       <LinkTab active={filter === 'webhook'} onClick={() => setFilter('webhook')} icon="ϟ">Webhook</LinkTab>
+      <LinkTab active={filter === 'schedule'} onClick={() => setFilter('schedule')} icon="◷">Schedule</LinkTab>
       <span className="links-validation">PREVIEW · {(validation ?? 'local-static').toUpperCase()}</span>
     </nav>
 
     {error && <Alert className="error">{error}</Alert>}
     <main className="links-grid" aria-busy={loading}>
-      {loading && links.length === 0
+      {loading && total === 0
         ? Array.from({ length: 3 }, (_, index) => <Skeleton className="link-card-skeleton" key={index} />)
-        : visible.map((link) => <LinkCard link={link} key={link.id} />)}
-      {!loading && visible.length === 0 && <div className="links-empty"><span>◎</span><h3>{links.length ? 'No matching Links' : 'No Links yet'}</h3><p>{links.length ? 'Try another type or search.' : 'Ask Papyrus to create a Webpage, API, or Webhook. The agent will ask before exposing anything.'}</p></div>}
+        : <>
+          {visibleLinks.map((link) => <LinkCard link={link} key={`link:${link.id}`} />)}
+          {visibleSchedules.map((schedule) => <ScheduleCard schedule={schedule} onOpen={() => openSchedule(schedule.id)} key={`schedule:${schedule.id}`} />)}
+        </>}
+      {!loading && visibleCount === 0 && <div className="links-empty"><span>◎</span><h3>{total ? 'No matching Links' : 'No Links yet'}</h3><p>{total ? 'Try another type or search.' : 'Ask Papyrus to create a Webpage, API, Webhook, or Schedule. Schedules stay customer-hosted and can be edited here.'}</p></div>}
     </main>
   </div>
 }
 
 function LinkTab({ active, onClick, icon, children }: { active: boolean; onClick: () => void; icon: string; children: string }) {
   return <button type="button" className={active ? 'active' : ''} aria-pressed={active} onClick={onClick}><span>{icon}</span>{children}</button>
+}
+
+function ScheduleCard({ schedule, onOpen }: { schedule: ScheduleLink; onOpen: () => void }) {
+  const status = schedule.status ?? 'active'
+  return <article className="link-card">
+    <div className="link-preview">
+      <div className="webhook-preview">
+        <div className="webhook-logo" aria-hidden="true"><span>◷</span></div>
+        <strong>{schedule.cron}</strong>
+        <small>{schedule.timezone || 'Daemon timezone'}</small>
+        <code>{schedule.prompt.length > 180 ? `${schedule.prompt.slice(0, 180)}…` : schedule.prompt}</code>
+      </div>
+      <Badge className="link-type-badge">SCHEDULE</Badge>
+    </div>
+    <div className="link-card-body">
+      <div className="link-card-title"><button type="button" className="link-inbound-toggle" onClick={onOpen}>{schedule.name}</button><Badge>{status.toUpperCase()}</Badge></div>
+      <div className="link-meta"><span className={`dot ${status === 'paused' ? 'warning' : 'good'}`} />{status === 'paused' ? 'Paused' : 'Active'}<span>·</span><span>{schedule.nextFireAt ? `Next ${new Date(schedule.nextFireAt).toLocaleString()}` : 'Waiting for next run'}</span></div>
+      <div className="link-card-foot"><span>Session · {shortId(schedule.threadId)}</span><span>Mastra recurring agent work</span><span className="link-card-foot-actions"><Button variant="ghost" onClick={onOpen}>Edit schedule</Button></span></div>
+    </div>
+  </article>
+}
+
+function ScheduleEditor({ id, canManage, onBack, onReplaced }: { id: string; canManage: boolean; onBack: () => void; onReplaced: (id: string) => void }) {
+  const [schedule, setSchedule] = useState<ScheduleLink>()
+  const [name, setName] = useState('')
+  const [cron, setCron] = useState('')
+  const [timezone, setTimezone] = useState('')
+  const [prompt, setPrompt] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string>()
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    setSchedule(undefined); setError(undefined); setSaved(false)
+    getScheduleLink(id).then((value) => {
+      if (!active) return
+      setSchedule(value); setName(value.name); setCron(value.cron); setTimezone(value.timezone ?? ''); setPrompt(value.prompt)
+    }).catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : 'Unable to load schedule') })
+    return () => { active = false }
+  }, [id])
+
+  const save = async () => {
+    if (!canManage || !name.trim() || !cron.trim() || !prompt.trim()) return
+    setBusy(true); setError(undefined); setSaved(false)
+    try {
+      const result = await saveScheduleLink(id, { name: name.trim(), cron: cron.trim(), prompt: prompt.trim(), ...(timezone.trim() ? { timezone: timezone.trim() } : {}) })
+      setSchedule(result.schedule); setSaved(true)
+      if (result.schedule.id !== id) onReplaced(result.schedule.id)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to save schedule')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return <div className="links-view">
+    <header className="links-head">
+      <div className="links-title"><Button variant="ghost" onClick={onBack}>← Links</Button><h2>{schedule?.name ?? 'Schedule'}</h2></div>
+      {schedule && <Badge>{(schedule.status ?? 'active').toUpperCase()}</Badge>}
+    </header>
+    {error && <Alert className="error">{error}</Alert>}
+    {!canManage && <Alert>Schedule editing requires Integration Manage or System Owner.</Alert>}
+    {!schedule && !error ? <Skeleton className="link-card-skeleton" /> : schedule && <article className="nb-card" style={{ display: 'grid', gap: 18 }}>
+      <div>
+        <p className="eyebrow">HOSTED SCHEDULE LINK</p>
+        <h2>Edit recurring agent work</h2>
+        <p>This page edits the Mastra schedule bound to session <code>{schedule.threadId}</code>. Saving keeps the same session authority and replaces the underlying schedule atomically.</p>
+      </div>
+      <Label>Name<Input value={name} disabled={!canManage || busy} onChange={(event) => setName(event.target.value)} maxLength={120} /></Label>
+      <Label>Timing (cron)<Input value={cron} disabled={!canManage || busy} onChange={(event) => setCron(event.target.value)} placeholder="0 8 * * 1-5" spellCheck={false} /><small>Five-field cron expression interpreted by the customer-hosted Mastra scheduler.</small></Label>
+      <Label>Timezone<Input value={timezone} disabled={!canManage || busy} onChange={(event) => setTimezone(event.target.value)} placeholder="UTC (leave blank for daemon timezone)" spellCheck={false} /></Label>
+      <Label>Prompt<Textarea value={prompt} disabled={!canManage || busy} onChange={(event) => setPrompt(event.target.value)} rows={10} /><small>This prompt is delivered to the same durable Agent session every time the schedule fires.</small></Label>
+      <div className="link-card-foot">
+        <span>{schedule.nextFireAt ? `Next run · ${new Date(schedule.nextFireAt).toLocaleString()}` : 'No next run reported'}</span>
+        <span>ID · {shortId(schedule.id)}</span>
+        <span className="link-card-foot-actions"><Button className="primary" disabled={!canManage || busy || !name.trim() || !cron.trim() || !prompt.trim()} onClick={() => void save()}>{busy ? 'Saving…' : saved ? 'Saved ✓' : 'Save schedule'}</Button></span>
+      </div>
+    </article>}
+  </div>
 }
 
 function LinkCard({ link }: { link: AgentLink }) {

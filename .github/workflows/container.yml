@@ -13,7 +13,7 @@ permissions:
   security-events: write
 
 env:
-  IMAGE: ghcr.io/${{ github.repository }}/papyrus/papyrus
+  IMAGE: ghcr.io/${{ github.repository }}/papyrus
 
 jobs:
   build:
@@ -34,8 +34,8 @@ jobs:
           context: .
           load: true
           tags: papyrus:${{ github.sha }}
-          provenance: false
-          sbom: false
+          provenance: mode=max
+          sbom: true
       - name: Verify FIPS and non-root runtime
         run: |
           test "$(docker run --rm --entrypoint node papyrus:${GITHUB_SHA} -p 'require("node:crypto").getFips()')" = "1"
@@ -47,7 +47,7 @@ jobs:
           format: cyclonedx-json
           output-file: papyrus.cdx.json
       - name: Scan image
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@0.30.0
         with:
           image-ref: papyrus:${{ github.sha }}
           format: sarif

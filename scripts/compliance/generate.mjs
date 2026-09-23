@@ -59,7 +59,7 @@ Papyrus is a customer-hosted durable agent runtime. The repository boundary incl
 - Webhook Links are the public dynamic-ingestion primitive; legacy Plugin connection and integration-scoped signal webhook routes are not exposed by the portal API.
 - Recurring work is managed through session-scoped Agent tools; the public scheduler CRUD/page surface is not exposed.
 - Webhook logo identity is snapshotted with the approved Link rather than loaded from an untrusted mutable URL.
-- Kitesurf is optional validation only; it is not the hosting authority and is not configurable for government, restricted, or disconnected profiles.
+- Kitesurf is optional validation only; it is not the hosting authority and is not configurable for government or disconnected profiles.
 - nono applies kernel-backed filesystem authority and blocks network access for workspace command execution.
 - AgentScript runs in Enclave STRICT and receives only Papyrus-brokered capabilities.
 - Credential-like environment variables are stripped before workspace commands execute.

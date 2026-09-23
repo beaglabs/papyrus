@@ -1,7 +1,15 @@
 import { createHash, generateKeyPairSync, sign, verify } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { DeploymentProfile, LicensePayload, LicenseStatus, SignedLicense } from '@papyrus/contracts'
+import {
+  CLASSIFICATION_BANNER_FEATURE,
+  CLASSIFICATION_LEVELS,
+  type ClassificationLevel,
+  type DeploymentProfile,
+  type LicensePayload,
+  type LicenseStatus,
+  type SignedLicense,
+} from '@papyrus/contracts'
 
 interface LicenseDatabase {
   sqlite: {
@@ -20,6 +28,15 @@ function canonical(value: unknown): string {
   return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(',')}}`
 }
 
+function configuredClassification(value: string | undefined = process.env.PAPYRUS_CLASSIFICATION): ClassificationLevel | undefined {
+  const selected = value?.trim().toLowerCase()
+  if (!selected) return undefined
+  if (!CLASSIFICATION_LEVELS.includes(selected as ClassificationLevel)) {
+    throw new Error(`Unsupported PAPYRUS_CLASSIFICATION ${value}. Expected one of: ${CLASSIFICATION_LEVELS.join(', ')}`)
+  }
+  return selected as ClassificationLevel
+}
+
 export function signLicense(payload: LicensePayload, keyId: string, privateKeyPem: string): SignedLicense {
   return { ...payload, keyId, signature: sign('sha256', Buffer.from(canonical(payload)), privateKeyPem).toString('base64') }
 }
@@ -27,6 +44,7 @@ export function signLicense(payload: LicensePayload, keyId: string, privateKeyPe
 export class LicenseService {
   readonly deploymentId: string
   private readonly publicKeyPem: string
+  private readonly classification: ClassificationLevel | undefined
 
   constructor(
     private readonly db: LicenseDatabase,
@@ -35,6 +53,7 @@ export class LicenseService {
     private readonly authorities: Record<string, string>,
     private readonly required: boolean,
   ) {
+    this.classification = configuredClassification()
     const identityDir = join(dataDir, 'identity')
     const publicPath = join(identityDir, 'deployment-public.pem')
     const privatePath = join(identityDir, 'deployment-private.pem')
@@ -89,6 +108,20 @@ export class LicenseService {
     if (status.license && !status.license.features.includes(feature)) throw new Error(`License does not entitle ${feature}`)
   }
 
+  /**
+   * Classification display remains a paid/signed capability, but the customer-owned
+   * deployment chooses the marking with PAPYRUS_CLASSIFICATION. A license cannot force
+   * a banner onto a system where that variable is unset, and the variable cannot create
+   * a banner unless the signed license includes classification-banners.
+   */
+  private effectiveFeatures(features: string[]): string[] {
+    const effective = features.filter((feature) => !feature.startsWith('classification:'))
+    if (this.classification && effective.includes(CLASSIFICATION_BANNER_FEATURE)) {
+      effective.push(`classification:${this.classification}`)
+    }
+    return effective
+  }
+
   private validate(document: SignedLicense): LicenseStatus {
     const { signature, keyId, ...payload } = document
     const authority = this.authorities[keyId]
@@ -104,6 +137,10 @@ export class LicenseService {
     if (!verify('sha256', Buffer.from(canonical(payload)), authority, Buffer.from(signature, 'base64'))) {
       return { valid: false, deploymentId: this.deploymentId, reason: 'Invalid license signature' }
     }
-    return { valid: true, deploymentId: this.deploymentId, license: { ...payload, keyId } }
+    return {
+      valid: true,
+      deploymentId: this.deploymentId,
+      license: { ...payload, features: this.effectiveFeatures(payload.features), keyId },
+    }
   }
 }

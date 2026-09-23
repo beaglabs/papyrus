@@ -1,4 +1,5 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import type { IncomingMessage } from 'node:http'
 import { dirname, join } from 'node:path'
@@ -55,6 +56,7 @@ interface StoredIdentityProfile {
 type EnrichedPortalPrincipal = PortalPrincipal & Omit<StoredIdentityProfile, 'updatedAt'>
 
 const DEFAULT_ORGANIZATION_NAME = 'Customer Agent Operations'
+const PORTAL_COOKIE_IDENTITY_VERSION = 2
 const MAX_PROFILE_PHOTO_BYTES = 128 * 1024
 const PROFILE_PHOTO_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
 
@@ -110,7 +112,9 @@ export class EntraAuthService {
   private cachedDiscovery?: OidcDiscovery
   private jwks?: ReturnType<typeof createRemoteJWKSet>
 
-  constructor(private readonly config: AgentConfig) {}
+  constructor(private readonly config: AgentConfig) {
+    this.restoreTenantOrganizationName()
+  }
 
   async authenticate(request: IncomingMessage): Promise<PortalPrincipal | undefined> {
     if (this.config.developmentPrincipal) return this.withStoredProfile(this.config.developmentPrincipal)
@@ -147,8 +151,7 @@ export class EntraAuthService {
     if (!body || !suppliedSignature) throw new EntraAuthError('INVALID_INGESTION_TOKEN', 'Ingestion token is malformed')
     const expectedSignature = createHmac('sha256', this.config.portalSecret).update(`papyrus-ingestion:${body}`).digest()
     let actualSignature: Buffer
-    try { actualSignature = Buffer.from(suppliedSignature, 'base64url') }
-    catch { throw new EntraAuthError('INVALID_INGESTION_TOKEN', 'Ingestion token signature is malformed') }
+    try { actualSignature = Buffer.from(suppliedSignature, 'base64url') } catch { throw new EntraAuthError('INVALID_INGESTION_TOKEN', 'Ingestion token signature is malformed') }
     if (actualSignature.length !== expectedSignature.length || !timingSafeEqual(actualSignature, expectedSignature)) {
       throw new EntraAuthError('INVALID_INGESTION_TOKEN', 'Ingestion token signature is invalid')
     }
@@ -179,9 +182,9 @@ export class EntraAuthService {
       redirect_uri: new URL('/api/auth/entra/callback', origin).toString(),
       response_type: 'code',
       response_mode: 'query',
-      // The portal is a server-side session, so its authorization code is used for Graph
-      // profile enrichment rather than for a Papyrus API access token. App roles still arrive
-      // on the ID token; Teams SSO continues to use the Papyrus application audience directly.
+      // The portal is a server-side session, so the authorization code is used for Graph
+      // profile enrichment rather than a Papyrus API access token. App roles still arrive
+      // on the ID token; Teams SSO continues to use the Papyrus application audience.
       scope: `openid profile email ${graphUserScope(this.config.cloud)}`,
       state,
       nonce,
@@ -233,8 +236,8 @@ export class EntraAuthService {
       groups: principal.groups,
       source: principal.source,
     }
-    const body = encoded(JSON.stringify({ principal: portable, exp: expiresAt }))
-    const signature = createHmac('sha256', this.config.portalSecret).update(body).digest('base64url')
+    const body = encoded(JSON.stringify({ principal: portable, exp: expiresAt, identityVersion: PORTAL_COOKIE_IDENTITY_VERSION }))
+    const signature = encoded(createHmac('sha256', this.config.portalSecret).update(body).digest())
     const secure = origin.startsWith('https://')
     return `${this.cookieName(origin)}=${encodeURIComponent(`${body}.${signature}`)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=3600; Priority=High${secure ? '; Secure' : ''}`
   }
@@ -273,8 +276,10 @@ export class EntraAuthService {
     try { presented = Buffer.from(signature, 'base64url') } catch { return undefined }
     if (expected.length !== presented.length || !timingSafeEqual(expected, presented)) return undefined
     try {
-      const value = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as { principal?: PortalPrincipal; exp?: number }
-      if (!value.principal || !value.exp || value.exp <= Date.now()) return undefined
+      const value = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as { principal?: PortalPrincipal; exp?: number; identityVersion?: number }
+      // Pre-profile cookies intentionally require one fresh Entra login so Graph can supply the
+      // photo/company metadata that did not exist when those sessions were issued.
+      if (!value.principal || !value.exp || value.exp <= Date.now() || value.identityVersion !== PORTAL_COOKIE_IDENTITY_VERSION) return undefined
       return value.principal
     } catch { return undefined }
   }
@@ -287,23 +292,52 @@ export class EntraAuthService {
     return join(this.config.dataDir, 'identity-profiles', `${this.profileKey(principal)}.json`)
   }
 
+  private tenantOrganizationPath(): string {
+    return join(this.config.dataDir, 'identity-profiles', 'tenant-organization.txt')
+  }
+
+  private restoreTenantOrganizationName(): void {
+    if (this.config.organizationName !== DEFAULT_ORGANIZATION_NAME) return
+    try {
+      const stored = optionalString(readFileSync(this.tenantOrganizationPath(), 'utf8'))
+      if (stored) this.config.organizationName = stored
+    } catch { /* first login has not learned tenant branding yet */ }
+  }
+
+  private async persistTenantOrganizationName(value: string | undefined): Promise<void> {
+    if (!value || this.config.organizationName !== DEFAULT_ORGANIZATION_NAME) return
+    this.config.organizationName = value
+    const path = this.tenantOrganizationPath()
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 })
+    await writeFile(path, `${value}\n`, { encoding: 'utf8', mode: 0o600 })
+  }
+
   private async readStoredProfile(principal: PortalPrincipal): Promise<StoredIdentityProfile | undefined> {
     const key = this.profileKey(principal)
     if (this.profileCache.has(key)) return this.profileCache.get(key) ?? undefined
     try {
       const parsed = JSON.parse(await readFile(this.profilePath(principal), 'utf8')) as Partial<StoredIdentityProfile>
+      const displayName = optionalString(parsed.displayName)
+      const preferredUsername = optionalString(parsed.preferredUsername)
+      const email = optionalString(parsed.email)
+      const organizationName = optionalString(parsed.organizationName)
+      const department = optionalString(parsed.department)
+      const jobTitle = optionalString(parsed.jobTitle)
+      const officeLocation = optionalString(parsed.officeLocation)
+      const pictureUrl = typeof parsed.pictureUrl === 'string' && parsed.pictureUrl.startsWith('data:image/') ? parsed.pictureUrl : undefined
       const profile: StoredIdentityProfile = {
-        ...(optionalString(parsed.displayName) ? { displayName: optionalString(parsed.displayName) } : {}),
-        ...(optionalString(parsed.preferredUsername) ? { preferredUsername: optionalString(parsed.preferredUsername) } : {}),
-        ...(optionalString(parsed.email) ? { email: optionalString(parsed.email) } : {}),
-        ...(optionalString(parsed.organizationName) ? { organizationName: optionalString(parsed.organizationName) } : {}),
-        ...(optionalString(parsed.department) ? { department: optionalString(parsed.department) } : {}),
-        ...(optionalString(parsed.jobTitle) ? { jobTitle: optionalString(parsed.jobTitle) } : {}),
-        ...(optionalString(parsed.officeLocation) ? { officeLocation: optionalString(parsed.officeLocation) } : {}),
-        ...(typeof parsed.pictureUrl === 'string' && parsed.pictureUrl.startsWith('data:image/') ? { pictureUrl: parsed.pictureUrl } : {}),
+        ...(displayName ? { displayName } : {}),
+        ...(preferredUsername ? { preferredUsername } : {}),
+        ...(email ? { email } : {}),
+        ...(organizationName ? { organizationName } : {}),
+        ...(department ? { department } : {}),
+        ...(jobTitle ? { jobTitle } : {}),
+        ...(officeLocation ? { officeLocation } : {}),
+        ...(pictureUrl ? { pictureUrl } : {}),
         updatedAt: optionalString(parsed.updatedAt) ?? new Date(0).toISOString(),
       }
       this.profileCache.set(key, profile)
+      if (organizationName) await this.persistTenantOrganizationName(organizationName).catch(() => undefined)
       return profile
     } catch {
       this.profileCache.set(key, null)
@@ -316,6 +350,7 @@ export class EntraAuthService {
     await mkdir(dirname(path), { recursive: true, mode: 0o700 })
     await writeFile(path, `${JSON.stringify(profile)}\n`, { encoding: 'utf8', mode: 0o600 })
     this.profileCache.set(this.profileKey(principal), profile)
+    await this.persistTenantOrganizationName(profile.organizationName)
   }
 
   private async withStoredProfile(principal: PortalPrincipal): Promise<PortalPrincipal> {
@@ -336,11 +371,10 @@ export class EntraAuthService {
 
   private async enrichFromGraph(principal: PortalPrincipal, accessToken: string): Promise<PortalPrincipal> {
     const origin = graphOrigin(this.config.cloud)
-    const headers = { authorization: `Bearer ${accessToken}`, accept: 'application/json' }
     let user: GraphUserProfile = {}
     try {
       const response = await fetch(`${origin}/v1.0/me?$select=displayName,mail,userPrincipalName,companyName,department,jobTitle,officeLocation`, {
-        headers,
+        headers: { authorization: `Bearer ${accessToken}`, accept: 'application/json' },
         redirect: 'error',
         signal: AbortSignal.timeout(10_000),
       })
@@ -367,17 +401,23 @@ export class EntraAuthService {
       console.warn(`[entra] Microsoft Graph profile photo lookup failed: ${cause instanceof Error ? cause.message : 'unexpected error'}`)
     }
 
-    const preferredUsername = optionalString(user.mail) ?? optionalString(user.userPrincipalName) ?? principal.preferredUsername
+    const displayName = optionalString(user.displayName)
+    const mail = optionalString(user.mail)
+    const userPrincipalName = optionalString(user.userPrincipalName)
+    const preferredUsername = mail ?? userPrincipalName ?? principal.preferredUsername
     const configuredOrganization = this.config.organizationName !== DEFAULT_ORGANIZATION_NAME ? this.config.organizationName : undefined
     const organizationName = optionalString(user.companyName) ?? configuredOrganization ?? emailDomain(preferredUsername)
+    const department = optionalString(user.department)
+    const jobTitle = optionalString(user.jobTitle)
+    const officeLocation = optionalString(user.officeLocation)
     const profile: StoredIdentityProfile = {
-      ...(optionalString(user.displayName) ? { displayName: optionalString(user.displayName) } : {}),
+      ...(displayName ? { displayName } : {}),
       ...(preferredUsername ? { preferredUsername } : {}),
-      ...(optionalString(user.mail) ? { email: optionalString(user.mail) } : {}),
+      ...(mail ? { email: mail } : {}),
       ...(organizationName ? { organizationName } : {}),
-      ...(optionalString(user.department) ? { department: optionalString(user.department) } : {}),
-      ...(optionalString(user.jobTitle) ? { jobTitle: optionalString(user.jobTitle) } : {}),
-      ...(optionalString(user.officeLocation) ? { officeLocation: optionalString(user.officeLocation) } : {}),
+      ...(department ? { department } : {}),
+      ...(jobTitle ? { jobTitle } : {}),
+      ...(officeLocation ? { officeLocation } : {}),
       ...(pictureUrl ? { pictureUrl } : {}),
       updatedAt: new Date().toISOString(),
     }

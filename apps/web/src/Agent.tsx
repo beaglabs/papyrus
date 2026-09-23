@@ -6,7 +6,7 @@ import type { AgentActionProposal } from '@papyrus/contracts'
 import { approveProposal, approveSkill, createSessionProposal, denyProposal, listProposals, sessionMessages, setSessionAttention, uploadWorkspaceAttachment, workspaceFiles } from './api.js'
 import { chatRequestBody } from './chat-request.js'
 import { ModelGatewayCard } from './Models.js'
-import { Alert, Badge, Button, Card, CommandBlock, Input, Skeleton } from './components/ui/index.js'
+import { Alert, Badge, Button, Card, CommandBlock, Input, Skeleton, Marker, MarkerIcon, MarkerContent, MarkerSeparator } from './components/ui/index.js'
 import { MarkdownMessage } from './Markdown.js'
 import { buildCardRegistry, type CardRegistry, type ExtensionUiProvider } from 'papyrus-extension-sdk'
 import { viewer3dUiProvider } from 'papyrus-viewer-3d/ui'
@@ -436,16 +436,13 @@ function MessagePart({ part, sessionId, canApprove, canManageSkills, onChanged }
   return null
 }
 
-// Tool calls and bash output render as a quiet, collapsible line that stays out of the
-// way of the answer (Claude-style), while keeping Papyrus's mono type, hard 1px edges,
-// and status dot (semi-neobrutalist). Failed calls open by default; everything else is
-// one line until the reader expands it.
+// Tool calls render as neobrutalist timeline markers (like Claude's conversation steps).
+// Running tools show a spinner; completed show a check; failed show an X.
 function ToolActivity({ part }: { part: Record<string, unknown> }) {
   const type = String(part['type'] ?? '')
   const name = type === 'dynamic-tool' ? String(part['toolName'] ?? 'tool') : type.slice(5)
   const state = String(part['state'] ?? 'running')
   const kind = state === 'output-error' ? 'error' : state === 'output-available' ? 'done' : 'running'
-  const statusLabel = kind === 'error' ? 'Failed' : kind === 'done' ? 'Done' : 'Working'
   const command = commandFromValue(part['input'])
   const detail = command ?? summaryDetail(part['input'])
   const output = toolOutputText(part['output'])
@@ -453,14 +450,18 @@ function ToolActivity({ part }: { part: Record<string, unknown> }) {
   const inputJson = command === undefined && output === undefined && part['input'] != null ? formatToolValue(part['input']) : undefined
   const hasBody = command !== undefined || output !== undefined || inputJson !== undefined || kind === 'error'
   const [open, setOpen] = useState(kind === 'error')
+
+  const label = describeTool(name, command !== undefined)
+  const icon = toolIcon(name, kind)
+
   return <div className={`tool-activity ${kind}${open ? ' open' : ''}`}>
-    <button type="button" className="tool-activity-summary" aria-expanded={open} disabled={!hasBody} onClick={() => setOpen((value) => !value)}>
-      <span className="tool-activity-dot" aria-hidden="true" />
-      <span className="tool-activity-label">{describeTool(name, command !== undefined)}</span>
-      {detail && <span className="tool-activity-detail">{firstLine(detail)}</span>}
-      <span className={`tool-activity-status ${kind}`}>{statusLabel}</span>
-      {hasBody && <span className="tool-activity-chevron" aria-hidden="true">{open ? '▾' : '▸'}</span>}
-    </button>
+    <Marker>
+      <MarkerIcon>{icon}</MarkerIcon>
+      <MarkerContent>
+        <span className="tool-marker-label">{label}</span>
+        {detail && <span className="tool-marker-detail">{firstLine(detail)}</span>}
+      </MarkerContent>
+    </Marker>
     {open && hasBody && <div className="tool-activity-body">
       {(command !== undefined || output !== undefined)
         ? <CommandBlock {...(command !== undefined ? { command } : {})} {...(output !== undefined ? { output } : {})} {...(exitCode !== undefined ? { exitCode } : {})} />
@@ -480,6 +481,20 @@ function describeTool(name: string, hasCommand: boolean): string {
   if (FETCH_TOOL.test(name)) return 'Read a page'
   if (hasCommand) return 'Ran command'
   return humanize(name)
+}
+
+function toolIcon(name: string, kind: 'running' | 'done' | 'error'): React.ReactNode {
+  if (kind === 'running') {
+    return <svg className="tool-spinner" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeDasharray="31.4 31.4"><animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="1s" repeatCount="indefinite"/></circle></svg>
+  }
+  if (kind === 'error') {
+    return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+  }
+  // done state - show tool-specific icon
+  if (COMMAND_TOOL.test(name)) return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+  if (SEARCH_TOOL.test(name)) return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+  if (FETCH_TOOL.test(name)) return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5"/><polyline points="7 7 13 13 19 7"/><polyline points="7 13 13 19 19 13"/></svg>
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
 }
 
 function commandFromValue(value: unknown): string | undefined {

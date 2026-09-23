@@ -166,6 +166,14 @@ p { color: var(--muted); line-height: 1.55; }
 @keyframes skeleton-shimmer { to { transform: translateX(100%); } }
 .nb-label { display: grid; gap: 7px; color: #34322f; font-size: 12px; font-weight: 800; }
 .nb-label small { color: #777; font-weight: 500; line-height: 1.35; }
+
+.nb-marker { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; }
+.nb-marker-icon { width: 28px; height: 28px; flex: none; display: grid; place-items: center; border: 2px solid #111; border-radius: 50%; background: var(--surface); color: #111; box-shadow: var(--shadow-sm); }
+.nb-marker-content { flex: 1; min-width: 0; color: #322e28; font: 700 13px ui-sans-serif, system-ui, -apple-system, sans-serif; line-height: 1.4; }
+.nb-marker-separator { display: flex; align-items: center; gap: 10px; padding: 8px 0; color: var(--muted); font: 800 9px ui-monospace, monospace; letter-spacing: .12em; text-transform: uppercase; }
+.nb-marker-separator::before { content: ""; flex: 1; height: 1px; background: #d8d0c2; }
+.nb-marker-separator::after { content: ""; flex: 1; height: 1px; background: #d8d0c2; }
+.nb-marker-separator > span { flex: none; }
 .error { background: var(--rose); }
 .portal-skeleton { min-height: 100vh; display: grid; grid-template-columns: 285px minmax(0,1fr); background: var(--background); }
 .portal-skeleton > aside { display: grid; align-content: start; gap: 14px; padding: 56px 18px 20px; border-right: 3px solid #111; background: var(--surface); }
@@ -447,26 +455,22 @@ p { color: var(--muted); line-height: 1.55; }
 .skeleton-line.short { width: 45%; }
 
 
-/* Tool calls + bash output: a quiet one-line row that recedes behind the answer, with a
-   status dot, muted mono label, an inline detail preview, and a right-aligned status.
-   Semi-neobrutalist — hard 1px edges and mono type, but no filled circles, big icons, or
-   drop shadows. Expands to the shared command block below. */
-.tool-activity { margin: 3px 0; }
-.tool-activity-summary { width: 100%; display: flex; align-items: center; gap: 9px; padding: 6px 4px; border: 0; border-top: 1px solid #e0d9cb; background: transparent; color: var(--muted); text-align: left; font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; cursor: pointer; }
-.tool-activity-summary:disabled { cursor: default; }
-.tool-activity-summary:hover:not(:disabled) { background: #f2ede3; }
-.tool-activity-dot { width: 8px; height: 8px; flex: none; border: 1px solid #111; border-radius: 50%; background: #cfc7b8; }
-.tool-activity.done .tool-activity-dot { background: var(--green); }
-.tool-activity.running .tool-activity-dot { background: var(--yellow); animation: pulse 1s infinite alternate; }
-.tool-activity.error .tool-activity-dot { background: var(--rose); }
-.tool-activity-label { flex: none; color: #322e28; font-weight: 750; }
-.tool-activity-detail { min-width: 0; flex: 1; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
-.tool-activity-status { flex: none; margin-left: auto; color: var(--muted); font: 800 8px ui-monospace, monospace; letter-spacing: .07em; text-transform: uppercase; }
-.tool-activity-status.error { color: #b4322d; }
-.tool-activity-chevron { flex: none; color: #8f887b; font-size: 9px; }
-.tool-activity-body { margin: 6px 0 8px 17px; display: grid; gap: 8px; }
+/* Tool calls: neobrutalist timeline markers (like Claude's conversation steps).
+   Each tool call is a Marker with an icon, label, and optional detail.
+   Running shows a spinner; done shows a check; error shows an X.
+   Expands to the shared command block below. */
+.tool-activity { margin: 4px 0; }
+.tool-activity .nb-marker { border-top: 1px solid #e0d9cb; padding: 8px 0; }
+.tool-activity.running .nb-marker-icon { background: var(--yellow); }
+.tool-activity.done .nb-marker-icon { background: var(--green); }
+.tool-activity.error .nb-marker-icon { background: var(--rose); }
+.tool-marker-label { color: #322e28; font-weight: 750; }
+.tool-marker-detail { display: block; margin-top: 2px; color: var(--muted); font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-activity-body { margin: 8px 0 10px 38px; display: grid; gap: 8px; }
 .tool-activity-json { max-height: 300px; overflow: auto; margin: 0; padding: 11px 13px; border: 1px solid #c9c1b3; background: var(--surface); color: #2b2925; font: 11px/1.55 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .tool-activity-error { margin: 0; padding: 9px 12px; border-left: 3px solid var(--rose); background: #fbeceb; color: #6d201d; font-size: 12px; overflow-wrap: anywhere; }
+.tool-spinner { width: 16px; height: 16px; color: #111; animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 
 /* Shared bash/command output block (agent transcript + Governance command history). */
 .nb-command { overflow: hidden; border: 1px solid #c7bfb1; background: var(--surface); }

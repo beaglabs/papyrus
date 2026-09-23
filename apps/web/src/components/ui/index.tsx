@@ -127,3 +127,39 @@ export function Dialog({open,onOpenChange,children}:{open:boolean;onOpenChange:(
 export function DialogHeader({className,...props}:HTMLAttributes<HTMLDivElement>){return <div data-slot="dialog-header" className={className} {...props}/>}
 export function DialogContent({className,...props}:HTMLAttributes<HTMLDivElement>){return <div data-slot="dialog-content" className={className} {...props}/>}
 export function DialogFooter({className,...props}:HTMLAttributes<HTMLDivElement>){return <div data-slot="dialog-footer" className={className} {...props}/>}
+
+export interface MarkerProps {
+  children: React.ReactNode
+  className?: string
+}
+
+export function Marker({children,className}:MarkerProps){
+  return <div data-slot="marker" className={classes('nb-marker',className)}>{children}</div>
+}
+
+export interface MarkerIconProps {
+  children: React.ReactNode
+  className?: string
+}
+
+export function MarkerIcon({children,className}:MarkerIconProps){
+  return <div data-slot="marker-icon" className={classes('nb-marker-icon',className)}>{children}</div>
+}
+
+export interface MarkerContentProps {
+  children: React.ReactNode
+  className?: string
+}
+
+export function MarkerContent({children,className}:MarkerContentProps){
+  return <div data-slot="marker-content" className={classes('nb-marker-content',className)}>{children}</div>
+}
+
+export interface MarkerSeparatorProps {
+  children?: React.ReactNode
+  className?: string
+}
+
+export function MarkerSeparator({children,className}:MarkerSeparatorProps){
+  return <div data-slot="marker-separator" className={classes('nb-marker-separator',className)}>{children}</div>
+}

@@ -235,18 +235,14 @@ function clean(value: string, field: string, max: number): string {
 }
 
 /**
- * Profiles whose deployments must not inherit a commercial provider endpoint.
- *
- * `gcch`, `dod`, `government-il4`, and `government-il6` run against national
- * clouds where a commercial endpoint is unreachable or unapproved, and
- * `restricted` and `disconnected` deployments cannot reach a hosted provider at
- * all. On these profiles the operator names the endpoint; Papyrus does not invent
- * one. `commercial` and `gcc` map to Entra Public and keep the default.
+ * Government and disconnected deployments must not inherit a commercial provider
+ * endpoint. The deployment's approved model endpoint is named explicitly; the
+ * selected Microsoft national cloud is configured separately with
+ * PAPYRUS_ENTRA_CLOUD and does not alter this policy.
  */
-const PROFILES_REQUIRING_EXPLICIT_ENDPOINT: readonly DeploymentProfile[] =
-  ['gcch', 'dod', 'government-il4', 'government-il6', 'restricted', 'disconnected']
+const PROFILES_REQUIRING_EXPLICIT_ENDPOINT: readonly DeploymentProfile[] = ['government', 'disconnected']
 
-/** Hosts that are never the approved model endpoint for a national-cloud deployment. */
+/** Hosts that are never implicitly approved for a government/disconnected deployment. */
 const COMMERCIAL_MODEL_HOSTS = ['api.openai.com', 'openai.azure.com']
 
 function requiresExplicitEndpoint(profile: DeploymentProfile): boolean {

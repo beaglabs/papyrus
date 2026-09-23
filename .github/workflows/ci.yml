@@ -38,8 +38,9 @@ jobs:
         run: pnpm contracts:check
       - name: Generate and verify compliance evidence
         run: pnpm compliance:check
-      - name: Build extension prerequisites
+      - name: Build runtime prerequisites
         run: |
+          pnpm --filter @papyrus/contracts build
           pnpm --filter papyrus-extension-sdk build
           pnpm --filter papyrus-viewer-3d build
           pnpm --filter papyrus-gnss build

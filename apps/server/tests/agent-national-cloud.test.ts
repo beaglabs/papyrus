@@ -16,17 +16,18 @@ const exchangeIntegration: IntegrationConfiguration = {
 
 function config(overrides: Partial<AgentConfig> = {}): AgentConfig {
   return {
-    mode: 'local', profile: 'gcch', host: '127.0.0.1', port: 3210, publicOrigin: 'http://127.0.0.1:3210',
+    mode: 'local', profile: 'government', host: '127.0.0.1', port: 3210, publicOrigin: 'http://127.0.0.1:3210',
     dataDir: '/var/lib/papyrus', databasePath: ':memory:', portalSecret: 'portal-secret-at-least-thirty-two-characters',
     organizationName: 'Example Agency', cloud: 'USGov', licenseRequired: false, licenseAuthorities: {},
     ...overrides,
   }
 }
 
-function environment(profile: string): NodeJS.ProcessEnv {
+function environment(profile: 'commercial' | 'government' | 'disconnected', cloud?: 'Public' | 'USGov' | 'USGovDoD'): NodeJS.ProcessEnv {
   return {
     PAPYRUS_MODE: 'local',
     PAPYRUS_PROFILE: profile,
+    ...(cloud ? { PAPYRUS_ENTRA_CLOUD: cloud } : {}),
     PAPYRUS_DATABASE_PATH: ':memory:',
     PAPYRUS_PORTAL_SECRET: 'portal-secret-at-least-thirty-two-characters',
     PAPYRUS_DEV_ENTRA_PRINCIPAL: JSON.stringify({
@@ -51,17 +52,16 @@ describe('national cloud endpoints', () => {
     expect(authorityHost('USGovDoD')).toBe('https://login.microsoftonline.us')
   })
 
-  it('infers the cloud from the deployment profile', () => {
+  it('selects the Entra cloud independently from the deployment profile', () => {
     expect(loadAgentConfig(environment('commercial')).cloud).toBe('Public')
-    expect(loadAgentConfig(environment('gcc')).cloud).toBe('Public')
-    expect(loadAgentConfig(environment('gcch')).cloud).toBe('USGov')
-    expect(loadAgentConfig(environment('government-il4')).cloud).toBe('USGov')
-    expect(loadAgentConfig(environment('dod')).cloud).toBe('USGovDoD')
-    expect(loadAgentConfig(environment('government-il6')).cloud).toBe('USGovDoD')
+    expect(loadAgentConfig(environment('government')).cloud).toBe('Public')
+    expect(loadAgentConfig(environment('disconnected')).cloud).toBe('Public')
+    expect(loadAgentConfig(environment('government', 'USGov')).cloud).toBe('USGov')
+    expect(loadAgentConfig(environment('government', 'USGovDoD')).cloud).toBe('USGovDoD')
   })
 
   it('rejects an unsupported Entra cloud', () => {
-    expect(() => loadAgentConfig({ ...environment('dod'), PAPYRUS_ENTRA_CLOUD: 'USGovSecret' })).toThrow(/PAPYRUS_ENTRA_CLOUD/)
+    expect(() => loadAgentConfig({ ...environment('government'), PAPYRUS_ENTRA_CLOUD: 'USGovSecret' })).toThrow(/PAPYRUS_ENTRA_CLOUD/)
   })
 
   it('sends a DoD deployment at the DoD Graph host', async () => {
@@ -103,53 +103,51 @@ describe('legacy model bootstrap endpoint selection', () => {
     return new ModelStore(new AgentDatabase(':memory:'))
   }
 
-  it('refuses to invent a commercial endpoint on a national-cloud profile', () => {
+  it('refuses to invent a commercial endpoint on the government profile', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const models = store()
-    expect(models.bootstrapLegacy({ PAPYRUS_AGENT_MODEL: 'openai/gpt-5' }, { profile: 'gcch' })).toBeUndefined()
+    expect(models.bootstrapLegacy({ PAPYRUS_AGENT_MODEL: 'openai/gpt-5' }, { profile: 'government' })).toBeUndefined()
     expect(models.list()).toHaveLength(0)
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('will not fall back to a commercial provider endpoint'))
   })
 
-  it('refuses on every profile that cannot reach or approve a commercial endpoint', () => {
+  it('refuses to invent a commercial endpoint on every restricted runtime posture', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
-    for (const profile of ['gcch', 'dod', 'government-il4', 'government-il6', 'restricted', 'disconnected'] as const) {
+    for (const profile of ['government', 'disconnected'] as const) {
       const models = store()
       expect(models.bootstrapLegacy({ PAPYRUS_AGENT_MODEL: 'openai/gpt-5' }, { profile })).toBeUndefined()
       expect(models.list()).toHaveLength(0)
     }
   })
 
-  it('imports the endpoint the operator configured for the national cloud', () => {
+  it('imports the endpoint the operator configured for a government deployment', () => {
     const models = store()
     const created = models.bootstrapLegacy(
       { PAPYRUS_AGENT_MODEL: 'openai/gpt-5', PAPYRUS_MODEL_BASE_URL: 'https://agency-openai.openai.azure.us/v1' },
-      { profile: 'gcch' },
+      { profile: 'government' },
     )
     expect(created?.baseUrl).toBe('https://agency-openai.openai.azure.us/v1')
     expect(models.list()).toHaveLength(1)
   })
 
-  it('keeps the commercial default for commercial and GCC profiles', () => {
-    for (const profile of ['commercial', 'gcc'] as const) {
-      const models = store()
-      const created = models.bootstrapLegacy({ PAPYRUS_AGENT_MODEL: 'openai/gpt-5' }, { profile })
-      expect(created?.baseUrl).toBe('https://api.openai.com/v1')
-    }
+  it('keeps the commercial default only for the commercial profile', () => {
+    const models = store()
+    const created = models.bootstrapLegacy({ PAPYRUS_AGENT_MODEL: 'openai/gpt-5' }, { profile: 'commercial' })
+    expect(created?.baseUrl).toBe('https://api.openai.com/v1')
   })
 
-  it('still allows a loopback provider on a national-cloud profile', () => {
+  it('still allows a loopback provider on a government profile', () => {
     const models = store()
-    const created = models.bootstrapLegacy({ PAPYRUS_AGENT_MODEL: 'ollama/qwen3-32b' }, { profile: 'gcch' })
+    const created = models.bootstrapLegacy({ PAPYRUS_AGENT_MODEL: 'ollama/qwen3-32b' }, { profile: 'government' })
     expect(created?.baseUrl).toBe('http://127.0.0.1:11434/v1')
   })
 
-  it('warns when an operator points a national-cloud profile at a commercial host', () => {
+  it('warns when an operator points a government profile at a commercial host', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const models = store()
     const created = models.bootstrapLegacy(
       { PAPYRUS_AGENT_MODEL: 'openai/gpt-5', PAPYRUS_MODEL_BASE_URL: 'https://api.openai.com/v1' },
-      { profile: 'dod' },
+      { profile: 'government' },
     )
     expect(created?.baseUrl).toBe('https://api.openai.com/v1')
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('commercial endpoint'))

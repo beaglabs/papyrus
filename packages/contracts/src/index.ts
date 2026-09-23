@@ -1,9 +1,21 @@
 export const ROLES = ['Owner', 'Admin', 'User', 'Auditor'] as const
 export type Role = (typeof ROLES)[number]
 
-export const PROFILES = ['commercial', 'government-il4', 'government-il6', 'gcc', 'gcch', 'dod', 'restricted', 'disconnected'] as const
+export const PROFILES = ['commercial', 'government', 'disconnected'] as const
 export type DeploymentProfile = (typeof PROFILES)[number]
 export type ServerMode = 'local' | 'persistent'
+
+export const CLASSIFICATION_BANNER_FEATURE = 'classification-banners' as const
+export const CLASSIFICATION_LEVELS = ['unclassified', 'cui', 'confidential', 'secret', 'top-secret', 'top-secret-sci'] as const
+export type ClassificationLevel = (typeof CLASSIFICATION_LEVELS)[number]
+export const CLASSIFICATION_BANNERS: Record<ClassificationLevel, { label: string; background: string; foreground: 'white' | 'black' }> = {
+  unclassified: { label: 'UNCLASSIFIED', background: '#007a33', foreground: 'white' },
+  cui: { label: 'CUI', background: '#502b85', foreground: 'white' },
+  confidential: { label: 'CONFIDENTIAL', background: '#0033a0', foreground: 'white' },
+  secret: { label: 'SECRET', background: '#c8102e', foreground: 'white' },
+  'top-secret': { label: 'TOP SECRET', background: '#ff8c00', foreground: 'black' },
+  'top-secret-sci': { label: 'TOP SECRET//SCI', background: '#fce83a', foreground: 'black' },
+}
 
 export interface Principal {
   id: string
@@ -823,4 +835,3 @@ export interface ConnectorChannel {
 export type ChannelValidation =
   | { ok: true; id: string; value: Record<string, unknown> }
   | { ok: false; id: string; reason: string }
-

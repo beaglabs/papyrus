@@ -1,7 +1,7 @@
 import type { DeploymentProfile, IntegrationCatalogEntry } from '@papyrus/contracts'
 import { observationProtocol } from './source-profiles.js'
 
-const CONNECTED: DeploymentProfile[] = ['commercial', 'government-il4', 'government-il6', 'gcc', 'gcch', 'dod', 'restricted']
+const CONNECTED: DeploymentProfile[] = ['commercial', 'government']
 const ALL: DeploymentProfile[] = [...CONNECTED, 'disconnected']
 
 export const LINK_PUBLISHER_CATALOG_ID = 'papyrus-links'
@@ -28,7 +28,7 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
     integrationClass: 'human_interface', authority: 'bidirectional', risk: 'moderate',
     capabilities: ['slash commands', 'adaptive cards', 'portal launch', 'proactive notifications'],
     evidenceTypes: ['HumanContext', 'OperatorRequest'], syncMode: 'hybrid', authSchemes: ['entra', 'certificate'],
-    supportedProfiles: ['commercial', 'gcc', 'gcch', 'dod'], licenseFeature: 'teams',
+    supportedProfiles: CONNECTED, licenseFeature: 'teams',
   },
   {
     id: 'exchange-email', name: 'Exchange Email', vendor: 'Microsoft', initials: 'EX', accent: '#75b9ff',
@@ -53,7 +53,7 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
     capabilities: ['identity graph', 'group membership', 'customer-managed export'],
     evidenceTypes: ['Identity', 'Privilege', 'TrustRelationship'], syncMode: 'push', authSchemes: ['entra', 'certificate', 'mTLS'],
     observationProtocol: observationProtocol('microsoft-entra'),
-    supportedProfiles: ['commercial', 'gcc', 'gcch', 'dod'], licenseFeature: 'security-connectors',
+    supportedProfiles: CONNECTED, licenseFeature: 'security-connectors',
   },
   {
     id: 'defender-xdr', name: 'Microsoft Defender XDR', vendor: 'Microsoft', initials: 'DX', accent: '#71df98',
@@ -62,7 +62,7 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
     capabilities: ['endpoint evidence', 'alert ingestion', 'customer-managed export'],
     evidenceTypes: ['Device', 'Alert', 'Process', 'Vulnerability'], syncMode: 'push', authSchemes: ['entra', 'certificate', 'mTLS'],
     observationProtocol: observationProtocol('defender-xdr'),
-    supportedProfiles: ['commercial', 'gcc', 'gcch', 'dod'], licenseFeature: 'security-connectors',
+    supportedProfiles: CONNECTED, licenseFeature: 'security-connectors',
   },
   {
     id: 'microsoft-sentinel', name: 'Microsoft Sentinel', vendor: 'Microsoft', initials: 'MS', accent: '#d7b7ff',
@@ -71,7 +71,7 @@ export const INTEGRATION_CATALOG: IntegrationCatalogEntry[] = [
     capabilities: ['incident ingestion', 'analytics evidence', 'customer-managed export'],
     evidenceTypes: ['Incident', 'Alert', 'SecurityEvent'], syncMode: 'push', authSchemes: ['entra', 'certificate', 'mTLS'],
     observationProtocol: observationProtocol('microsoft-sentinel'),
-    supportedProfiles: ['commercial', 'gcc', 'gcch', 'dod'], licenseFeature: 'security-connectors',
+    supportedProfiles: CONNECTED, licenseFeature: 'security-connectors',
   },
   {
     id: 'zeek', name: 'Zeek', vendor: 'Open source', initials: 'ZK', accent: '#ffd36e',

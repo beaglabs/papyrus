@@ -156,7 +156,7 @@ export function Onboarding() {
     </div>
   ) : step === 'license' ? (
     <div className="onboarding-form">
-      <Textarea value={licenseJson} onChange={(event) => setLicenseJson(event.target.value)} placeholder={'{"licenseId": "...", "licensee": "...", "deploymentId": "' + (status?.deploymentId ?? '') + '", "profiles": ["gcc"], "features": [], "keyId": "...", "signature": "..."}'} rows={8} spellCheck={false} />
+      <Textarea value={licenseJson} onChange={(event) => setLicenseJson(event.target.value)} placeholder={'{"licenseId": "...", "licensee": "...", "deploymentId": "' + (status?.deploymentId ?? '') + '", "profiles": ["government"], "features": [], "keyId": "...", "signature": "..."}'} rows={8} spellCheck={false} />
       <Button className="primary" disabled={busy || !licenseJson.trim()} onClick={() => void submitLicense()}>Activate license →</Button>
     </div>
   ) : step === 'secret' ? (

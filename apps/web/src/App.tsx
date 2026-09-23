@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { CLASSIFICATION_BANNER_FEATURE, CLASSIFICATION_BANNERS, CLASSIFICATION_LEVELS, type ClassificationLevel, type LicenseStatus } from '@papyrus/contracts'
 import type { PortalData, PublicConfig } from './api.js'
 import { AuthenticationRequired, createSession, deleteSession, loadPortal, logout, publicConfig, type AgentSession, type AgentStatus } from './api.js'
 import { AgentView } from './Agent.js'
@@ -27,7 +28,26 @@ function Logo() {
   return <div className="brand"><span className="brand-mark" aria-hidden="true"><img src={papyrusLogo} alt="" width="39" height="39" style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} /></span><span>PAPYRUS</span></div>
 }
 function initials(name: string) { return name.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') }
-function profileLabel(profile: string) { return ({ gcc: 'GCC', gcch: 'GCC HIGH', dod: 'DOD', restricted: 'RESTRICTED', disconnected: 'DISCONNECTED' } as Record<string, string>)[profile] ?? profile.toUpperCase() }
+function profileLabel(profile: string) { return profile.toUpperCase() }
+
+async function licensedClassification(): Promise<ClassificationLevel | undefined> {
+  try {
+    const response = await fetch('/api/license/status', { credentials: 'same-origin', headers: { accept: 'application/json' } })
+    if (!response.ok) return undefined
+    const status = await response.json() as LicenseStatus
+    const features = status.valid ? status.license?.features ?? [] : []
+    if (!features.includes(CLASSIFICATION_BANNER_FEATURE)) return undefined
+    const value = features.find((feature) => feature.startsWith('classification:'))?.slice('classification:'.length)
+    return value && CLASSIFICATION_LEVELS.includes(value as ClassificationLevel) ? value as ClassificationLevel : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function ClassificationBanner({ level }: { level: ClassificationLevel }) {
+  const banner = CLASSIFICATION_BANNERS[level]
+  return <div className="classification-banner" role="note" aria-label={`System classification: ${banner.label}`} style={{ background: banner.background, color: banner.foreground }}><strong>{banner.label}</strong></div>
+}
 
 /**
  * Keep the identity mark stable even when an upstream identity response temporarily omits
@@ -58,6 +78,7 @@ function UserAvatar({ principal }: { principal: PortalData['me'] }) {
 
 export function App() {
   const [state, setState] = useState<AppState>({ phase: 'loading' })
+  const [classification, setClassification] = useState<ClassificationLevel | undefined>()
   const [view, setView] = useState<PortalView>(viewFromPath)
   const [selectedSessionId, setSelectedSessionId] = useState(() => new URLSearchParams(window.location.search).get('session') ?? undefined)
   const [initialPrompt, setInitialPrompt] = useState(() => new URLSearchParams(window.location.search).get('prompt') ?? undefined)
@@ -65,12 +86,16 @@ export function App() {
   const refresh = useCallback(async () => {
     try {
       const config = await publicConfig()
+      setClassification(await licensedClassification())
       if (config.bootstrap) { setState({ phase: 'bootstrap' }); return }
       setState({ phase: 'ready', data: await loadPortal() })
     }
     catch (cause) {
       if (cause instanceof AuthenticationRequired) {
-        try { setState({ phase: 'signed-out', config: await publicConfig() }) }
+        try {
+          setClassification(await licensedClassification())
+          setState({ phase: 'signed-out', config: await publicConfig() })
+        }
         catch { setState({ phase: 'error', message: 'Unable to load deployment configuration' }) }
       } else setState({ phase: 'error', message: cause instanceof Error ? cause.message : 'Unable to open Papyrus' })
     }
@@ -94,7 +119,7 @@ export function App() {
   if (state.phase === 'loading') return <PortalSkeleton />
   if (state.phase === 'bootstrap') return <Onboarding />
   if (state.phase === 'error') return <main className="center login"><Logo /><p className="eyebrow">DAEMON UNAVAILABLE</p><h1>Unable to open<br />Papyrus.</h1><Alert className="error">{state.message}</Alert><Button className="primary" onClick={() => { setState({ phase: 'loading' }); void refresh() }}>Try again →</Button></main>
-  if (state.phase === 'signed-out') return <SignedOut config={state.config} />
+  if (state.phase === 'signed-out') return <SignedOut config={state.config} classification={classification} />
 
   const data = state.data
   const selectedSession = data.sessions.find((session) => session.id === selectedSessionId) ?? data.sessions[0]
@@ -112,12 +137,11 @@ export function App() {
   const signOut = async () => { await logout(); window.location.replace('/portal') }
 
   return <>
-    <div className="handling-banner government"><strong>{profileLabel(data.config.profile)}</strong><span>AUTHORIZED USE ONLY · CUSTOMER-HOSTED AGENT RUNTIME</span></div>
-    <SidebarProvider className="portal-shell with-handling-banner">
+    {classification && <ClassificationBanner level={classification} />}
+    <SidebarProvider className={`portal-shell ${classification ? 'with-handling-banner' : ''}`}>
       <Sidebar collapsible="icon" className="portal-sidebar">
         <SidebarHeader>
           <div className="sidebar-brand-row"><Logo /></div>
-          <div className="classification">{profileLabel(data.config.profile)} · {data.config.cloud}</div>
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton className="new-session" tooltip="New session" onClick={() => void newSession()}><span className="sidebar-icon">＋</span><span className="sidebar-copy">New session</span></SidebarMenuButton>
@@ -183,8 +207,8 @@ function PortalSkeleton() {
   </div>
 }
 
-function SignedOut({ config }: { config: PublicConfig }) {
-  return <><div className="handling-banner government"><strong>{profileLabel(config.profile)}</strong><span>MICROSOFT ENTRA AUTHORITY</span></div><main className="center login agent-login"><Logo /><p className="eyebrow">CUSTOMER-HOSTED AGENT RUNTIME</p><h1>Your tools.<br />Your authority.</h1><p>Papyrus accepts identity and application roles from your Microsoft Entra tenant. It does not maintain a parallel user directory.</p>{config.entraConfigured
+function SignedOut({ config, classification }: { config: PublicConfig; classification?: ClassificationLevel | undefined }) {
+  return <>{classification && <ClassificationBanner level={classification} />}<main className={`center login agent-login ${classification ? 'login-with-classification' : ''}`}><Logo /><p className="eyebrow">CUSTOMER-HOSTED AGENT RUNTIME</p><h1>Your tools.<br />Your authority.</h1><p>Papyrus accepts identity and application roles from your Microsoft Entra tenant. It does not maintain a parallel user directory.</p>{config.entraConfigured
     ? <a className="primary" href={`/api/auth/entra/login?returnTo=${encodeURIComponent(window.location.pathname.startsWith('/portal') ? window.location.pathname : '/portal')}`}>Continue with Microsoft Entra →</a>
     : <Alert className="error">This deployment does not have Microsoft Entra configured.</Alert>}<div className="login-facts"><span>{config.organizationName}</span><span>{profileLabel(config.profile)}</span><span>{config.cloud}</span></div></main></>
 }

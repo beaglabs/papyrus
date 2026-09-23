@@ -12,6 +12,8 @@ interface LicenseDatabase {
   }
 }
 
+const LEGACY_GOVERNMENT_PROFILES = new Set(['government-il4', 'government-il6', 'gcc', 'gcch', 'dod', 'restricted'])
+
 function canonical(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
@@ -76,6 +78,11 @@ export class LicenseService {
     return this.validate(JSON.parse(row.document_json) as SignedLicense)
   }
 
+  has(feature: string): boolean {
+    const status = this.status()
+    return Boolean(status.valid && status.license?.features.includes(feature))
+  }
+
   require(feature: string): void {
     const status = this.status()
     if (!status.valid) throw new Error(status.reason ?? 'License invalid')
@@ -87,7 +94,12 @@ export class LicenseService {
     const authority = this.authorities[keyId]
     if (!authority) return { valid: false, deploymentId: this.deploymentId, reason: `Unknown license authority ${keyId}` }
     if (payload.deploymentId !== this.deploymentId) return { valid: false, deploymentId: this.deploymentId, reason: 'License belongs to another deployment' }
-    if (!payload.profiles.includes(this.profile)) return { valid: false, deploymentId: this.deploymentId, reason: `License does not permit ${this.profile}` }
+
+    const licensedProfiles = payload.profiles as string[]
+    const profileAllowed = licensedProfiles.includes(this.profile) ||
+      (this.profile === 'government' && licensedProfiles.some((candidate) => LEGACY_GOVERNMENT_PROFILES.has(candidate)))
+    if (!profileAllowed) return { valid: false, deploymentId: this.deploymentId, reason: `License does not permit ${this.profile}` }
+
     if (payload.expiresAt && Date.parse(payload.expiresAt) <= Date.now()) return { valid: false, deploymentId: this.deploymentId, reason: `License expired at ${payload.expiresAt}` }
     if (!verify('sha256', Buffer.from(canonical(payload)), authority, Buffer.from(signature, 'base64'))) {
       return { valid: false, deploymentId: this.deploymentId, reason: 'Invalid license signature' }

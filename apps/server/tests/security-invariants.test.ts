@@ -12,8 +12,8 @@ const localEnv = {
 
 describe('pre-commit security invariants', () => {
   it('keeps government cloud selection explicit and rejects unknown sandbox backends', () => {
-    expect(loadAgentConfig({ ...localEnv, PAPYRUS_PROFILE: 'government-il4' }).cloud).toBe('USGov')
-    expect(loadAgentConfig({ ...localEnv, PAPYRUS_PROFILE: 'government-il6' }).cloud).toBe('USGovDoD')
+    expect(loadAgentConfig({ ...localEnv, PAPYRUS_PROFILE: 'government', PAPYRUS_ENTRA_CLOUD: 'USGov' }).cloud).toBe('USGov')
+    expect(loadAgentConfig({ ...localEnv, PAPYRUS_PROFILE: 'government', PAPYRUS_ENTRA_CLOUD: 'USGovDoD' }).cloud).toBe('USGovDoD')
     expect(() => loadAgentConfig({ ...localEnv, PAPYRUS_SANDBOX_RUNTIME: 'docker' })).toThrow(/bwrap or seatbelt/)
   })
 

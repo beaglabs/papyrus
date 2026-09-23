@@ -1,0 +1,40 @@
+.brand-mark {
+  box-sizing: border-box;
+  padding: 2px;
+  border: 3px solid var(--border);
+  background: #fff;
+  color: var(--foreground);
+  box-shadow: 4px 4px 0 var(--border);
+  transform: rotate(-2deg);
+}
+
+.brand-mark img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+}
+
+.avatar {
+  position: relative;
+  overflow: hidden;
+  background: var(--blue);
+  border: 2px solid var(--border);
+  box-shadow: 2px 2px 0 var(--border);
+}
+
+.avatar > span {
+  position: relative;
+  z-index: 0;
+}
+
+.avatar > img {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  background: #fff;
+}

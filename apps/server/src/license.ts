@@ -20,6 +20,12 @@ interface LicenseDatabase {
   }
 }
 
+type ProvisionedBranding = {
+  branding?: {
+    entraAppLogoUrl?: string
+  }
+}
+
 const LEGACY_GOVERNMENT_PROFILES = new Set(['government-il4', 'government-il6', 'gcc', 'gcch', 'dod', 'restricted'])
 
 function canonical(value: unknown): string {
@@ -35,6 +41,16 @@ function configuredClassification(value: string | undefined = process.env.PAPYRU
     throw new Error(`Unsupported PAPYRUS_CLASSIFICATION ${value}. Expected one of: ${CLASSIFICATION_LEVELS.join(', ')}`)
   }
   return selected as ClassificationLevel
+}
+
+function clearProvisionedBranding(): void {
+  delete process.env.PAPYRUS_ENTRA_APP_LOGO_URL
+}
+
+function applyProvisionedBranding(payload: LicensePayload & ProvisionedBranding): void {
+  clearProvisionedBranding()
+  const logoUrl = payload.branding?.entraAppLogoUrl?.trim()
+  if (logoUrl) process.env.PAPYRUS_ENTRA_APP_LOGO_URL = logoUrl
 }
 
 export function signLicense(payload: LicensePayload, keyId: string, privateKeyPem: string): SignedLicense {
@@ -53,6 +69,10 @@ export class LicenseService {
     private readonly authorities: Record<string, string>,
     private readonly required: boolean,
   ) {
+    // App-registration branding is provisioned in the signed license. Never let a
+    // process environment value override commercial state, even if an older
+    // deployment still has the legacy variable set.
+    clearProvisionedBranding()
     this.classification = configuredClassification()
     const identityDir = join(dataDir, 'identity')
     const publicPath = join(identityDir, 'deployment-public.pem')
@@ -93,7 +113,10 @@ export class LicenseService {
 
   status(): LicenseStatus {
     const row = this.db.sqlite.prepare('SELECT document_json FROM licenses WHERE id=1').get() as { document_json: string } | undefined
-    if (!row) return { valid: !this.required, deploymentId: this.deploymentId, ...(!this.required ? {} : { reason: 'No license activated' }) }
+    if (!row) {
+      clearProvisionedBranding()
+      return { valid: !this.required, deploymentId: this.deploymentId, ...(!this.required ? {} : { reason: 'No license activated' }) }
+    }
     return this.validate(JSON.parse(row.document_json) as SignedLicense)
   }
 
@@ -123,6 +146,7 @@ export class LicenseService {
   }
 
   private validate(document: SignedLicense): LicenseStatus {
+    clearProvisionedBranding()
     const { signature, keyId, ...payload } = document
     const authority = this.authorities[keyId]
     if (!authority) return { valid: false, deploymentId: this.deploymentId, reason: `Unknown license authority ${keyId}` }
@@ -137,6 +161,7 @@ export class LicenseService {
     if (!verify('sha256', Buffer.from(canonical(payload)), authority, Buffer.from(signature, 'base64'))) {
       return { valid: false, deploymentId: this.deploymentId, reason: 'Invalid license signature' }
     }
+    applyProvisionedBranding(payload as LicensePayload & ProvisionedBranding)
     return {
       valid: true,
       deploymentId: this.deploymentId,

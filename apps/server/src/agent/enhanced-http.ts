@@ -132,8 +132,8 @@ async function principal(request: IncomingMessage, auth: EntraAuthService, servi
 
 function invoke(listener: RequestListener, request: IncomingMessage, response: ServerResponse): Promise<void> {
   try {
-    const result = listener(request, response)
-    return result && typeof (result as Promise<void>).then === 'function' ? result as Promise<void> : Promise.resolve()
+    listener(request, response)
+    return Promise.resolve()
   } catch (cause) {
     return Promise.reject(cause)
   }

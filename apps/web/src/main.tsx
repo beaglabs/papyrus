@@ -1,5 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import './agent-ui-globals.js'
 import { App } from './App.js'
 import papyrusLogo from '../../../deploy/marketplace/logos/papyrus-small-48x48.png'
 import './styles.css'

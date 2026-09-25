@@ -14,9 +14,9 @@ const ENHANCED_MAX_STEPS = 100
 const ACP_AGENT_PREFIX = 'acp-'
 
 interface RuntimeScope {
-  actor?: PortalPrincipal
-  threadId?: string
-  interruption?: ReturnType<typeof classifyInterruption>
+  actor?: PortalPrincipal | undefined
+  threadId?: string | undefined
+  interruption?: ReturnType<typeof classifyInterruption> | undefined
 }
 
 type AgentLike = Record<string, unknown>

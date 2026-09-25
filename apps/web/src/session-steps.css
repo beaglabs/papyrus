@@ -1,0 +1,65 @@
+/* Session execution timeline: reasoning tokens and tool calls share one compact, inspectable surface. */
+.reasoning-activity,
+.tool-activity { margin: 4px 0; }
+
+.reasoning-activity .nb-marker,
+.tool-activity .nb-marker { border-top: 1px solid #e0d9cb; padding: 8px 0; }
+
+.session-step-trigger {
+  display: block;
+  width: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.session-step-trigger:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
+.session-step-trigger[aria-disabled="true"] { cursor: default; }
+.session-step-trigger .nb-marker { transition: background 120ms ease; }
+.session-step-trigger:not([aria-disabled="true"]):hover .nb-marker { background: #f3eee5; }
+
+.session-step-chevron {
+  min-width: 24px;
+  color: var(--muted);
+  font: 900 14px/1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  text-align: right;
+}
+
+.reasoning-activity.running .nb-marker-icon,
+.tool-activity.running .nb-marker-icon { background: var(--yellow); }
+.reasoning-activity.done .nb-marker-icon,
+.tool-activity.done .nb-marker-icon { background: var(--green); }
+.tool-activity.error .nb-marker-icon { background: var(--rose); }
+
+.reasoning-body,
+.tool-activity-body { margin: 8px 0 10px 38px; display: grid; gap: 8px; }
+.reasoning-body pre {
+  max-height: 300px;
+  overflow: auto;
+  margin: 0;
+  padding: 11px 13px;
+  border: 1px solid #c9c1b3;
+  background: #f5f0e7;
+  color: #3b3731;
+  font: 11px/1.6 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.reasoning-activity.running .reasoning-body pre { border-left: 3px solid var(--yellow); }
+.reasoning-cursor {
+  display: inline-block;
+  width: 6px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -2px;
+  background: currentColor;
+  animation: reasoning-blink 850ms steps(1, end) infinite;
+}
+@keyframes reasoning-blink { 50% { opacity: 0; } }
+
+.tool-marker-label { color: #322e28; font-weight: 750; }
+.tool-marker-detail { display: block; margin-top: 2px; color: var(--muted); font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-activity-json { max-height: 300px; overflow: auto; margin: 0; padding: 11px 13px; border: 1px solid #c9c1b3; background: var(--surface); color: #2b2925; font: 11px/1.55 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tool-activity-error { margin: 0; padding: 9px 12px; border-left: 3px solid var(--rose); background: #fbeceb; color: #6d201d; font-size: 12px; overflow-wrap: anywhere; }

@@ -1,11 +1,13 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import './agent-ui-globals.js'
 import { App } from './App.js'
 import papyrusLogo from '../../../deploy/marketplace/logos/papyrus-small-48x48.png'
 import './styles.css'
 import './identity-branding.css'
 import './classification.css'
 import './portal-layout.css'
+import './session-steps.css'
 
 const favicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]') ?? document.createElement('link')
 favicon.rel = 'icon'

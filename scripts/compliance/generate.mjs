@@ -17,6 +17,7 @@ const evidencePaths = [
   'apps/server/src/agent/action-worker.ts',
   'apps/server/src/agent/catalog.ts',
   'apps/server/src/agent/link-store.ts',
+  'apps/server/src/agent/link-action-attachments.ts',
   'apps/server/src/agent/link-http.ts',
   'apps/server/src/agent/link-preview.ts',
   'apps/server/src/agent/executors/link-publisher-executor.ts',
@@ -55,7 +56,8 @@ Papyrus is a customer-hosted durable agent runtime. The repository boundary incl
 - Link drafts, published blobs, logos, assets, and inbound payloads remain under /Library/Links in the same Workspace filesystem.
 - Webpage Links are served as static documents with a restrictive CSP and without Papyrus-injected presentation styles or scripts.
 - API Links serve approved JSON snapshots or explicitly bound durable workflows.
-- Webhook Links are scoped to the creating Mastra {resourceId, threadId}; WebhookSignalProvider routes each inbound event back into that exact session.
+- Webhook Links may project inbound events into their creating Mastra session, but attached Action Executors create durable action proposals owned by the workspace approval ledger rather than the session lifecycle.
+- A Webhook Link never directly authorizes an attached executor; enabled attachments resolve payload mappings/conditions into proposals that require the existing Papyrus.Action.Approve release boundary before the leased action worker can execute them.
 - Webhook Links are the public dynamic-ingestion primitive; legacy Plugin connection and integration-scoped signal webhook routes are not exposed by the portal API.
 - Recurring work is managed through session-scoped Agent tools; the public scheduler CRUD/page surface is not exposed.
 - Webhook logo identity is snapshotted with the approved Link rather than loaded from an untrusted mutable URL.

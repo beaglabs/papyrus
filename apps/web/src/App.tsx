@@ -24,6 +24,22 @@ function viewFromPath(): PortalView {
   return (Object.entries(ROUTES).find(([, route]) => window.location.pathname === route)?.[0] as PortalView | undefined) ?? 'agent'
 }
 
+/**
+ * Portal navigation is orthogonal to the Agent thread. Moving to Models, Links, Library,
+ * Governance, or Access must not silently switch the active conversation. Only an explicit
+ * session selection is allowed to replace the current thread.
+ */
+export function navigationSession(current: string | undefined, requested: string | undefined): string | undefined {
+  return requested ?? current
+}
+
+function routeUrl(view: PortalView, input: { session?: string; prompt?: string } = {}): string {
+  const query = new URLSearchParams()
+  if (input.prompt) query.set('prompt', input.prompt)
+  if (input.session) query.set('session', input.session)
+  return `${ROUTES[view]}${query.size ? `?${query}` : ''}`
+}
+
 function Logo() {
   return <div className="brand"><span className="brand-mark" aria-hidden="true"><img src={papyrusLogo} alt="" width="39" height="39" style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} /></span><span>PAPYRUS</span></div>
 }
@@ -102,18 +118,43 @@ export function App() {
   }, [])
 
   useEffect(() => { void refresh() }, [refresh])
+
+  // A bare /portal historically meant "whatever session happens to sort first". As soon as
+  // the daemon returns the session list, pin that implicit choice into state and the URL. That
+  // makes the selected thread stable even if another session's updatedAt changes while this
+  // operator is looking at a different portal surface.
   useEffect(() => {
-    const onPopState = () => { setView(viewFromPath()); setSelectedSessionId(new URLSearchParams(window.location.search).get('session') ?? undefined) }
+    if (state.phase !== 'ready' || selectedSessionId || state.data.sessions.length === 0) return
+    const session = state.data.sessions[0]
+    if (!session) return
+    setSelectedSessionId(session.id)
+    const query = new URLSearchParams(window.location.search)
+    query.set('session', session.id)
+    window.history.replaceState({}, '', `${window.location.pathname}?${query}`)
+  }, [state, selectedSessionId])
+
+  useEffect(() => {
+    const onPopState = () => {
+      const query = new URLSearchParams(window.location.search)
+      setView(viewFromPath())
+      setSelectedSessionId(query.get('session') ?? undefined)
+      setInitialPrompt(query.get('prompt') ?? undefined)
+      void refresh()
+    }
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
-  }, [])
+  }, [refresh])
 
   const navigate = (next: PortalView, options?: { prompt?: string | undefined; session?: string | undefined }) => {
-    const query = new URLSearchParams()
-    if (options?.prompt) query.set('prompt', options.prompt)
-    if (options?.session) query.set('session', options.session)
-    window.history.pushState({}, '', `${ROUTES[next]}${query.size ? `?${query}` : ''}`)
-    setView(next); setInitialPrompt(options?.prompt); setSelectedSessionId(options?.session)
+    const session = navigationSession(selectedSessionId, options?.session)
+    window.history.pushState({}, '', routeUrl(next, { ...(session ? { session } : {}), ...(options?.prompt ? { prompt: options.prompt } : {}) }))
+    setView(next)
+    setInitialPrompt(options?.prompt)
+    setSelectedSessionId(session)
+    // Session titles, attention, runtime health, and other shell metadata can all change while
+    // the operator is elsewhere. Re-read them on route changes; the live AgentView itself stays
+    // mounted below, so this refresh does not replace its in-flight useChat stream.
+    void refresh()
   }
 
   if (state.phase === 'loading') return <PortalSkeleton />
@@ -132,7 +173,13 @@ export function App() {
   // sidebar lists conversations by name and "Delete session?" identifies nothing.
   const removeSession = async (session: AgentSession) => {
     if (!window.confirm(`Delete \u201C${session.title}\u201D? Its transcript is removed with it.`)) return
-    await deleteSession(session.id); if (selectedSessionId === session.id) setSelectedSessionId(undefined); await refresh()
+    await deleteSession(session.id)
+    if (selectedSessionId === session.id) {
+      const nextSession = data.sessions.find((candidate) => candidate.id !== session.id)?.id
+      setSelectedSessionId(nextSession)
+      window.history.replaceState({}, '', routeUrl(view, { ...(nextSession ? { session: nextSession } : {}) }))
+    }
+    await refresh()
   }
   const signOut = async () => { await logout(); window.location.replace('/portal') }
 
@@ -171,9 +218,13 @@ export function App() {
         <SidebarRail />
       </Sidebar>
       <SidebarInset className={`portal-main ${view === 'agent' ? 'agent-main' : ''}`}><PortalHeader view={view} data={data} />
-        {view === 'agent' && (selectedSession
-          ? <AgentView key={selectedSession.id} session={selectedSession} status={data.agent} initialPrompt={initialPrompt} canApprove={data.me.roles.includes('Papyrus.System.Owner') || data.me.roles.includes('Papyrus.Action.Approve')} canManageSkills={data.me.roles.includes('Papyrus.System.Owner')} onChanged={refresh} />
-          : <EmptyAgent onCreate={() => void newSession()} />)}
+        {/* Keep AgentView mounted across portal navigation. Unmounting it tears down useChat's
+            live stream and forces the return path to reconstruct a moving durable transcript. */}
+        <div style={{ display: view === 'agent' ? 'contents' : 'none' }} aria-hidden={view !== 'agent'}>
+          {selectedSession
+            ? <AgentView key={selectedSession.id} session={selectedSession} status={data.agent} initialPrompt={initialPrompt} canApprove={data.me.roles.includes('Papyrus.System.Owner') || data.me.roles.includes('Papyrus.Action.Approve')} canManageSkills={data.me.roles.includes('Papyrus.System.Owner')} onChanged={refresh} />
+            : <EmptyAgent onCreate={() => void newSession()} />}
+        </div>
         {view === 'models' && <ModelsView profiles={data.models} onAskAgent={(prompt) => navigate('agent', { prompt, session: selectedSession?.id })} onChanged={refresh} canManage={data.me.roles.includes('Papyrus.System.Owner') || data.me.roles.includes('Papyrus.Integration.Manage')} />}
         {view === 'links' && <LinksView {...(data.agent.links?.validation ? { validation: data.agent.links.validation } : {})} canManageSchedules={data.me.roles.includes('Papyrus.System.Owner') || data.me.roles.includes('Papyrus.Integration.Manage')} />}
         {view === 'library' && <LibraryView />}

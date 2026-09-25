@@ -3,6 +3,7 @@ import { loadConfig, type AgentConfig } from './agent/config.js'
 import { AgentDatabase } from './agent/database.js'
 import { EntraAuthService } from './agent/entra-auth.js'
 import { createAgentServer } from './agent/http.js'
+import { installEnhancedAgentPlane } from './agent/enhanced-http.js'
 import { createBootstrapServer } from './agent/bootstrap-http.js'
 import { AgentService } from './agent/service.js'
 import { LicenseService } from './license.js'
@@ -16,7 +17,7 @@ import { KitesurfLinkValidator } from './agent/link-preview.js'
 import { LINK_PUBLISHER_CATALOG_ID } from './agent/catalog.js'
 import { ExchangeEmailDriver } from './agent/drivers/exchange-email-driver.js'
 import { HttpMicrosoftGraphClient } from './agent/graph-client.js'
-import { MastraRuntime } from './agent/mastra/runtime.js'
+import { EnhancedMastraRuntime } from './agent/mastra/enhanced-runtime.js'
 import { ApplianceConsoleExecutor } from './agent/executors/appliance-console-executor.js'
 import { FirewallExecutor, UnconfiguredConnectorCredentialResolver } from './agent/executors/firewall-executor.js'
 import { UnconfiguredDeviceCredentialResolver } from './agent/browser/credential.js'
@@ -73,9 +74,10 @@ async function startFull(config: AgentConfig): Promise<void> {
   const worker = new SyncWorker(database, terrain, connectors)
   const actionWorker = new ActionWorker(database, actionStore, executorRegistry, config)
   const service = new AgentService(database, config, terrain, worker, actionStore, executorRegistry, actionWorker)
-  const mastraRuntime = new MastraRuntime(config, actionStore, terrain, service)
+  const mastraRuntime = new EnhancedMastraRuntime(config, actionStore, terrain, service)
   await mastraRuntime.start()
   const server = createAgentServer(config, service, auth, mastraRuntime)
+  installEnhancedAgentPlane(server, service, auth, mastraRuntime)
 
   // Exchange shares one Graph client boundary for inbound mailbox delta sync and
   // approved outbound mail. The default client deliberately refuses to resolve

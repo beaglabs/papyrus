@@ -1,0 +1,17 @@
+/*
+ * The sidebar and content inset both size themselves to 100% of the portal shell.
+ * A min-height alone does not give those percentage heights a definite containing
+ * block, which lets the authenticated portal collapse to the intrinsic height of
+ * its footer/header. Keep the shell at the viewport height and let the existing
+ * sidebar/content overflow regions own scrolling.
+ */
+.portal-shell {
+  height: 100vh;
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+.portal-shell.with-handling-banner {
+  height: 100vh;
+  min-height: 0;
+}

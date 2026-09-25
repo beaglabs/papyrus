@@ -6,6 +6,7 @@ import './styles.css'
 import './identity-branding.css'
 import './classification.css'
 import './portal-layout.css'
+import './session-steps.css'
 
 const favicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]') ?? document.createElement('link')
 favicon.rel = 'icon'

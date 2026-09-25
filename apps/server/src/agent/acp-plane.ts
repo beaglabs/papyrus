@@ -58,7 +58,7 @@ type Row = Record<string, unknown>
  */
 export class AcpPlane {
   private readonly root: string
-  private readonly projectRoot?: string
+  private readonly projectRoot: string | undefined
   private readonly passthroughEnv: Set<string>
   private availability = new Map<AcpHarnessId, boolean>()
 
@@ -285,7 +285,7 @@ export class AcpPlane {
         last_error TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
-        UNIQUE(session_id, tenant_id, user_oid, harness_id)
+        UNIQUE(session_id, tenant_id, user_oid,harness_id)
       );
       CREATE INDEX IF NOT EXISTS idx_agent_acp_scope ON agent_acp_bindings(session_id, tenant_id, user_oid);
     `)

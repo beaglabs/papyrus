@@ -225,7 +225,11 @@ async function disconnectHarness(id: HarnessId, button: HTMLButtonElement): Prom
   try {
     await request(`/api/sessions/${encodeURIComponent(activeSession)}/acp/${id}/disconnect`, { method: 'DELETE' })
     const current = statusByHarness.get(id)
-    if (current) statusByHarness.set(id, { ...current, connected: false, state: 'closed', externalSessionId: undefined })
+    if (current) {
+      const disconnected: HarnessStatus = { ...current, connected: false, state: 'closed' }
+      delete disconnected.externalSessionId
+      statusByHarness.set(id, disconnected)
+    }
     renderHarnesses()
   } catch (cause) {
     const current = statusByHarness.get(id)

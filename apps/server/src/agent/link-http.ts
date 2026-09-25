@@ -9,6 +9,15 @@ const MAX_LINK_BODY = 512 * 1024
 const MAX_LINK_RESPONSE = 2 * 1024 * 1024
 const MAX_LINK_ASSET = 100 * 1024 * 1024
 
+/**
+ * Public Link pages remain sandboxed and cannot execute scripts or make fetch/XHR
+ * requests, but they may intentionally reference HTTPS photos (for example an image
+ * selected from a public source while the page is being composed). `img-src` is the
+ * narrow CSP directive that governs both <img> elements and CSS background images,
+ * so allowing HTTPS here does not relax connect-src, frame-src, object-src, or forms.
+ */
+export const PUBLIC_LINK_WEBPAGE_CSP = "sandbox; default-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; media-src 'self'; font-src 'self' data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'"
+
 export async function handlePublicLink(
   request: IncomingMessage,
   response: ServerResponse,
@@ -127,7 +136,7 @@ async function serveWebpage(
 
   publicHeaders(response)
   response.setHeader('content-type', 'text/html; charset=utf-8')
-  response.setHeader('content-security-policy', "sandbox; default-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; font-src 'self' data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'")
+  response.setHeader('content-security-policy', PUBLIC_LINK_WEBPAGE_CSP)
   response.writeHead(200)
   response.end(request.method === 'HEAD' ? undefined : html)
   return true

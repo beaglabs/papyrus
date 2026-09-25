@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { createPortal } from 'react-dom'
 import type { AgentActionProposal, AgentLink, PortalPrincipal } from '@papyrus/contracts'
 import { api, approveProposal, denyProposal, listLinks, listProposals } from './api.js'
@@ -48,7 +48,6 @@ interface LinkExecutorData {
  */
 export function GovernanceExtensions() {
   const [path, setPath] = useState(() => window.location.pathname)
-  const [targetRevision, setTargetRevision] = useState(0)
 
   useEffect(() => {
     const navigation = () => setPath(window.location.pathname)
@@ -66,10 +65,10 @@ export function GovernanceExtensions() {
       window.dispatchEvent(new Event('papyrus:navigation'))
     }) as History['replaceState']
 
-    const observer = new MutationObserver(() => {
-      setTargetRevision((value) => value + 1)
-      projectSessionApprovalLinks()
-    })
+    // The observer only projects a link into existing transcript cards. It does
+    // not drive React state, so its own idempotent DOM insertion cannot create a
+    // mutation/render feedback loop.
+    const observer = new MutationObserver(projectSessionApprovalLinks)
     observer.observe(document.body, { childList: true, subtree: true })
     projectSessionApprovalLinks()
 
@@ -82,8 +81,8 @@ export function GovernanceExtensions() {
     }
   }, [])
 
-  const portalMain = useMemo(() => document.querySelector<HTMLElement>('.portal-main'), [path, targetRevision])
-  const governance = useMemo(() => document.querySelector<HTMLElement>('.governance-surface'), [path, targetRevision])
+  const portalMain = document.querySelector<HTMLElement>('.portal-main')
+  const governance = document.querySelector<HTMLElement>('.governance-surface')
 
   return <>
     {path === '/portal/governance' && governance && createPortal(<ApprovalsPanel />, governance)}

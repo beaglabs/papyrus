@@ -4,6 +4,7 @@ import type { PortalData, PublicConfig } from './api.js'
 import { AuthenticationRequired, createSession, deleteSession, loadPortal, logout, publicConfig, type AgentSession, type AgentStatus } from './api.js'
 import { AgentView } from './Agent.js'
 import { AccessView } from './Access.js'
+import { AcpSessionConnect } from './AcpSessionConnect.js'
 import { LibraryView } from './Library.js'
 import { LinksView } from './Links.js'
 import { ModelsView } from './Models.js'
@@ -223,7 +224,7 @@ export function App() {
         </SidebarFooter>
         <SidebarRail />
       </Sidebar>
-      <SidebarInset className={`portal-main ${view === 'agent' ? 'agent-main' : ''}`}><PortalHeader view={view} data={data} />
+      <SidebarInset className={`portal-main ${view === 'agent' ? 'agent-main' : ''}`}><PortalHeader view={view} data={data} sessionId={selectedSession?.id} />
         {/* Keep AgentView mounted across portal navigation. Unmounting it tears down useChat's
             live stream and forces the return path to reconstruct a moving durable transcript. */}
         <div style={{ display: view === 'agent' ? 'contents' : 'none' }} aria-hidden={view !== 'agent'}>
@@ -321,7 +322,7 @@ export function PrimaryNavigation({ view, onNavigate }: { view: PortalView; onNa
   return <SidebarMenu aria-label="Primary navigation">{items.map((item) => <SidebarMenuItem key={item.view}><SidebarMenuButton isActive={view === item.view} tooltip={item.label} onClick={() => onNavigate(item.view)}><span className="sidebar-icon" aria-hidden="true">{item.icon}</span><span className="sidebar-copy">{item.label}</span></SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu>
 }
 
-function PortalHeader({ view, data }: { view: PortalView; data: PortalData }) {
+function PortalHeader({ view, data, sessionId }: { view: PortalView; data: PortalData; sessionId?: string | undefined }) {
   const copy: Record<PortalView, [string, string]> = {
     agent: ['MASTRA RUNTIME', 'Agent'], models: ['MODEL GATEWAYS', 'Models'],
     links: ['AGENT-CREATED PUBLIC BOUNDARIES', 'Links'], library: ['AGENTFS FILE AUTHORITY', 'Library'], governance: ['IDENTITY, LICENSING AND AUDIT', 'Governance'],
@@ -331,7 +332,13 @@ function PortalHeader({ view, data }: { view: PortalView; data: PortalData }) {
   // even with no model configured and agent chat disabled. A status that cannot be false is
   // worse than none, so it now follows the daemon's own reported state. The wording in the
   // healthy case is unchanged.
-  return <header className="portal-header"><div className="portal-header-title"><SidebarTrigger /><div><p className="eyebrow">{copy[view][0]}</p><h1>{copy[view][1]}</h1></div></div><div className="header-status"><span><i className={`dot ${data.agent.ready ? 'good' : 'warning'}`} />{data.agent.ready ? 'DAEMON HEALTHY' : 'DAEMON UNREACHABLE'}</span><small>{data.config.organizationName}</small></div></header>
+  return <header className="portal-header">
+    <div className="portal-header-title"><SidebarTrigger /><div><p className="eyebrow">{copy[view][0]}</p><h1>{copy[view][1]}</h1></div></div>
+    <div className="portal-header-actions">
+      {view === 'agent' && sessionId && <AcpSessionConnect sessionId={sessionId} />}
+      <div className="header-status"><span><i className={`dot ${data.agent.ready ? 'good' : 'warning'}`} />{data.agent.ready ? 'DAEMON HEALTHY' : 'DAEMON UNREACHABLE'}</span><small>{data.config.organizationName}</small></div>
+    </div>
+  </header>
 }
 
 function GovernanceView({ data }: { data: PortalData }) {

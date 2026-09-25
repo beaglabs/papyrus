@@ -2,7 +2,6 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './agent-ui-globals.js'
 import { App } from './App.js'
-import { installAcpSessionConnect } from './acp-session-connect.js'
 import papyrusLogo from '../../../deploy/marketplace/logos/papyrus-small-48x48.png'
 import './styles.css'
 import './identity-branding.css'
@@ -17,4 +16,3 @@ favicon.href = papyrusLogo
 if (!favicon.isConnected) document.head.appendChild(favicon)
 
 createRoot(document.getElementById('root') as HTMLElement).render(<StrictMode><App /></StrictMode>)
-installAcpSessionConnect()

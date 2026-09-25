@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@ai-sdk/react": "^4.0.92",
+    "@base-ui/react": "1.8.0",
     "@papyrus/contracts": "workspace:*",
     "@vitejs/plugin-react": "6.0.5",
     "ai": "^7.0.89",

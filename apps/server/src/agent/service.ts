@@ -20,6 +20,7 @@ import { AgentDatabase, type CreateIntegrationInput } from './database.js'
 import { hasAppRole } from './entra-auth.js'
 import type { ActionStore } from './action-store.js'
 import type { ActionExecutorRegistry, ActionWorker } from './action-worker.js'
+import { requireSessionConnectorBinding, SessionConnectorAccessError } from './session-connector-access.js'
 import type { IntegrationSyncRuntime } from './sync-worker.js'
 import { normalizeSourceRecord, SourceNormalizationError } from './source-profiles.js'
 import { SourceRecordConflictError, TerrainStore } from './terrain-store.js'
@@ -408,6 +409,7 @@ export class AgentService {
     const investigation = this.actions.getInvestigation(investigationId)
     if (!investigation) throw new AgentServiceError(404, 'INVESTIGATION_NOT_FOUND', 'Investigation not found')
     const executor = this.requireExecutable(executorIntegrationId)
+    this.requireSessionBoundExecutor(investigation, executor.id, principal.oid)
     const proposal = this.actions.createProposal({
       investigationId, proposedByOperatorId: principal.oid,
       executorIntegrationId: cleanText(executorIntegrationId, 'executorIntegrationId', 128),
@@ -429,10 +431,14 @@ export class AgentService {
     if (!this.actions) throw new AgentServiceError(503, 'ACTION_STORE_UNAVAILABLE', 'Action store is not initialized')
     const proposal = this.actions.getProposal(proposalId)
     if (!proposal) throw new AgentServiceError(404, 'PROPOSAL_NOT_FOUND', 'Action proposal not found')
+    const investigation = this.actions.getInvestigation(proposal.investigationId)
+    if (!investigation) throw new AgentServiceError(404, 'INVESTIGATION_NOT_FOUND', 'Investigation not found')
     // An approval that cannot produce executable work is refused rather than
     // recorded, so the ledger never holds an authorized action with nothing
-    // able to run it.
-    this.requireExecutable(proposal.executorIntegrationId)
+    // able to run it. Session bindings are checked again here because a connector
+    // can be disconnected after the proposal card was created.
+    const executor = this.requireExecutable(proposal.executorIntegrationId)
+    this.requireSessionBoundExecutor(investigation, executor.id, proposal.proposedByOperatorId)
     if (!this.actionWorker) throw new AgentServiceError(503, 'ACTION_WORKER_UNAVAILABLE', 'Action worker is not running; approvals cannot be executed')
     try {
       const approved = this.actions.approveProposal(proposalId, principal.oid)
@@ -487,6 +493,21 @@ export class AgentService {
       throw new AgentServiceError(409, 'EXECUTOR_UNAVAILABLE', `No action executor is installed for ${executor.catalogId}`)
     }
     return executor
+  }
+
+  private requireSessionBoundExecutor(investigation: AgentInvestigation, integrationId: string, actorOid: string): void {
+    if (!investigation.mastraThreadId) return
+    try {
+      requireSessionConnectorBinding(this.db, integrationId, {
+        sessionId: investigation.mastraThreadId,
+        actorOid,
+      })
+    } catch (cause) {
+      if (cause instanceof SessionConnectorAccessError) {
+        throw new AgentServiceError(cause.status, cause.code, cause.message)
+      }
+      throw cause
+    }
   }
 
   listReceipts(principal: PortalPrincipal, investigationId?: string): AgentActionReceipt[] {

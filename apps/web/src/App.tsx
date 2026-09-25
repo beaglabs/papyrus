@@ -98,6 +98,9 @@ export function App() {
   const [view, setView] = useState<PortalView>(viewFromPath)
   const [selectedSessionId, setSelectedSessionId] = useState(() => new URLSearchParams(window.location.search).get('session') ?? undefined)
   const [initialPrompt, setInitialPrompt] = useState(() => new URLSearchParams(window.location.search).get('prompt') ?? undefined)
+  // Ordinary navigation must not remount the Agent, but an explicit "Ask Agent" handoff needs
+  // to seed a fresh composer. A revision key distinguishes that intentional reset from routing.
+  const [agentPromptRevision, setAgentPromptRevision] = useState(0)
 
   const refresh = useCallback(async () => {
     try {
@@ -136,9 +139,11 @@ export function App() {
   useEffect(() => {
     const onPopState = () => {
       const query = new URLSearchParams(window.location.search)
+      const prompt = query.get('prompt') ?? undefined
       setView(viewFromPath())
       setSelectedSessionId(query.get('session') ?? undefined)
-      setInitialPrompt(query.get('prompt') ?? undefined)
+      setInitialPrompt(prompt)
+      if (prompt) setAgentPromptRevision((current) => current + 1)
       void refresh()
     }
     window.addEventListener('popstate', onPopState)
@@ -150,6 +155,7 @@ export function App() {
     window.history.pushState({}, '', routeUrl(next, { ...(session ? { session } : {}), ...(options?.prompt ? { prompt: options.prompt } : {}) }))
     setView(next)
     setInitialPrompt(options?.prompt)
+    if (options?.prompt) setAgentPromptRevision((current) => current + 1)
     setSelectedSessionId(session)
     // Session titles, attention, runtime health, and other shell metadata can all change while
     // the operator is elsewhere. Re-read them on route changes; the live AgentView itself stays
@@ -222,7 +228,7 @@ export function App() {
             live stream and forces the return path to reconstruct a moving durable transcript. */}
         <div style={{ display: view === 'agent' ? 'contents' : 'none' }} aria-hidden={view !== 'agent'}>
           {selectedSession
-            ? <AgentView key={selectedSession.id} session={selectedSession} status={data.agent} initialPrompt={initialPrompt} canApprove={data.me.roles.includes('Papyrus.System.Owner') || data.me.roles.includes('Papyrus.Action.Approve')} canManageSkills={data.me.roles.includes('Papyrus.System.Owner')} onChanged={refresh} />
+            ? <AgentView key={`${selectedSession.id}:${agentPromptRevision}`} session={selectedSession} status={data.agent} initialPrompt={initialPrompt} canApprove={data.me.roles.includes('Papyrus.System.Owner') || data.me.roles.includes('Papyrus.Action.Approve')} canManageSkills={data.me.roles.includes('Papyrus.System.Owner')} onChanged={refresh} />
             : <EmptyAgent onCreate={() => void newSession()} />}
         </div>
         {view === 'models' && <ModelsView profiles={data.models} onAskAgent={(prompt) => navigate('agent', { prompt, session: selectedSession?.id })} onChanged={refresh} canManage={data.me.roles.includes('Papyrus.System.Owner') || data.me.roles.includes('Papyrus.Integration.Manage')} />}

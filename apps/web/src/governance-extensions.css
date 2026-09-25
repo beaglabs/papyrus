@@ -1,0 +1,243 @@
+.durable-approvals,
+.webhook-executor-surface {
+  margin: 24px;
+  display: grid;
+  gap: 16px;
+}
+
+.governance-surface > .durable-approvals {
+  margin: 24px 0 0;
+}
+
+.governance-section-head,
+.approval-card-head,
+.executor-attachment-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.governance-section-head h2,
+.approval-card-head h3,
+.executor-attachment-title strong {
+  margin: 0;
+}
+
+.governance-section-head > div > p:last-child {
+  max-width: 780px;
+  margin-bottom: 0;
+}
+
+.approval-queue,
+.executor-attachment-list {
+  display: grid;
+  gap: 12px;
+}
+
+.approval-card {
+  display: grid;
+  gap: 14px;
+}
+
+.approval-metadata {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 18px;
+  margin: 0;
+}
+
+.approval-metadata div {
+  min-width: 0;
+}
+
+.approval-metadata dt {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  opacity: .62;
+}
+
+.approval-metadata dd {
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.approval-card details pre {
+  max-height: 280px;
+  overflow: auto;
+  padding: 12px;
+  border: 2px solid currentColor;
+  background: rgba(127, 127, 127, .08);
+  white-space: pre-wrap;
+}
+
+.approval-actions,
+.executor-attachment-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+
+.approval-history {
+  display: grid;
+  gap: 8px;
+}
+
+.approval-history-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(127, 127, 127, .28);
+}
+
+.approval-history-row span:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.webhook-executor-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.webhook-link-picker {
+  display: grid;
+  gap: 8px;
+}
+
+.webhook-link-picker > button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  border: 2px solid transparent;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.webhook-link-picker > button:hover,
+.webhook-link-picker > button.active {
+  border-color: currentColor;
+  background: rgba(127, 127, 127, .08);
+}
+
+.webhook-link-picker > button > span:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.webhook-link-picker small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.webhook-executor-card {
+  display: grid;
+  gap: 16px;
+}
+
+.executor-attachment {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 2px solid currentColor;
+}
+
+.executor-attachment-title {
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.executor-attachment-title > span:nth-child(2) {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.executor-mark {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 2px solid currentColor;
+  font-size: 16px;
+}
+
+.executor-attachment-policy {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.executor-attachment-policy span,
+.attach-executor-note {
+  padding: 5px 8px;
+  border: 1px solid rgba(127, 127, 127, .35);
+  font-size: 12px;
+}
+
+.executor-mapping {
+  overflow-wrap: anywhere;
+}
+
+.attach-executor-form {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 2px solid currentColor;
+  background: rgba(127, 127, 127, .06);
+}
+
+.attach-executor-form label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.attach-executor-form select,
+.attach-executor-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 2px solid currentColor;
+  background: var(--background, #fff);
+  color: inherit;
+  padding: 9px 10px;
+  font: inherit;
+}
+
+.form-two {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.empty-attachment,
+.approval-empty {
+  padding: 12px 0;
+}
+
+.action-suggestion .proposal-controls [data-governance-approval-link] {
+  text-decoration: none;
+}
+
+@media (max-width: 900px) {
+  .webhook-executor-layout,
+  .approval-metadata,
+  .form-two {
+    grid-template-columns: 1fr;
+  }
+}

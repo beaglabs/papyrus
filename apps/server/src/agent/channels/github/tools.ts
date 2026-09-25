@@ -1,4 +1,5 @@
 import type { ChannelRegistry } from '../registry.js'
+import { requireCurrentSessionConnectorBinding } from '../../session-connector-access.js'
 import { GithubClientError, type GithubClient } from './client.js'
 import { GITHUB_CATALOG_ID } from './channel.js'
 
@@ -12,6 +13,10 @@ import { GITHUB_CATALOG_ID } from './channel.js'
  * the same rules at proposal time that the executor applies at release time is
  * deliberate: an operator is never asked to approve something that would then be
  * refused.
+ *
+ * Every dispatch, including reads, requires the configured GitHub integration to
+ * be bound to the current Agent session. The active deployment integration alone
+ * is not sufficient authority.
  */
 
 export interface ChannelTool {
@@ -43,7 +48,16 @@ function stringField(input: Record<string, unknown>, field: string): string {
 }
 
 export function githubTools(context: GithubToolContext): Record<string, ChannelTool> {
+  const requireBoundIntegration = (): string => {
+    if (!context.integrationId) {
+      throw new Error('No active GitHub integration is configured, so this session cannot dispatch GitHub tools.')
+    }
+    requireCurrentSessionConnectorBinding(context.integrationId)
+    return context.integrationId
+  }
+
   const permitted = (repository: string): string => {
+    requireBoundIntegration()
     if (!context.allowedRepositories.length) {
       throw new Error('No repository is approved for this session. An operator must register the repository on the GitHub integration before any GitHub work can run.')
     }
@@ -158,13 +172,11 @@ export function githubTools(context: GithubToolContext): Record<string, ChannelT
         const validation = context.registry.validateCommand(GITHUB_CATALOG_ID, command, { ...(parameters as Record<string, unknown>), repository })
         if (!validation.ok) throw new Error(`${command} cannot be proposed: ${validation.reason}`)
 
-        if (!context.integrationId) {
-          throw new Error('No active GitHub integration is configured, so there is nothing for an approved change to run against.')
-        }
+        const integrationId = requireBoundIntegration()
 
         return {
           kind: 'action_suggestion',
-          executorIntegrationId: context.integrationId,
+          executorIntegrationId: integrationId,
           action: command,
           target: repository,
           rationale: explanation,

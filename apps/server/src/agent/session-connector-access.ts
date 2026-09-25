@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import type { IntegrationConfiguration } from '@papyrus/contracts'
 import { LINK_PUBLISHER_CATALOG_ID } from './catalog.js'
 import type { AgentDatabase } from './database.js'
@@ -22,6 +23,55 @@ export class SessionConnectorAccessError extends Error {
 export interface SessionConnectorScope {
   sessionId: string
   actorOid?: string
+}
+
+interface SessionConnectorExecutionScope extends SessionConnectorScope {
+  db: AgentDatabase
+}
+
+const executionScope = new AsyncLocalStorage<SessionConnectorExecutionScope>()
+
+/**
+ * Bind the current async execution tree to the exact Papyrus session whose
+ * connector capabilities it may use. Tool implementations intentionally read
+ * this at their lowest integration-dispatch boundary instead of trusting model
+ * input to name the right session.
+ */
+export function runWithSessionConnectorScope<T>(
+  db: AgentDatabase,
+  scope: SessionConnectorScope,
+  operation: () => T,
+): T {
+  ensureSessionConnectorSchema(db)
+  return executionScope.run({ db, sessionId: scope.sessionId, ...(scope.actorOid ? { actorOid: scope.actorOid } : {}) }, operation)
+}
+
+export function currentSessionConnectorScope(): SessionConnectorExecutionScope | undefined {
+  return executionScope.getStore()
+}
+
+export function requireCurrentSessionConnectorBinding(integrationId: string): IntegrationConfiguration {
+  const current = executionScope.getStore()
+  if (!current) {
+    throw new SessionConnectorAccessError(
+      409,
+      'SESSION_CONNECTOR_SCOPE_REQUIRED',
+      'Connector tools can only dispatch from an active Agent session',
+    )
+  }
+  return requireSessionConnectorBinding(current.db, integrationId, current)
+}
+
+export function currentSessionIntegrationForCatalog(catalogId: string): IntegrationConfiguration {
+  const current = executionScope.getStore()
+  if (!current) {
+    throw new SessionConnectorAccessError(
+      409,
+      'SESSION_CONNECTOR_SCOPE_REQUIRED',
+      'Connector tools can only dispatch from an active Agent session',
+    )
+  }
+  return sessionIntegrationForCatalog(current.db, catalogId, current)
 }
 
 export function requireSessionConnectorBinding(

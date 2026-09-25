@@ -97,10 +97,23 @@ export class LinkExecutorAttachmentStore {
 
     const now = new Date().toISOString()
     const id = randomUUID()
+    // Approved configuration changes are retried by the normal leased action worker. Use the
+    // attachment's natural identity as an upsert key so a worker retry after a successful DB
+    // write cannot turn an already-applied approval into a false terminal failure. A second,
+    // separately approved attach request for the same identity intentionally updates policy.
     this.db.sqlite.prepare(`INSERT INTO agent_link_executor_attachments(
       id,link_id,executor_integration_id,action,target,enabled,invocation_mode,condition_json,input_mapping_json,
       approval_policy,timeout_ms,max_retries,created_by_oid,created_at,updated_at
-    ) VALUES(?,?,?,?,?,1,?,?,?,?,?,?,?,?,?)`).run(
+    ) VALUES(?,?,?,?,?,1,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(link_id,executor_integration_id,action,target) DO UPDATE SET
+      enabled=1,
+      invocation_mode=excluded.invocation_mode,
+      condition_json=excluded.condition_json,
+      input_mapping_json=excluded.input_mapping_json,
+      approval_policy=excluded.approval_policy,
+      timeout_ms=excluded.timeout_ms,
+      max_retries=excluded.max_retries,
+      updated_at=excluded.updated_at`).run(
       id,
       input.linkId,
       executor.id,
@@ -116,7 +129,15 @@ export class LinkExecutorAttachmentStore {
       now,
       now,
     )
-    return this.get(id) as WebhookExecutorAttachment
+    const row = this.db.sqlite.prepare(`SELECT * FROM agent_link_executor_attachments
+      WHERE link_id=? AND executor_integration_id=? AND action=? AND target=?`).get(
+      input.linkId,
+      executor.id,
+      action,
+      target,
+    ) as Row | undefined
+    if (!row) throw new Error('Webhook Action Executor attachment could not be persisted')
+    return this.attachment(row)
   }
 
   detach(linkId: string, attachmentId: string): void {

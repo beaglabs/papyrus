@@ -82,11 +82,21 @@ export class LinkPublisherExecutor implements ActionExecutor {
   }
 
   private async detachWebhookExecutor(context: ActionExecutorContext): Promise<ActionResult> {
-    const attachmentId = requiredString(context.proposal.parameters?.['attachmentId'], 'attachmentId')
-    this.executorAttachments.detach(context.proposal.target, attachmentId)
+    const parameters = context.proposal.parameters ?? {}
+    const explicitId = typeof parameters['attachmentId'] === 'string' && parameters['attachmentId'].trim()
+      ? parameters['attachmentId'].trim()
+      : undefined
+    const attachment = explicitId
+      ? this.executorAttachments.get(explicitId)
+      : this.executorAttachments.list(context.proposal.target).find((candidate) =>
+          candidate.executorIntegrationId === parameters['executorIntegrationId'] &&
+          candidate.action === parameters['executorAction'] &&
+          candidate.target === parameters['executorTarget'])
+    if (!attachment || attachment.linkId !== context.proposal.target) throw new Error('Webhook Action Executor attachment not found')
+    this.executorAttachments.detach(context.proposal.target, attachment.id)
     return {
       result: 'success',
-      message: `Detached Action Executor attachment ${attachmentId} from Webhook Link ${context.proposal.target}.`,
+      message: `Detached Action Executor ${attachment.executorName} from Webhook Link ${context.proposal.target}.`,
     }
   }
 }

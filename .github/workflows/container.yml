@@ -34,8 +34,11 @@ jobs:
           context: .
           load: true
           tags: papyrus:${{ github.sha }}
-          provenance: mode=max
-          sbom: true
+          # The docker exporter used by load:true cannot import the manifest list
+          # produced by inline SBOM/provenance attestations. The workflow generates
+          # a CycloneDX SBOM below and attests published images separately on push.
+          provenance: false
+          sbom: false
       - name: Verify FIPS and non-root runtime
         run: |
           test "$(docker run --rm --entrypoint node papyrus:${GITHUB_SHA} -p 'require("node:crypto").getFips()')" = "1"
@@ -56,8 +59,8 @@ jobs:
           exit-code: "1"
           ignore-unfixed: true
       - name: Upload scan
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        if: ${{ always() && hashFiles('trivy.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy.sarif
       - name: Publish image

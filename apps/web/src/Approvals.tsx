@@ -112,7 +112,7 @@ export function ApprovalsPanel({ roles }: { roles: EntraAppRole[] }) {
 
 function ApprovalCard({ proposal, executorName, canApprove, busy, selected, onDecide }: {
   proposal: AgentActionProposal
-  executorName?: string
+  executorName: string | undefined
   canApprove: boolean
   busy: boolean
   selected: boolean

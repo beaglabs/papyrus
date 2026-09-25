@@ -258,7 +258,7 @@ async function acceptWebhook(
     linkId: link.id,
     inboundId: inbound.id,
     sessionId: signal.sessionId,
-    approvalIds,
+    actionsProposed: approvalIds.length,
     ...(link.workflowId ? { workflowId: link.workflowId, workflowResult } : {}),
   }))
   return true
@@ -301,12 +301,13 @@ function proposeAttachedWebhookActions(
       parameters: attachmentParameters(attachment, context),
       rationaleClaimIds: [],
     })
-    mastra.actionStore.db.recordActionEvent(attachment.executorIntegrationId, `webhook-link:${link.id}`, 'WebhookActionProposed', {
+    mastra.actionStore.db.recordActionEvent(attachment.executorIntegrationId, `webhook-link:${link.id}`, 'ActionProposed', {
       proposalId: proposal.id,
       investigationId: investigation.id,
       linkId: link.id,
       inboundId: inbound.id,
       attachmentId: attachment.id,
+      source: 'webhook-link',
       action: proposal.action,
       target: proposal.target,
       approvalPolicy: attachment.approvalPolicy,

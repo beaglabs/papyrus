@@ -5,6 +5,7 @@ import { AuthenticationRequired, createSession, deleteSession, loadPortal, logou
 import { AgentView } from './Agent.js'
 import { AccessView } from './Access.js'
 import { AcpSessionConnect } from './AcpSessionConnect.js'
+import { ApprovalsPanel } from './Approvals.js'
 import { LibraryView } from './Library.js'
 import { LinksView } from './Links.js'
 import { ModelsView } from './Models.js'
@@ -99,8 +100,6 @@ export function App() {
   const [view, setView] = useState<PortalView>(viewFromPath)
   const [selectedSessionId, setSelectedSessionId] = useState(() => new URLSearchParams(window.location.search).get('session') ?? undefined)
   const [initialPrompt, setInitialPrompt] = useState(() => new URLSearchParams(window.location.search).get('prompt') ?? undefined)
-  // Ordinary navigation must not remount the Agent, but an explicit "Ask Agent" handoff needs
-  // to seed a fresh composer. A revision key distinguishes that intentional reset from routing.
   const [agentPromptRevision, setAgentPromptRevision] = useState(0)
 
   const refresh = useCallback(async () => {
@@ -123,10 +122,6 @@ export function App() {
 
   useEffect(() => { void refresh() }, [refresh])
 
-  // A bare /portal historically meant "whatever session happens to sort first". As soon as
-  // the daemon returns the session list, pin that implicit choice into state and the URL. That
-  // makes the selected thread stable even if another session's updatedAt changes while this
-  // operator is looking at a different portal surface.
   useEffect(() => {
     if (state.phase !== 'ready' || selectedSessionId || state.data.sessions.length === 0) return
     const session = state.data.sessions[0]
@@ -158,9 +153,6 @@ export function App() {
     setInitialPrompt(options?.prompt)
     if (options?.prompt) setAgentPromptRevision((current) => current + 1)
     setSelectedSessionId(session)
-    // Session titles, attention, runtime health, and other shell metadata can all change while
-    // the operator is elsewhere. Re-read them on route changes; the live AgentView itself stays
-    // mounted below, so this refresh does not replace its in-flight useChat stream.
     void refresh()
   }
 
@@ -175,9 +167,6 @@ export function App() {
     const created = await createSession()
     await refresh(); navigate('agent', { session: created.id })
   }
-  // Confirmation lives here rather than in the row, so the destructive call has one
-  // guard no matter which surface invokes it. The title is quoted back because the
-  // sidebar lists conversations by name and "Delete session?" identifies nothing.
   const removeSession = async (session: AgentSession) => {
     if (!window.confirm(`Delete \u201C${session.title}\u201D? Its transcript is removed with it.`)) return
     await deleteSession(session.id)
@@ -225,11 +214,12 @@ export function App() {
         <SidebarRail />
       </Sidebar>
       <SidebarInset className={`portal-main ${view === 'agent' ? 'agent-main' : ''}`}><PortalHeader view={view} data={data} sessionId={selectedSession?.id} />
-        {/* Keep AgentView mounted across portal navigation. Unmounting it tears down useChat's
-            live stream and forces the return path to reconstruct a moving durable transcript. */}
+        {/* A session may request authority, but Governance owns the decision. Keeping canApprove
+            false here deliberately prevents the transcript card from becoming a second approval
+            surface whose lifecycle depends on the browser being on this session. */}
         <div style={{ display: view === 'agent' ? 'contents' : 'none' }} aria-hidden={view !== 'agent'}>
           {selectedSession
-            ? <AgentView key={`${selectedSession.id}:${agentPromptRevision}`} session={selectedSession} status={data.agent} initialPrompt={initialPrompt} canApprove={data.me.roles.includes('Papyrus.System.Owner') || data.me.roles.includes('Papyrus.Action.Approve')} canManageSkills={data.me.roles.includes('Papyrus.System.Owner')} onChanged={refresh} />
+            ? <AgentView key={`${selectedSession.id}:${agentPromptRevision}`} session={selectedSession} status={data.agent} initialPrompt={initialPrompt} canApprove={false} canManageSkills={data.me.roles.includes('Papyrus.System.Owner')} onChanged={refresh} />
             : <EmptyAgent onCreate={() => void newSession()} />}
         </div>
         {view === 'models' && <ModelsView profiles={data.models} onAskAgent={(prompt) => navigate('agent', { prompt, session: selectedSession?.id })} onChanged={refresh} canManage={data.me.roles.includes('Papyrus.System.Owner') || data.me.roles.includes('Papyrus.Integration.Manage')} />}
@@ -288,11 +278,6 @@ export function backgroundSummary(jobs: NonNullable<AgentStatus['jobs']>): strin
   return [running > 0 ? `${running} running` : null, queued > 0 ? `${queued} queued` : null].filter(Boolean).join(' · ')
 }
 
-/**
- * The durable objective, if this session has one. Undefined rather than a placeholder, so a
- * session with no goal renders exactly the strip it rendered before goals existed and an
- * operator never sees a goal line that means nothing.
- */
 export function goalSummary(jobs: NonNullable<AgentStatus['jobs']>): string | undefined {
   const goal = jobs.goal
   if (!goal) return undefined
@@ -300,11 +285,6 @@ export function goalSummary(jobs: NonNullable<AgentStatus['jobs']>): string | un
   return `goal ${goal.status}${budget}`
 }
 
-/**
- * Footer runtime status is deliberately limited to runtime/model health. Session goals,
- * schedules, and background job counters belong on their own surfaces rather than becoming
- * a second task dashboard in the sidebar footer.
- */
 export function RuntimeStatusStrip({ status }: { status: AgentStatus; sessionId?: string | undefined }) {
   return <div className="runtime-panel">
     <span className="runtime-label">RUNTIME</span>
@@ -328,10 +308,6 @@ function PortalHeader({ view, data, sessionId }: { view: PortalView; data: Porta
     links: ['AGENT-CREATED PUBLIC BOUNDARIES', 'Links'], library: ['AGENTFS FILE AUTHORITY', 'Library'], governance: ['IDENTITY, LICENSING AND AUDIT', 'Governance'],
     access: ['IDENTITY AND ENTITLEMENTS', 'Access'],
   }
-  // The health claim was literal text with a hardcoded green dot, so it read "DAEMON HEALTHY"
-  // even with no model configured and agent chat disabled. A status that cannot be false is
-  // worse than none, so it now follows the daemon's own reported state. The wording in the
-  // healthy case is unchanged.
   return <header className="portal-header">
     <div className="portal-header-title"><SidebarTrigger /><div><p className="eyebrow">{copy[view][0]}</p><h1>{copy[view][1]}</h1></div></div>
     <div className="portal-header-actions">
@@ -346,8 +322,9 @@ function GovernanceView({ data }: { data: PortalData }) {
     <div className="governance-grid">
       <Card><p className="eyebrow">IDENTITY AUTHORITY</p><h2>Microsoft Entra ID</h2><p>Users, groups, and application roles are assigned in the customer tenant. Papyrus maintains no invitation or local role database.</p><div className="role-list">{data.me.roles.map((role) => <Badge key={role}>{role.replace('Papyrus.', '')}</Badge>)}</div></Card>
       <Card><p className="eyebrow">OFFLINE ENTITLEMENT</p><h2>{data.overview.deployment.license.valid ? 'License active' : 'Activation required'}</h2><p>Licensing remains deployment-bound and locally verified. No vendor cloud callback is required.</p><code>{data.overview.deployment.license.deploymentId.slice(0, 24)}…</code></Card>
-      <Card><p className="eyebrow">ACTION BOUNDARY</p><h2>Suggestions are not authority</h2><p>Agent suggestions appear with a <strong>!</strong>. Only deterministic policy and an Entra-authorized approver can release an action to the leased executor worker.</p></Card>
+      <Card><p className="eyebrow">ACTION BOUNDARY</p><h2>Suggestions are not authority</h2><p>Agent suggestions appear with a <strong>!</strong>. Sessions request authority; Governance owns the durable decision. Only deterministic policy and an Entra-authorized approver can release an action to the leased executor worker.</p></Card>
     </div>
+    <ApprovalsPanel roles={data.me.roles} />
     <ObservabilityPanel roles={data.me.roles} />
   </div>
 }

@@ -26,17 +26,27 @@ export function Avatar({
   return <AvatarPrimitive.Root
     data-slot="avatar"
     data-size={size}
-    className={classes('neo-avatar', avatarSizes[size], className)}
+    className={typeof className === 'function'
+      ? (state) => classes('neo-avatar', avatarSizes[size], className(state))
+      : classes('neo-avatar', avatarSizes[size], className)}
     {...props}
   />
 }
 
 export function AvatarImage({ className, ...props }: React.ComponentProps<typeof AvatarPrimitive.Image>) {
-  return <AvatarPrimitive.Image data-slot="avatar-image" className={classes('neo-avatar-image', className)} {...props} />
+  return <AvatarPrimitive.Image
+    data-slot="avatar-image"
+    className={typeof className === 'function' ? (state) => classes('neo-avatar-image', className(state)) : classes('neo-avatar-image', className)}
+    {...props}
+  />
 }
 
 export function AvatarFallback({ className, ...props }: React.ComponentProps<typeof AvatarPrimitive.Fallback>) {
-  return <AvatarPrimitive.Fallback data-slot="avatar-fallback" className={classes('neo-avatar-fallback', className)} {...props} />
+  return <AvatarPrimitive.Fallback
+    data-slot="avatar-fallback"
+    className={typeof className === 'function' ? (state) => classes('neo-avatar-fallback', className(state)) : classes('neo-avatar-fallback', className)}
+    {...props}
+  />
 }
 
 export function AvatarBadge({ className, ...props }: React.ComponentProps<'span'>) {

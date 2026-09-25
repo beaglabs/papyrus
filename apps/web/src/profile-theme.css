@@ -1,0 +1,99 @@
+/* Deployment-profile color system.
+ *
+ * Commercial intentionally inherits the existing Papyrus palette from styles.css.
+ * Government and disconnected deployments use a restrained U.S. red/white/blue
+ * treatment while retaining the same component geometry and interaction model.
+ * Keep these overrides semantic and centralized so profile presentation does not
+ * leak into individual components.
+ */
+
+html[data-papyrus-profile="government"],
+html[data-papyrus-profile="disconnected"] {
+  color: #0b1f33;
+  background: #edf3f8;
+  --background: #edf3f8;
+  --surface: #ffffff;
+  --foreground: #0b1f33;
+  --muted: #52677c;
+  --main: #6fa8dc;
+  --rose: #e96972;
+  --green: #5fbd84;
+  --blue: #b7d8f5;
+  --yellow: #f2ca67;
+  --violet: #8b93d6;
+  --border: #0b1f33;
+  --shadow: 4px 4px 0 #0b1f33;
+  --shadow-sm: 3px 3px 0 #0b1f33;
+}
+
+/* Disconnected keeps the same federal palette but reads more operational: a
+ * slightly cooler field, deeper blue, and stronger red for local-only status. */
+html[data-papyrus-profile="disconnected"] {
+  background: #e7eef5;
+  --background: #e7eef5;
+  --surface: #fbfdff;
+  --foreground: #071a2b;
+  --muted: #465f76;
+  --main: #5f98ce;
+  --rose: #df5964;
+  --blue: #a8cdec;
+  --border: #071a2b;
+  --shadow: 4px 4px 0 #071a2b;
+  --shadow-sm: 3px 3px 0 #071a2b;
+}
+
+/* Use navy for selected navigation so the profile has a clear federal visual
+ * anchor. Existing Papyrus CSS hard-codes dark text for active rows, so the
+ * foreground is explicitly flipped here for accessible contrast. */
+html[data-papyrus-profile="government"] .nb-sidebar-menu-button[data-active="true"],
+html[data-papyrus-profile="disconnected"] .nb-sidebar-menu-button[data-active="true"] {
+  background: #173f70;
+  color: #ffffff;
+  border-color: #0b1f33;
+}
+
+html[data-papyrus-profile="government"] .nb-sidebar-menu-button:hover,
+html[data-papyrus-profile="government"] .session-row .nb-sidebar-menu-button:hover,
+html[data-papyrus-profile="disconnected"] .nb-sidebar-menu-button:hover,
+html[data-papyrus-profile="disconnected"] .session-row .nb-sidebar-menu-button:hover {
+  background: #e2ebf4;
+}
+
+/* Red is reserved for deliberate emphasis rather than becoming the page field.
+ * Primary actions therefore read as the red member of the palette while blue
+ * continues to carry navigation and informational interaction states. */
+html[data-papyrus-profile="government"] .primary,
+html[data-papyrus-profile="disconnected"] .primary {
+  background: #c93644;
+  color: #ffffff;
+  border-color: #0b1f33;
+}
+
+html[data-papyrus-profile="government"] .primary:hover,
+html[data-papyrus-profile="disconnected"] .primary:hover {
+  background: #b52f3b;
+  color: #ffffff;
+}
+
+html[data-papyrus-profile="government"] .brand-mark,
+html[data-papyrus-profile="disconnected"] .brand-mark {
+  background: #173f70;
+  color: #ffffff;
+}
+
+html[data-papyrus-profile="government"] .eyebrow,
+html[data-papyrus-profile="disconnected"] .eyebrow {
+  color: #52677c;
+}
+
+html[data-papyrus-profile="government"] .runtime-panel,
+html[data-papyrus-profile="disconnected"] .runtime-panel {
+  background: #f3f7fb;
+}
+
+html[data-papyrus-profile="government"] .new-session:hover,
+html[data-papyrus-profile="government"] .nb-sidebar-trigger:hover,
+html[data-papyrus-profile="disconnected"] .new-session:hover,
+html[data-papyrus-profile="disconnected"] .nb-sidebar-trigger:hover {
+  background: var(--blue);
+}

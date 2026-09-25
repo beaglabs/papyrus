@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { PrimaryNavigation, RuntimeStatusStrip, backgroundSummary, scheduleSummary } from './App.js'
+import { PrimaryNavigation, RuntimeStatusStrip, backgroundSummary, navigationSession, scheduleSummary } from './App.js'
 import type { AgentStatus } from './api.js'
 
 const status: AgentStatus = {
@@ -23,6 +23,12 @@ describe('primary navigation', () => {
     const buttons = [...html.matchAll(/<button\b[^>]*>([\s\S]*?)<\/button>/g)].map((match) => match[1]!.replace(/<[^>]*>/g, '').trim())
     expect(buttons).toEqual(['✦Agent', '◎Models', '◎Links', '▤Library', '◇Governance', '◈Access'])
     expect(html).not.toMatch(/terrain|investigation|workflows|plugins|scheduled/i)
+  })
+
+  it('preserves the active Agent session unless navigation explicitly selects another one', () => {
+    expect(navigationSession('session-1', undefined)).toBe('session-1')
+    expect(navigationSession('session-1', 'session-2')).toBe('session-2')
+    expect(navigationSession(undefined, undefined)).toBeUndefined()
   })
 })
 

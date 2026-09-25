@@ -421,6 +421,7 @@ function MessagePart({ part, sessionId, canApprove, canManageSkills, onChanged }
   if (part['type'] === 'text') return <MarkdownMessage>{String(part['text'] ?? '')}</MarkdownMessage>
   if (part['type'] === 'source-url') return <a className="source-link" href={String(part['url'])} target="_blank" rel="noreferrer">{String(part['title'] ?? part['url'])} ↗</a>
   const type = String(part['type'] ?? '')
+  if (type === 'reasoning') return <ReasoningActivity part={part} />
   if (type === 'dynamic-tool' || type.startsWith('tool-')) {
     const output = part['output'] as Record<string, unknown> | undefined
     if (output?.['kind'] === 'model_gateway_request') return <ModelGatewayCard request={output as unknown as ModelGatewayRequest} onChanged={onChanged} />
@@ -437,8 +438,9 @@ function MessagePart({ part, sessionId, canApprove, canManageSkills, onChanged }
 }
 
 // Tool calls render as neobrutalist timeline markers (like Claude's conversation steps).
-// Running tools show a spinner; completed show a check; failed show an X.
-function ToolActivity({ part }: { part: Record<string, unknown> }) {
+// Running tools show a spinner; completed show a check; failed show an X. The marker itself
+// is a disclosure trigger so an operator can inspect the exact input and captured output.
+export function ToolActivity({ part }: { part: Record<string, unknown> }) {
   const type = String(part['type'] ?? '')
   const name = type === 'dynamic-tool' ? String(part['toolName'] ?? 'tool') : type.slice(5)
   const state = String(part['state'] ?? 'running')
@@ -453,21 +455,70 @@ function ToolActivity({ part }: { part: Record<string, unknown> }) {
 
   const label = describeTool(name, command !== undefined)
   const icon = toolIcon(name, kind)
+  const toggle = () => { if (hasBody) setOpen((current) => !current) }
 
   return <div className={`tool-activity ${kind}${open ? ' open' : ''}`}>
-    <Marker>
-      <MarkerIcon>{icon}</MarkerIcon>
-      <MarkerContent>
-        <span className="tool-marker-label">{label}</span>
-        {detail && <span className="tool-marker-detail">{firstLine(detail)}</span>}
-      </MarkerContent>
-    </Marker>
+    <div
+      className="session-step-trigger"
+      {...(hasBody ? { role: 'button', tabIndex: 0, 'aria-expanded': open } : { 'aria-disabled': true })}
+      onClick={toggle}
+      onKeyDown={(event) => {
+        if (!hasBody || (event.key !== 'Enter' && event.key !== ' ')) return
+        event.preventDefault()
+        toggle()
+      }}
+    >
+      <Marker>
+        <MarkerIcon>{icon}</MarkerIcon>
+        <MarkerContent>
+          <span className="tool-marker-label">{label}</span>
+          {detail && <span className="tool-marker-detail">{firstLine(detail)}</span>}
+        </MarkerContent>
+        {hasBody && <MarkerSeparator className="session-step-chevron">{open ? '−' : '+'}</MarkerSeparator>}
+      </Marker>
+    </div>
     {open && hasBody && <div className="tool-activity-body">
       {(command !== undefined || output !== undefined)
         ? <CommandBlock {...(command !== undefined ? { command } : {})} {...(output !== undefined ? { output } : {})} {...(exitCode !== undefined ? { exitCode } : {})} />
         : inputJson !== undefined && <pre className="tool-activity-json">{inputJson}</pre>}
       {kind === 'error' && <p className="tool-activity-error">{String(part['errorText'] ?? 'Tool failed')}</p>}
     </div>}
+  </div>
+}
+
+// AI SDK v7 emits provider-visible reasoning as `reasoning` UI parts. `useChat` mutates the
+// part as deltas arrive, so rendering its text directly makes the timeline stream those tokens
+// without a second transport. Completed reasoning starts collapsed when loaded from history;
+// live reasoning opens itself and stays readable when the provider marks it done.
+export function ReasoningActivity({ part }: { part: Record<string, unknown> }) {
+  const text = String(part['text'] ?? '')
+  const streaming = String(part['state'] ?? '') === 'streaming'
+  const [open, setOpen] = useState(streaming)
+  useEffect(() => { if (streaming) setOpen(true) }, [streaming])
+  const hasBody = text.length > 0
+  const toggle = () => { if (hasBody) setOpen((current) => !current) }
+
+  return <div className={`reasoning-activity ${streaming ? 'running' : 'done'}${open ? ' open' : ''}`}>
+    <div
+      className="session-step-trigger"
+      {...(hasBody ? { role: 'button', tabIndex: 0, 'aria-expanded': open } : { 'aria-disabled': true })}
+      onClick={toggle}
+      onKeyDown={(event) => {
+        if (!hasBody || (event.key !== 'Enter' && event.key !== ' ')) return
+        event.preventDefault()
+        toggle()
+      }}
+    >
+      <Marker>
+        <MarkerIcon>{streaming ? toolIcon('reasoning', 'running') : reasoningDoneIcon()}</MarkerIcon>
+        <MarkerContent>
+          <span className="tool-marker-label">{streaming ? 'Thinking…' : 'Thinking'}</span>
+          {text && <span className="tool-marker-detail">{firstLine(text.trimStart())}</span>}
+        </MarkerContent>
+        {hasBody && <MarkerSeparator className="session-step-chevron">{open ? '−' : '+'}</MarkerSeparator>}
+      </Marker>
+    </div>
+    {open && hasBody && <div className="reasoning-body"><pre>{text}{streaming && <span className="reasoning-cursor" aria-hidden="true" />}</pre></div>}
   </div>
 }
 
@@ -481,6 +532,10 @@ function describeTool(name: string, hasCommand: boolean): string {
   if (FETCH_TOOL.test(name)) return 'Read a page'
   if (hasCommand) return 'Ran command'
   return humanize(name)
+}
+
+function reasoningDoneIcon(): React.ReactNode {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M8.4 14.5A7 7 0 1 1 15.6 14.5C14.6 15.2 14 16.2 14 17h-4c0-.8-.6-1.8-1.6-2.5Z"/></svg>
 }
 
 function toolIcon(name: string, kind: 'running' | 'done' | 'error'): React.ReactNode {
@@ -757,5 +812,3 @@ function fileIcon(mediaType: string): string {
 function previewAssetUrl(url: string): string {
   return `/api/url-preview/image?url=${encodeURIComponent(url)}`
 }
-
-function humanize(value: string): string { return value.replaceAll('_', ' ').replace(/([a-z])([A-Z])/g, '$1 $2') }

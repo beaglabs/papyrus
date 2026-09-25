@@ -9,12 +9,16 @@ Papyrus is a customer-hosted durable agent runtime. The repository boundary incl
 ## Security invariants
 
 - External side effects cross the proposal → human approval → ledger → leased executor boundary.
+- Governance → Approvals is the authoritative workspace decision surface; Agent sessions and Links only originate or project durable action proposals.
 - AgentFS is the durable file authority; native processes work through bounded materialize → isolate → reconcile behavior.
 - Link publication snapshots exact AgentFS bytes before approval and verifies the SHA-256 again before making the Link live.
 - Link drafts, published blobs, logos, assets, and inbound payloads remain under /Library/Links in the same Workspace filesystem.
 - Webpage Links are served as static documents with a restrictive CSP and without Papyrus-injected presentation styles or scripts.
 - API Links serve approved JSON snapshots or explicitly bound durable workflows.
 - Webhook Links are scoped to the creating Mastra {resourceId, threadId}; WebhookSignalProvider routes each inbound event back into that exact session.
+- Webhook Action Executor attachments are durable configuration only; inbound webhook traffic never receives executor authority directly and matching automatic actions become new action proposals before execution.
+- Webhook executor attachment and detachment changes themselves cross the proposal → approval → Papyrus Links executor boundary.
+- Webhook executor timeout and retry settings may tighten worker behavior but cannot expand the deployment-level retry ceiling.
 - Webhook Links are the public dynamic-ingestion primitive; legacy Plugin connection and integration-scoped signal webhook routes are not exposed by the portal API.
 - Recurring work is managed through session-scoped Agent tools; the public scheduler CRUD/page surface is not exposed.
 - Webhook logo identity is snapshotted with the approved Link rather than loaded from an untrusted mutable URL.
@@ -30,12 +34,13 @@ Papyrus is a customer-hosted durable agent runtime. The repository boundary incl
 | --- | --- |
 | `apps/server/src/agent/config.ts` | `9577a8ecd5f3cefd6d72f99f94db86a23610aff3` |
 | `apps/server/src/agent/http.ts` | `a489dd950477b09eab269bb6fa0ac700bd3af409` |
-| `apps/server/src/agent/action-worker.ts` | `edee5c81e503ea46f5596c806c73b39884e0383f` |
+| `apps/server/src/agent/action-worker.ts` | `3bead8248aafa7833f83f5f49157f6ab25353370` |
 | `apps/server/src/agent/catalog.ts` | `f57c95522643997327121ca926e1637058ea32fd` |
 | `apps/server/src/agent/link-store.ts` | `75cb2a0dd381bc622ad9c3b79e76083ccc944ddb` |
-| `apps/server/src/agent/link-http.ts` | `f7a3dedf5555a7e077aa206c85af0d8ad5060909` |
+| `apps/server/src/agent/link-executor-attachments.ts` | `57bc0dc3ca5a52c8f04542080b423aa847c21b32` |
+| `apps/server/src/agent/link-http.ts` | `a84df327a95a12c9052a7084881276ff6514ef2f` |
 | `apps/server/src/agent/link-preview.ts` | `fc30c91eea30af9999019d6bc0c565240e13ace7` |
-| `apps/server/src/agent/executors/link-publisher-executor.ts` | `7f31a74af751f8d7009d1667f835b35890663cbd` |
+| `apps/server/src/agent/executors/link-publisher-executor.ts` | `5df3f1b24badca58e367d252cda90c7d1576964a` |
 | `apps/server/src/agent/mastra/runtime.ts` | `1ab29e831905e156c9763d0c66a472a70e414137` |
 | `apps/server/src/agent/mastra/workspace-agentfs.ts` | `c2b86023b6a6e33270fc07c745afc63c2fff55b3` |
 | `apps/server/src/agent/mastra/workspace-nono.ts` | `a9e50594c17b07afc03e14d50b76b4dfc2c8da77` |

@@ -17,6 +17,7 @@ const evidencePaths = [
   'apps/server/src/agent/action-worker.ts',
   'apps/server/src/agent/catalog.ts',
   'apps/server/src/agent/link-store.ts',
+  'apps/server/src/agent/link-executor-attachments.ts',
   'apps/server/src/agent/link-http.ts',
   'apps/server/src/agent/link-preview.ts',
   'apps/server/src/agent/executors/link-publisher-executor.ts',
@@ -50,12 +51,16 @@ Papyrus is a customer-hosted durable agent runtime. The repository boundary incl
 ## Security invariants
 
 - External side effects cross the proposal → human approval → ledger → leased executor boundary.
+- Governance → Approvals is the authoritative workspace decision surface; Agent sessions and Links only originate or project durable action proposals.
 - AgentFS is the durable file authority; native processes work through bounded materialize → isolate → reconcile behavior.
 - Link publication snapshots exact AgentFS bytes before approval and verifies the SHA-256 again before making the Link live.
 - Link drafts, published blobs, logos, assets, and inbound payloads remain under /Library/Links in the same Workspace filesystem.
 - Webpage Links are served as static documents with a restrictive CSP and without Papyrus-injected presentation styles or scripts.
 - API Links serve approved JSON snapshots or explicitly bound durable workflows.
 - Webhook Links are scoped to the creating Mastra {resourceId, threadId}; WebhookSignalProvider routes each inbound event back into that exact session.
+- Webhook Action Executor attachments are durable configuration only; inbound webhook traffic never receives executor authority directly and matching automatic actions become new action proposals before execution.
+- Webhook executor attachment and detachment changes themselves cross the proposal → approval → Papyrus Links executor boundary.
+- Webhook executor timeout and retry settings may tighten worker behavior but cannot expand the deployment-level retry ceiling.
 - Webhook Links are the public dynamic-ingestion primitive; legacy Plugin connection and integration-scoped signal webhook routes are not exposed by the portal API.
 - Recurring work is managed through session-scoped Agent tools; the public scheduler CRUD/page surface is not exposed.
 - Webhook logo identity is snapshotted with the approved Link rather than loaded from an untrusted mutable URL.

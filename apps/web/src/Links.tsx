@@ -1,9 +1,29 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { AgentLink, LinkInbound, LinkType } from '@papyrus/contracts'
-import { linkContentUrl, linkInboundUrl, linkInbounds, listLinks, publicLinkUrl, workspaceFileContentUrl } from './api.js'
+import type { AgentActionProposal, AgentLink, IntegrationConfiguration, LinkInbound, LinkType } from '@papyrus/contracts'
+import { api, createSessionProposal, linkContentUrl, linkInboundUrl, linkInbounds, listLinks, listProposals, publicLinkUrl, workspaceFileContentUrl } from './api.js'
 import { Alert, Badge, Button, Input, Label, Skeleton, Textarea } from './components/ui/index.js'
 
 type LinkFilter = 'all' | LinkType | 'schedule'
+const LINK_SYSTEM_EXECUTOR_ID = 'papyrus-links-system'
+
+type InvocationMode = 'agent_decides' | 'always' | 'conditional'
+type ApprovalPolicy = 'inherit' | 'required'
+
+interface WebhookAttachmentView {
+  key: string
+  executorIntegrationId: string
+  executorName: string
+  action: string
+  target: string
+  invocationMode: InvocationMode
+  approvalPolicy: ApprovalPolicy
+  condition?: Record<string, unknown>
+  inputMapping: Record<string, string>
+  timeoutMs?: number
+  maxRetries?: number
+  state: 'pending' | 'active' | 'removing' | 'failed'
+  proposalId: string
+}
 
 interface ScheduleLink {
   id: string
@@ -52,9 +72,15 @@ function scheduleFromLocation(): string | undefined {
   return new URLSearchParams(window.location.search).get('schedule') ?? undefined
 }
 
+function sessionFromLocation(): string | undefined {
+  return new URLSearchParams(window.location.search).get('session') ?? undefined
+}
+
 export function LinksView({ validation, canManageSchedules = false }: { validation?: 'local-static' | 'kitesurf'; canManageSchedules?: boolean }) {
   const [links, setLinks] = useState<AgentLink[]>([])
   const [schedules, setSchedules] = useState<ScheduleLink[]>([])
+  const [proposals, setProposals] = useState<AgentActionProposal[]>([])
+  const [integrations, setIntegrations] = useState<IntegrationConfiguration[]>([])
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | undefined>(scheduleFromLocation)
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<LinkFilter>('all')
@@ -64,9 +90,16 @@ export function LinksView({ validation, canManageSchedules = false }: { validati
   const refresh = async () => {
     try {
       setError(undefined)
-      const [nextLinks, nextSchedules] = await Promise.all([listLinks(), listScheduleLinks()])
+      const [nextLinks, nextSchedules, nextProposals, integrationResult] = await Promise.all([
+        listLinks(),
+        listScheduleLinks(),
+        listProposals(),
+        api<{ integrations: IntegrationConfiguration[] }>('/api/integrations'),
+      ])
       setLinks(nextLinks)
       setSchedules(nextSchedules)
+      setProposals(nextProposals)
+      setIntegrations(integrationResult.integrations)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to load Links')
     } finally {
@@ -99,27 +132,43 @@ export function LinksView({ validation, canManageSchedules = false }: { validati
     return schedules.filter((schedule) => !needle || [schedule.name, schedule.cron, schedule.prompt, schedule.timezone ?? '', 'schedule'].some((value) => value.toLowerCase().includes(needle)))
   }, [schedules, query, filter])
 
+  const pendingLinkApprovals = useMemo(() => proposals.filter((proposal) =>
+    proposal.action === 'publish_link' && !['executed', 'denied', 'expired', 'failed'].includes(proposal.status) &&
+    (filter === 'all' || filter === proposal.parameters?.['linkType']) &&
+    (!query.trim() || proposal.target.toLowerCase().includes(query.trim().toLowerCase())),
+  ), [proposals, filter, query])
+
+  const actionExecutors = useMemo(() => integrations.filter((integration) =>
+    integration.id !== LINK_SYSTEM_EXECUTOR_ID && integration.state === 'active' &&
+    (integration.catalogId === 'exchange-email' || integration.integrationClass === 'action_executor' || integration.authority === 'controlled_actions'),
+  ), [integrations])
+
   const openSchedule = (id: string) => {
-    const next = `/portal/links?schedule=${encodeURIComponent(id)}`
-    window.history.pushState({}, '', next)
+    const query = new URLSearchParams(window.location.search)
+    query.set('schedule', id)
+    window.history.pushState({}, '', `/portal/links?${query}`)
     setSelectedScheduleId(id)
   }
   const closeSchedule = () => {
-    window.history.pushState({}, '', '/portal/links')
+    const query = new URLSearchParams(window.location.search)
+    query.delete('schedule')
+    window.history.pushState({}, '', `/portal/links${query.size ? `?${query}` : ''}`)
     setSelectedScheduleId(undefined)
     void refresh()
   }
 
   if (selectedScheduleId) {
     return <ScheduleEditor id={selectedScheduleId} canManage={canManageSchedules} onBack={closeSchedule} onReplaced={(id) => {
-      window.history.replaceState({}, '', `/portal/links?schedule=${encodeURIComponent(id)}`)
+      const query = new URLSearchParams(window.location.search)
+      query.set('schedule', id)
+      window.history.replaceState({}, '', `/portal/links?${query}`)
       setSelectedScheduleId(id)
       void refresh()
     }} />
   }
 
-  const visibleCount = visibleLinks.length + visibleSchedules.length
-  const total = links.length + schedules.length
+  const visibleCount = visibleLinks.length + visibleSchedules.length + pendingLinkApprovals.length
+  const total = links.length + schedules.length + pendingLinkApprovals.length
 
   return <div className="links-view">
     <header className="links-head">
@@ -141,7 +190,16 @@ export function LinksView({ validation, canManageSchedules = false }: { validati
       {loading && total === 0
         ? Array.from({ length: 3 }, (_, index) => <Skeleton className="link-card-skeleton" key={index} />)
         : <>
-          {visibleLinks.map((link) => <LinkCard link={link} key={`link:${link.id}`} />)}
+          {pendingLinkApprovals.map((proposal) => <PendingLinkCard proposal={proposal} key={`pending:${proposal.id}`} />)}
+          {visibleLinks.map((link) => <LinkCard
+            link={link}
+            proposals={proposals}
+            executors={actionExecutors}
+            sessionId={sessionFromLocation()}
+            canManage={canManageSchedules}
+            onChanged={refresh}
+            key={`link:${link.id}`}
+          />)}
           {visibleSchedules.map((schedule) => <ScheduleCard schedule={schedule} onOpen={() => openSchedule(schedule.id)} key={`schedule:${schedule.id}`} />)}
         </>}
       {!loading && visibleCount === 0 && <div className="links-empty"><span>◎</span><h3>{total ? 'No matching Links' : 'No Links yet'}</h3><p>{total ? 'Try another type or search.' : 'Ask Papyrus to create a Webpage, API, Webhook, or Schedule. Schedules stay customer-hosted and can be edited here.'}</p></div>}
@@ -151,6 +209,18 @@ export function LinksView({ validation, canManageSchedules = false }: { validati
 
 function LinkTab({ active, onClick, icon, children }: { active: boolean; onClick: () => void; icon: string; children: string }) {
   return <button type="button" className={active ? 'active' : ''} aria-pressed={active} onClick={onClick}><span>{icon}</span>{children}</button>
+}
+
+function PendingLinkCard({ proposal }: { proposal: AgentActionProposal }) {
+  const type = String(proposal.parameters?.['linkType'] ?? 'link')
+  return <article className="link-card">
+    <div className="link-preview"><div className="webhook-preview"><div className="webhook-logo"><span>◇</span></div><strong>{proposal.target}</strong><small>Draft is not publicly reachable</small><code>Approval {shortId(proposal.id)}</code></div><Badge className="link-type-badge">{type.toUpperCase()}</Badge></div>
+    <div className="link-card-body">
+      <div className="link-card-title"><strong>{proposal.target}</strong><Badge>PENDING APPROVAL</Badge></div>
+      <div className="link-meta"><span className="dot warning" />Awaiting workspace approval<span>·</span><span>{new Date(proposal.proposedAt).toLocaleString()}</span></div>
+      <div className="link-card-foot"><span>Draft snapshot</span><span>Not live until approved</span><span className="link-card-foot-actions"><a className="nb-button" href={approvalUrl(proposal.id)}>View approval →</a></span></div>
+    </div>
+  </article>
 }
 
 function ScheduleCard({ schedule, onOpen }: { schedule: ScheduleLink; onOpen: () => void }) {
@@ -233,7 +303,14 @@ function ScheduleEditor({ id, canManage, onBack, onReplaced }: { id: string; can
   </div>
 }
 
-function LinkCard({ link }: { link: AgentLink }) {
+function LinkCard({ link, proposals, executors, sessionId, canManage, onChanged }: {
+  link: AgentLink
+  proposals: AgentActionProposal[]
+  executors: IntegrationConfiguration[]
+  sessionId: string | undefined
+  canManage: boolean
+  onChanged: () => Promise<void>
+}) {
   const url = publicLinkUrl(link)
   const [copied, setCopied] = useState(false)
   const [showInbounds, setShowInbounds] = useState(false)
@@ -258,21 +335,195 @@ function LinkCard({ link }: { link: AgentLink }) {
           {link.inboundCount} inbounds {showInbounds ? '▴' : '▾'}
         </button>
       </div>
+      {link.type === 'webhook' && <WebhookExecutors link={link} proposals={proposals} executors={executors} sessionId={sessionId} canManage={canManage} onChanged={onChanged} />}
       {showInbounds && <LinkInbounds link={link} />}
       <div className="link-card-foot"><span>{link.type === 'webhook' && link.threadId ? `Session · ${shortId(link.threadId)}` : link.workflowId ? `Workflow · ${link.workflowId}` : link.scheduleId ? `Schedule · ${link.scheduleId}` : 'General'}</span><span>{link.type === 'webhook' ? 'Mastra Webhook Signal' : link.validationProvider ? `Validated · ${link.validationProvider}` : 'Approved snapshot'}</span><span className="link-card-foot-actions"><a className="link-snapshot" href={linkContentUrl(link.id, true)} title="Download the approved snapshot this Link serves">Snapshot ↓</a><Button variant="ghost" onClick={() => void copy()} aria-label={`Copy ${link.name} Link`}>{copied ? 'Copied ✓' : 'Copy link'}</Button></span></div>
     </div>
   </article>
 }
 
-/**
- * What actually arrived on a Link, and the only place it can be read back.
- *
- * A workflow-bound API Link answers GET by running its workflow, so the pinned snapshot is not
- * retrievable through the Link itself, and inbound records were previously only reachable by
- * listing metadata, copying a blob path out of it, and reading that path as a workspace file.
- * Both are served from authenticated portal routes here; the Link URL is a public boundary and
- * inbound traffic is customer data, so none of this is exposed there.
- */
+function WebhookExecutors({ link, proposals, executors, sessionId, canManage, onChanged }: {
+  link: AgentLink
+  proposals: AgentActionProposal[]
+  executors: IntegrationConfiguration[]
+  sessionId: string | undefined
+  canManage: boolean
+  onChanged: () => Promise<void>
+}) {
+  const attachments = useMemo(() => attachmentViews(link.id, proposals, executors), [link.id, proposals, executors])
+  const [executorId, setExecutorId] = useState(executors[0]?.id ?? '')
+  const [action, setAction] = useState('')
+  const [target, setTarget] = useState(link.slug)
+  const [mode, setMode] = useState<InvocationMode>('agent_decides')
+  const [approvalPolicy, setApprovalPolicy] = useState<ApprovalPolicy>('inherit')
+  const [conditionPath, setConditionPath] = useState('body.type')
+  const [conditionEquals, setConditionEquals] = useState('')
+  const [inputMapping, setInputMapping] = useState('{}')
+  const [timeoutMs, setTimeoutMs] = useState('30000')
+  const [maxRetries, setMaxRetries] = useState('2')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string>()
+
+  useEffect(() => {
+    if (!executorId && executors[0]) setExecutorId(executors[0].id)
+  }, [executorId, executors])
+
+  const attach = async () => {
+    if (!sessionId || !executorId || !action.trim()) return
+    setBusy(true); setError(undefined)
+    try {
+      const mapping = parseStringMap(inputMapping)
+      const condition = mode === 'conditional'
+        ? { path: conditionPath.trim(), equals: parseScalar(conditionEquals) }
+        : undefined
+      const proposal = await createSessionProposal(sessionId, {
+        executorIntegrationId: LINK_SYSTEM_EXECUTOR_ID,
+        action: 'attach_webhook_executor',
+        target: link.id,
+        parameters: {
+          executorIntegrationId: executorId,
+          executorAction: action.trim(),
+          executorTarget: target.trim() || link.slug,
+          invocationMode: mode,
+          approvalPolicy,
+          inputMapping: mapping,
+          ...(condition ? { condition } : {}),
+          timeoutMs: Number(timeoutMs),
+          maxRetries: Number(maxRetries),
+        },
+      })
+      await onChanged()
+      window.location.hash = `approval-${proposal.id}`
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to submit executor attachment')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const detach = async (attachment: WebhookAttachmentView) => {
+    if (!sessionId) return
+    setBusy(true); setError(undefined)
+    try {
+      await createSessionProposal(sessionId, {
+        executorIntegrationId: LINK_SYSTEM_EXECUTOR_ID,
+        action: 'detach_webhook_executor',
+        target: link.id,
+        parameters: {
+          executorIntegrationId: attachment.executorIntegrationId,
+          executorAction: attachment.action,
+          executorTarget: attachment.target,
+        },
+      })
+      await onChanged()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to submit executor detachment')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return <section className="webhook-executors" aria-label={`Action Executors attached to ${link.name}`}>
+    <div className="webhook-executors-head"><span><p className="eyebrow">ACTION EXECUTORS</p><strong>{attachments.filter((item) => item.state === 'active').length} attached</strong></span><small>Webhook ingress never executes an action directly.</small></div>
+    {attachments.length === 0 ? <p className="link-inbounds-empty">No Action Executors attached.</p> : <div className="webhook-executor-list">{attachments.map((attachment) => <div className="webhook-executor-row" key={attachment.key}>
+      <span><strong>⚡ {attachment.executorName}</strong><small>{attachment.action} → {attachment.target} · {attachment.invocationMode.replace('_', ' ')}</small></span>
+      <span className="webhook-executor-policy"><Badge>{attachment.state.toUpperCase()}</Badge><small>{attachment.approvalPolicy === 'required' ? 'Approval required' : 'Workspace policy · approval required'}</small></span>
+      {(attachment.state === 'pending' || attachment.state === 'removing') && <a href={approvalUrl(attachment.proposalId)}>View approval →</a>}
+      {attachment.state === 'active' && canManage && <Button variant="ghost" disabled={busy || !sessionId} onClick={() => void detach(attachment)}>Detach</Button>}
+    </div>)}</div>}
+
+    {error && <Alert className="error">{error}</Alert>}
+    {canManage && <details className="webhook-executor-attach">
+      <summary>+ Attach Action Executor</summary>
+      {!sessionId && <Alert>Open Links from an Agent session before changing executor attachments. The configuration change itself is submitted to the durable approval queue.</Alert>}
+      <div className="webhook-executor-form">
+        <Label>Executor<select value={executorId} disabled={busy || !sessionId} onChange={(event) => setExecutorId(event.target.value)}><option value="">Select executor</option>{executors.map((executor) => <option value={executor.id} key={executor.id}>{executor.name}</option>)}</select></Label>
+        <Label>Action<Input value={action} disabled={busy || !sessionId} onChange={(event) => setAction(event.target.value)} placeholder="Executor action name" /></Label>
+        <Label>Target<Input value={target} disabled={busy || !sessionId} onChange={(event) => setTarget(event.target.value)} placeholder={link.slug} /><small>May interpolate values such as {'{body.repository}'}</small></Label>
+        <Label>Invocation<select value={mode} disabled={busy || !sessionId} onChange={(event) => setMode(event.target.value as InvocationMode)}><option value="agent_decides">Agent decides</option><option value="always">Always propose</option><option value="conditional">Conditional proposal</option></select></Label>
+        <Label>Approval<select value={approvalPolicy} disabled={busy || !sessionId} onChange={(event) => setApprovalPolicy(event.target.value as ApprovalPolicy)}><option value="inherit">Inherit workspace policy</option><option value="required">Always require approval</option></select></Label>
+        {mode === 'conditional' && <><Label>Condition path<Input value={conditionPath} disabled={busy || !sessionId} onChange={(event) => setConditionPath(event.target.value)} placeholder="body.type" /></Label><Label>Equals<Input value={conditionEquals} disabled={busy || !sessionId} onChange={(event) => setConditionEquals(event.target.value)} placeholder="push" /></Label></>}
+        <Label>Input mapping<Textarea value={inputMapping} disabled={busy || !sessionId} onChange={(event) => setInputMapping(event.target.value)} rows={4} spellCheck={false} /><small>JSON object mapping executor parameter names to paths, e.g. {'{"repository":"body.repository"}'}.</small></Label>
+        <Label>Timeout (ms)<Input type="number" min={1000} max={120000} value={timeoutMs} disabled={busy || !sessionId} onChange={(event) => setTimeoutMs(event.target.value)} /></Label>
+        <Label>Retries<Input type="number" min={0} max={2} value={maxRetries} disabled={busy || !sessionId} onChange={(event) => setMaxRetries(event.target.value)} /></Label>
+        <Button className="primary" disabled={busy || !sessionId || !executorId || !action.trim()} onClick={() => void attach()}>{busy ? 'Submitting…' : 'Submit attachment for approval'}</Button>
+      </div>
+    </details>}
+  </section>
+}
+
+function attachmentViews(linkId: string, proposals: AgentActionProposal[], integrations: IntegrationConfiguration[]): WebhookAttachmentView[] {
+  const names = new Map(integrations.map((integration) => [integration.id, integration.name]))
+  const active = new Map<string, WebhookAttachmentView>()
+  const pending: WebhookAttachmentView[] = []
+  const relevant = proposals.filter((proposal) => proposal.target === linkId && ['attach_webhook_executor', 'detach_webhook_executor'].includes(proposal.action))
+    .sort((left, right) => left.proposedAt.localeCompare(right.proposedAt))
+
+  for (const proposal of relevant) {
+    const parameters = proposal.parameters ?? {}
+    const executorIntegrationId = String(parameters['executorIntegrationId'] ?? '')
+    const action = String(parameters['executorAction'] ?? '')
+    const target = String(parameters['executorTarget'] ?? '')
+    const key = `${executorIntegrationId}\u0000${action}\u0000${target}`
+    if (!executorIntegrationId || !action || !target) continue
+    const base: WebhookAttachmentView = {
+      key,
+      executorIntegrationId,
+      executorName: names.get(executorIntegrationId) ?? executorIntegrationId,
+      action,
+      target,
+      invocationMode: ['always', 'conditional'].includes(String(parameters['invocationMode'])) ? parameters['invocationMode'] as InvocationMode : 'agent_decides',
+      approvalPolicy: parameters['approvalPolicy'] === 'required' ? 'required' : 'inherit',
+      ...(parameters['condition'] && typeof parameters['condition'] === 'object' && !Array.isArray(parameters['condition']) ? { condition: parameters['condition'] as Record<string, unknown> } : {}),
+      inputMapping: parameters['inputMapping'] && typeof parameters['inputMapping'] === 'object' && !Array.isArray(parameters['inputMapping']) ? parameters['inputMapping'] as Record<string, string> : {},
+      ...(typeof parameters['timeoutMs'] === 'number' ? { timeoutMs: parameters['timeoutMs'] } : {}),
+      ...(typeof parameters['maxRetries'] === 'number' ? { maxRetries: parameters['maxRetries'] } : {}),
+      state: 'pending',
+      proposalId: proposal.id,
+    }
+
+    if (proposal.action === 'attach_webhook_executor') {
+      if (proposal.status === 'executed') active.set(key, { ...base, state: 'active' })
+      else if (proposal.status === 'failed') pending.push({ ...base, state: 'failed' })
+      else if (!['denied', 'expired'].includes(proposal.status)) pending.push(base)
+    } else if (proposal.status === 'executed') {
+      active.delete(key)
+    } else if (!['denied', 'expired', 'failed'].includes(proposal.status)) {
+      const attached = active.get(key)
+      if (attached) active.set(key, { ...attached, state: 'removing', proposalId: proposal.id })
+    }
+  }
+  return [...active.values(), ...pending]
+}
+
+function parseStringMap(value: string): Record<string, string> {
+  const parsed = JSON.parse(value || '{}') as unknown
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Input mapping must be a JSON object')
+  const result: Record<string, string> = {}
+  for (const [key, path] of Object.entries(parsed as Record<string, unknown>)) {
+    if (typeof path !== 'string') throw new Error(`Input mapping ${key} must be a string path`)
+    result[key] = path
+  }
+  return result
+}
+
+function parseScalar(value: string): string | number | boolean | null {
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  try {
+    const parsed = JSON.parse(trimmed) as unknown
+    if (parsed === null || ['string', 'number', 'boolean'].includes(typeof parsed)) return parsed as string | number | boolean | null
+  } catch { /* plain strings are valid */ }
+  return trimmed
+}
+
+function approvalUrl(id: string): string {
+  const query = new URLSearchParams({ approval: id })
+  const session = sessionFromLocation()
+  if (session) query.set('session', session)
+  return `/portal/governance?${query}`
+}
+
 function LinkInbounds({ link }: { link: AgentLink }) {
   const [inbounds, setInbounds] = useState<LinkInbound[]>()
   const [error, setError] = useState<string>()

@@ -2,6 +2,14 @@ import { randomUUID } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { posix } from 'node:path'
 import type { AgentLink, LinkInbound } from '@papyrus/contracts'
+import {
+  attachmentMatches,
+  attachmentParameters,
+  attachmentTarget,
+  LinkExecutorAttachmentStore,
+  type WebhookExecutorAttachment,
+  type WebhookExecutionContext,
+} from './link-executor-attachments.js'
 import { fetchUrlPreviewImage } from './mastra/fetch-preview.js'
 import { linkInboundHeaders, type MastraRuntime } from './mastra/runtime.js'
 
@@ -24,10 +32,6 @@ export async function handlePublicLink(
   url: URL,
   mastra: MastraRuntime,
 ): Promise<boolean> {
-  // Branding is intentionally handled before Link routing because the main daemon
-  // dispatches this boundary first. The source is the exact read-only logoUrl from
-  // the Microsoft Entra App Registration. Proxying it keeps portal CSP same-origin
-  // and reuses the SSRF/size/content checks already used for URL preview images.
   if (url.pathname === '/api/branding/entra-app-logo') {
     if (!['GET', 'HEAD'].includes(request.method ?? '')) return methodNotAllowed(response, ['GET', 'HEAD'])
     const logoUrl = process.env.PAPYRUS_ENTRA_APP_LOGO_URL?.trim()
@@ -208,7 +212,28 @@ async function acceptWebhook(
   if (!allowed.includes(request.method ?? '')) return methodNotAllowed(response, allowed)
   const body = await jsonBody(request)
   const inbound = await persistInbound(request, url, mastra, link, body)
-  const signal = await mastra.acceptLinkWebhook(link, inbound, body, linkInboundHeaders(request.headers))
+  const attachmentStore = new LinkExecutorAttachmentStore(mastra.actionStore.db)
+  const attachments = attachmentStore.list(link.id)
+  const enabledAttachments = attachments.filter((attachment) => attachment.enabled)
+
+  // The session receives a projection of the durable attachment configuration so
+  // agent_decides attachments are visible to reasoning without granting authority.
+  const agentPayload = enabledAttachments.length
+    ? {
+        ...body,
+        __papyrusExecutors: enabledAttachments.map((attachment) => ({
+          attachmentId: attachment.id,
+          executorIntegrationId: attachment.executorIntegrationId,
+          executorName: attachment.executorName,
+          action: attachment.action,
+          target: attachment.target,
+          invocationMode: attachment.invocationMode,
+          approvalPolicy: attachment.approvalPolicy,
+        })),
+      }
+    : body
+  const signal = await mastra.acceptLinkWebhook(link, inbound, agentPayload, linkInboundHeaders(request.headers))
+  const approvalIds = proposeAttachedWebhookActions(mastra, link, inbound, body, enabledAttachments)
 
   let workflowResult: unknown
   if (link.workflowId) {
@@ -233,9 +258,63 @@ async function acceptWebhook(
     linkId: link.id,
     inboundId: inbound.id,
     sessionId: signal.sessionId,
+    actionsProposed: approvalIds.length,
     ...(link.workflowId ? { workflowId: link.workflowId, workflowResult } : {}),
   }))
   return true
+}
+
+function proposeAttachedWebhookActions(
+  mastra: MastraRuntime,
+  link: AgentLink,
+  inbound: LinkInbound,
+  body: Record<string, unknown>,
+  attachments: WebhookExecutorAttachment[],
+): string[] {
+  const context: WebhookExecutionContext = {
+    body,
+    link: { id: link.id, slug: link.slug, name: link.name },
+    inbound: { id: inbound.id, blobPath: inbound.blobPath, method: inbound.method, receivedAt: inbound.receivedAt },
+  }
+  const approvalIds: string[] = []
+
+  for (const attachment of attachments) {
+    if (!attachmentMatches(attachment, context)) continue
+    const executor = mastra.actionStore.db.getIntegration(attachment.executorIntegrationId)
+    // Attachment configuration is durable. Runtime availability is evaluated again here and
+    // again on approval; an inactive executor never receives an action merely because it was
+    // active when attached.
+    if (!executor || executor.state !== 'active') continue
+
+    const investigation = mastra.actionStore.createInvestigation({
+      title: `Webhook action · ${link.name} → ${attachment.executorName}`,
+      trigger: 'signal',
+      triggerIntegrationId: attachment.executorIntegrationId,
+      triggerMessageId: inbound.id,
+    })
+    const proposal = mastra.actionStore.createProposal({
+      investigationId: investigation.id,
+      proposedByOperatorId: `webhook-link:${link.id}`,
+      executorIntegrationId: attachment.executorIntegrationId,
+      action: attachment.action,
+      target: attachmentTarget(attachment, context),
+      parameters: attachmentParameters(attachment, context),
+      rationaleClaimIds: [],
+    })
+    mastra.actionStore.db.recordActionEvent(attachment.executorIntegrationId, `webhook-link:${link.id}`, 'ActionProposed', {
+      proposalId: proposal.id,
+      investigationId: investigation.id,
+      linkId: link.id,
+      inboundId: inbound.id,
+      attachmentId: attachment.id,
+      source: 'webhook-link',
+      action: proposal.action,
+      target: proposal.target,
+      approvalPolicy: attachment.approvalPolicy,
+    })
+    approvalIds.push(proposal.id)
+  }
+  return approvalIds
 }
 
 async function persistInbound(

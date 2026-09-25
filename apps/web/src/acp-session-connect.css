@@ -1,0 +1,120 @@
+.acp-session-connect {
+  padding: 10px 20px 0;
+  background: var(--surface);
+}
+
+.acp-session-connect-trigger {
+  width: 100%;
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid #cfc9bc;
+  border-radius: 10px;
+  background: #fff;
+  color: #151515;
+  padding: 8px 11px 8px 14px;
+  cursor: pointer;
+  box-shadow: 0 1px 0 rgba(0,0,0,.04);
+  text-align: left;
+}
+
+.acp-session-connect-trigger:hover { border-color: #969084; background: #fbfaf7; }
+.acp-session-connect-trigger:focus-visible { outline: 3px solid rgba(31,95,191,.22); outline-offset: 2px; }
+.acp-session-connect-copy { display: grid; gap: 1px; margin-right: auto; }
+.acp-session-connect-copy strong { font-size: 12px; letter-spacing: .04em; text-transform: uppercase; }
+.acp-session-connect-copy span { font-size: 12px; color: #6d685f; }
+.acp-session-logo,
+.acp-harness-logo {
+  width: 30px;
+  height: 30px;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  border: 1px solid #d8d2c7;
+  border-radius: 8px;
+  background: #111;
+  overflow: hidden;
+}
+.acp-session-logo img,
+.acp-harness-logo img { width: 19px; height: 19px; display: block; object-fit: contain; }
+.acp-session-logo:nth-of-type(3),
+.acp-harness-card:nth-child(2) .acp-harness-logo { background: #fff8f4; }
+.acp-session-connect-arrow { font-size: 18px; padding-left: 2px; }
+
+body.acp-dialog-open { overflow: hidden; }
+.acp-dialog-layer[hidden] { display: none !important; }
+.acp-dialog-layer { position: fixed; inset: 0; z-index: 2000; display: grid; place-items: center; padding: 24px; }
+.acp-dialog-backdrop { position: absolute; inset: 0; background: rgba(13,16,22,.58); backdrop-filter: blur(3px); }
+.acp-dialog {
+  position: relative;
+  width: min(720px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  overflow: auto;
+  border: 1px solid #aaa397;
+  border-radius: 16px;
+  background: #f7f5ef;
+  box-shadow: 0 24px 80px rgba(0,0,0,.3);
+  padding: 20px;
+}
+.acp-dialog-head { display: flex; gap: 20px; align-items: flex-start; justify-content: space-between; }
+.acp-dialog-head h2 { margin: 2px 0 0; font-size: 22px; line-height: 1.15; }
+.acp-dialog-close {
+  width: 36px; height: 36px; flex: none; border: 1px solid #bdb6aa; border-radius: 8px;
+  background: #fff; font-size: 24px; line-height: 1; cursor: pointer;
+}
+.acp-dialog-intro { margin: 14px 0 18px; color: #5d584f; font-size: 13px; line-height: 1.55; max-width: 64ch; }
+.acp-dialog-harnesses { display: grid; gap: 10px; }
+.acp-harness-card {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) auto;
+  gap: 12px 16px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid #cbc5b9;
+  border-radius: 12px;
+  background: #fff;
+}
+.acp-harness-card.is-connected { border-color: #7aa27f; box-shadow: inset 3px 0 #3b7b49; }
+.acp-harness-card.is-unavailable { opacity: .68; }
+.acp-harness-identity { display: flex; gap: 12px; align-items: center; min-width: 0; }
+.acp-harness-logo { width: 38px; height: 38px; border-radius: 10px; }
+.acp-harness-logo img { width: 23px; height: 23px; }
+.acp-harness-identity > span:last-child { display: grid; gap: 2px; min-width: 0; }
+.acp-harness-identity strong { font-size: 14px; }
+.acp-harness-identity small { color: #6d685f; white-space: normal; }
+.acp-harness-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
+.acp-harness-state { font: 700 9px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .06em; padding: 4px 6px; border-radius: 999px; border: 1px solid #c6c0b5; background: #f2efe8; }
+.acp-harness-state.connected { border-color: #8caf93; background: #edf6ef; color: #275a32; }
+.acp-harness-state.available { border-color: #aebbd1; background: #eef3fa; color: #284b7d; }
+.acp-harness-open,
+.acp-harness-disconnect {
+  min-height: 34px; border: 1px solid #1c1c1c; border-radius: 8px; padding: 0 11px;
+  font: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
+}
+.acp-harness-open { background: #171717; color: white; }
+.acp-harness-open:disabled { cursor: default; opacity: .52; }
+.acp-harness-disconnect { background: #fff; color: #252525; border-color: #c5beb2; }
+.acp-harness-error,
+.acp-harness-scope { grid-column: 1 / -1; margin: -2px 0 0 50px; font-size: 11px; line-height: 1.45; }
+.acp-harness-error { color: #9d2929; }
+.acp-harness-scope { color: #706b61; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+.acp-dialog-loading,
+.acp-dialog-error { min-height: 108px; display: flex; align-items: center; justify-content: center; gap: 7px; border: 1px dashed #c6c0b5; border-radius: 12px; color: #655f56; background: #fff; }
+.acp-dialog-loading span { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: acp-pulse 1s infinite alternate; }
+.acp-dialog-loading span:nth-child(2) { animation-delay: .2s; }
+.acp-dialog-loading span:nth-child(3) { animation-delay: .4s; }
+.acp-dialog-error { display: grid; align-content: center; text-align: center; padding: 18px; color: #8d2424; }
+.acp-dialog-error span { font-size: 12px; }
+.acp-dialog-foot { margin-top: 14px; padding-top: 12px; border-top: 1px solid #d8d2c7; color: #777168; font-size: 11px; }
+@keyframes acp-pulse { from { opacity: .25; transform: translateY(0); } to { opacity: 1; transform: translateY(-2px); } }
+
+@media (max-width: 680px) {
+  .acp-session-connect { padding-inline: 12px; }
+  .acp-session-connect-copy span { display: none; }
+  .acp-dialog-layer { padding: 10px; }
+  .acp-dialog { padding: 16px; }
+  .acp-harness-card { grid-template-columns: 1fr; }
+  .acp-harness-actions { justify-content: flex-start; padding-left: 50px; }
+  .acp-harness-error, .acp-harness-scope { margin-left: 50px; }
+}

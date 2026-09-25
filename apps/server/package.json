@@ -15,6 +15,7 @@
     "@ai-sdk/openai-compatible": "3.0.43",
     "@ai-sdk/provider": "4.0.7",
     "@enclave-vm/core": "2.15.2",
+    "@mastra/acp": "0.4.1",
     "@mastra/ai-sdk": "1.10.0",
     "@mastra/browser-viewer": "0.2.3",
     "@mastra/core": "1.63.2",

@@ -62,14 +62,14 @@ export function AcpSessionConnect({ sessionId }: { sessionId: string }) {
       setStatusByHarness((current) => ({ ...current, [id]: payload.harness }))
     } catch (cause) {
       const message = errorMessage(cause)
-      let attachedToHarness = false
-      setStatusByHarness((current) => {
-        const previous = current[id]
-        if (!previous) return current
-        attachedToHarness = true
-        return { ...current, [id]: { ...previous, state: 'error', lastError: message } }
-      })
-      if (!attachedToHarness) setError(message)
+      if (statusByHarness[id]) {
+        setStatusByHarness((current) => {
+          const previous = current[id]
+          return previous ? { ...current, [id]: { ...previous, state: 'error', lastError: message } } : current
+        })
+      } else {
+        setError(message)
+      }
     } finally {
       setBusyHarness(undefined)
     }

@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { AgencyAuthStrip, PrimaryNavigation, backgroundSummary, scheduleSummary } from './App.js'
-import type { AgentStatus, PortalData } from './api.js'
+import { PrimaryNavigation, RuntimeStatusStrip, backgroundSummary, scheduleSummary } from './App.js'
+import type { AgentStatus } from './api.js'
 
 const status: AgentStatus = {
   ready: true, agentReady: true, durable: true, model: 'llama-3.3-70b', runtime: 'mastra',
@@ -26,35 +26,25 @@ describe('primary navigation', () => {
   })
 })
 
-describe('footer identity state', () => {
-  it('renders the agency and Entra authentication boundary instead of runtime plumbing', () => {
-    const data = {
-      config: {
-        bootstrap: false,
-        organizationName: 'Example Agency',
-        profile: 'government',
-        cloud: 'USGov',
-        entraConfigured: true,
-      },
-      me: {
-        oid: '11111111-1111-1111-1111-111111111111',
-        tenantId: '22222222-2222-2222-2222-222222222222',
-        displayName: 'Agent Analyst',
-        preferredUsername: 'analyst@example.mil',
-        roles: ['Papyrus.Integration.View'],
-        groups: [],
-        source: 'entra',
-      },
-    } as unknown as PortalData
-
-    const html = renderToStaticMarkup(<AgencyAuthStrip data={data} />)
-    expect(html).toContain('AGENCY / ENTRA ORG')
-    expect(html).toContain('Example Agency')
-    expect(html).toContain('Entra authenticated')
-    expect(html).toContain('PAPYRUS APP · USGOV')
-    expect(html).toContain('agency-auth-logo')
-    expect(html).not.toContain('Mastra storage online')
-    expect(html).not.toContain('Model configuration required')
+describe('footer runtime status', () => {
+  it('renders runtime/model health without session goal, schedule, or job counters', () => {
+    const withSessionJobs: AgentStatus = {
+      ...status,
+      jobs: jobs({
+        goal: { status: 'active', objective: 'Finish the work', runsUsed: 0, maxRuns: 5 },
+        schedules: { active: 2, paused: 1, nextFireAt: Date.UTC(2026, 8, 23, 18, 0) },
+        background: { running: 1, queued: 2, failed: 0, observed: true },
+      }),
+    }
+    const html = renderToStaticMarkup(<RuntimeStatusStrip status={withSessionJobs} sessionId="session-1" />)
+    expect(html).toContain('RUNTIME')
+    expect(html).toContain('Mastra online')
+    expect(html).toContain('llama-3.3-70b')
+    expect(html).not.toContain('runtime-jobs')
+    expect(html).not.toContain('goal active')
+    expect(html).not.toContain('active schedule')
+    expect(html).not.toContain('running')
+    expect(html).not.toContain('queued')
   })
 
   it('reports a session with no recurring work and no running jobs plainly', () => {

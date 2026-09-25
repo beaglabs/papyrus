@@ -106,31 +106,44 @@ export class ActionWorker {
       this.store.failJob(job.id, 'Proposal not found', true)
       return true
     }
-    // Executors are registered per connector catalog id, mirroring the sync
-    // worker's driver registry, so resolve the integration before looking one
-    // up. An integration that is gone or no longer active can never execute.
     const integration = this.db.getIntegration(proposal.executorIntegrationId)
     if (!integration || integration.state !== 'active') {
       this.store.failJob(job.id, `Executor integration ${proposal.executorIntegrationId} is not active`, true)
       return true
     }
     const executor = this.registry.get(integration.catalogId)
-    // A missing executor is permanent for this process: retrying would be a
-    // no-op that re-claims the job on every drain pass and spins the loop.
     if (!executor) {
       this.store.failJob(job.id, `No action executor installed for ${integration.catalogId}`, true)
       return true
     }
 
+    const policy = executionPolicy(proposal)
+    const effectiveMaxAttempts = policy.maxRetries === undefined
+      ? job.maxAttempts
+      : Math.min(job.maxAttempts, Math.max(1, policy.maxRetries + 1))
     this.controller = new AbortController()
+    let timeout: ReturnType<typeof setTimeout> | undefined
     try {
-      const result = await executor.execute({ job, proposal, config: this.config, signal: this.controller.signal })
+      const execution = executor.execute({ job, proposal, config: this.config, signal: this.controller.signal })
+      const result = policy.timeoutMs === undefined
+        ? await execution
+        : await Promise.race([
+            execution,
+            new Promise<never>((_resolve, reject) => {
+              timeout = setTimeout(() => {
+                this.controller?.abort(new Error(`Action execution exceeded ${policy.timeoutMs} ms`))
+                reject(new Error(`Action execution exceeded ${policy.timeoutMs} ms`))
+              }, policy.timeoutMs)
+              timeout.unref?.()
+            }),
+          ])
       this.store.completeJob(job.id, result, now)
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : 'Action execution failed'
-      const terminal = job.attempt >= job.maxAttempts
+      const terminal = job.attempt >= effectiveMaxAttempts
       this.store.failJob(job.id, message, terminal, terminal ? 0 : this.nextRetryDelayMs(job), now)
     } finally {
+      if (timeout) clearTimeout(timeout)
       this.controller = undefined
     }
     return true
@@ -162,5 +175,21 @@ export class ActionWorker {
     while (this.running && await this.runOnce()) {
       // Drain every ready job before returning to the polling interval.
     }
+  }
+}
+
+function executionPolicy(proposal: AgentActionProposal): { timeoutMs?: number; maxRetries?: number } {
+  const value = proposal.parameters?.['__papyrusExecutionPolicy']
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const item = value as Record<string, unknown>
+  const timeoutMs = typeof item['timeoutMs'] === 'number' && Number.isInteger(item['timeoutMs'])
+    ? Math.min(120_000, Math.max(1_000, item['timeoutMs']))
+    : undefined
+  const maxRetries = typeof item['maxRetries'] === 'number' && Number.isInteger(item['maxRetries'])
+    ? Math.min(2, Math.max(0, item['maxRetries']))
+    : undefined
+  return {
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    ...(maxRetries === undefined ? {} : { maxRetries }),
   }
 }

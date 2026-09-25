@@ -3,6 +3,7 @@ import type { AgentActionJob, AgentActionReceipt, AgentActionProposal } from '@p
 import type { AgentConfig } from './config.js'
 import type { AgentDatabase } from './database.js'
 import { ActionStore } from './action-store.js'
+import { requireSessionConnectorBinding, SessionConnectorAccessError } from './session-connector-access.js'
 
 export interface ActionExecutorContext {
   job: AgentActionJob
@@ -114,6 +115,28 @@ export class ActionWorker {
       this.store.failJob(job.id, `Executor integration ${proposal.executorIntegrationId} is not active`, true)
       return true
     }
+
+    // Session connector authority is re-checked at the last possible point,
+    // immediately before the external executor is selected. This makes a
+    // disconnect a revocation: an action approved while the connector was
+    // attached cannot execute later if that session binding has disappeared.
+    // Manual/non-session investigations keep their existing governed path.
+    const investigation = this.store.getInvestigation(proposal.investigationId)
+    if (investigation?.mastraThreadId) {
+      try {
+        requireSessionConnectorBinding(this.db, integration.id, {
+          sessionId: investigation.mastraThreadId,
+          actorOid: proposal.proposedByOperatorId,
+        })
+      } catch (cause) {
+        const message = cause instanceof SessionConnectorAccessError
+          ? `${cause.code}: ${cause.message}`
+          : cause instanceof Error ? cause.message : 'Session connector authorization failed'
+        this.store.failJob(job.id, message, true)
+        return true
+      }
+    }
+
     const executor = this.registry.get(integration.catalogId)
     // A missing executor is permanent for this process: retrying would be a
     // no-op that re-claims the job on every drain pass and spins the loop.

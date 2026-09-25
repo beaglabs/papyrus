@@ -7,6 +7,7 @@ import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from './components/u
 import { BorderBeam } from './components/ui/border-beam.js'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from './components/ui/dialog.js'
 import './acp-session-connect.css'
+import './acp-header-layout.css'
 
 type HarnessId = 'codex' | 'claude' | 'opencode'
 type HarnessState = 'opening' | 'connected' | 'available' | 'error' | 'closed' | 'disconnected'
@@ -55,15 +56,20 @@ export function AcpSessionConnect({ sessionId }: { sessionId: string }) {
 
   const connectHarness = async (id: HarnessId) => {
     setBusyHarness(id)
+    setError(undefined)
     try {
       const payload = await request<{ harness: HarnessStatus }>(`/api/sessions/${encodeURIComponent(sessionId)}/acp/${id}/connect`, { method: 'POST' })
       setStatusByHarness((current) => ({ ...current, [id]: payload.harness }))
     } catch (cause) {
+      const message = errorMessage(cause)
+      let attachedToHarness = false
       setStatusByHarness((current) => {
         const previous = current[id]
-        return previous ? { ...current, [id]: { ...previous, state: 'error', lastError: errorMessage(cause) } } : current
+        if (!previous) return current
+        attachedToHarness = true
+        return { ...current, [id]: { ...previous, state: 'error', lastError: message } }
       })
-      if (!statusByHarness[id]) setError(errorMessage(cause))
+      if (!attachedToHarness) setError(message)
     } finally {
       setBusyHarness(undefined)
     }

@@ -54,20 +54,37 @@ jobs:
           image: papyrus:${{ github.sha }}
           format: cyclonedx-json
           output-file: papyrus.cdx.json
-      - name: Scan image
+      - name: Generate Trivy SARIF
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: papyrus:${{ github.sha }}
           format: sarif
           output: trivy.sarif
           severity: CRITICAL,HIGH
-          exit-code: "1"
+          exit-code: "0"
           ignore-unfixed: true
+          scanners: vuln
       - name: Upload scan
         if: ${{ always() && hashFiles('trivy.sarif') != '' }}
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy.sarif
+      - name: Preserve Trivy SARIF
+        if: ${{ always() && hashFiles('trivy.sarif') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-sarif
+          path: trivy.sarif
+          if-no-files-found: error
+      - name: Enforce HIGH/CRITICAL vulnerability gate
+        run: |
+          trivy image \
+            --scanners vuln \
+            --severity CRITICAL,HIGH \
+            --ignore-unfixed \
+            --exit-code 1 \
+            --format table \
+            papyrus:${GITHUB_SHA}
       - name: Publish image
         id: digest
         if: github.event_name == 'push'

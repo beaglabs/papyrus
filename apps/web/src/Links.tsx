@@ -307,7 +307,7 @@ function LinkCard({ link, proposals, executors, sessionId, canManage, onChanged 
   link: AgentLink
   proposals: AgentActionProposal[]
   executors: IntegrationConfiguration[]
-  sessionId?: string
+  sessionId: string | undefined
   canManage: boolean
   onChanged: () => Promise<void>
 }) {
@@ -346,7 +346,7 @@ function WebhookExecutors({ link, proposals, executors, sessionId, canManage, on
   link: AgentLink
   proposals: AgentActionProposal[]
   executors: IntegrationConfiguration[]
-  sessionId?: string
+  sessionId: string | undefined
   canManage: boolean
   onChanged: () => Promise<void>
 }) {

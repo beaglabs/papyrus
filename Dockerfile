@@ -33,6 +33,7 @@ RUN pnpm install --node-linker=hoisted \
       --config.supportedArchitectures.cpu=${TARGETARCH} \
       --config.supportedArchitectures.libc=musl \
  && pnpm --filter @papyrus/server... run build \
+ && pnpm --filter papyrus-viewer-3d run build \
  && pnpm --filter @papyrus/web run build \
  && pnpm install --prod --node-linker=hoisted \
       --config.supportedArchitectures.os=linux \

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { posix } from 'node:path'
 import type { AgentLink, LinkInbound } from '@papyrus/contracts'
+import { linkActionAttachments } from './link-action-attachments.js'
 import { fetchUrlPreviewImage } from './mastra/fetch-preview.js'
 import { linkInboundHeaders, type MastraRuntime } from './mastra/runtime.js'
 
@@ -208,7 +209,18 @@ async function acceptWebhook(
   if (!allowed.includes(request.method ?? '')) return methodNotAllowed(response, allowed)
   const body = await jsonBody(request)
   const inbound = await persistInbound(request, url, mastra, link, body)
-  const signal = await mastra.acceptLinkWebhook(link, inbound, body, linkInboundHeaders(request.headers))
+
+  // A Link may still project the delivery into its originating session, but that
+  // session is now provenance/context rather than the owner of downstream action.
+  // This allows a Webhook Link with attached executors to remain governable even
+  // when no human conversation is active.
+  const signal = link.threadId && link.resourceId
+    ? await mastra.acceptLinkWebhook(link, inbound, body, linkInboundHeaders(request.headers))
+    : undefined
+
+  const dispatches = linkActionAttachments(mastra.actionStore.db)
+    .dispatchWebhook(mastra.actionStore, link, inbound, body)
+  const approvalIds = dispatches.flatMap((dispatch) => dispatch.proposal ? [dispatch.proposal.id] : [])
 
   let workflowResult: unknown
   if (link.workflowId) {
@@ -232,7 +244,14 @@ async function acceptWebhook(
     accepted: true,
     linkId: link.id,
     inboundId: inbound.id,
-    sessionId: signal.sessionId,
+    ...(signal ? { sessionId: signal.sessionId } : {}),
+    ...(approvalIds.length ? { approvalIds } : {}),
+    executorDispatches: dispatches.map((dispatch) => ({
+      attachmentId: dispatch.attachment.id,
+      executorIntegrationId: dispatch.attachment.executorIntegrationId,
+      ...(dispatch.proposal ? { approvalId: dispatch.proposal.id, status: dispatch.proposal.status } : {}),
+      ...(dispatch.skipped ? { skipped: dispatch.skipped } : {}),
+    })),
     ...(link.workflowId ? { workflowId: link.workflowId, workflowResult } : {}),
   }))
   return true

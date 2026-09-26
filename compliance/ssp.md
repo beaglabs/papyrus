@@ -18,7 +18,8 @@ Papyrus is a customer-hosted durable agent runtime. The repository boundary incl
 - Link drafts, published blobs, logos, assets, and inbound payloads remain under /Library/Links in the same Workspace filesystem.
 - Webpage Links are served as static documents with a restrictive CSP and without Papyrus-injected presentation styles or scripts.
 - API Links serve approved JSON snapshots or explicitly bound durable workflows.
-- Webhook Links are scoped to the creating Mastra {resourceId, threadId}; WebhookSignalProvider routes each inbound event back into that exact session.
+- Webhook Links may project inbound events into their creating Mastra session, but attached Action Executors create durable action proposals owned by the workspace approval ledger rather than the session lifecycle.
+- A Webhook Link never directly authorizes an attached executor; enabled attachments resolve payload mappings/conditions into proposals that require the existing Papyrus.Action.Approve release boundary before the leased action worker can execute them.
 - Webhook Links are the public dynamic-ingestion primitive; legacy Plugin connection and integration-scoped signal webhook routes are not exposed by the portal API.
 - Recurring work is managed through session-scoped Agent tools; the public scheduler CRUD/page surface is not exposed.
 - Webhook logo identity is snapshotted with the approved Link rather than loaded from an untrusted mutable URL.
@@ -43,7 +44,8 @@ Papyrus is a customer-hosted durable agent runtime. The repository boundary incl
 | `apps/server/src/agent/session-connector-access.ts` | `3995b791819defc900067a2af901174c5b1b1a95` |
 | `apps/server/src/agent/catalog.ts` | `f57c95522643997327121ca926e1637058ea32fd` |
 | `apps/server/src/agent/link-store.ts` | `11c06d078c9c728c920648c1043db2704a64d68e` |
-| `apps/server/src/agent/link-http.ts` | `ec8d8a21497fc96048c7173f8a0e84d67401293a` |
+| `apps/server/src/agent/link-action-attachments.ts` | `61359fdd6dea64ad794f9b2fc53af3e92e2caac8` |
+| `apps/server/src/agent/link-http.ts` | `3ec4815813ed81ffda668cb5f31b46fdf004ffd8` |
 | `apps/server/src/agent/link-preview.ts` | `fc30c91eea30af9999019d6bc0c565240e13ace7` |
 | `apps/server/src/agent/executors/link-publisher-executor.ts` | `7f31a74af751f8d7009d1667f835b35890663cbd` |
 | `apps/server/src/agent/mastra/runtime.ts` | `1c0b8206a9a7bd2ba0fc0a2bf23154e0de0a6d2e` |

@@ -10,11 +10,19 @@ const contractSources = [
   'packages/contracts/src/index.ts',
   'apps/server/src/agent/mastra/tools.ts',
   'apps/server/src/agent/mastra/workspace-agentfs.ts',
+  'apps/server/src/agent/apps/project.ts',
+  'apps/server/src/agent/policies/evaluator.ts',
 ]
 const evidencePaths = [
   'apps/server/src/agent/config.ts',
   'apps/server/src/agent/http.ts',
   'apps/server/src/agent/action-worker.ts',
+  'apps/server/src/agent/apps/http.ts',
+  'apps/server/src/agent/apps/store.ts',
+  'apps/server/src/agent/apps/migration.ts',
+  'apps/server/src/agent/policies/store.ts',
+  'apps/server/src/agent/policies/runtime.ts',
+  'apps/server/src/agent/session-connector-access.ts',
   'apps/server/src/agent/catalog.ts',
   'apps/server/src/agent/link-store.ts',
   'apps/server/src/agent/link-http.ts',
@@ -45,13 +53,17 @@ const sspText = `# Papyrus System Security Plan (Repository-Derived)
 
 ## System boundary
 
-Papyrus is a customer-hosted durable agent runtime. The repository boundary includes the portal, daemon, Mastra runtime, AgentFS workspace, nono isolation workers, Enclave broker, action ledger, approved action executors, and the approval-backed Links publication and serving boundary.
+Papyrus is a customer-hosted durable agent runtime. The repository boundary includes the portal, daemon, Mastra runtime, AgentFS workspace, nono isolation workers, Enclave broker, action ledger, approved action executors, and the approval-backed Links and hosted App publication and serving boundaries.
 
 ## Security invariants
 
 - External side effects cross the proposal → human approval → ledger → leased executor boundary.
 - AgentFS is the durable file authority; native processes work through bounded materialize → isolate → reconcile behavior.
 - Link publication snapshots exact AgentFS bytes before approval and verifies the SHA-256 again before making the Link live.
+- Hosted App publication approves an immutable, digest-checked build candidate; source edits and preview builds never advance the production pointer.
+- Hosted App content is served from a separate HTTPS origin in a script-only sandbox. Entra authentication and brokered connector access remain on the portal origin.
+- App runtime connector grants are durable and operation-specific, separate from the authoring session's bindings; low-level dispatch rechecks grants and active connector state.
+- Named, attached policy rules are evaluated deterministically. The policy specialist cannot activate an authority-weakening change without Governance approval.
 - Link drafts, published blobs, logos, assets, and inbound payloads remain under /Library/Links in the same Workspace filesystem.
 - Webpage Links are served as static documents with a restrictive CSP and without Papyrus-injected presentation styles or scripts.
 - API Links serve approved JSON snapshots or explicitly bound durable workflows.

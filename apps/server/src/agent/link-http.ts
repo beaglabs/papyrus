@@ -58,6 +58,8 @@ export async function handlePublicLink(
   const link = mastra.links.getBySlug(slug)
   if (!link || link.state !== 'live') return publicError(response, 404, 'LINK_NOT_FOUND', 'Link not found')
 
+  if (link.type === 'app') return publicError(response, 403, 'APP_AUTH_REQUIRED', 'App Links require authenticated app serving')
+
   try {
     if (assetMatch) {
       let assetName: string

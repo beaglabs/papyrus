@@ -25,6 +25,7 @@ export interface NonoWorkspaceSandboxOptions {
    * exceptions for interpreters and libraries the agent is meant to use.
    */
   readOnlyToolchainPaths?: string[] | undefined
+  landstripBinaryPath?: string | undefined
 }
 
 const MAX_COMMAND_BYTES = 64 * 1024
@@ -49,6 +50,7 @@ export class NonoWorkspaceSandbox extends MastraSandbox {
       filesystem: options.filesystem,
       dataDir: options.dataDir,
       readOnlyToolchainPaths: options.readOnlyToolchainPaths,
+      landstripBinaryPath: options.landstripBinaryPath,
     })
     super({ name: 'Papyrus Nono Sandbox', processes: manager })
     this.filesystem = options.filesystem
@@ -110,13 +112,15 @@ class NonoProcessManager extends SandboxProcessManager<NonoWorkspaceSandbox> {
   private readonly filesystem: PapyrusAgentFSFilesystem
   private readonly dataDir: string
   private readonly readOnlyToolchainPaths: string[]
+  private readonly landstripBinaryPath: string | undefined
   private executionTail: Promise<void> = Promise.resolve()
 
-  constructor(options: { filesystem: PapyrusAgentFSFilesystem; dataDir: string; readOnlyToolchainPaths?: string[] | undefined }) {
+  constructor(options: { filesystem: PapyrusAgentFSFilesystem; dataDir: string; readOnlyToolchainPaths?: string[] | undefined; landstripBinaryPath?: string | undefined }) {
     super()
     this.filesystem = options.filesystem
     this.dataDir = resolve(options.dataDir)
     this.readOnlyToolchainPaths = (options.readOnlyToolchainPaths ?? []).map((path) => resolve(path))
+    this.landstripBinaryPath = options.landstripBinaryPath
   }
 
   async spawn(command: string, options: SpawnProcessOptions = {}): Promise<ProcessHandle> {
@@ -153,7 +157,7 @@ class NonoProcessManager extends SandboxProcessManager<NonoWorkspaceSandbox> {
       const startedAt = Date.now()
       const child = spawn(process.execPath, workerArguments(controlPath), {
         cwd: this.dataDir,
-        env: workerBootstrapEnvironment(this.dataDir),
+        env: workerBootstrapEnvironment(this.dataDir, this.landstripBinaryPath),
         stdio: ['pipe', 'pipe', 'pipe'],
         detached: process.platform !== 'win32',
         windowsHide: true,
@@ -362,9 +366,10 @@ export function workspaceEnvironment(root: string, overlay: Record<string, strin
   return environment
 }
 
-function workerBootstrapEnvironment(dataDir: string): NodeJS.ProcessEnv {
+function workerBootstrapEnvironment(dataDir: string, landstripBinaryPath?: string): NodeJS.ProcessEnv {
   return {
     PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin',
+    ...(landstripBinaryPath ? { PAPYRUS_LANDSTRIP_BIN: landstripBinaryPath } : {}),
     LANG: process.env.LANG ?? 'C.UTF-8',
     HOME: join(dataDir, '.workspace-worker-home'),
     TMPDIR: join(dataDir, '.workspace-worker-tmp'),

@@ -1,3 +1,5 @@
+import { currentAppScope, requireAppConnector } from './apps/store.js'
+import { PolicyStore } from './policies/store.js'
 import type {
   AgentActionProposal,
   AgentActionReceipt,
@@ -410,6 +412,7 @@ export class AgentService {
     if (!investigation) throw new AgentServiceError(404, 'INVESTIGATION_NOT_FOUND', 'Investigation not found')
     const executor = this.requireExecutable(executorIntegrationId)
     this.requireSessionBoundExecutor(investigation, executor.id, principal.oid)
+    new PolicyStore(this.db).assert({ operation: action, target, actorOid: principal.oid, sessionId: investigation.mastraThreadId, executorId: executor.id, connectorId: executor.id }, { proposing: true })
     const proposal = this.actions.createProposal({
       investigationId, proposedByOperatorId: principal.oid,
       executorIntegrationId: cleanText(executorIntegrationId, 'executorIntegrationId', 128),
@@ -439,6 +442,10 @@ export class AgentService {
     // can be disconnected after the proposal card was created.
     const executor = this.requireExecutable(proposal.executorIntegrationId)
     this.requireSessionBoundExecutor(investigation, executor.id, proposal.proposedByOperatorId)
+    const appScope = this.db.sqlite.prepare('SELECT * FROM app_action_scopes WHERE proposal_id=?').get(proposal.id) as { app_id: string; release_id: string; actor_oid: string; operation: string } | undefined
+    if (appScope) requireAppConnector(this.db, appScope.app_id, executor.id, appScope.operation, appScope.actor_oid, appScope.release_id, true)
+
+    new PolicyStore(this.db).assert({ operation: proposal.action, target: proposal.target, actorOid: proposal.proposedByOperatorId, sessionId: investigation.mastraThreadId, appId: appScope?.app_id, linkId: appScope?.app_id, executorId: executor.id, connectorId: executor.id }, { approved: true })
     if (!this.actionWorker) throw new AgentServiceError(503, 'ACTION_WORKER_UNAVAILABLE', 'Action worker is not running; approvals cannot be executed')
     try {
       const approved = this.actions.approveProposal(proposalId, principal.oid)

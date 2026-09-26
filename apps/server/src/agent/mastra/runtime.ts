@@ -1,3 +1,6 @@
+import { assertRuntimePolicy, modelPolicyProcessor } from '../policies/runtime.js'
+import { PolicyStore } from '../policies/store.js'
+import { currentSessionConnectorScope } from '../session-connector-access.js'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
@@ -177,6 +180,7 @@ export class MastraRuntime {
   readonly workspaceSandbox: NonoWorkspaceSandbox
   readonly workspaceExecutors: WorkspaceExecutorRegistry
   readonly enclave: PapyrusEnclaveRuntime
+  readonly appConnectorTools = new Map<string, (input: Record<string, unknown>) => Promise<unknown>>()
   readonly links: LinkStore
   /** Append-only device page snapshots and the submissions an operator approved. */
   readonly consoles: ConsoleStore
@@ -1105,7 +1109,7 @@ export class MastraRuntime {
       ...(tools ? { tools } : {}),
       // Live connector context before every model step. Empty lane renders
       // nothing, so an appliance with no connected channel pays no tokens.
-      inputProcessors: [connectorContextProcessor(this.channelState)],
+      inputProcessors: [modelPolicyProcessor(this.actionStore.db,'papyrus',String(this.status.model)),connectorContextProcessor(this.channelState)],
       ...(memory ? { memory } : {}),
       ...(webhooks ? { signals: [webhooks] } : {}),
       goal: this.goalConfig(tools),
@@ -1118,6 +1122,17 @@ export class MastraRuntime {
   }
 
   private buildTools(createTool: (options: unknown) => unknown): Record<string, unknown> {
+    const rawCreateTool = createTool
+    createTool = (options: unknown) => {
+      const descriptor = options as { id: string; execute?: (...args: any[]) => unknown }
+      if (!descriptor.execute) return rawCreateTool(options)
+      const execute = descriptor.execute
+      return rawCreateTool({ ...descriptor, execute: (...args: any[]) => {
+        const scope = currentSessionConnectorScope()
+        assertRuntimePolicy(this.actionStore.db,{operation:descriptor.id,tool:descriptor.id,agentId:'papyrus',modelId:this.status.model, ...(descriptor.id === 'loadSkill' ? {skillId:args[0]?.name} : {})})
+        return execute(...args)
+      } })
+    }
     const registered: Record<string, unknown> = {}
     for (const name of Object.keys(INVESTIGATION_TOOLS) as InvestigationToolName[]) {
       const descriptor = INVESTIGATION_TOOLS[name]
@@ -1672,6 +1687,7 @@ export class MastraRuntime {
         allowedRepositories,
       },
     }))) {
+      if (/^(read|list).*Github/.test(tool.id)) this.appConnectorTools.set(tool.id, tool.execute)
       registered[tool.id] = createTool({ id: tool.id, description: tool.description, inputSchema: tool.inputSchema, execute: tool.execute })
     }
 

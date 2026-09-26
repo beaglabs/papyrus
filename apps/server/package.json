@@ -15,6 +15,7 @@
     "@ai-sdk/openai-compatible": "3.0.43",
     "@ai-sdk/provider": "4.0.7",
     "@enclave-vm/core": "2.15.2",
+    "@landstrip/landstrip": "^0.18.38",
     "@mastra/acp": "0.4.1",
     "@mastra/ai-sdk": "1.10.0",
     "@mastra/browser-viewer": "0.2.3",
@@ -25,11 +26,13 @@
     "@papyrus/contracts": "workspace:*",
     "agentfs-sdk": "0.6.4",
     "ai": "7.0.89",
+    "esbuild": "^0.28.2",
     "jose": "6.2.9",
     "libsql": "^0.5.29",
-    "@landstrip/landstrip": "^0.18.38",
     "papyrus-extension-sdk": "workspace:*",
     "papyrus-gnss": "workspace:*",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
     "zod": "4.5.4"
   },
   "devDependencies": {

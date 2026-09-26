@@ -4,6 +4,8 @@ const sources = [
   'packages/contracts/src/index.ts',
   'apps/server/src/agent/mastra/tools.ts',
   'apps/server/src/agent/mastra/workspace-agentfs.ts',
+  'apps/server/src/agent/apps/project.ts',
+  'apps/server/src/agent/policies/evaluator.ts',
 ]
 const expected = {
   formatVersion: 1,

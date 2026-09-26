@@ -1,8 +1,11 @@
+import { PolicyStore } from './policies/store.js'
+import { AppStore, requireAppConnector, runWithAppScope } from './apps/store.js'
 import { randomUUID } from 'node:crypto'
 import type { AgentActionJob, AgentActionReceipt, AgentActionProposal } from '@papyrus/contracts'
 import type { AgentConfig } from './config.js'
 import type { AgentDatabase } from './database.js'
 import { ActionStore } from './action-store.js'
+import { requireSessionConnectorBinding, SessionConnectorAccessError } from './session-connector-access.js'
 
 export interface ActionExecutorContext {
   job: AgentActionJob
@@ -114,6 +117,35 @@ export class ActionWorker {
       this.store.failJob(job.id, `Executor integration ${proposal.executorIntegrationId} is not active`, true)
       return true
     }
+
+    // Session connector authority is re-checked at the last possible point,
+    // immediately before the external executor is selected. This makes a
+    // disconnect a revocation: an action approved while the connector was
+    // attached cannot execute later if that session binding has disappeared.
+    // Manual/non-session investigations keep their existing governed path.
+    const investigation = this.store.getInvestigation(proposal.investigationId)
+    if (investigation?.mastraThreadId) {
+      try {
+        requireSessionConnectorBinding(this.db, integration.id, {
+          sessionId: investigation.mastraThreadId,
+          actorOid: proposal.proposedByOperatorId,
+        })
+      } catch (cause) {
+        const message = cause instanceof SessionConnectorAccessError
+          ? `${cause.code}: ${cause.message}`
+          : cause instanceof Error ? cause.message : 'Session connector authorization failed'
+        this.store.failJob(job.id, message, true)
+        return true
+      }
+    }
+
+    new AppStore(this.db)
+    const appScope = this.db.sqlite.prepare('SELECT * FROM app_action_scopes WHERE proposal_id=?').get(proposal.id) as {app_id:string; release_id:string; actor_oid:string; operation:string} | undefined
+    try {
+      if (appScope) requireAppConnector(this.db, appScope.app_id, integration.id, appScope.operation, appScope.actor_oid, appScope.release_id, true)
+      new PolicyStore(this.db).assert({operation:proposal.action,target:proposal.target,actorOid:proposal.proposedByOperatorId,sessionId:investigation?.mastraThreadId,appId:appScope?.app_id,linkId:appScope?.app_id,executorId:integration.id,connectorId:integration.id},{approved:true})
+    } catch (cause) { this.store.failJob(job.id, cause instanceof Error ? cause.message : 'Policy denied',true); return true }
+
     const executor = this.registry.get(integration.catalogId)
     // A missing executor is permanent for this process: retrying would be a
     // no-op that re-claims the job on every drain pass and spins the loop.
@@ -124,7 +156,8 @@ export class ActionWorker {
 
     this.controller = new AbortController()
     try {
-      const result = await executor.execute({ job, proposal, config: this.config, signal: this.controller.signal })
+      const dispatch = () => executor.execute({ job, proposal, config: this.config, signal: this.controller!.signal })
+      const result = await (appScope ? runWithAppScope({db:this.db,appId:appScope.app_id,releaseId:appScope.release_id,actorOid:appScope.actor_oid,operation:appScope.operation,integrationId:integration.id,approved:true},dispatch) : dispatch())
       this.store.completeJob(job.id, result, now)
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : 'Action execution failed'

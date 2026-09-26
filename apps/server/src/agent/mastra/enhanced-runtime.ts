@@ -1,3 +1,6 @@
+import { PolicyStore, PolicyError } from '../policies/store.js'
+import { evaluatePolicies } from '../policies/evaluator.js'
+import { modelPolicyProcessor, assertRuntimePolicy } from '../policies/runtime.js'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import type { PortalPrincipal } from '@papyrus/contracts'
 import { AcpPlane, AcpPlaneError, type AcpBinding, type AcpHarnessId, type PublicAcpBinding } from '../acp-plane.js'
@@ -276,7 +279,7 @@ export class EnhancedMastraRuntime extends MastraRuntime {
         const threadId = String(requestContext?.get?.('papyrusThreadId') ?? this.scope.getStore()?.threadId ?? '') || undefined
         return { ...specialists, ...(await this.dynamicAcpSubagents(threadId)) }
       },
-      inputProcessors: [connectorContextProcessor(runtime.channelState as never)],
+      inputProcessors: [modelPolicyProcessor(this.actionStore.db,'papyrus',model),connectorContextProcessor(runtime.channelState as never)],
       ...(runtime.mastra.memory ? { memory: runtime.mastra.memory } : {}),
       ...(runtime.mastra.webhooks ? { signals: [runtime.mastra.webhooks] } : {}),
       goal: runtime.goalConfig(tools),
@@ -299,6 +302,7 @@ export class EnhancedMastraRuntime extends MastraRuntime {
               context.requestContext?.set?.('papyrusTenantId', scope.actor.tenantId)
             }
             if (scope?.threadId) context.requestContext?.set?.('papyrusThreadId', scope.threadId)
+            context.requestContext?.set?.('papyrusAgentId',context.primitiveId)
             if (context.iteration > 24) return { proceed: false, rejectionReason: 'Delegation budget reached; reconcile current evidence instead of spawning more work.' }
             if (scope?.actor && scope.threadId) {
               this.workGraph.appendEvent(scope.threadId, scope.actor.oid, 'delegation.started', { primitiveId: context.primitiveId, iteration: context.iteration })
@@ -344,6 +348,7 @@ export class EnhancedMastraRuntime extends MastraRuntime {
       name,
       description,
       model: this.modelForRole(role),
+      inputProcessors: [modelPolicyProcessor(this.actionStore.db,id,this.modelForRole(role))],
       instructions,
       tools: pickTools(tools, toolNames),
       defaultOptions: { maxSteps: 20 },
@@ -359,6 +364,7 @@ export class EnhancedMastraRuntime extends MastraRuntime {
       name.includes('DeviceConsole') || ['fetchUrlPreview', 'listWorkItems', 'updateWorkItem', 'rememberSessionFact', 'verifySessionOutcome'].includes(name))
 
     return {
+      'policy-specialist': make('policy-specialist','Policy Specialist','Creates named deterministic restrictions and proposes governed changes. Cannot approve or grant capabilities.','Only use deterministic policy tools. Create restrictions on the current session. Strengthen existing restrictions. Weakening must remain a pending Governance proposal. Never claim approval or connector authority.',['listPolicies','createPolicy','strengthenPolicy','evaluatePolicy'],'operations'),
       'evidence-analyst': make('evidence-analyst', 'Evidence Analyst', 'Read-only specialist for source discovery, reconciliation, provenance, and conflicting evidence.', SPECIALIST_INSTRUCTIONS.evidence, evidenceTools, 'evidence'),
       'artifact-builder': make('artifact-builder', 'Artifact Builder', 'Specialist for producing and verifying PDFs, Office files, data exports, HTML, media, and other local deliverables.', SPECIALIST_INSTRUCTIONS.artifact, artifactTools, 'artifact'),
       'operations-planner': make('operations-planner', 'Operations Planner', 'Specialist for Links, schedules, integrations, and governed action proposals. It cannot approve or execute actions.', SPECIALIST_INSTRUCTIONS.operations, operationsTools, 'operations'),
@@ -373,7 +379,24 @@ export class EnhancedMastraRuntime extends MastraRuntime {
       if (!threadId || !actor) throw new Error('This tool requires an authenticated Papyrus session')
       return { threadId, actor }
     }
+    const originalTool = createTool
+    createTool = (options: unknown) => {
+      const descriptor = options as { id:string; execute?:(...args:any[])=>unknown }
+      if(!descriptor.execute)return originalTool(options)
+      const execute=descriptor.execute
+      return originalTool({...descriptor,execute:(input:Record<string,unknown>,context?:Record<string,unknown>)=>{
+        const {threadId,actor}=actorAndThread(context)
+        assertRuntimePolicy(this.actionStore.db,{operation:descriptor.id,tool:descriptor.id,sessionId:threadId,actorOid:actor.oid,agentId:requestContextValue(context,'papyrusAgentId')??'papyrus',modelId:this.status.model,...(descriptor.id==='loadSkill'?{skillId:input.name}:{})})
+        return execute(input,context)
+      }})
+    }
+    const policySchema = { type:'object', properties:{ name:{type:'string'}, policyId:{type:'string'}, version:{type:'integer'}, rules:{type:'array',items:{type:'object'}}, context:{type:'object'} }, additionalProperties:false }
+    const policyStore = new PolicyStore(this.actionStore.db)
     return {
+      listPolicies: createTool({id:'listPolicies',description:'List named restrictions for the current session.',inputSchema:{type:'object',properties:{}},execute:()=>{const {threadId}=actorAndThread();return policyStore.list().filter(p=>p.attachments.some(a=>a.scope==='workspace'||a.scope==='session'&&a.resourceId===threadId))}}),
+      createPolicy: createTool({id:'createPolicy',description:'Create a named deterministic restriction attached to the current session. This grants no authority.',inputSchema:policySchema,execute:(input:Record<string,unknown>)=>{const {threadId,actor}=actorAndThread();return policyStore.create(String(input.name??''),input.rules,[{scope:'session',resourceId:threadId}],actor.oid)}}),
+      strengthenPolicy: createTool({id:'strengthenPolicy',description:'Strengthen a policy owned by this session; weakening becomes a pending Governance change.',inputSchema:policySchema,execute:(input:Record<string,unknown>)=>{const {threadId,actor}=actorAndThread();const p=policyStore.get(String(input.policyId));if(p.createdBy!==actor.oid||p.attachments.some(a=>a.scope!=='session'||a.resourceId!==threadId))throw new PolicyError('POLICY_SCOPE_DENIED','Specialist may edit only policies owned by this session');return policyStore.update(p.id,Number(input.version),input.rules,p.attachments,actor.oid)}}),
+      evaluatePolicy: createTool({id:'evaluatePolicy',description:'Dry-run deterministic rules; this is not authorization.',inputSchema:policySchema,execute:(input:Record<string,unknown>)=>{actorAndThread();return evaluatePolicies(policyStore.get(String(input.policyId)).rules,(input.context??{}) as Record<string,unknown>)}}),
       createWorkItem: createTool({
         id: 'createWorkItem',
         description: 'Add a durable node to the current session work graph for substantial work. Use dependencies to represent ordering and parallelizable work explicitly.',

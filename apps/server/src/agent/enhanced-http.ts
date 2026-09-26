@@ -1,3 +1,5 @@
+import { handleAppPlane } from './apps/http.js'
+import { deriveOrigin } from './config.js'
 import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http'
 import type { EntraAppRole, PortalPrincipal } from '@papyrus/contracts'
 import type { EntraAuthService } from './entra-auth.js'
@@ -6,6 +8,7 @@ import { AcpPlaneError, isAcpHarnessId } from './acp-plane.js'
 import { linkActionAttachments, type AttachLinkExecutorInput } from './link-action-attachments.js'
 import { EnhancedMastraRuntime } from './mastra/enhanced-runtime.js'
 import { MastraRuntimeError } from './mastra/runtime.js'
+import { SessionConnectorError, SessionConnectorStore, type SessionConnectorSummary } from './session-connectors.js'
 
 interface RequestServer {
   listeners(event: 'request'): Function[]
@@ -19,7 +22,8 @@ interface RequestServer {
  * The wrapper does two things before handing ordinary session routes back to
  * the original handler: authenticate the Entra principal and bind it to an
  * AsyncLocalStorage scope consumed by EnhancedMastraRuntime. ACP/work/fact/event
- * routes terminate here because they belong to the enhanced plane.
+ * routes and the session connector plane terminate here because they belong to
+ * the enhanced, user/session-scoped runtime.
  */
 export function installEnhancedAgentPlane(
   server: RequestServer,
@@ -29,9 +33,10 @@ export function installEnhancedAgentPlane(
 ): void {
   const original = server.listeners('request')[0] as RequestListener | undefined
   if (!original) throw new Error('Papyrus HTTP server has no request listener to wrap')
+  const connectors = new SessionConnectorStore(service.db)
   server.removeAllListeners('request')
   server.on('request', (request, response) => {
-    void route(request, response, service, auth, runtime, original)
+    void route(request, response, service, auth, runtime, connectors, original)
   })
 }
 
@@ -41,10 +46,13 @@ async function route(
   service: AgentService,
   auth: EntraAuthService,
   runtime: EnhancedMastraRuntime,
+  connectors: SessionConnectorStore,
   original: RequestListener,
 ): Promise<void> {
-  const url = new URL(request.url ?? '/', 'https://papyrus.local')
+  const url = new URL(request.url ?? '/', deriveOrigin(request.headers, runtime.config.publicOrigin))
   try {
+    if (await handleAppPlane(request, response, url, service, auth, runtime)) return
+
     const attachmentRoute = matchLinkExecutorAttachment(url.pathname)
     if (attachmentRoute) {
       const actor = await principal(request, auth, service)
@@ -70,9 +78,9 @@ async function route(
 
       requireAnyRole(actor, ['Papyrus.System.Owner', 'Papyrus.Integration.Manage'])
       if (attachmentRoute.kind === 'collection' && request.method === 'POST') {
-        const body = await jsonRequest(request)
+        const value = await jsonRequest(request)
         try {
-          const attachment = attachments.attach(link, actor.oid, attachmentInput(body))
+          const attachment = attachments.attach(link, actor.oid, attachmentInput(value))
           return json(response, 201, { attachment })
         } catch (cause) {
           throw new EnhancedHttpError(400, 'INVALID_EXECUTOR_ATTACHMENT', cause instanceof Error ? cause.message : 'Invalid executor attachment')
@@ -80,10 +88,10 @@ async function route(
       }
 
       if (attachmentRoute.kind === 'resource' && attachmentRoute.attachmentId && request.method === 'PATCH') {
-        const body = await jsonRequest(request)
-        if (typeof body.enabled !== 'boolean') throw new EnhancedHttpError(400, 'INVALID_INPUT', 'enabled must be a boolean')
+        const value = await jsonRequest(request)
+        if (typeof value.enabled !== 'boolean') throw new EnhancedHttpError(400, 'INVALID_INPUT', 'enabled must be a boolean')
         try {
-          const attachment = attachments.setEnabled(link.id, attachmentRoute.attachmentId, body.enabled, actor.oid)
+          const attachment = attachments.setEnabled(link.id, attachmentRoute.attachmentId, value.enabled, actor.oid)
           return json(response, 200, { attachment })
         } catch (cause) {
           throw new EnhancedHttpError(404, 'EXECUTOR_ATTACHMENT_NOT_FOUND', cause instanceof Error ? cause.message : 'Executor attachment not found')
@@ -132,6 +140,45 @@ async function route(
           const limit = numberQuery(url.searchParams.get('limit'), 200, 1, 500)
           return json(response, 200, { sessionId: enhanced.sessionId, events: runtime.sessionEvents(enhanced.sessionId, after, limit) })
         }
+        if (enhanced.kind === 'connector-list' && request.method === 'GET') {
+          const query = (url.searchParams.get('q') ?? '').slice(0, 256)
+          return json(response, 200, {
+            sessionId: enhanced.sessionId,
+            connectors: connectors.list(service, actor, enhanced.sessionId, query),
+          })
+        }
+        if (enhanced.kind === 'connector-connect' && request.method === 'POST' && enhanced.catalogId) {
+          const input = await body(request)
+          const connector = connectors.connect(
+            service,
+            actor,
+            enhanced.sessionId,
+            enhanced.catalogId,
+            typeof input.integrationId === 'string' ? input.integrationId : undefined,
+          )
+          recordConnectorState(runtime, actor, enhanced.sessionId, connector)
+          return json(response, 200, { sessionId: enhanced.sessionId, connector })
+        }
+        if (enhanced.kind === 'connector-setup' && request.method === 'POST' && enhanced.catalogId) {
+          const connector = await connectors.setup(service, actor, enhanced.sessionId, enhanced.catalogId, await body(request))
+          recordConnectorState(runtime, actor, enhanced.sessionId, connector)
+          return json(response, connector.status === 'connected' || connector.status === 'degraded' ? 200 : 202, {
+            sessionId: enhanced.sessionId,
+            connector,
+          })
+        }
+        if (enhanced.kind === 'connector-disconnect' && request.method === 'DELETE' && enhanced.catalogId) {
+          connectors.disconnect(actor, enhanced.sessionId, enhanced.catalogId)
+          runtime.workGraph.rememberFact(
+            enhanced.sessionId,
+            actor.oid,
+            `connector.${enhanced.catalogId}`,
+            'disconnected from this session',
+            'operator',
+          )
+          runtime.workGraph.appendEvent(enhanced.sessionId, actor.oid, 'connector.disconnected', { catalogId: enhanced.catalogId })
+          return json(response, 200, { sessionId: enhanced.sessionId, catalogId: enhanced.catalogId, disconnected: true })
+        }
         return json(response, 405, { error: 'Method not allowed', code: 'METHOD_NOT_ALLOWED' })
       })
       return
@@ -158,9 +205,20 @@ async function route(
 }
 
 function matchEnhanced(pathname: string): {
-  kind: 'acp-list' | 'acp-connect' | 'acp-disconnect' | 'work' | 'facts' | 'events'
+  kind:
+    | 'acp-list'
+    | 'acp-connect'
+    | 'acp-disconnect'
+    | 'work'
+    | 'facts'
+    | 'events'
+    | 'connector-list'
+    | 'connector-connect'
+    | 'connector-setup'
+    | 'connector-disconnect'
   sessionId: string
   harnessId?: 'codex' | 'claude' | 'opencode'
+  catalogId?: string
 } | undefined {
   const acpList = pathname.match(/^\/api\/sessions\/([^/]+)\/acp$/)
   if (acpList) return { kind: 'acp-list', sessionId: decodeURIComponent(acpList[1] as string) }
@@ -173,6 +231,20 @@ function matchEnhanced(pathname: string): {
       sessionId: decodeURIComponent(acp[1] as string),
       harnessId: harness,
     }
+  }
+  const connectorList = pathname.match(/^\/api\/sessions\/([^/]+)\/connectors$/)
+  if (connectorList) return { kind: 'connector-list', sessionId: decodeURIComponent(connectorList[1] as string) }
+  const connectorAction = pathname.match(/^\/api\/sessions\/([^/]+)\/connectors\/([^/]+)\/(connect|setup)$/)
+  if (connectorAction) return {
+    kind: connectorAction[3] === 'connect' ? 'connector-connect' : 'connector-setup',
+    sessionId: decodeURIComponent(connectorAction[1] as string),
+    catalogId: decodeURIComponent(connectorAction[2] as string),
+  }
+  const connectorResource = pathname.match(/^\/api\/sessions\/([^/]+)\/connectors\/([^/]+)$/)
+  if (connectorResource) return {
+    kind: 'connector-disconnect',
+    sessionId: decodeURIComponent(connectorResource[1] as string),
+    catalogId: decodeURIComponent(connectorResource[2] as string),
   }
   const work = pathname.match(/^\/api\/sessions\/([^/]+)\/(work|facts|events)$/)
   if (work) return { kind: work[2] as 'work' | 'facts' | 'events', sessionId: decodeURIComponent(work[1] as string) }
@@ -211,15 +283,15 @@ function requireAnyRole(principalValue: PortalPrincipal, roles: EntraAppRole[]):
   throw new EnhancedHttpError(403, 'ROLE_REQUIRED', `Requires one of: ${roles.join(', ')}`)
 }
 
-function attachmentInput(body: Record<string, unknown>): AttachLinkExecutorInput {
-  const executorIntegrationId = text(body.executorIntegrationId, 'executorIntegrationId', 128)
-  const action = text(body.action, 'action', 256)
-  const target = text(body.target, 'target', 1024)
-  const invocationMode = body.invocationMode === undefined ? undefined : text(body.invocationMode, 'invocationMode', 32) as AttachLinkExecutorInput['invocationMode']
-  const approvalMode = body.approvalMode === undefined ? undefined : text(body.approvalMode, 'approvalMode', 32) as AttachLinkExecutorInput['approvalMode']
-  const maxRetries = body.maxRetries === undefined ? undefined : Number(body.maxRetries)
-  const inputMapping = body.inputMapping === undefined ? undefined : stringMap(body.inputMapping, 'inputMapping')
-  const conditionRecord = body.condition === undefined ? undefined : record(body.condition, 'condition')
+function attachmentInput(value: Record<string, unknown>): AttachLinkExecutorInput {
+  const executorIntegrationId = text(value.executorIntegrationId, 'executorIntegrationId', 128)
+  const action = text(value.action, 'action', 256)
+  const target = text(value.target, 'target', 1024)
+  const invocationMode = value.invocationMode === undefined ? undefined : text(value.invocationMode, 'invocationMode', 32) as AttachLinkExecutorInput['invocationMode']
+  const approvalMode = value.approvalMode === undefined ? undefined : text(value.approvalMode, 'approvalMode', 32) as AttachLinkExecutorInput['approvalMode']
+  const maxRetries = value.maxRetries === undefined ? undefined : Number(value.maxRetries)
+  const inputMapping = value.inputMapping === undefined ? undefined : stringMap(value.inputMapping, 'inputMapping')
+  const conditionRecord = value.condition === undefined ? undefined : record(value.condition, 'condition')
   const condition = conditionRecord ? {
     path: text(conditionRecord.path, 'condition.path', 512),
     equals: scalar(conditionRecord.equals, 'condition.equals'),
@@ -274,6 +346,42 @@ function scalar(value: unknown, name: string): string | number | boolean | null 
   throw new EnhancedHttpError(400, 'INVALID_INPUT', `${name} must be a string, number, boolean, or null`)
 }
 
+async function body(request: IncomingMessage, maximumBytes = 1_048_576): Promise<Record<string, unknown>> {
+  const chunks: Buffer[] = []
+  let size = 0
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+    size += buffer.length
+    if (size > maximumBytes) throw new EnhancedHttpError(413, 'BODY_TOO_LARGE', 'Request body exceeds 1 MiB')
+    chunks.push(buffer)
+  }
+  if (!chunks.length) return {}
+  try {
+    const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('object required')
+    return parsed as Record<string, unknown>
+  } catch {
+    throw new EnhancedHttpError(400, 'INVALID_JSON', 'Request body must be a JSON object')
+  }
+}
+
+function recordConnectorState(runtime: EnhancedMastraRuntime, actor: PortalPrincipal, sessionId: string, connector: SessionConnectorSummary): void {
+  const details = [
+    connector.status,
+    connector.integrationId ? `integration=${connector.integrationId}` : '',
+    connector.integrationState ? `state=${connector.integrationState}` : '',
+    connector.health ? `health=${connector.health}` : '',
+    connector.capabilities.length ? `capabilities=${connector.capabilities.join(', ')}` : '',
+  ].filter(Boolean).join('; ')
+  runtime.workGraph.rememberFact(sessionId, actor.oid, `connector.${connector.catalogId}`, details, 'operator')
+  runtime.workGraph.appendEvent(sessionId, actor.oid, 'connector.connection_changed', {
+    catalogId: connector.catalogId,
+    integrationId: connector.integrationId ?? null,
+    status: connector.status,
+    integrationState: connector.integrationState ?? null,
+  })
+}
+
 function invoke(listener: RequestListener, request: IncomingMessage, response: ServerResponse): Promise<void> {
   try {
     listener(request, response)
@@ -300,7 +408,7 @@ function numberQuery(value: string | null, fallback: number, min: number, max: n
 }
 
 function httpFailure(cause: unknown): { status: number; code: string; message: string } {
-  if (cause instanceof EnhancedHttpError || cause instanceof MastraRuntimeError) {
+  if (cause instanceof EnhancedHttpError || cause instanceof MastraRuntimeError || cause instanceof SessionConnectorError) {
     return { status: cause.status, code: cause.code, message: cause.message }
   }
   if (cause instanceof AcpPlaneError) {

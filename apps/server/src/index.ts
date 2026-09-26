@@ -17,7 +17,7 @@ import { KitesurfLinkValidator } from './agent/link-preview.js'
 import { LINK_PUBLISHER_CATALOG_ID } from './agent/catalog.js'
 import { ExchangeEmailDriver } from './agent/drivers/exchange-email-driver.js'
 import { HttpMicrosoftGraphClient } from './agent/graph-client.js'
-import { EnhancedMastraRuntime } from './agent/mastra/enhanced-runtime.js'
+import { SessionScopedMastraRuntime } from './agent/mastra/session-scoped-runtime.js'
 import { ApplianceConsoleExecutor } from './agent/executors/appliance-console-executor.js'
 import { FirewallExecutor, UnconfiguredConnectorCredentialResolver } from './agent/executors/firewall-executor.js'
 import { UnconfiguredDeviceCredentialResolver } from './agent/browser/credential.js'
@@ -74,7 +74,7 @@ async function startFull(config: AgentConfig): Promise<void> {
   const worker = new SyncWorker(database, terrain, connectors)
   const actionWorker = new ActionWorker(database, actionStore, executorRegistry, config)
   const service = new AgentService(database, config, terrain, worker, actionStore, executorRegistry, actionWorker)
-  const mastraRuntime = new EnhancedMastraRuntime(config, actionStore, terrain, service)
+  const mastraRuntime = new SessionScopedMastraRuntime(config, actionStore, terrain, service)
   await mastraRuntime.start()
   const server = createAgentServer(config, service, auth, mastraRuntime)
   installEnhancedAgentPlane(server, service, auth, mastraRuntime)

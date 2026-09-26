@@ -685,7 +685,7 @@ export interface AgentActionReceipt {
   executedAt: string
 }
 
-export const LINK_TYPES = ['webpage', 'api', 'webhook'] as const
+export const LINK_TYPES = ['webpage', 'api', 'webhook', 'app'] as const
 export type LinkType = (typeof LINK_TYPES)[number]
 export type LinkState = 'live' | 'disabled' | 'failed'
 
@@ -835,3 +835,18 @@ export interface ConnectorChannel {
 export type ChannelValidation =
   | { ok: true; id: string; value: Record<string, unknown> }
   | { ok: false; id: string; reason: string }
+
+/** Policies only restrict existing authority; an allow rule is never a grant. */
+export type PolicyRule =
+  | { kind: 'allow' | 'deny'; field: string; values: readonly string[] }
+  | { kind: 'limit'; field: string; maximum: number }
+  | { kind: 'approval' }
+export const POLICY_SCOPES = ['workspace', 'app', 'session', 'connector', 'executor', 'skill', 'agent', 'model', 'link'] as const
+export type PolicyScope = typeof POLICY_SCOPES[number]
+export interface PolicyAttachment { scope: PolicyScope; resourceId: string }
+export interface NamedPolicy { id: string; name: string; version: number; rules: PolicyRule[]; attachments: PolicyAttachment[]; createdBy: string }
+export interface PolicyDecision { allowed: boolean; approvalRequired: boolean; reasons: string[] }
+export interface AppManifest { formatVersion: 1; entry: string; auth: 'inherit-entra'; preset: 'react'; title: string }
+export interface HostedApp { id: string; name: string; ownerOid: string; sessionId: string; projectRoot: string; revision: string; liveReleaseId?: string }
+export interface AppRelease { id: string; appId: string; sourceDigest: string; artifactDigest: string; html: string; createdAt: string }
+export interface AppConnectorGrant { appId: string; integrationId: string; operations: string[]; approvedBy: string; version: number }

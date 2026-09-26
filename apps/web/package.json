@@ -16,6 +16,7 @@
     "@papyrus/contracts": "workspace:*",
     "@vitejs/plugin-react": "6.0.5",
     "ai": "^7.0.89",
+    "monaco-editor": "^0.57.0",
     "papyrus-extension-sdk": "workspace:*",
     "papyrus-gnss": "workspace:*",
     "papyrus-viewer-3d": "workspace:*",

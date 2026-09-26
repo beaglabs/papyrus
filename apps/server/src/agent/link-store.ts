@@ -1,3 +1,4 @@
+import { migrateAppLinkType } from './apps/migration.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { posix } from 'node:path'
 import type { AgentLink, IntegrationConfiguration, LinkInbound, LinkType } from '@papyrus/contracts'
@@ -117,6 +118,7 @@ export class LinkStore {
   }
 
   async prepareDraft(input: PrepareLinkInput): Promise<LinkDraftManifest> {
+    if (input.type === 'app') throw new Error('App Links require a project manifest and approved app build')
     if (!LINK_TYPES.includes(input.type)) throw new Error('Link type must be webpage, api, or webhook')
     const name = cleanName(input.name)
     const slug = normalizeSlug(input.slug || name)
@@ -215,6 +217,7 @@ export class LinkStore {
 
   async publishFromManifest(manifestPath: string, actorOid: string): Promise<AgentLink> {
     const manifest = await this.readManifest(manifestPath)
+    if (manifest.type === 'app') throw new Error('App Links must use the app publication boundary')
     const existing = this.get(manifest.draftId)
     if (existing) return existing
 
@@ -496,6 +499,7 @@ export class LinkStore {
     this.ensureColumn('agent_links', 'logo_path', 'TEXT')
     this.ensureColumn('agent_links', 'logo_media_type', 'TEXT')
     this.ensureColumn('agent_links', 'logo_text', 'TEXT')
+    migrateAppLinkType(this.db)
   }
 
   private ensureColumn(table: string, column: string, definition: string): void {

@@ -121,7 +121,7 @@ export function LinksView({ validation, canManageSchedules = false }: { validati
   const visibleCount = visibleLinks.length + visibleSchedules.length
   const total = links.length + schedules.length
 
-  return <div className="links-view">
+  return <div className="links-view"><a href="/portal/apps">Build and manage hosted App Links →</a>
     <header className="links-head">
       <div className="links-title"><h2>Links</h2><span>{total}</span></div>
       <Input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search links…" aria-label="Search Links" />
@@ -245,6 +245,7 @@ function LinkCard({ link }: { link: AgentLink }) {
 
   return <article className="link-card">
     <div className="link-preview">
+      {link.type === 'app' && <p>Entra-authenticated app · approved production build</p>}
       {link.type === 'webpage' && <iframe src={link.publicPath} title={`${link.name} preview`} sandbox="" loading="lazy" />}
       {link.type === 'api' && <ApiPreview url={link.publicPath} />}
       {link.type === 'webhook' && <WebhookPreview link={link} />}
@@ -259,7 +260,7 @@ function LinkCard({ link }: { link: AgentLink }) {
         </button>
       </div>
       {showInbounds && <LinkInbounds link={link} />}
-      <div className="link-card-foot"><span>{link.type === 'webhook' && link.threadId ? `Session · ${shortId(link.threadId)}` : link.workflowId ? `Workflow · ${link.workflowId}` : link.scheduleId ? `Schedule · ${link.scheduleId}` : 'General'}</span><span>{link.type === 'webhook' ? 'Mastra Webhook Signal' : link.validationProvider ? `Validated · ${link.validationProvider}` : 'Approved snapshot'}</span><span className="link-card-foot-actions"><a className="link-snapshot" href={linkContentUrl(link.id, true)} title="Download the approved snapshot this Link serves">Snapshot ↓</a><Button variant="ghost" onClick={() => void copy()} aria-label={`Copy ${link.name} Link`}>{copied ? 'Copied ✓' : 'Copy link'}</Button></span></div>
+      <div className="link-card-foot"><span>{link.type === 'webhook' && link.threadId ? `Session · ${shortId(link.threadId)}` : link.workflowId ? `Workflow · ${link.workflowId}` : link.scheduleId ? `Schedule · ${link.scheduleId}` : 'General'}</span><span>{link.type === 'webhook' ? 'Mastra Webhook Signal' : link.validationProvider ? `Validated · ${link.validationProvider}` : 'Approved snapshot'}</span><span className="link-card-foot-actions">{link.type !== 'app' && <a className="link-snapshot" href={linkContentUrl(link.id, true)} title="Download the approved snapshot this Link serves">Snapshot ↓</a>}<Button variant="ghost" onClick={() => void copy()} aria-label={`Copy ${link.name} Link`}>{copied ? 'Copied ✓' : 'Copy link'}</Button></span></div>
     </div>
   </article>
 }

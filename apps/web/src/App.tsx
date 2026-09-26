@@ -1,3 +1,5 @@
+import { HostedAppsView } from './AppBuilder.js'
+import { PoliciesView, AppGovernance } from './Policies.js'
 import { useCallback, useEffect, useState } from 'react'
 import { CLASSIFICATION_BANNER_FEATURE, CLASSIFICATION_BANNERS, CLASSIFICATION_LEVELS, type ClassificationLevel, type LicenseStatus } from '@papyrus/contracts'
 import type { PortalData, PublicConfig } from './api.js'
@@ -14,11 +16,11 @@ import { Alert, Avatar, Badge, Button, Card, DropdownMenu, DropdownMenuItem, Dro
 import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarRail, SidebarTrigger } from './components/ui/sidebar.js'
 import papyrusLogo from '../../../deploy/marketplace/logos/papyrus-small-48x48.png'
 
-export type PortalView = 'agent' | 'models' | 'links' | 'library' | 'governance' | 'access'
+export type PortalView = 'agent' | 'models' | 'links' | 'library' | 'governance' | 'access' | 'apps' | 'policies'
 type AppState = { phase: 'loading' } | { phase: 'bootstrap' } | { phase: 'signed-out'; config: PublicConfig } | { phase: 'ready'; data: PortalData } | { phase: 'error'; message: string }
 
 const ROUTES: Record<PortalView, string> = {
-  agent: '/portal', models: '/portal/models', links: '/portal/links', library: '/portal/library', governance: '/portal/governance', access: '/portal/access',
+  apps: '/portal/apps', policies: '/portal/policies', agent: '/portal', models: '/portal/models', links: '/portal/links', library: '/portal/library', governance: '/portal/governance', access: '/portal/access',
 }
 
 function viewFromPath(): PortalView {
@@ -233,9 +235,11 @@ export function App() {
             : <EmptyAgent onCreate={() => void newSession()} />}
         </div>
         {view === 'models' && <ModelsView profiles={data.models} onAskAgent={(prompt) => navigate('agent', { prompt, session: selectedSession?.id })} onChanged={refresh} canManage={data.me.roles.includes('Papyrus.System.Owner') || data.me.roles.includes('Papyrus.Integration.Manage')} />}
+        {view === 'apps' && <HostedAppsView />}
+        {view === 'policies' && <PoliciesView actor={data.me} />}
         {view === 'links' && <LinksView {...(data.agent.links?.validation ? { validation: data.agent.links.validation } : {})} canManageSchedules={data.me.roles.includes('Papyrus.System.Owner') || data.me.roles.includes('Papyrus.Integration.Manage')} />}
         {view === 'library' && <LibraryView />}
-        {view === 'governance' && <GovernanceView data={data} />}
+        {view === 'governance' && <><GovernanceView data={data} />{(data.me.roles.includes('Papyrus.System.Owner') || data.me.roles.includes('Papyrus.Security.Manage') && data.me.roles.includes('Papyrus.Action.Approve')) && <AppGovernance />}</>}
         {view === 'access' && <AccessView me={data.me} />}
       </SidebarInset>
     </SidebarProvider>
@@ -316,6 +320,7 @@ export function RuntimeStatusStrip({ status }: { status: AgentStatus; sessionId?
 export function PrimaryNavigation({ view, onNavigate }: { view: PortalView; onNavigate: (view: PortalView) => void }) {
   const items: Array<{ view: PortalView; icon: string; label: string }> = [
     { view: 'agent', icon: '✦', label: 'Agent' }, { view: 'models', icon: '◎', label: 'Models' },
+    { view: 'apps', icon: '▣', label: 'Apps' }, { view: 'policies', icon: '◧', label: 'Policies' },
     { view: 'links', icon: '◎', label: 'Links' }, { view: 'library', icon: '▤', label: 'Library' },
     { view: 'governance', icon: '◇', label: 'Governance' }, { view: 'access', icon: '◈', label: 'Access' },
   ]
@@ -324,7 +329,7 @@ export function PrimaryNavigation({ view, onNavigate }: { view: PortalView; onNa
 
 function PortalHeader({ view, data, sessionId }: { view: PortalView; data: PortalData; sessionId?: string | undefined }) {
   const copy: Record<PortalView, [string, string]> = {
-    agent: ['MASTRA RUNTIME', 'Agent'], models: ['MODEL GATEWAYS', 'Models'],
+    apps: ['HOSTED APP LINKS', 'Apps'], policies: ['DETERMINISTIC RESTRICTIONS', 'Policies'], agent: ['MASTRA RUNTIME', 'Agent'], models: ['MODEL GATEWAYS', 'Models'],
     links: ['AGENT-CREATED PUBLIC BOUNDARIES', 'Links'], library: ['AGENTFS FILE AUTHORITY', 'Library'], governance: ['IDENTITY, LICENSING AND AUDIT', 'Governance'],
     access: ['IDENTITY AND ENTITLEMENTS', 'Access'],
   }

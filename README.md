@@ -70,6 +70,8 @@ The web product is rooted at `/portal`:
 | `/portal` | Durable agent sessions and AI SDK UI tool cards |
 | `/portal/models` | Customer model gateways and the agent-guided model configuration form |
 | `/portal/links` | Agent-created public boundaries and their validation state |
+| `/portal/apps` | App Link builder with agent prompts, Monaco source editor, and live preview |
+| `/portal/policies` | Named policies, attachments, and Governance approvals |
 | `/portal/library` | AgentFS file authority |
 | `/portal/governance` | Entra roles, licensing, and action boundary |
 
@@ -143,6 +145,7 @@ pnpm start
 export PAPYRUS_MODE=persistent
 export PAPYRUS_PROFILE=gcch             # gcc | gcch | dod | restricted | disconnected
 export PAPYRUS_PUBLIC_ORIGIN=https://papyrus.customer.example
+export PAPYRUS_APP_ORIGIN=https://apps.customer.example
 export PAPYRUS_PORTAL_SECRET="..."
 export PAPYRUS_ENTRA_TENANT_ID="..."
 export PAPYRUS_ENTRA_CLIENT_ID="..."
@@ -155,6 +158,8 @@ export PAPYRUS_LICENSE_AUTHORITIES='{ "beag-root": "-----BEGIN PUBLIC KEY-----..
 ```
 
 Cloud defaults are inferred from the deployment profile, but an explicit value is recommended in production.
+
+App Links use the existing Entra sign-in by default. `PAPYRUS_APP_ORIGIN` must be a separate HTTPS origin routed to the same daemon; it serves isolated app content while `/a/<app-id>` on the portal origin handles sign-in and brokers approved connector calls. See [hosted app deployment](docs/deployment.md#hosted-app-links).
 
 ## Runtime API
 
@@ -180,6 +185,15 @@ Authenticated portal clients use:
 **Terrain**
 
 - `GET /api/terrain` — read-only entity/relationship snapshot
+
+**Hosted apps and policies**
+
+- `GET|POST /api/apps` — list or create an App Link project
+- `GET|PUT /api/apps/:id/files` — read or edit its AgentFS project
+- `POST /api/apps/:id/build|frame|publish` — build a review candidate, open a preview, or request publication
+- `POST|DELETE /api/apps/:id/grants` — request or revoke a durable runtime connector grant
+- `GET|POST /api/policies`, `PUT /api/policies/:id` — named deterministic policies
+- `GET /api/governed-changes`, `POST /api/governed-changes/:id/approve` — Governance review of publication, grants, and non-monotone policy changes
 
 There is no portal HTTP API for plugins, schedules, or integrations; those paths return 404.
 

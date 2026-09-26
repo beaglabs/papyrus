@@ -82,6 +82,16 @@ export PAPYRUS_MODEL_CREDENTIAL_REF='env://OPENAI_API_KEY'
 
 Without a model, Mastra storage, session history, workflows, and connector state can still start while work that requires a model remains unavailable. The Models surface stores gateway metadata and customer-owned credential references; it does not require Papyrus to persist raw model secrets.
 
+## Hosted App Links
+
+Set `PAPYRUS_APP_ORIGIN` to a dedicated HTTPS origin such as `https://apps.customer.example` and route it to the same daemon as `PAPYRUS_PUBLIC_ORIGIN`. Use separate hostnames, TLS certificates, and host-only cookies. The app origin accepts only one-use, short-lived content frame exchanges; it does not serve portal API routes or receive portal cookies. The portal origin hosts `/a/<app-id>`, performs the ordinary Entra sign-in, and embeds app content in a script-only sandbox. Keep the content origin outside the portal's service-worker scope and do not share a parent-domain cookie with it. Reverse proxies must preserve the validated request host and scheme. Portal and app origins must both be reachable by the browser.
+
+An App Link starts as an AgentFS project directory containing `papyrus.app.json` and React source. Preview builds compile pinned dependencies in the isolated workspace with network denied. Editing a file or prompting the agent updates the preview candidate; it does not change the published release. Publication is a Governance-reviewed pointer to an immutable, hash-checked build artifact. The release content and its source digest are backed by the daemon database and must be included in backups.
+
+Authoring-session connector bindings are temporary capabilities for the app's agent and preview. Production app code uses separately approved, operation-specific grants. Revocation takes effect at the low-level connector and action-worker dispatch boundaries. No raw connector secrets are stored in app files, manifests, releases, grants, or frame state. App code calls the brokered `window.papyrus.request()` API rather than receiving credentials. Write actions enter the existing proposal and approval ledger and are checked again at execution.
+
+Named policies attach to the workspace, app, session, connector, executor, skill, agent, model, or Link. Structured rules evaluate deterministically at model, tool, connector, app, and action boundaries. A policy specialist may create or strengthen rules; changes that weaken an existing rule or extend authority remain pending until a Governance principal approves them. Keep the policy and governed-change tables in the database backup and audit retention plan.
+
 Storage is LibSQL, split by lifecycle rather than kept in one file: `<data-dir>/mastra.db` holds session threads and messages, `<data-dir>/jobs.db` holds schedules and background jobs, and `<data-dir>/observability.db` holds trace spans and logs. All belong in the deployment backup plan.
 
 ## Document toolchain

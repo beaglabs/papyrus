@@ -1,3 +1,5 @@
+import { handleAppPlane } from './apps/http.js'
+import { deriveOrigin } from './config.js'
 import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http'
 import type { PortalPrincipal } from '@papyrus/contracts'
 import type { EntraAuthService } from './entra-auth.js'
@@ -46,8 +48,9 @@ async function route(
   connectors: SessionConnectorStore,
   original: RequestListener,
 ): Promise<void> {
-  const url = new URL(request.url ?? '/', 'https://papyrus.local')
+  const url = new URL(request.url ?? '/', deriveOrigin(request.headers, runtime.config.publicOrigin))
   try {
+    if (await handleAppPlane(request,response,url,service,auth,runtime)) return
     const enhanced = matchEnhanced(url.pathname)
     if (enhanced) {
       const actor = await principal(request, auth, service)

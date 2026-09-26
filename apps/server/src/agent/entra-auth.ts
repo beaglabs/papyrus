@@ -169,7 +169,7 @@ export class EntraAuthService {
     if (!this.config.entra) throw new EntraAuthError('ENTRA_NOT_CONFIGURED', 'Microsoft Entra ID is not configured')
     this.prune()
     if (this.pending.size >= 256) throw new EntraAuthError('TOO_MANY_LOGINS', 'Too many pending Entra login requests')
-    const safeReturnTo = returnTo.startsWith('/portal') && !returnTo.startsWith('//') ? returnTo : '/portal'
+    const safeReturnTo = (returnTo.startsWith('/portal') || /^\/a\/[a-f0-9-]{36}$/.test(returnTo)) && !returnTo.startsWith('//') ? returnTo : '/portal'
     const discovery = await this.discovery()
     const state = encoded(randomBytes(32))
     const nonce = encoded(randomBytes(32))

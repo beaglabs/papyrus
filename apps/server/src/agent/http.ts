@@ -25,7 +25,15 @@ function boundedInteger(value: string | null, minimum: number, maximum: number, 
 
 function securityHeaders(response: ServerResponse): void {
   response.setHeader('cache-control', 'no-store')
-  response.setHeader('content-security-policy', "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self'; worker-src 'self' blob:; frame-ancestors 'self' https://*.teams.microsoft.com https://*.cloud.microsoft")
+  let appFrameSource = "'self'"
+  try {
+    const configured = process.env.PAPYRUS_APP_ORIGIN
+    if (configured) {
+      const origin = new URL(configured)
+      if (origin.protocol === 'https:' && !origin.username && !origin.password && origin.pathname === '/' && !origin.search && !origin.hash) appFrameSource = origin.origin
+    }
+  } catch { /* Invalid configuration cannot enter a response header. */ }
+  response.setHeader('content-security-policy', `default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self'; worker-src 'self' blob:; frame-src ${appFrameSource}; form-action 'self' ${appFrameSource}; frame-ancestors 'self' https://*.teams.microsoft.com https://*.cloud.microsoft`)
   response.setHeader('cross-origin-opener-policy', 'same-origin-allow-popups')
   response.setHeader('referrer-policy', 'no-referrer')
   response.setHeader('x-content-type-options', 'nosniff')

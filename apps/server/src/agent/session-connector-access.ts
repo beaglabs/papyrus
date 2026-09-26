@@ -1,3 +1,5 @@
+import { currentAppScope, requireAppConnector } from './apps/store.js'
+import { PolicyStore } from './policies/store.js'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import type { IntegrationConfiguration } from '@papyrus/contracts'
 import { LINK_PUBLISHER_CATALOG_ID } from './catalog.js'
@@ -51,6 +53,9 @@ export function currentSessionConnectorScope(): SessionConnectorExecutionScope |
 }
 
 export function requireCurrentSessionConnectorBinding(integrationId: string): IntegrationConfiguration {
+  const app = currentAppScope()
+  if (app?.integrationId && app.integrationId !== integrationId) throw new SessionConnectorAccessError(403, 'APP_INTEGRATION_MISMATCH', 'Connector does not match the authorized app invocation')
+  if (app) return requireAppConnector(app.db, app.appId, integrationId, app.operation, app.actorOid, app.releaseId, app.approved)
   const current = executionScope.getStore()
   if (!current) {
     throw new SessionConnectorAccessError(
@@ -109,6 +114,7 @@ export function requireSessionConnectorBinding(
       `${integration.name} is not connected to this Agent session`,
     )
   }
+  new PolicyStore(db).assert({ sessionId, actorOid: scope.actorOid, connectorId: integrationId, operation: 'connector.dispatch' })
   return integration
 }
 

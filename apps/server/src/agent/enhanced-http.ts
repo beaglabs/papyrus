@@ -1,8 +1,9 @@
 import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http'
-import type { PortalPrincipal } from '@papyrus/contracts'
+import type { EntraAppRole, PortalPrincipal } from '@papyrus/contracts'
 import type { EntraAuthService } from './entra-auth.js'
 import type { AgentService } from './service.js'
 import { AcpPlaneError, isAcpHarnessId } from './acp-plane.js'
+import { linkActionAttachments, type AttachLinkExecutorInput } from './link-action-attachments.js'
 import { EnhancedMastraRuntime } from './mastra/enhanced-runtime.js'
 import { MastraRuntimeError } from './mastra/runtime.js'
 
@@ -44,6 +45,65 @@ async function route(
 ): Promise<void> {
   const url = new URL(request.url ?? '/', 'https://papyrus.local')
   try {
+    const attachmentRoute = matchLinkExecutorAttachment(url.pathname)
+    if (attachmentRoute) {
+      const actor = await principal(request, auth, service)
+      const link = runtime.links.get(attachmentRoute.linkId)
+      if (!link) throw new EnhancedHttpError(404, 'LINK_NOT_FOUND', 'Link not found')
+      if (link.type !== 'webhook') throw new EnhancedHttpError(409, 'LINK_NOT_WEBHOOK', 'Action Executors can only be attached to Webhook Links')
+      const attachments = linkActionAttachments(runtime.actionStore.db)
+
+      if (attachmentRoute.kind === 'collection' && request.method === 'GET') {
+        const executors = runtime.actionStore.db.listIntegrations()
+          .filter((integration) => integration.state === 'active' && (integration.integrationClass === 'action_executor' || integration.authority === 'controlled_actions'))
+          .map((integration) => ({
+            id: integration.id,
+            name: integration.name,
+            catalogId: integration.catalogId,
+            authority: integration.authority,
+            risk: integration.risk,
+            state: integration.state,
+            health: integration.health,
+          }))
+        return json(response, 200, { link, attachments: attachments.list(link.id), executors })
+      }
+
+      requireAnyRole(actor, ['Papyrus.System.Owner', 'Papyrus.Integration.Manage'])
+      if (attachmentRoute.kind === 'collection' && request.method === 'POST') {
+        const body = await jsonRequest(request)
+        try {
+          const attachment = attachments.attach(link, actor.oid, attachmentInput(body))
+          return json(response, 201, { attachment })
+        } catch (cause) {
+          throw new EnhancedHttpError(400, 'INVALID_EXECUTOR_ATTACHMENT', cause instanceof Error ? cause.message : 'Invalid executor attachment')
+        }
+      }
+
+      if (attachmentRoute.kind === 'resource' && attachmentRoute.attachmentId && request.method === 'PATCH') {
+        const body = await jsonRequest(request)
+        if (typeof body.enabled !== 'boolean') throw new EnhancedHttpError(400, 'INVALID_INPUT', 'enabled must be a boolean')
+        try {
+          const attachment = attachments.setEnabled(link.id, attachmentRoute.attachmentId, body.enabled, actor.oid)
+          return json(response, 200, { attachment })
+        } catch (cause) {
+          throw new EnhancedHttpError(404, 'EXECUTOR_ATTACHMENT_NOT_FOUND', cause instanceof Error ? cause.message : 'Executor attachment not found')
+        }
+      }
+
+      if (attachmentRoute.kind === 'resource' && attachmentRoute.attachmentId && request.method === 'DELETE') {
+        try {
+          attachments.remove(link.id, attachmentRoute.attachmentId, actor.oid)
+          response.writeHead(204)
+          response.end()
+          return
+        } catch (cause) {
+          throw new EnhancedHttpError(404, 'EXECUTOR_ATTACHMENT_NOT_FOUND', cause instanceof Error ? cause.message : 'Executor attachment not found')
+        }
+      }
+
+      return json(response, 405, { error: 'Method not allowed', code: 'METHOD_NOT_ALLOWED' })
+    }
+
     const enhanced = matchEnhanced(url.pathname)
     if (enhanced) {
       const actor = await principal(request, auth, service)
@@ -119,6 +179,22 @@ function matchEnhanced(pathname: string): {
   return undefined
 }
 
+function matchLinkExecutorAttachment(pathname: string): {
+  kind: 'collection' | 'resource'
+  linkId: string
+  attachmentId?: string
+} | undefined {
+  const collection = pathname.match(/^\/api\/links\/([^/]+)\/executors$/)
+  if (collection) return { kind: 'collection', linkId: decodeURIComponent(collection[1] as string) }
+  const resource = pathname.match(/^\/api\/links\/([^/]+)\/executors\/([^/]+)$/)
+  if (resource) return {
+    kind: 'resource',
+    linkId: decodeURIComponent(resource[1] as string),
+    attachmentId: decodeURIComponent(resource[2] as string),
+  }
+  return undefined
+}
+
 function isSessionScopedOriginalRoute(pathname: string): boolean {
   return pathname === '/api/sessions' || pathname.startsWith('/api/sessions/') || pathname === '/api/agent/chat' || pathname === '/api/agent/status'
 }
@@ -128,6 +204,74 @@ async function principal(request: IncomingMessage, auth: EntraAuthService, servi
   if (!value) throw new EnhancedHttpError(401, 'ENTRA_AUTHENTICATION_REQUIRED', 'Microsoft Entra authentication is required')
   service.requirePortalAccess(value)
   return value
+}
+
+function requireAnyRole(principalValue: PortalPrincipal, roles: EntraAppRole[]): void {
+  if (roles.some((role) => principalValue.roles.includes(role))) return
+  throw new EnhancedHttpError(403, 'ROLE_REQUIRED', `Requires one of: ${roles.join(', ')}`)
+}
+
+function attachmentInput(body: Record<string, unknown>): AttachLinkExecutorInput {
+  const executorIntegrationId = text(body.executorIntegrationId, 'executorIntegrationId', 128)
+  const action = text(body.action, 'action', 256)
+  const target = text(body.target, 'target', 1024)
+  const invocationMode = body.invocationMode === undefined ? undefined : text(body.invocationMode, 'invocationMode', 32) as AttachLinkExecutorInput['invocationMode']
+  const approvalMode = body.approvalMode === undefined ? undefined : text(body.approvalMode, 'approvalMode', 32) as AttachLinkExecutorInput['approvalMode']
+  const maxRetries = body.maxRetries === undefined ? undefined : Number(body.maxRetries)
+  const inputMapping = body.inputMapping === undefined ? undefined : stringMap(body.inputMapping, 'inputMapping')
+  const conditionRecord = body.condition === undefined ? undefined : record(body.condition, 'condition')
+  const condition = conditionRecord ? {
+    path: text(conditionRecord.path, 'condition.path', 512),
+    equals: scalar(conditionRecord.equals, 'condition.equals'),
+  } : undefined
+  return {
+    executorIntegrationId, action, target,
+    ...(invocationMode ? { invocationMode } : {}),
+    ...(approvalMode ? { approvalMode } : {}),
+    ...(Number.isFinite(maxRetries) ? { maxRetries } : {}),
+    ...(inputMapping ? { inputMapping } : {}),
+    ...(condition ? { condition } : {}),
+  }
+}
+
+async function jsonRequest(request: IncomingMessage): Promise<Record<string, unknown>> {
+  const chunks: Buffer[] = []
+  let size = 0
+  for await (const chunk of request) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+    size += bytes.length
+    if (size > 64 * 1024) throw new EnhancedHttpError(413, 'REQUEST_TOO_LARGE', 'Request body exceeds 64 KiB')
+    chunks.push(bytes)
+  }
+  if (!chunks.length) return {}
+  let value: unknown
+  try { value = JSON.parse(Buffer.concat(chunks).toString('utf8')) } catch { throw new EnhancedHttpError(400, 'INVALID_JSON', 'Request body must be valid JSON') }
+  return record(value, 'body')
+}
+
+function record(value: unknown, name: string): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new EnhancedHttpError(400, 'INVALID_INPUT', `${name} must be an object`)
+  return value as Record<string, unknown>
+}
+
+function stringMap(value: unknown, name: string): Record<string, string> {
+  const source = record(value, name)
+  const result: Record<string, string> = {}
+  for (const [key, item] of Object.entries(source)) {
+    if (typeof item !== 'string') throw new EnhancedHttpError(400, 'INVALID_INPUT', `${name}.${key} must be a string`)
+    result[key] = item
+  }
+  return result
+}
+
+function text(value: unknown, name: string, max: number): string {
+  if (typeof value !== 'string' || !value.trim() || value.trim().length > max) throw new EnhancedHttpError(400, 'INVALID_INPUT', `${name} is required and must be at most ${max} characters`)
+  return value.trim()
+}
+
+function scalar(value: unknown, name: string): string | number | boolean | null {
+  if (value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value
+  throw new EnhancedHttpError(400, 'INVALID_INPUT', `${name} must be a string, number, boolean, or null`)
 }
 
 function invoke(listener: RequestListener, request: IncomingMessage, response: ServerResponse): Promise<void> {

@@ -21,26 +21,28 @@ const text=(v:unknown)=>typeof v==='string'?v:''
 const scriptJson=(v:unknown)=>JSON.stringify(v).replace(/</g,'\\u003c')
 function html(response:ServerResponse,value:string,csp:string):true {response.setHeader('cache-control','no-store');response.setHeader('content-type','text/html; charset=utf-8');response.setHeader('x-content-type-options','nosniff');response.setHeader('referrer-policy','no-referrer');response.setHeader('content-security-policy',csp);response.writeHead(200);response.end(value);return true}
 export function appOrigin(portal:string):string {
-  const value=process.env.PAPYRUS_APP_ORIGIN
-  if(!value)throw new PolicyError('APP_ORIGIN_REQUIRED','Configure PAPYRUS_APP_ORIGIN as a separate HTTPS origin',503)
-  const url=new URL(value)
-  if(url.origin===portal||url.protocol!=='https:'||url.username||url.password||url.pathname!=='/'||url.search||url.hash)throw new PolicyError('UNSAFE_APP_ORIGIN','App content requires a separate HTTPS origin',503)
+  const value=process.env.PAPYRUS_APP_ORIGIN?.trim()
+  if(!value)return new URL(portal).origin
+  let url:URL
+  try{url=new URL(value)}catch{throw new PolicyError('UNSAFE_APP_ORIGIN','PAPYRUS_APP_ORIGIN must be an absolute HTTP(S) origin',503)}
+  if((url.protocol!=='https:'&&url.protocol!=='http:')||url.username||url.password||url.pathname!=='/'||url.search||url.hash)throw new PolicyError('UNSAFE_APP_ORIGIN','PAPYRUS_APP_ORIGIN must be an HTTP(S) origin without a path, query, credentials, or fragment',503)
   return url.origin
 }
 interface Frame {app_id:string;release_id:string;actor_oid:string;preview:number;expires_at:number;used:number;nonce_hash:string}
 export async function handleAppPlane(request:IncomingMessage,response:ServerResponse,url:URL,service:AgentService,auth:EntraAuthService,runtime:EnhancedMastraRuntime):Promise<boolean> {
-  const configured=process.env.PAPYRUS_APP_ORIGIN
-  let contentHost: string | undefined
-  try { if(configured) contentHost=new URL(configured).origin } catch { /* Invalid app configuration is reported when an App Link is opened. */ }
-  const isContent=url.origin===contentHost
+  const portal=runtime.config.publicOrigin
+  let contentOrigin:string|undefined
+  try{contentOrigin=appOrigin(portal)}catch{/* Invalid optional configuration is surfaced when an App Link issues a frame. */}
+  const isContent=url.pathname==='/app-content'&&url.origin===contentOrigin
+  if(url.pathname==='/app-content'&&!isContent)return json(response,403,{error:'App content entry denied'})
   if(!isContent&&!url.pathname.startsWith('/api/apps')&&!url.pathname.startsWith('/api/policies')&&!url.pathname.startsWith('/api/governed-changes')&&!url.pathname.startsWith('/a/'))return false
   const db=service.db,store=new AppStore(db),policies=new PolicyStore(db)
   db.sqlite.exec('CREATE TABLE IF NOT EXISTS app_frames(ticket_hash TEXT PRIMARY KEY,nonce_hash TEXT NOT NULL,app_id TEXT NOT NULL,release_id TEXT NOT NULL,actor_oid TEXT NOT NULL,preview INTEGER NOT NULL,expires_at INTEGER NOT NULL,used INTEGER NOT NULL DEFAULT 0)')
   db.sqlite.prepare('DELETE FROM app_frames WHERE expires_at<?').run(Date.now())
-  const portal=runtime.config.publicOrigin
   if(isContent){
-    // This origin never serves portal APIs, portal cookies, or the control-plane shell.
-    if(url.pathname!=='/app-content'||request.method!=='POST'||request.headers.origin!==portal)return json(response,403,{error:'App content entry denied'})
+    // App HTML may share the portal transport origin, but the iframe remains an opaque
+    // sandboxed origin with no direct portal API, cookie, storage, network, or form access.
+    if(request.method!=='POST'||request.headers.origin!==portal)return json(response,403,{error:'App content entry denied'})
     let raw='';for await(const c of request){raw+=Buffer.from(c).toString();if(raw.length>4096)throw new PolicyError('BODY_TOO_LARGE','Frame exchange too large',413)}
     const fields=new URLSearchParams(raw),ticket=fields.get('ticket')??'',nonce=fields.get('nonce')??''
     const frame=db.sqlite.prepare('SELECT * FROM app_frames WHERE ticket_hash=?').get(hash(ticket)) as Frame|undefined

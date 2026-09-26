@@ -11,9 +11,9 @@ function config(cloud: AgentConfig['cloud'] = 'Public'): AgentConfig {
   return {
     mode: 'local',
     profile: 'gcc',
-    host: '127.0.0.1',
+    host: 'localhost',
     port: 3210,
-    publicOrigin: 'http://127.0.0.1:3210',
+    publicOrigin: 'http://localhost:3210',
     dataDir: '/tmp/papyrus-auth-profile-test',
     databasePath: ':memory:',
     portalSecret: 'portal-secret-at-least-thirty-two-characters',

@@ -49,9 +49,9 @@ beforeAll(async () => {
       response.end(reply.body)
     })
   })
-  await new Promise<void>((resolve) => endpoint.listen(0, '127.0.0.1', resolve))
+  await new Promise<void>((resolve) => endpoint.listen(0, 'localhost', resolve))
   const address = endpoint.address() as AddressInfo
-  origin = `http://127.0.0.1:${address.port}`
+  origin = `http://localhost:${address.port}`
 })
 
 afterAll(async () => { await new Promise<void>((resolve) => endpoint.close(() => resolve())) })
@@ -323,7 +323,7 @@ describe('controlled write health test', () => {
 
   it('reports an unreachable endpoint instead of throwing', async () => {
     const db = new AgentDatabase(':memory:')
-    const integration = seedIntegration(db, integrationFor({ endpoint: 'http://127.0.0.1:1' }))
+    const integration = seedIntegration(db, integrationFor({ endpoint: 'http://localhost:1' }))
     const executor = new FirewallExecutor(db, stubCredentials)
 
     const result = await executor.test(contextFor(integration))

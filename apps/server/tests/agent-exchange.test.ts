@@ -157,7 +157,7 @@ describe('Exchange Graph connector boundary', () => {
       exchangeIntegration.credentialRef, JSON.stringify(exchangeIntegration.settings), exchangeIntegration.health,
       exchangeIntegration.createdByOid, exchangeIntegration.createdAt, exchangeIntegration.updatedAt, exchangeIntegration.version,
     )
-    const config = { mode: 'local', profile: 'gcc', host: '127.0.0.1', port: 3210, publicOrigin: 'http://127.0.0.1:3210', dataDir: '/tmp', databasePath: ':memory:', portalSecret: 'x'.repeat(32), organizationName: 'Example', cloud: 'Public', licenseRequired: false, licenseAuthorities: {} } as const
+    const config = { mode: 'local', profile: 'gcc', host: 'localhost', port: 3210, publicOrigin: 'http://localhost:3210', dataDir: '/tmp', databasePath: ':memory:', portalSecret: 'x'.repeat(32), organizationName: 'Example', cloud: 'Public', licenseRequired: false, licenseAuthorities: {} } as const
     const terrain = new TerrainStore(db)
     const actions = new ActionStore(db)
     const executors = new ActionExecutorRegistry().register('exchange-email', new EmailExecutor(db, graph()))

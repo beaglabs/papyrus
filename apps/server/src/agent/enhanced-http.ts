@@ -300,7 +300,7 @@ function attachmentInput(value: Record<string, unknown>): AttachLinkExecutorInpu
     executorIntegrationId, action, target,
     ...(invocationMode ? { invocationMode } : {}),
     ...(approvalMode ? { approvalMode } : {}),
-    ...(Number.isFinite(maxRetries) ? { maxRetries } : {}),
+    ...(typeof maxRetries === 'number' && Number.isFinite(maxRetries) ? { maxRetries } : {}),
     ...(inputMapping ? { inputMapping } : {}),
     ...(condition ? { condition } : {}),
   }

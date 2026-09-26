@@ -16,7 +16,7 @@ const exchangeIntegration: IntegrationConfiguration = {
 
 function config(overrides: Partial<AgentConfig> = {}): AgentConfig {
   return {
-    mode: 'local', profile: 'government', host: '127.0.0.1', port: 3210, publicOrigin: 'http://127.0.0.1:3210',
+    mode: 'local', profile: 'government', host: 'localhost', port: 3210, publicOrigin: 'http://localhost:3210',
     dataDir: '/var/lib/papyrus', databasePath: ':memory:', portalSecret: 'portal-secret-at-least-thirty-two-characters',
     organizationName: 'Example Agency', cloud: 'USGov', licenseRequired: false, licenseAuthorities: {},
     ...overrides,
@@ -139,7 +139,7 @@ describe('legacy model bootstrap endpoint selection', () => {
   it('still allows a loopback provider on a government profile', () => {
     const models = store()
     const created = models.bootstrapLegacy({ PAPYRUS_AGENT_MODEL: 'ollama/qwen3-32b' }, { profile: 'government' })
-    expect(created?.baseUrl).toBe('http://127.0.0.1:11434/v1')
+    expect(created?.baseUrl).toBe('http://localhost:11434/v1')
   })
 
   it('warns when an operator points a government profile at a commercial host', () => {

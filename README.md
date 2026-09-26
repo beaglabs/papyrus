@@ -115,9 +115,9 @@ pnpm build
 
 export PAPYRUS_MODE=local
 export PAPYRUS_PROFILE=gcc
-export PAPYRUS_HOST=127.0.0.1
+export PAPYRUS_HOST=localhost
 export PAPYRUS_PORT=3210
-export PAPYRUS_PUBLIC_ORIGIN=http://127.0.0.1:3210
+export PAPYRUS_PUBLIC_ORIGIN=http://localhost:3210
 export PAPYRUS_PORTAL_SECRET="$(openssl rand -hex 32)"
 export PAPYRUS_LICENSE_REQUIRED=false
 export PAPYRUS_DATABASE_PATH=:memory:

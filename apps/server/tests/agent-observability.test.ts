@@ -27,9 +27,9 @@ async function openPortal(roles: EntraAppRole[]): Promise<RunningPortal> {
   const config: AgentConfig = {
     mode: 'local',
     profile: 'gcc',
-    host: '127.0.0.1',
+    host: 'localhost',
     port: 0,
-    publicOrigin: 'http://127.0.0.1:3210',
+    publicOrigin: 'http://localhost:3210',
     dataDir,
     databasePath: ':memory:',
     portalSecret: 'portal-secret-at-least-thirty-two-characters',
@@ -52,10 +52,10 @@ async function openPortal(roles: EntraAppRole[]): Promise<RunningPortal> {
   const mastra = new MastraRuntime(config, actionStore, terrain, service)
   await mastra.start()
   const server = createAgentServer(config, service, new EntraAuthService(config), mastra)
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  await new Promise<void>((resolve) => server.listen(0, 'localhost', resolve))
   const address = server.address()
   if (!address || typeof address === 'string') throw new Error('Expected TCP listener')
-  return { origin: `http://127.0.0.1:${address.port}`, server, mastra, db, dataDir }
+  return { origin: `http://localhost:${address.port}`, server, mastra, db, dataDir }
 }
 
 async function closePortal(portal: RunningPortal): Promise<void> {

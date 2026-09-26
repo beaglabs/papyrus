@@ -163,8 +163,8 @@ beforeAll(async () => {
       res.end(hit.body)
     })
   })
-  await new Promise<void>((resolve) => device.listen(0, '127.0.0.1', resolve))
-  origin = `http://127.0.0.1:${(device.address() as AddressInfo).port}`
+  await new Promise<void>((resolve) => device.listen(0, 'localhost', resolve))
+  origin = `http://localhost:${(device.address() as AddressInfo).port}`
   served.clear()
   serve('/index.cgi', LOGIN_PAGE)
   serve('/login.cgi', '<html><body><h2>Welcome</h2><p>Console session established.</p></body></html>')
@@ -218,7 +218,7 @@ describe('device console policy', () => {
   it('refuses credentials smuggled into the endpoint and non-http schemes', () => {
     const db = new AgentDatabase(':memory:')
     const { config } = configFor()
-    expect(() => ConsolePolicy.forIntegration({ ...configFor().integration, endpoint: 'http://admin:hunter2@127.0.0.1:1/' } as IntegrationConfiguration, config))
+    expect(() => ConsolePolicy.forIntegration({ ...configFor().integration, endpoint: 'http://admin:hunter2@localhost:1/' } as IntegrationConfiguration, config))
       .toThrow(/must not carry credentials/)
     expect(() => ConsolePolicy.forIntegration({ ...configFor().integration, endpoint: 'file:///etc/shadow' } as IntegrationConfiguration, config))
       .toThrow(/must be http or https/)
@@ -317,7 +317,7 @@ describe('device console reads', () => {
 
   it('surfaces an unreachable device as a finding instead of an empty answer', async () => {
     const db = new AgentDatabase(':memory:')
-    const { integration, config } = configFor({ endpoint: 'http://127.0.0.1:1' })
+    const { integration, config } = configFor({ endpoint: 'http://localhost:1' })
     seedIntegration(db, integration)
     const tools = buildConsoleTools({ config, integrations: () => [integration], store: new ConsoleStore(db) })
     const result = await tools.read.readDeviceConsolePage.execute({ integrationId: integration.id, url: '/' } as never)
@@ -745,7 +745,7 @@ describe('device console rendering', () => {
       loaderCalled = true
       throw new Error('the viewer must not be loaded without a configured executable')
     })
-    const error = await host.render({ url: 'http://127.0.0.1/grid.cgi' }).catch((cause: unknown) => cause)
+    const error = await host.render({ url: 'http://localhost/grid.cgi' }).catch((cause: unknown) => cause)
     expect(error).toBeInstanceOf(RenderError)
     expect((error as RenderError).code).toBe('BROWSER_EXECUTABLE_NOT_CONFIGURED')
     expect(loaderCalled).toBe(false)
@@ -755,7 +755,7 @@ describe('device console rendering', () => {
     const host = new BrowserRenderHost({
       executable: () => '/usr/bin/chromium',
       assertAllowedUrl: (url) => {
-        if (!url.startsWith('http://127.0.0.1:')) throw new Error(`refused ${url}`)
+        if (!url.startsWith('http://localhost:')) throw new Error(`refused ${url}`)
       },
     })
     host.useViewerLoader(async () => {
@@ -836,12 +836,12 @@ describe('device console rendering', () => {
     const db = new AgentDatabase(':memory:')
     const { integration, config } = configFor()
     seedIntegration(db, integration)
-    const stub = stubRenderer(SCRIPT_BUILT_RENDERED, { frameUrl: 'http://127.0.0.1:1/grid.cgi#/after-script' })
+    const stub = stubRenderer(SCRIPT_BUILT_RENDERED, { frameUrl: 'http://localhost:1/grid.cgi#/after-script' })
     const policy = ConsolePolicy.forIntegration(integration, config)
     const reader = new DeviceConsoleReader(new ConsoleStore(db), openConsoleSession(policy), integration, stub.source)
     const page = await reader.readRendered('/grid.cgi')
     expect(page.content).toContain('content="rendered"')
-    expect(page.content).toContain('frame="http://127.0.0.1:1/grid.cgi#/after-script"')
+    expect(page.content).toContain('frame="http://localhost:1/grid.cgi#/after-script"')
     expect(page.content).toMatch(/not the HTTP response the device sent/)
     expect(page.content).toMatch(/never have existed on the wire/)
     expect(page.content).toMatch(/will find nothing at that position/)

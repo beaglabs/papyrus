@@ -29,7 +29,7 @@ describe('Entra-native portal identity', () => {
 
   it('issues expiring ingestion tokens bound to one integration route', () => {
     const config: AgentConfig = {
-      mode: 'local', profile: 'gcc', host: '127.0.0.1', port: 3210, publicOrigin: 'http://127.0.0.1:3210',
+      mode: 'local', profile: 'gcc', host: 'localhost', port: 3210, publicOrigin: 'http://localhost:3210',
       dataDir: '/tmp/papyrus-auth-test', databasePath: ':memory:', portalSecret: 'portal-secret-at-least-thirty-two-characters',
       organizationName: 'Example Agency', cloud: 'Public', licenseRequired: false, licenseAuthorities: {},
     }

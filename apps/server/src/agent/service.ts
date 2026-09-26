@@ -56,7 +56,7 @@ function optionalEndpoint(value: unknown, mode: AgentConfig['mode']): string | u
   let url: URL
   try { url = new URL(endpoint) } catch { throw new AgentServiceError(400, 'INVALID_ENDPOINT', 'endpoint must be a valid URL') }
   if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.hash) throw new AgentServiceError(400, 'INVALID_ENDPOINT', 'endpoint must be an HTTP(S) URL without credentials or a fragment')
-  const loopback = ['127.0.0.1', '::1', 'localhost'].includes(url.hostname)
+  const loopback = ['localhost', '::1', 'localhost'].includes(url.hostname)
   if (url.protocol !== 'https:' && !(mode === 'local' && loopback)) throw new AgentServiceError(400, 'INSECURE_ENDPOINT', 'endpoint must use HTTPS outside loopback development')
   return url.toString()
 }

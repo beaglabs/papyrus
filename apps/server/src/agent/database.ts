@@ -12,7 +12,10 @@ import type {
 type Row = Record<string, unknown>
 
 /** Decisions the action ledger records against an executor integration. */
-export type ActionDecisionKind = 'ActionProposed' | 'ActionApproved' | 'ActionDenied' | 'ActionExecuted' | 'ActionFailed'
+export type ActionDecisionKind =
+  | 'ActionProposed' | 'ActionApproved' | 'ActionDenied' | 'ActionExecuted' | 'ActionFailed'
+  | 'WebhookExecutorAttached' | 'WebhookExecutorEnabled' | 'WebhookExecutorDisabled'
+  | 'WebhookExecutorDetached' | 'WebhookActionProposed'
 
 export function canonical(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)

@@ -126,7 +126,7 @@ export type LoadedConfig =
 export function bootstrapContext(env: NodeJS.ProcessEnv = process.env): BootstrapContext {
   const mode = (env.PAPYRUS_MODE ?? 'local') as ServerMode
   const selectedProfile = profile(env.PAPYRUS_PROFILE)
-  const host = env.PAPYRUS_HOST ?? '127.0.0.1'
+  const host = env.PAPYRUS_HOST ?? 'localhost'
   const port = Number(env.PAPYRUS_PORT ?? 3210)
   const selectedCloud = cloud(env.PAPYRUS_ENTRA_CLOUD)
   const dataDir = resolve(env.PAPYRUS_DATA_DIR ?? './papyrus-agent-data')
@@ -185,7 +185,7 @@ export function loadAgentConfig(env: NodeJS.ProcessEnv = process.env, resolved: 
   const mode = (env.PAPYRUS_MODE ?? 'local') as ServerMode
   if (!['local', 'persistent'].includes(mode)) throw new Error(`Unsupported PAPYRUS_MODE ${mode}`)
   const selectedProfile = profile(env.PAPYRUS_PROFILE)
-  const host = env.PAPYRUS_HOST ?? '127.0.0.1'
+  const host = env.PAPYRUS_HOST ?? 'localhost'
   const port = Number(env.PAPYRUS_PORT ?? 3210)
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PAPYRUS_PORT must be a valid TCP port')
   const configuredOrigin = env.PAPYRUS_PUBLIC_ORIGIN?.trim()

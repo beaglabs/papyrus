@@ -19,7 +19,7 @@ describe('agent portal HTTP surface', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'papyrus-agent-http-'))
     const db = new AgentDatabase(':memory:')
     const config: AgentConfig = {
-      mode: 'local', profile: 'gcc', host: '127.0.0.1', port: 0, publicOrigin: 'http://127.0.0.1:3210',
+      mode: 'local', profile: 'gcc', host: 'localhost', port: 0, publicOrigin: 'http://localhost:3210',
       dataDir, databasePath: ':memory:', portalSecret: 'portal-secret-at-least-thirty-two-characters',
       organizationName: 'Example Agency', cloud: 'Public', licenseRequired: false, licenseAuthorities: {},
       developmentPrincipal: {
@@ -32,10 +32,10 @@ describe('agent portal HTTP surface', () => {
     const mastra = new MastraRuntime(config, actionStore, terrain, service)
     await mastra.start()
     const server = createAgentServer(config, service, new EntraAuthService(config), mastra)
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    await new Promise<void>((resolve) => server.listen(0, 'localhost', resolve))
     const address = server.address()
     if (!address || typeof address === 'string') throw new Error('Expected TCP listener')
-    const origin = `http://127.0.0.1:${address.port}`
+    const origin = `http://localhost:${address.port}`
     disposers.push(async () => {
       await new Promise<void>((resolve) => server.close(() => resolve()))
       await mastra.stop()
@@ -100,7 +100,7 @@ describe('agent portal HTTP surface', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'papyrus-agent-jobs-'))
     const db = new AgentDatabase(':memory:')
     const config: AgentConfig = {
-      mode: 'local', profile: 'gcc', host: '127.0.0.1', port: 0, publicOrigin: 'http://127.0.0.1:3210',
+      mode: 'local', profile: 'gcc', host: 'localhost', port: 0, publicOrigin: 'http://localhost:3210',
       dataDir, databasePath: ':memory:', portalSecret: 'portal-secret-at-least-thirty-two-characters',
       organizationName: 'Example Agency', cloud: 'Public', licenseRequired: false, licenseAuthorities: {},
       developmentPrincipal: {
@@ -113,10 +113,10 @@ describe('agent portal HTTP surface', () => {
     const mastra = new MastraRuntime(config, actionStore, terrain, service)
     await mastra.start()
     const server = createAgentServer(config, service, new EntraAuthService(config), mastra)
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    await new Promise<void>((resolve) => server.listen(0, 'localhost', resolve))
     const address = server.address()
     if (!address || typeof address === 'string') throw new Error('Expected TCP listener')
-    const origin = `http://127.0.0.1:${address.port}`
+    const origin = `http://localhost:${address.port}`
     disposers.push(async () => {
       await new Promise<void>((resolve) => server.close(() => resolve()))
       await mastra.stop()
@@ -147,7 +147,7 @@ describe('agent portal HTTP surface', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'papyrus-agent-chat-'))
     const db = new AgentDatabase(':memory:')
     const config: AgentConfig = {
-      mode: 'local', profile: 'gcc', host: '127.0.0.1', port: 0, publicOrigin: 'http://127.0.0.1:3210',
+      mode: 'local', profile: 'gcc', host: 'localhost', port: 0, publicOrigin: 'http://localhost:3210',
       dataDir, databasePath: ':memory:', portalSecret: 'portal-secret-at-least-thirty-two-characters',
       organizationName: 'Example Agency', cloud: 'Public', licenseRequired: false, licenseAuthorities: {},
       developmentPrincipal: {
@@ -160,10 +160,10 @@ describe('agent portal HTTP surface', () => {
     const mastra = new MastraRuntime(config, actionStore, terrain, service)
     await mastra.start()
     const server = createAgentServer(config, service, new EntraAuthService(config), mastra)
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    await new Promise<void>((resolve) => server.listen(0, 'localhost', resolve))
     const address = server.address()
     if (!address || typeof address === 'string') throw new Error('Expected TCP listener')
-    const origin = `http://127.0.0.1:${address.port}`
+    const origin = `http://localhost:${address.port}`
     disposers.push(async () => {
       await new Promise<void>((resolve) => server.close(() => resolve()))
       await mastra.stop()

@@ -15,7 +15,7 @@ describe('agent integration lifecycle', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'papyrus-agent-test-'))
     const db = new AgentDatabase(':memory:')
     const config: AgentConfig = {
-      mode: 'local', profile: 'gcc', host: '127.0.0.1', port: 3210, publicOrigin: 'http://127.0.0.1:3210',
+      mode: 'local', profile: 'gcc', host: 'localhost', port: 3210, publicOrigin: 'http://localhost:3210',
       dataDir, databasePath: ':memory:', portalSecret: 'portal-secret-at-least-thirty-two-characters',
       organizationName: 'Example Agency', cloud: 'Public', licenseRequired: false, licenseAuthorities: {},
     }

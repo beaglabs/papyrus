@@ -130,8 +130,8 @@ describe('AgentFS Links boundary', () => {
     const db = new AgentDatabase(':memory:')
     const actionStore = new ActionStore(db)
     const config: AgentConfig = {
-      mode: 'local', profile: 'gcc', host: '127.0.0.1', port: 3210,
-      publicOrigin: 'http://127.0.0.1:3210', dataDir: root, databasePath: ':memory:',
+      mode: 'local', profile: 'gcc', host: 'localhost', port: 3210,
+      publicOrigin: 'http://localhost:3210', dataDir: root, databasePath: ':memory:',
       portalSecret: 'test-secret', organizationName: 'Test', cloud: 'Public',
       agentfsId: 'artifact-link-test', licenseRequired: false, licenseAuthorities: {},
     }
@@ -169,8 +169,8 @@ describe('AgentFS Links boundary', () => {
     const db = new AgentDatabase(':memory:')
     const actionStore = new ActionStore(db)
     const config: AgentConfig = {
-      mode: 'local', profile: 'gcc', host: '127.0.0.1', port: 3210,
-      publicOrigin: 'http://127.0.0.1:3210', dataDir: root, databasePath: ':memory:',
+      mode: 'local', profile: 'gcc', host: 'localhost', port: 3210,
+      publicOrigin: 'http://localhost:3210', dataDir: root, databasePath: ':memory:',
       portalSecret: 'test-secret', organizationName: 'Test', cloud: 'Public',
       agentfsId: 'video-link-test', licenseRequired: false, licenseAuthorities: {},
     }
@@ -215,8 +215,8 @@ describe('AgentFS Links boundary', () => {
     const db = new AgentDatabase(':memory:')
     const actionStore = new ActionStore(db)
     const config: AgentConfig = {
-      mode: 'local', profile: 'gcc', host: '127.0.0.1', port: 3210,
-      publicOrigin: 'http://127.0.0.1:3210', dataDir: root, databasePath: ':memory:',
+      mode: 'local', profile: 'gcc', host: 'localhost', port: 3210,
+      publicOrigin: 'http://localhost:3210', dataDir: root, databasePath: ':memory:',
       portalSecret: 'test-secret', organizationName: 'Test', cloud: 'Public',
       agentfsId: 'html-asset-link-test', licenseRequired: false, licenseAuthorities: {},
     }
@@ -337,8 +337,8 @@ describe('AgentFS Links boundary', () => {
     const db = new AgentDatabase(':memory:')
     const actionStore = new ActionStore(db)
     const config: AgentConfig = {
-      mode: 'local', profile: 'gcc', host: '127.0.0.1', port: 3210,
-      publicOrigin: 'http://127.0.0.1:3210', dataDir: root, databasePath: ':memory:',
+      mode: 'local', profile: 'gcc', host: 'localhost', port: 3210,
+      publicOrigin: 'http://localhost:3210', dataDir: root, databasePath: ':memory:',
       portalSecret: 'test-secret', organizationName: 'Example Agency', cloud: 'Public',
       agentfsId: 'webhook-signal-test', licenseRequired: false, licenseAuthorities: {},
     }

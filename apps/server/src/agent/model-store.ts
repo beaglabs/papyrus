@@ -215,7 +215,7 @@ function normalizeInput(input: CreateModelProfileInput): CreateModelProfileInput
   if (!['https:', 'http:'].includes(base.protocol) || base.username || base.password || base.search || base.hash) {
     throw new ModelProfileError('INVALID_MODEL_BASE_URL', 'baseUrl must be an HTTP(S) URL without credentials, query, or fragment')
   }
-  if (base.protocol === 'http:' && !['localhost', '127.0.0.1', '::1'].includes(base.hostname)) {
+  if (base.protocol === 'http:' && !['localhost', 'localhost', '::1'].includes(base.hostname)) {
     throw new ModelProfileError('INSECURE_MODEL_BASE_URL', 'HTTP model endpoints are only allowed on loopback; use HTTPS elsewhere')
   }
   const credentialRef = input.credentialRef?.trim()
@@ -263,7 +263,7 @@ function isCommercialModelHost(host: string): boolean {
 }
 
 function defaultBaseUrl(provider: string, profile: DeploymentProfile): string | undefined {
-  if (provider === 'ollama') return 'http://127.0.0.1:11434/v1'
+  if (provider === 'ollama') return 'http://localhost:11434/v1'
   if (requiresExplicitEndpoint(profile)) return undefined
   return 'https://api.openai.com/v1'
 }

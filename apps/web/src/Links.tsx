@@ -51,8 +51,8 @@ async function saveScheduleLink(id: string, value: Pick<ScheduleLink, 'name' | '
 
 function selectionFromLocation(): { app?: string; schedule?: string } {
   const query = new URLSearchParams(window.location.search)
-  const app = query.get('app') || undefined
-  const schedule = query.get('schedule') || undefined
+  const app = query.get('app') ?? undefined
+  const schedule = query.get('schedule') ?? undefined
   return {
     ...(app ? { app } : {}),
     ...(schedule ? { schedule } : {}),

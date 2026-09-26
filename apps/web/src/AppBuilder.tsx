@@ -1,42 +1,297 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport, type UIMessage } from 'ai'
-import type { HostedApp, NamedPolicy, AppConnectorGrant } from '@papyrus/contracts'
+import type { AppConnectorGrant, HostedApp, NamedPolicy } from '@papyrus/contracts'
+import { sessionMessages } from './api.js'
+import { Alert, Badge, Button, Textarea } from './components/ui/index.js'
 import './app-builder.css'
-export async function appRequest<T>(path:string, method='GET',data?:unknown):Promise<T>{const r=await fetch(path,{method,credentials:'same-origin',headers:{'content-type':'application/json'},...(data===undefined?{}:{body:JSON.stringify(data)})});const v=await r.json();if(!r.ok)throw new Error(v.error??'Request failed');return v as T}
-interface Project {files:Record<string,string>;revision:string}
-interface Frame {url:string;ticket:string;nonce:string}
-export function HostedAppsView(){
-  const [apps,setApps]=useState<HostedApp[]>([]),[selected,setSelected]=useState<HostedApp>(),[name,setName]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false)
-  useEffect(()=>{appRequest<{apps:HostedApp[]}>('/api/apps').then(v=>setApps(v.apps)).catch(e=>setError(String(e)))},[])
-  if(selected)return <AppBuilder app={selected} back={()=>setSelected(undefined)}/>
-  return <section className="app-workbench"><header><h2>App Links</h2><p>Build with your agent. Review each release before it goes live.</p></header>{error&&<p role="alert">{error}</p>}<form onSubmit={e=>{e.preventDefault();setBusy(true);appRequest<{app:HostedApp}>('/api/apps','POST',{name}).then(v=>{setApps([...apps,v.app]);setSelected(v.app)}).catch(e=>setError(String(e))).finally(()=>setBusy(false))}}><label>App name <input required maxLength={160} value={name} onChange={e=>setName(e.target.value)}/></label><button disabled={busy}>Create app</button></form><div className="app-cards">{apps.map(a=><button key={a.id} onClick={()=>setSelected(a)}><strong>{a.name}</strong><span>{a.liveReleaseId?'Published':'Draft'} · Entra authenticated</span></button>)}</div></section>
+
+export async function appRequest<T>(path: string, method = 'GET', data?: unknown): Promise<T> {
+  const response = await fetch(path, {
+    method,
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/json' },
+    ...(data === undefined ? {} : { body: JSON.stringify(data) }),
+  })
+  const value = await response.json() as { error?: string }
+  if (!response.ok) throw new Error(value.error ?? 'Request failed')
+  return value as T
 }
-function PromptPanel({app}:{app:HostedApp}){
-  const [prompt,setPrompt]=useState('')
-  const transport=useMemo(()=>new DefaultChatTransport<UIMessage>({api:'/api/agent/chat',credentials:'same-origin',prepareSendMessagesRequest:({messages})=>({body:{threadId:app.sessionId,messages:messages.slice(-1)}})}),[app.sessionId])
-  const chat=useChat({id:app.sessionId,transport})
-  return <section className="app-pane"><h3>Agent</h3><div className="app-conversation" aria-live="polite">{chat.messages.map(m=><article key={m.id}><strong>{m.role}</strong>{m.parts.map((p,i)=>p.type==='text'?<p key={i}>{p.text}</p>:null)}</article>)}</div>{chat.error&&<p role="alert">{chat.error.message}</p>}<form onSubmit={e=>{e.preventDefault();if(!prompt.trim())return;void chat.sendMessage({text:`Work only on the React app project at ${app.projectRoot}. Keep papyrus.app.json inherited Entra auth and the pinned dependencies. Edit source files in AgentFS. Do not publish or grant capabilities. Requested change: ${prompt}`});setPrompt('')}}><label htmlFor="app-prompt">Describe a change</label><textarea id="app-prompt" value={prompt} onChange={e=>setPrompt(e.target.value)}/><button disabled={chat.status==='streaming'||chat.status==='submitted'}>Send prompt</button><button type="button" onClick={()=>chat.stop()}>Stop</button></form><a href={`/portal?session=${encodeURIComponent(app.sessionId)}`}>Open authoring session and connectors</a></section>
+
+interface ProjectSnapshot { files: Record<string, string>; revision: string }
+interface Frame { url: string; ticket: string; nonce: string }
+interface AppDetail { app: HostedApp; grants: AppConnectorGrant[]; policies: NamedPolicy[] }
+
+/**
+ * The App Link authoring surface intentionally lives inside Links. There is no
+ * separate app IDE: Papyrus owns the project and the operator steers it through
+ * the same durable session that created it.
+ */
+export function AppLinkWorkspace({ app, onBack, onChanged }: {
+  app: HostedApp
+  onBack: () => void
+  onChanged?: () => void
+}) {
+  const [detail, setDetail] = useState<AppDetail>()
+  const [error, setError] = useState<string>()
+  const [status, setStatus] = useState('Preparing software factory…')
+  const [releaseId, setReleaseId] = useState('')
+  const [revision, setRevision] = useState('')
+  const [frame, setFrame] = useState<Frame>()
+  const [publishing, setPublishing] = useState(false)
+  const buildRef = useRef({ running: false, seen: '', failed: '' })
+
+  const refreshDetail = async () => {
+    const next = await appRequest<AppDetail>(`/api/apps/${encodeURIComponent(app.id)}`)
+    setDetail(next)
+  }
+
+  useEffect(() => {
+    let active = true
+    void refreshDetail().catch((cause) => { if (active) setError(message(cause)) })
+
+    const refreshPreview = async () => {
+      if (buildRef.current.running) return
+      try {
+        const project = await appRequest<ProjectSnapshot>(`/api/apps/${encodeURIComponent(app.id)}/files`)
+        if (!active) return
+        if (project.revision === buildRef.current.seen || project.revision === buildRef.current.failed) return
+        buildRef.current.running = true
+        setStatus(buildRef.current.seen ? 'Agent changed the app · rebuilding preview…' : 'Building first preview…')
+        try {
+          const built = await appRequest<{ releaseId: string; revision: string }>(`/api/apps/${encodeURIComponent(app.id)}/build`, 'POST', {})
+          const latest = await appRequest<ProjectSnapshot>(`/api/apps/${encodeURIComponent(app.id)}/files`)
+          if (latest.revision !== built.revision) return
+          const nextFrame = await appRequest<Frame>(`/api/apps/${encodeURIComponent(app.id)}/frame`, 'POST', { releaseId: built.releaseId })
+          if (!active) return
+          setReleaseId(built.releaseId)
+          setRevision(built.revision)
+          setFrame(nextFrame)
+          buildRef.current.seen = built.revision
+          buildRef.current.failed = ''
+          setStatus('Preview synchronized with the agent')
+          setError(undefined)
+        } catch (cause) {
+          buildRef.current.failed = project.revision
+          if (active) {
+            setStatus('Build needs attention · last good preview retained')
+            setError(message(cause))
+          }
+        } finally {
+          buildRef.current.running = false
+        }
+      } catch (cause) {
+        if (active) setError(message(cause))
+      }
+    }
+
+    void refreshPreview()
+    const previewTimer = window.setInterval(() => { void refreshPreview() }, 2_500)
+    const detailTimer = window.setInterval(() => { void refreshDetail().catch(() => undefined) }, 10_000)
+    return () => {
+      active = false
+      window.clearInterval(previewTimer)
+      window.clearInterval(detailTimer)
+    }
+  }, [app.id])
+
+  const requestPublication = async () => {
+    if (!releaseId || publishing) return
+    setPublishing(true)
+    setError(undefined)
+    try {
+      await appRequest(`/api/apps/${encodeURIComponent(app.id)}/publish`, 'POST', { releaseId })
+      setStatus('Publication proposal sent to Governance')
+      await refreshDetail()
+      onChanged?.()
+    } catch (cause) {
+      setError(message(cause))
+    } finally {
+      setPublishing(false)
+    }
+  }
+
+  const grants = detail?.grants ?? []
+  const policies = detail?.policies ?? []
+  const live = Boolean(detail?.app.liveReleaseId ?? app.liveReleaseId)
+
+  return <section className="app-link-workspace">
+    <header className="app-link-head">
+      <div className="app-link-title-row">
+        <Button variant="ghost" onClick={onBack}>← Links</Button>
+        <div>
+          <p className="eyebrow">APP LINK · AGENTIC SOFTWARE FACTORY</p>
+          <h2>{app.name}</h2>
+          <p>Prompt Papyrus, watch the isolated preview update, then release an immutable build through Governance.</p>
+        </div>
+      </div>
+      <div className="app-link-actions">
+        <Badge className={live ? 'status-good' : ''}>{live ? 'LIVE' : 'DRAFT'}</Badge>
+        <Button disabled={!releaseId || publishing} onClick={() => void requestPublication()}>{publishing ? 'Requesting…' : 'Request publication'}</Button>
+        {live && <a className="app-open-live" href={`/a/${encodeURIComponent(app.id)}`} target="_blank" rel="noreferrer">Open live ↗</a>}
+      </div>
+    </header>
+
+    {error && <Alert className="error"><strong>Factory attention</strong><span>{error}</span></Alert>}
+
+    <div className="app-link-grid">
+      <AppConversation app={app} onActivity={() => {
+        buildRef.current.failed = ''
+        setStatus('Papyrus is updating the app…')
+      }} />
+      <section className="app-factory-preview">
+        <div className="app-panel-head">
+          <div><span className="app-panel-kicker">LIVE PREVIEW</span><strong>{status}</strong></div>
+          <div className="app-factory-dots"><span /><span /><span /></div>
+        </div>
+        <div className="app-preview-stage">
+          {frame
+            ? <AppFrame frame={frame} appId={app.id} />
+            : <div className="app-preview-empty"><span>▣</span><strong>Waiting for the first successful build</strong><p>Papyrus creates the project, reads the connected sources it needs, writes the app, and builds it here.</p></div>}
+        </div>
+        <div className="app-build-strip">
+          <span><small>REVISION</small>{revision ? revision.slice(0, 10) : '—'}</span>
+          <span><small>AUTH</small>Inherited Entra</span>
+          <span><small>RUNTIME GRANTS</small>{grants.filter((grant) => grant.operations.length).length}</span>
+          <span><small>POLICIES</small>{policies.length}</span>
+          <Button variant="ghost" onClick={() => { buildRef.current.failed = ''; buildRef.current.seen = ''; setStatus('Rebuilding preview…') }}>Rebuild</Button>
+        </div>
+      </section>
+    </div>
+
+    <section className="app-link-governance">
+      <div>
+        <p className="eyebrow">PRODUCTION BOUNDARY</p>
+        <h3>Connector access and policy stay governed</h3>
+        <p>The authoring session can read only its attached connectors. A live App Link receives only explicit operations approved through Governance; the agent cannot promote preview authority into production.</p>
+      </div>
+      <div className="app-runtime-summary">
+        {grants.length === 0 && <span className="app-runtime-empty">No production connector grants</span>}
+        {grants.map((grant) => <span className="app-runtime-chip" key={grant.integrationId}><strong>{grant.integrationId}</strong>{grant.operations.length ? grant.operations.join(', ') : 'revoked'}</span>)}
+        {policies.map((policy) => <span className="app-runtime-chip policy" key={policy.id}><strong>{policy.name}</strong>v{policy.version}</span>)}
+      </div>
+    </section>
+  </section>
 }
-function Monaco({path,value,onChange}:{path:string;value:string;onChange:(v:string)=>void}){
-  const element=useRef<HTMLDivElement>(null),editor=useRef<import('monaco-editor').editor.IStandaloneCodeEditor|null>(null),callback=useRef(onChange),[error,setError]=useState('')
-  callback.current=onChange
-  useEffect(()=>{let disposed=false;let cleanup=()=>{};Promise.all([import('monaco-editor'),import('monaco-editor/editor/editor.worker.js?worker')]).then(([monaco,worker])=>{if(disposed||!element.current)return;(globalThis as unknown as {MonacoEnvironment:unknown}).MonacoEnvironment={getWorker:()=>new worker.default()};const model=monaco.editor.createModel(value,path.endsWith('.json')?'json':path.endsWith('.css')?'css':'typescript');const instance=monaco.editor.create(element.current,{model,automaticLayout:true,minimap:{enabled:false},fontSize:13,scrollBeyondLastLine:false});editor.current=instance;const subscription=instance.onDidChangeModelContent(()=>callback.current(instance.getValue()));cleanup=()=>{subscription.dispose();instance.dispose();model.dispose();editor.current=null}}).catch(e=>setError(String(e)));return()=>{disposed=true;cleanup()}},[path])
-  useEffect(()=>{if(editor.current&&editor.current.getValue()!==value)editor.current.setValue(value)},[value])
-  return <>{error&&<p role="alert">Editor unavailable: {error}</p>}<div ref={element} className="app-monaco" aria-label={`Code editor: ${path}`}/></>
+
+function AppConversation({ app, onActivity }: { app: HostedApp; onActivity: () => void }) {
+  const [initial, setInitial] = useState<UIMessage[]>()
+  const [error, setError] = useState<string>()
+
+  useEffect(() => {
+    let active = true
+    setInitial(undefined)
+    setError(undefined)
+    sessionMessages(app.sessionId).then((messages) => { if (active) setInitial(messages) }).catch((cause) => { if (active) setError(message(cause)) })
+    return () => { active = false }
+  }, [app.sessionId])
+
+  return <section className="app-agent-panel">
+    <div className="app-panel-head">
+      <div><span className="app-panel-kicker">PAPYRUS</span><strong>Build this App Link with the agent</strong></div>
+      <Badge>SESSION {app.sessionId.slice(0, 8)}</Badge>
+    </div>
+    {error && <Alert className="error">{error}</Alert>}
+    {initial === undefined
+      ? <div className="app-conversation-loading"><span /><span /><span /></div>
+      : <AppChat key={`${app.sessionId}:${initial.length}`} app={app} initial={initial} onActivity={onActivity} />}
+  </section>
 }
-function AppFrame({frame,appId}:{frame:Frame;appId:string}){
-  const iframe=useRef<HTMLIFrameElement>(null),form=useRef<HTMLFormElement>(null),target=useRef(`frame-${crypto.randomUUID()}`)
-  useEffect(()=>{form.current?.submit();const receive=async(e:MessageEvent)=>{const d=e.data;if(e.source!==iframe.current?.contentWindow||e.origin!=='null'||!d?.papyrusApp||d.nonce!==frame.nonce)return;try{const result=await appRequest(`/api/apps/${appId}/${d.operation==='proposeAction'?'actions':'invoke'}`,'POST',d.operation==='proposeAction'?{...d.input,integrationId:d.integrationId,nonce:frame.nonce}:{...d,nonce:frame.nonce});iframe.current?.contentWindow?.postMessage({nonce:frame.nonce,id:d.id,result},'*')}catch(error){iframe.current?.contentWindow?.postMessage({nonce:frame.nonce,id:d.id,error:String(error)},'*')}};window.addEventListener('message',receive);return()=>window.removeEventListener('message',receive)},[frame,appId])
-  return <><iframe ref={iframe} name={target.current} sandbox="allow-scripts" title="Live app preview"/><form ref={form} method="POST" target={target.current} action={frame.url}><input type="hidden" name="ticket" value={frame.ticket}/><input type="hidden" name="nonce" value={frame.nonce}/></form></>
+
+function AppChat({ app, initial, onActivity }: { app: HostedApp; initial: UIMessage[]; onActivity: () => void }) {
+  const [prompt, setPrompt] = useState('')
+  const listRef = useRef<HTMLDivElement>(null)
+  const transport = useMemo(() => new DefaultChatTransport<UIMessage>({
+    api: '/api/agent/chat',
+    credentials: 'same-origin',
+    prepareSendMessagesRequest: ({ messages }) => ({ body: { threadId: app.sessionId, messages: messages.slice(-1) } }),
+  }), [app.sessionId])
+  const chat = useChat({ id: app.sessionId, messages: initial, transport })
+  const working = chat.status === 'streaming' || chat.status === 'submitted'
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [chat.messages, working])
+
+  const submit = async () => {
+    const text = prompt.trim()
+    if (!text || working) return
+    setPrompt('')
+    onActivity()
+    await chat.sendMessage({
+      text: `Continue the App Link "${app.name}" (${app.id}) that belongs to this session. Use the agentic app factory and app_factory_code when useful; inspect session connectors instead of inventing data. Do not bypass Governance for publication or production connector authority. Requested change: ${text}`,
+    })
+  }
+
+  return <>
+    <div ref={listRef} className="app-conversation" aria-live="polite">
+      {chat.messages.length === 0 && <div className="app-chat-welcome"><span>✦</span><strong>Describe the app you want.</strong><p>Papyrus will own the structure, gather from connected sources, write the project, and keep iterating in this same session.</p></div>}
+      {chat.messages.map((messageItem) => <article className={`app-chat-message ${messageItem.role}`} key={messageItem.id}>
+        <small>{messageItem.role === 'user' ? 'YOU' : 'PAPYRUS'}</small>
+        {messageItem.parts.map((part, index) => part.type === 'text' ? <p key={index}>{part.text}</p> : isToolPart(part) ? <div className="app-tool-event" key={index}>Factory operation · {toolName(part.type)}</div> : null)}
+      </article>)}
+      {working && <div className="app-agent-working"><span /><span /><span /> Papyrus is building</div>}
+      {chat.error && <Alert className="error">{chat.error.message}</Alert>}
+    </div>
+    <form className="app-prompt" onSubmit={(event) => { event.preventDefault(); void submit() }}>
+      <Textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Change the app, connect data, add a view, fix the layout…" rows={4} />
+      <div className="app-prompt-foot">
+        <span>AgentFS · Code Mode · session-scoped connectors</span>
+        {working
+          ? <Button type="button" onClick={() => chat.stop()}>Stop</Button>
+          : <Button className="primary" type="submit" disabled={!prompt.trim()}>Send ↑</Button>}
+      </div>
+    </form>
+  </>
 }
-function AppBuilder({app,back}:{app:HostedApp;back:()=>void}){
-  const [project,setProject]=useState<Project>(),[path,setPath]=useState('src/App.tsx'),[code,setCode]=useState(''),[dirty,setDirty]=useState(false),[error,setError]=useState(''),[status,setStatus]=useState('Loading project'),[release,setRelease]=useState(''),[frame,setFrame]=useState<Frame>(),[grants,setGrants]=useState<AppConnectorGrant[]>([]),[policies,setPolicies]=useState<NamedPolicy[]>([]),[grantId,setGrantId]=useState(''),[operations,setOperations]=useState('readGithubRepository'),[newPath,setNewPath]=useState('')
-  const dirtyRef=useRef(false),pathRef=useRef(path),revision=useRef(''),building=useRef(false),failedRevision=useRef(''),mounted=useRef(true)
-  dirtyRef.current=dirty;pathRef.current=path
-  const refreshStatus=()=>appRequest<{grants:AppConnectorGrant[];policies:NamedPolicy[]}>(`/api/apps/${app.id}`).then(v=>{setGrants(v.grants);setPolicies(v.policies)})
-  useEffect(()=>{mounted.current=true;let fetching=false;const poll=async()=>{if(fetching)return;fetching=true;try{const p=await appRequest<Project>(`/api/apps/${app.id}/files`);if(!mounted.current)return;if(!dirtyRef.current){setProject(p);setCode(p.files[pathRef.current]??'')}if(p.revision!==revision.current&&!building.current&&p.revision!==failedRevision.current){building.current=true;setStatus('Building preview…');try{const result=await appRequest<{releaseId:string;revision:string}>(`/api/apps/${app.id}/build`,'POST',{});const latest=await appRequest<Project>(`/api/apps/${app.id}/files`);if(latest.revision!==result.revision)return;const f=await appRequest<Frame>(`/api/apps/${app.id}/frame`,'POST',{releaseId:result.releaseId});if(!mounted.current)return;setRelease(result.releaseId);setFrame(f);revision.current=result.revision;setStatus(`Preview updated · ${result.revision.slice(0,8)}`);setError('')}catch(e){failedRevision.current=p.revision;setError(String(e));setStatus('Build failed · last successful preview retained')}finally{building.current=false}}}catch(e){if(mounted.current)setError(String(e))}finally{fetching=false}};void poll();void refreshStatus().catch(e=>setError(String(e)));const timer=setInterval(()=>void poll(),2000);return()=>{mounted.current=false;clearInterval(timer)}},[app.id])
-  const save=async()=>{if(!project)return;try{const p=await appRequest<Project>(`/api/apps/${app.id}/files`,'PUT',{path,content:code,revision:project.revision});setProject(p);setDirty(false);failedRevision.current=''}catch(e){setError(String(e))}}
-  const act=(action:()=>Promise<unknown>)=>{void action().catch(e=>setError(String(e)))}
-  return <section className="app-workbench"><header className="app-builder-header"><button onClick={back}>← Apps</button><h2>{app.name}</h2><span>{status}</span><button disabled={!release||dirty} onClick={()=>act(async()=>{await appRequest(`/api/apps/${app.id}/publish`,'POST',{releaseId:release});setStatus('Publication awaiting Governance approval')})}>Request publication</button><a href={`/a/${app.id}`} target="_blank" rel="noreferrer">Open published app</a></header>{error&&<p role="alert" className="app-error">{error}</p>}<div className="app-builder-panels"><PromptPanel app={app}/><section className="app-pane app-code"><h3>Code</h3><div className="app-file-bar"><select aria-label="Project file" value={path} disabled={dirty} onChange={e=>{setPath(e.target.value);setCode(project?.files[e.target.value]??'')}}>{Object.keys(project?.files??{}).map(p=><option key={p}>{p}</option>)}</select><button disabled={!dirty} onClick={()=>void save()}>Save</button>{dirty&&<button onClick={()=>{setDirty(false);setCode(project?.files[path]??'')}}>Discard edits</button>}</div><form onSubmit={e=>{e.preventDefault();if(!project||!newPath)return;act(async()=>{const p=await appRequest<Project>(`/api/apps/${app.id}/files`,'PUT',{path:newPath,content:'',revision:project.revision});setProject(p);setPath(newPath);setCode('');setNewPath('')})}}><input aria-label="New file path" placeholder="src/component.tsx" value={newPath} onChange={e=>setNewPath(e.target.value)}/><button disabled={dirty}>Add file</button></form>{project&&<Monaco path={path} value={code} onChange={v=>{setCode(v);setDirty(v!==(project.files[path]??''))}}/>}</section><section className="app-pane app-preview"><h3>Preview</h3>{frame?<AppFrame frame={frame} appId={app.id}/>:<p>The preview will appear after the first successful build.</p>}<button onClick={()=>{failedRevision.current='';revision.current=''}}>Rebuild preview</button></section></div><footer className="app-status"><span>Entra auth inherited</span><span>{policies.length} effective policies</span><span>{grants.filter(g=>g.operations.length).length} runtime connector grants</span><a href={`/portal?session=${app.sessionId}`}>Authoring-session connections</a></footer><details><summary>Runtime connections and policies</summary><p>Runtime grants require Governance approval. Session connections apply only to preview.</p>{grants.map(g=><p key={g.integrationId}>{g.integrationId}: {g.operations.join(', ')||'Revoked'} <button onClick={()=>act(async()=>{await appRequest(`/api/apps/${app.id}/grants`,'DELETE',{integrationId:g.integrationId});await refreshStatus()})}>Revoke</button></p>)}<form onSubmit={e=>{e.preventDefault();act(async()=>{await appRequest(`/api/apps/${app.id}/grants`,'POST',{integrationId:grantId,operations:operations.split(',').map(s=>s.trim()).filter(Boolean)});setStatus('Connector grant awaiting Governance approval')})}}><label>Integration ID<input required value={grantId} onChange={e=>setGrantId(e.target.value)}/></label><label>Operations<input required value={operations} onChange={e=>setOperations(e.target.value)}/></label><button>Request grant</button></form>{policies.map(p=><p key={p.id}>{p.name} · v{p.version}</p>)}</details></section>
+
+function AppFrame({ frame, appId }: { frame: Frame; appId: string }) {
+  const iframe = useRef<HTMLIFrameElement>(null)
+  const form = useRef<HTMLFormElement>(null)
+  const target = useRef(`frame-${crypto.randomUUID()}`)
+
+  useEffect(() => {
+    form.current?.submit()
+    const receive = async (event: MessageEvent) => {
+      const data = event.data
+      if (event.source !== iframe.current?.contentWindow || event.origin !== 'null' || !data?.papyrusApp || data.nonce !== frame.nonce) return
+      try {
+        const result = await appRequest(
+          `/api/apps/${encodeURIComponent(appId)}/${data.operation === 'proposeAction' ? 'actions' : 'invoke'}`,
+          'POST',
+          data.operation === 'proposeAction'
+            ? { ...data.input, integrationId: data.integrationId, nonce: frame.nonce }
+            : { ...data, nonce: frame.nonce },
+        )
+        iframe.current?.contentWindow?.postMessage({ nonce: frame.nonce, id: data.id, result }, '*')
+      } catch (cause) {
+        iframe.current?.contentWindow?.postMessage({ nonce: frame.nonce, id: data.id, error: message(cause) }, '*')
+      }
+    }
+    window.addEventListener('message', receive)
+    return () => window.removeEventListener('message', receive)
+  }, [frame, appId])
+
+  return <>
+    <iframe ref={iframe} name={target.current} sandbox="allow-scripts" title="App Link preview" />
+    <form ref={form} method="POST" target={target.current} action={frame.url}>
+      <input type="hidden" name="ticket" value={frame.ticket} />
+      <input type="hidden" name="nonce" value={frame.nonce} />
+    </form>
+  </>
+}
+
+function isToolPart(part: UIMessage['parts'][number]): boolean {
+  return typeof part.type === 'string' && (part.type.startsWith('tool-') || part.type === 'dynamic-tool')
+}
+
+function toolName(type: string): string {
+  return type.replace(/^tool-/, '').replace(/_/g, ' ')
+}
+
+function message(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause)
 }
